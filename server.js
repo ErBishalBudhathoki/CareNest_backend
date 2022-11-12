@@ -4,12 +4,10 @@ const mysql = require("mysql");
 
 var app = express();
 
+var PORT = process.env.PORT || 9001;
 
-
-var port = process.env.PORT || 9001;
-
-const server = app.listen(port, function() {
-    console.log('Server up at http://localhost:' + port);
+const server = app.listen(PORT, function() {
+    console.log('Server up at http://localhost:' + PORT);
 });
 
 process.on('SIGTERM', () => {
@@ -32,7 +30,7 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const uri = "mongodb+srv://invoiceapi:REDACTED_MONGODB_PASSWORD_3@invoiceapi.55an8gv.mongodb.net/?retryWrites=true&w=majority";
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
 
-MongoClient.connect(uri, function(err, db)  {
+MongoClient.connect(process.env.MONGODB_URI || uri, function(err, db)  {
   if (err) throw err;
   var dbo = db.db("Invoice");
   dbo.collection("login").findOne({}, function(err, result) {
