@@ -28,7 +28,7 @@ process.on('SIGINT', () => {
 
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const uri = "mongodb+srv://invoiceapi:REDACTED_MONGODB_PASSWORD_3@invoiceapi.55an8gv.mongodb.net/?retryWrites=true&w=majority";
-const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
+const client = new MongoClient(process.env.MONGODB_URI || uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
 
 MongoClient.connect(process.env.MONGODB_URI || uri, function(err, db)  {
   if (err) throw err;
