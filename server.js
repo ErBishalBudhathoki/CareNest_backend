@@ -28,16 +28,14 @@ const serverOptions = {
 };
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const uri =
-  "mongodb+srv://invoiceapi:REDACTED_MONGODB_PASSWORD_3@invoiceapi.55an8gv.mongodb.net/?retryWrites=true&w=majority";
-const client = new MongoClient(process.env.MONGODB_URI || uri, {
+const client = new MongoClient(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   serverApi: ServerApiVersion.v1,
 });
 // process.env.MONGODB_URI ||
 
-MongoClient.connect(process.env.MONGODB_URI || uri, function (err, db) {
+MongoClient.connect(process.env.MONGODB_URI, function (err, db) {
   if (err) throw err;
   var dbo = db.db("Invoice");
   dbo.collection("login").findOne({}, function (err, result) {
