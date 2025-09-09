@@ -70,7 +70,17 @@ class AuthMiddleware {
       }
 
       // Verify JWT token using the same private key as login endpoint
-      const privateKey = process.env.PRIVATE_KEY || '01rFHXe6VLK-J2n6JLoyJ'; // Fallback to default if env var not set
+      const privateKey = process.env.JWT_SECRET || process.env.PRIVATE_KEY;
+      if (!privateKey) {
+        logger.error('JWT_SECRET not configured in environment variables');
+        return res.status(500).json(
+          SecureErrorHandler.createErrorResponse(
+            'Server configuration error. Please contact administrator.',
+            500,
+            'MISSING_JWT_SECRET'
+          )
+        );
+      }
       const decoded = jwt.verify(token, privateKey, {
         issuer: 'invoice-app',
         audience: 'invoice-app-users'
