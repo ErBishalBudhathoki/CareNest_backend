@@ -2723,9 +2723,18 @@ app.post("/login", async function (req, res) {
       organizationId: user.organizationId
     };
     
+    const jwtSecret = process.env.JWT_SECRET || process.env.PRIVATE_KEY;
+    if (!jwtSecret) {
+      await client.close();
+      return res.status(500).json({
+        statusCode: 500,
+        message: "Server configuration error. Please contact administrator."
+      });
+    }
+    
     const token = jwt.sign(
       tokenPayload,
-      process.env.PRIVATE_KEY || '01rFHXe6VLK-J2n6JLoyJ', // Fallback to default if env var not set
+      jwtSecret,
       { 
         expiresIn: '24h',
         issuer: 'invoice-app',
