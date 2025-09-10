@@ -1,6 +1,9 @@
 const path = require('path');
 require("dotenv").config({ path: path.join(__dirname, '.env') });
 
+// Load environment configuration early
+const { environmentConfig } = require('./config/environment');
+
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);
@@ -1840,6 +1843,64 @@ app.get("/", (req, res) => {
 
 app.get("/hello", (req, res) => {
   res.send("Hello World!");
+});
+
+/**
+ * Health check endpoint
+ * GET /health
+ * Provides server health status and environment information
+ */
+app.get("/health", async (req, res) => {
+  const { environmentConfig } = require('./config/environment');
+  const { MongoClient, ServerApiVersion } = require("mongodb");
+  
+  const healthData = {
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    environment: environmentConfig.getEnvironment(),
+    version: "1.0.0",
+    uptime: process.uptime(),
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      external: Math.round(process.memoryUsage().external / 1024 / 1024)
+    },
+    services: {
+      mongodb: "checking",
+      firebase: "initialized"
+    }
+  };
+  
+  // Test database connectivity
+  let client;
+  try {
+    client = new MongoClient(process.env.MONGODB_URI, {
+      serverApi: ServerApiVersion.v1,
+      serverSelectionTimeoutMS: 5000 // 5 second timeout
+    });
+    
+    await client.connect();
+    await client.db("Invoice").admin().ping();
+    healthData.services.mongodb = "connected";
+    
+  } catch (error) {
+    healthData.services.mongodb = "disconnected";
+    healthData.status = "DEGRADED";
+    
+    // Only include error details in development
+    if (environmentConfig.shouldShowDetailedErrors()) {
+      healthData.mongodb_error = error.message;
+    }
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+  
+  // Set appropriate HTTP status code
+  const statusCode = healthData.status === "OK" ? 200 : 503;
+  
+  res.status(statusCode).json(healthData);
 });
 
 // ============================================================================
@@ -6250,14 +6311,21 @@ app.get('/api/analytics/business/revenue/:organizationId', getRevenueForecastAna
 app.get('/api/analytics/business/efficiency/:organizationId', getOperationalEfficiencyReport);
 
 // Handle both serverless and local environments
-if (process.env.SERVERLESS) {
+if (process.env.SERVERLESS === 'true') {
   module.exports.handler = serverless(app);
 } else {
+  // Ensure PORT is available for server startup
+  const PORT = process.env.PORT || 8080;
+  
   // Start server with Firebase verification
-  console.log(`Starting server on port ${PORT}...`);
+  console.log(`🚀 Starting ${environmentConfig.getConfig().app.name}...`);
+  console.log(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
+  console.log(`📋 Port: ${PORT}`);
+  
   app.listen(PORT, async () => {
     console.log(`✅ Server is now listening on port ${PORT}`);
     console.log(`🌐 Server URL: http://localhost:${PORT}`);
+    console.log(`⚙️  Health Check: http://localhost:${PORT}/health`);
     
     try {
       // Verify Firebase messaging is working
@@ -6270,14 +6338,24 @@ if (process.env.SERVERLESS) {
       });
       logger.info('Server startup successful', {
         port: PORT,
+        environment: environmentConfig.getEnvironment(),
         firebase: 'initialized',
         timestamp: new Date().toISOString()
       });
       console.log('🔥 Firebase Admin SDK verified and server is ready!');
+      
+      if (environmentConfig.isDevelopmentEnvironment()) {
+        console.log('🟡 Development mode: Detailed logging enabled');
+        console.log('🔍 Debug endpoints available');
+      } else {
+        console.log('🟢 Production mode: Secure logging enabled');
+        console.log('🔒 Sensitive data logging disabled');
+      }
+      
     } catch (error) {
       logger.error('Firebase Messaging verification failed', {
         error: error.message,
-        stack: error.stack,
+        stack: environmentConfig.shouldShowDetailedErrors() ? error.stack : undefined,
         port: PORT
       });
       logger.warn('Server started with Firebase Messaging issues', {
