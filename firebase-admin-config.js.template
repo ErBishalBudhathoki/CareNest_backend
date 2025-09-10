@@ -1,17 +1,38 @@
 const admin = require('firebase-admin');
+const { environmentConfig } = require('./config/environment');
 
 // Load environment variables
 require('dotenv').config();
 
-// Debug information for troubleshooting
-console.log('Firebase config - Current directory:', process.cwd());
-console.log('Firebase config - Env file path:', `${process.cwd()}/.env`);
+// Environment-based logging configuration
+const isProduction = environmentConfig.isProductionEnvironment();
+const shouldLogSensitive = environmentConfig.shouldLogSensitiveData();
 
-// Debug information for troubleshooting
-console.log('DEBUG: process.env.FIREBASE_PRIVATE_KEY (length):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.length : 0);
-console.log('DEBUG: process.env.FIREBASE_PRIVATE_KEY (first 50 chars):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.substring(0, 50) : 'undefined');
-console.log('DEBUG: process.env.FIREBASE_PRIVATE_KEY (last 50 chars):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.slice(-50) : 'undefined');
-// console.log('DEBUG: process.env.FIREBASE_PRIVATE_KEY (full):', process.env.FIREBASE_PRIVATE_KEY); // Use with caution, sensitive data
+// Safe logging function that respects environment
+function safeLog(message, data = null, level = 'info') {
+  if (level === 'debug' && isProduction) {
+    return; // Skip debug logs in production
+  }
+  
+  if (data && !shouldLogSensitive) {
+    console.log(message, '[HIDDEN IN PRODUCTION]');
+  } else {
+    console.log(message, data || '');
+  }
+}
+
+// Basic configuration info (safe for all environments)
+safeLog('Firebase config - Current directory:', process.cwd());
+safeLog(`Firebase config - Environment: ${environmentConfig.getEnvironment()}`);
+
+// Debug information for troubleshooting (development only)
+if (shouldLogSensitive) {
+  safeLog('DEBUG: process.env.FIREBASE_PRIVATE_KEY (length):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.length : 0, 'debug');
+  safeLog('DEBUG: process.env.FIREBASE_PRIVATE_KEY (first 50 chars):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.substring(0, 50) : 'undefined', 'debug');
+  safeLog('DEBUG: process.env.FIREBASE_PRIVATE_KEY (last 50 chars):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.slice(-50) : 'undefined', 'debug');
+} else {
+  safeLog('Firebase private key configuration: [CONFIGURED]');
+}
 
 // Check if environment variables are set
 const envCheck = {
@@ -21,7 +42,7 @@ const envCheck = {
   PRIVATE_KEY_LENGTH: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.length : 0
 };
 
-console.log('Environment Variables Check:', envCheck);
+safeLog('Environment Variables Check:', envCheck);
 
 // Initialize Firebase Admin SDK using environment variables
 const serviceAccount = {
@@ -38,34 +59,35 @@ const serviceAccount = {
   "universe_domain": process.env.FIREBASE_UNIVERSE_DOMAIN || "googleapis.com"
 };
 
-console.log('DEBUG: serviceAccount.private_key (length after replace):', serviceAccount.private_key ? serviceAccount.private_key.length : 0);
-console.log('DEBUG: serviceAccount.private_key (first 50 chars after replace):', serviceAccount.private_key ? serviceAccount.private_key.substring(0, 50) : 'undefined');
-console.log('DEBUG: serviceAccount.private_key (last 50 chars after replace):', serviceAccount.private_key ? serviceAccount.private_key.slice(-50) : 'undefined');
-// console.log('DEBUG: serviceAccount.private_key (full after replace):', serviceAccount.private_key); // Use with caution, sensitive data
+// Debug service account info (development only)
+if (shouldLogSensitive) {
+  safeLog('DEBUG: serviceAccount.private_key (length after replace):', serviceAccount.private_key ? serviceAccount.private_key.length : 0, 'debug');
+  safeLog('DEBUG: serviceAccount.private_key (first 50 chars after replace):', serviceAccount.private_key ? serviceAccount.private_key.substring(0, 50) : 'undefined', 'debug');
+  safeLog('DEBUG: serviceAccount.private_key (last 50 chars after replace):', serviceAccount.private_key ? serviceAccount.private_key.slice(-50) : 'undefined', 'debug');
+}
 
-console.log('Service Account Config:', {
+safeLog('Service Account Config:', {
   ...serviceAccount,
   private_key: '[REDACTED]'
 });
 
-
-console.log('Initializing Firebase Admin SDK...');
+safeLog('Initializing Firebase Admin SDK...');
 
 // Initialize the Firebase Admin SDK
 try {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
-  console.log('Firebase Admin SDK initialized successfully');
+  safeLog('Firebase Admin SDK initialized successfully');
 } catch (error) {
   console.error('Error initializing Firebase Admin SDK:', error.message);
   throw error; // Re-throw to fail the application startup if Firebase is critical
 }
 
 // Set up messaging service
-console.log('Setting up FCM messaging service...');
+safeLog('Setting up FCM messaging service...');
 const messaging = admin.messaging();
-console.log('FCM messaging service initialized successfully');
+safeLog('FCM messaging service initialized successfully');
 
 // Export both admin and messaging for use in other modules
 module.exports = { admin, messaging };

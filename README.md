@@ -1,6 +1,36 @@
 # Multi-Tenant Invoice Backend Server
 
-This is a Node.js Express server implementing a multi-tenant solution for an invoice management system. The server supports organization-based user management with role-based access control.
+# Multi-Tenant Invoice Backend
+
+A Node.js Express backend server implementing multi-tenant architecture for invoice management with environment-based configuration and comprehensive security features.
+
+## 🚀 Quick Start
+
+### Development Mode
+```bash
+npm install
+npm run dev  # Starts with detailed logging and debug features
+```
+
+### Production Mode
+```bash
+npm install
+npm run prod  # Starts with secure logging and production settings
+```
+
+### Health Check
+```bash
+curl http://localhost:8080/health
+```
+
+## 🌍 Environment Configuration
+
+This application supports environment-based configuration with automatic security features:
+
+- **Development**: Detailed logging, debug information, lenient security
+- **Production**: Secure logging, hidden credentials, strict security
+
+See [`ENVIRONMENT_CONFIGURATION.md`](./ENVIRONMENT_CONFIGURATION.md) for detailed information.
 
 ## Features
 
