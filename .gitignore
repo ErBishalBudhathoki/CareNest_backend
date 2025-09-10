@@ -49,6 +49,8 @@ test*.js
 *.spec.js
 test/
 tests/
+check_test_user.js
+update_test_user.js
 
 # XML files
 *.xml
@@ -72,6 +74,10 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Generated files
+*.pdf
+Invoice Number*.pdf
 
 # Documentation and development files that shouldn't be in production
 issues.md
