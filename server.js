@@ -52,6 +52,8 @@ const { admin, messaging } = require('./firebase-admin-config'); // Initialize F
 console.log('Firebase Admin SDK loaded successfully');
 const logger = require('./config/logger'); // Import structured logger
 console.log('Logger loaded successfully');
+const { keepAliveService } = require('./utils/keepAlive'); // Import keep-alive service
+console.log('Keep-alive service loaded successfully');
 const { startTimerWithTracking, stopTimerWithTracking, getActiveTimers } = require('./active_timers_endpoints');
 console.log('Active timers endpoints loaded successfully');
 const {
@@ -1870,6 +1872,11 @@ app.get("/health", async (req, res) => {
       firebase: "initialized"
     }
   };
+  
+  // Add keep-alive status in production
+  if (environmentConfig.isProductionEnvironment()) {
+    healthData.keepAlive = keepAliveService.getStatus();
+  }
   
   // Test database connectivity
   let client;
@@ -6350,6 +6357,12 @@ if (process.env.SERVERLESS === 'true') {
       } else {
         console.log('🟢 Production mode: Secure logging enabled');
         console.log('🔒 Sensitive data logging disabled');
+        
+        // Initialize keep-alive service for production (Render platform)
+        const serverUrl = process.env.RENDER_EXTERNAL_URL || 'https://more-than-invoice.onrender.com';
+        keepAliveService.initialize(serverUrl);
+        console.log('🔄 Keep-alive service initialized for Render platform');
+        console.log(`🌐 Production URL: ${serverUrl}`);
       }
       
     } catch (error) {
@@ -6364,5 +6377,22 @@ if (process.env.SERVERLESS === 'true') {
       });
       console.log('⚠️ Server started but Firebase messaging has issues. Check logs for details.');
     }
+    
+    // Graceful shutdown handlers
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+      if (keepAliveService) {
+        keepAliveService.stop();
+      }
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+      if (keepAliveService) {
+        keepAliveService.stop();
+      }
+      process.exit(0);
+    });
   });
 }
