@@ -53,7 +53,7 @@ RENDER=true
 🟢 Production mode: Secure logging enabled
 🔒 Sensitive data logging disabled
 🔄 Keep-alive service initialized for Render platform
-🌐 Production URL: https://more-than-invoice.onrender.com
+🌐 Production URL: Environment variable (BACKEND_URL)
 ```
 
 ### After 3 Minutes
@@ -75,7 +75,7 @@ The `/health` endpoint includes keep-alive status in production:
   "uptime": 3600,
   "keepAlive": {
     "enabled": true,
-    "serverUrl": "https://more-than-invoice.onrender.com",
+    "serverUrl": "$BACKEND_URL (from environment)",
     "interval": 600000,
     "running": true
   },
@@ -105,8 +105,8 @@ The `/health` endpoint includes keep-alive status in production:
 # Test production endpoint
 npm run health-check
 
-# Or direct curl
-curl https://more-than-invoice.onrender.com/health
+# Or direct curl with environment variable
+curl $BACKEND_URL/health
 ```
 
 ### Local Testing
@@ -138,6 +138,9 @@ git push origin main
 NODE_ENV=production
 SERVERLESS=false
 PORT=8080
+BACKEND_URL=https://more-than-invoice.onrender.com
+PRODUCTION_URL=https://more-than-invoice.onrender.com
+RENDER_EXTERNAL_URL=https://more-than-invoice.onrender.com
 MONGODB_URI=your_mongodb_connection_string
 # ... other environment variables
 ```
@@ -155,7 +158,7 @@ MONGODB_URI=your_mongodb_connection_string
 ### Ping Schedule
 - **First ping**: 3 minutes after server start
 - **Subsequent pings**: Every 10 minutes
-- **Ping target**: `https://more-than-invoice.onrender.com/health`
+- **Ping target**: `$BACKEND_URL/health` (e.g., `https://more-than-invoice.onrender.com/health`)
 - **Expected response**: 200 OK with health data
 
 ## Troubleshooting
@@ -166,7 +169,7 @@ MONGODB_URI=your_mongodb_connection_string
 3. Look for initialization message in startup logs
 
 ### Pings Failing
-1. Check server accessibility: `curl https://more-than-invoice.onrender.com/health`
+1. Check server accessibility: `curl $BACKEND_URL/health` (or direct URL)
 2. Verify URL is correct in logs
 3. Check for network or DNS issues
 
