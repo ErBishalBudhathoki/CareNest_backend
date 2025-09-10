@@ -41,7 +41,14 @@ class EnvironmentConfig {
       features: {
         enableHealthEndpoint: true,
         enableMetrics: true,
-        enableDebugEndpoints: this.isDevelopment
+        enableDebugEndpoints: this.isDevelopment,
+        enableKeepAlive: this.isProduction // Only enable keep-alive in production
+      },
+      keepAlive: {
+        enabled: this.isProduction,
+        interval: 10 * 60 * 1000, // 10 minutes
+        timeout: 30000, // 30 seconds
+        retries: 3
       }
     };
     
