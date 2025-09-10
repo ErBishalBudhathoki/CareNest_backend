@@ -6254,7 +6254,11 @@ if (process.env.SERVERLESS) {
   module.exports.handler = serverless(app);
 } else {
   // Start server with Firebase verification
+  console.log(`Starting server on port ${PORT}...`);
   app.listen(PORT, async () => {
+    console.log(`✅ Server is now listening on port ${PORT}`);
+    console.log(`🌐 Server URL: http://localhost:${PORT}`);
+    
     try {
       // Verify Firebase messaging is working
       await messaging.send({
@@ -6269,6 +6273,7 @@ if (process.env.SERVERLESS) {
         firebase: 'initialized',
         timestamp: new Date().toISOString()
       });
+      console.log('🔥 Firebase Admin SDK verified and server is ready!');
     } catch (error) {
       logger.error('Firebase Messaging verification failed', {
         error: error.message,
@@ -6279,6 +6284,7 @@ if (process.env.SERVERLESS) {
         port: PORT,
         firebase: 'degraded'
       });
+      console.log('⚠️ Server started but Firebase messaging has issues. Check logs for details.');
     }
   });
 }
