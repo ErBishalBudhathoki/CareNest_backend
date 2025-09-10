@@ -143,7 +143,7 @@ console.log('Backward compatibility endpoints loaded successfully');
 const { loggingMiddleware } = require('./middleware/logging');
 console.log('Logging middleware loaded successfully');
 const { errorTrackingMiddleware } = require('./middleware/errorTracking');
-console.log('Error tracking middleware loaded successfully');
+//console.log('Error tracking middleware loaded successfully');
 const { systemHealthMiddleware } = require('./middleware/systemHealth');
 console.log('System health middleware loaded successfully');
 const {
