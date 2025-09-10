@@ -40,8 +40,10 @@ class KeepAliveService {
       return;
     }
 
-    // Use the provided URL or default to your Render production URL
+    // Use the provided URL or default to environment variable or fallback
     this.serverUrl = serverUrl || 
+                     process.env.BACKEND_URL ||
+                     process.env.PRODUCTION_URL ||
                      process.env.RENDER_EXTERNAL_URL || 
                      'https://more-than-invoice.onrender.com';
     

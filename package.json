@@ -10,7 +10,7 @@
     "dev": "cp .env.development .env && NODE_ENV=development nodemon server.js",
     "prod": "cp .env.production .env && NODE_ENV=production node server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "health-check": "curl https://more-than-invoice.onrender.com/health || echo 'Server not responding'",
+    "health-check": "curl $BACKEND_URL/health || curl $PRODUCTION_URL/health || echo 'Server not responding'",
     "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'"
   },
   "keywords": [
