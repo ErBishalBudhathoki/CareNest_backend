@@ -1,6 +1,9 @@
 const path = require('path');
 require("dotenv").config({ path: path.join(__dirname, '.env') });
 
+// Load environment configuration early
+const { environmentConfig } = require('./config/environment');
+
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);
@@ -49,6 +52,8 @@ const { admin, messaging } = require('./firebase-admin-config'); // Initialize F
 console.log('Firebase Admin SDK loaded successfully');
 const logger = require('./config/logger'); // Import structured logger
 console.log('Logger loaded successfully');
+const { keepAliveService } = require('./utils/keepAlive'); // Import keep-alive service
+console.log('Keep-alive service loaded successfully');
 const { startTimerWithTracking, stopTimerWithTracking, getActiveTimers } = require('./active_timers_endpoints');
 console.log('Active timers endpoints loaded successfully');
 const {
@@ -60,7 +65,9 @@ const {
   updatePricingApproval,
   getPricingLookup,
   getBulkPricingLookup,
-  bulkImportPricing
+  bulkImportPricing,
+  getFallbackBaseRate,
+  setFallbackBaseRate
 } = require('./pricing_endpoints');
 console.log('Pricing endpoints loaded successfully');
 const {
@@ -143,7 +150,7 @@ console.log('Backward compatibility endpoints loaded successfully');
 const { loggingMiddleware } = require('./middleware/logging');
 console.log('Logging middleware loaded successfully');
 const { errorTrackingMiddleware } = require('./middleware/errorTracking');
-console.log('Error tracking middleware loaded successfully');
+//console.log('Error tracking middleware loaded successfully');
 const { systemHealthMiddleware } = require('./middleware/systemHealth');
 console.log('System health middleware loaded successfully');
 const {
@@ -151,6 +158,10 @@ const {
   getPricingComplianceReport
 } = require('./endpoints/pricing_analytics_endpoints');
 console.log('Pricing analytics endpoints loaded successfully');
+// General Settings endpoints
+const { updateGeneralSettings, createOrUpdateGeneralSettings } = require('./settings_endpoints');
+const { authenticateUser } = require('./middleware/auth');
+console.log('General settings endpoints loaded successfully');
 const {
   getClientActivityAnalytics,
   getTopPerformingClients,
@@ -175,6 +186,8 @@ const securityDashboardRoutes = require('./routes/securityDashboard');
 console.log('Security dashboard routes loaded successfully');
 const apiUsageRoutes = require('./routes/apiUsageRoutes');
 console.log('API usage routes loaded successfully');
+const bankDetailsRoutes = require('./routes/bankDetails');
+console.log('Bank details routes loaded successfully');
 const uri = process.env.MONGODB_URI;
 
 var app = express();
@@ -228,6 +241,9 @@ app.use('/auth-test', authTestEndpoint);
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Mount bank details routes (keeps existing endpoint paths)
+app.use('/', bankDetailsRoutes);
 
 // Configure multer to handle file uploads
 const upload = multer({
@@ -559,11 +575,13 @@ app.post('/invoicingEmailDetailKey', async (req, res) => {
       await client.close();
     }
   }
-});
+  });
 
-// ============================================================================
-// NEW ENDPOINT FOR FETCHING WORKED TIME
-// ============================================================================
+  // Bank details endpoints moved to routes/bankDetails.js
+
+  // ============================================================================
+  // NEW ENDPOINT FOR FETCHING WORKED TIME
+  // ============================================================================
 
 /**
  * Get worked time records for a specific user and client, ensuring it belongs to an organization.
@@ -1842,6 +1860,69 @@ app.get("/hello", (req, res) => {
   res.send("Hello World!");
 });
 
+/**
+ * Health check endpoint
+ * GET /health
+ * Provides server health status and environment information
+ */
+app.get("/health", async (req, res) => {
+  const { environmentConfig } = require('./config/environment');
+  const { MongoClient, ServerApiVersion } = require("mongodb");
+  
+  const healthData = {
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    environment: environmentConfig.getEnvironment(),
+    version: "1.0.0",
+    uptime: process.uptime(),
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      external: Math.round(process.memoryUsage().external / 1024 / 1024)
+    },
+    services: {
+      mongodb: "checking",
+      firebase: "initialized"
+    }
+  };
+  
+  // Add keep-alive status in production
+  if (environmentConfig.isProductionEnvironment()) {
+    healthData.keepAlive = keepAliveService.getStatus();
+  }
+  
+  // Test database connectivity
+  let client;
+  try {
+    client = new MongoClient(process.env.MONGODB_URI, {
+      serverApi: ServerApiVersion.v1,
+      serverSelectionTimeoutMS: 5000 // 5 second timeout
+    });
+    
+    await client.connect();
+    await client.db("Invoice").admin().ping();
+    healthData.services.mongodb = "connected";
+    
+  } catch (error) {
+    healthData.services.mongodb = "disconnected";
+    healthData.status = "DEGRADED";
+    
+    // Only include error details in development
+    if (environmentConfig.shouldShowDetailedErrors()) {
+      healthData.mongodb_error = error.message;
+    }
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+  
+  // Set appropriate HTTP status code
+  const statusCode = healthData.status === "OK" ? 200 : 503;
+  
+  res.status(statusCode).json(healthData);
+});
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -2723,9 +2804,18 @@ app.post("/login", async function (req, res) {
       organizationId: user.organizationId
     };
     
+    const jwtSecret = process.env.JWT_SECRET || process.env.PRIVATE_KEY;
+    if (!jwtSecret) {
+      await client.close();
+      return res.status(500).json({
+        statusCode: 500,
+        message: "Server configuration error. Please contact administrator."
+      });
+    }
+    
     const token = jwt.sign(
       tokenPayload,
-      process.env.PRIVATE_KEY || '01rFHXe6VLK-J2n6JLoyJ', // Fallback to default if env var not set
+      jwtSecret,
       { 
         expiresIn: '24h',
         issuer: 'invoice-app',
@@ -5454,6 +5544,42 @@ app.post('/api/pricing/bulk-lookup', getBulkPricingLookup);
 app.post('/api/pricing/bulk-import', bulkImportPricing);
 
 /**
+ * Get organization fallback base rate
+ * GET /api/pricing/fallback-base-rate/:organizationId
+ */
+app.get('/api/pricing/fallback-base-rate/:organizationId', getFallbackBaseRate);
+
+/**
+ * Set organization fallback base rate
+ * PUT /api/pricing/fallback-base-rate/:organizationId
+ */
+app.put('/api/pricing/fallback-base-rate/:organizationId', setFallbackBaseRate);
+
+/**
+ * General Settings (atomic update)
+ * PUT /api/settings/general
+ */
+app.put('/api/settings/general', authenticateUser, updateGeneralSettings);
+
+/**
+ * General Settings (fallback POST)
+ * POST /api/settings/general
+ */
+app.post('/api/settings/general', authenticateUser, createOrUpdateGeneralSettings);
+
+/**
+ * Versioned General Settings
+ * PUT /api/v1/settings/general
+ */
+app.put('/api/v1/settings/general', authenticateUser, updateGeneralSettings);
+
+/**
+ * Versioned General Settings (fallback POST)
+ * POST /api/v1/settings/general
+ */
+app.post('/api/v1/settings/general', authenticateUser, createOrUpdateGeneralSettings);
+
+/**
 Ho * Get custom price for organization (legacy endpoint)
  * GET /custom-price-organization/:ndisItemNumber
  */
@@ -6241,11 +6367,24 @@ app.get('/api/analytics/business/revenue/:organizationId', getRevenueForecastAna
 app.get('/api/analytics/business/efficiency/:organizationId', getOperationalEfficiencyReport);
 
 // Handle both serverless and local environments
-if (process.env.SERVERLESS) {
+if (process.env.SERVERLESS === 'true') {
   module.exports.handler = serverless(app);
 } else {
+  // Ensure PORT is available for server startup
+  const PORT = process.env.PORT || 8080;
+  
   // Start server with Firebase verification
-  app.listen(PORT, async () => {
+  console.log(`🚀 Starting ${environmentConfig.getConfig().app.name}...`);
+  console.log(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
+  console.log(`📋 Port: ${PORT}`);
+  
+  app.listen(PORT, '0.0.0.0', async () => {
+    console.log(`✅ Server is now listening on port ${PORT}`);
+    console.log(`🌐 Server URL: http://0.0.0.0:${PORT}`);
+    console.log(`🌐 Local URL: http://localhost:${PORT}`);
+    console.log(`🌐 Network URL: http://localhost:${PORT}`);
+    console.log(`⚙️  Health Check: http://localhost:${PORT}/health`);
+    
     try {
       // Verify Firebase messaging is working
       await messaging.send({
@@ -6257,19 +6396,54 @@ if (process.env.SERVERLESS) {
       });
       logger.info('Server startup successful', {
         port: PORT,
+        environment: environmentConfig.getEnvironment(),
         firebase: 'initialized',
         timestamp: new Date().toISOString()
       });
+      console.log('🔥 Firebase Admin SDK verified and server is ready!');
+      
+      if (environmentConfig.isDevelopmentEnvironment()) {
+        console.log('🟡 Development mode: Detailed logging enabled');
+        console.log('🔍 Debug endpoints available');
+      } else {
+        console.log('🟢 Production mode: Secure logging enabled');
+        console.log('🔒 Sensitive data logging disabled');
+        
+        // Initialize keep-alive service for production (Render platform)
+        const serverUrl = process.env.RENDER_EXTERNAL_URL || 'https://more-than-invoice.onrender.com';
+        keepAliveService.initialize(serverUrl);
+        console.log('🔄 Keep-alive service initialized for Render platform');
+        console.log(`🌐 Production URL: ${serverUrl}`);
+      }
+      
     } catch (error) {
       logger.error('Firebase Messaging verification failed', {
         error: error.message,
-        stack: error.stack,
+        stack: environmentConfig.shouldShowDetailedErrors() ? error.stack : undefined,
         port: PORT
       });
       logger.warn('Server started with Firebase Messaging issues', {
         port: PORT,
         firebase: 'degraded'
       });
+      console.log('⚠️ Server started but Firebase messaging has issues. Check logs for details.');
     }
+    
+    // Graceful shutdown handlers
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+      if (keepAliveService) {
+        keepAliveService.stop();
+      }
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+      if (keepAliveService) {
+        keepAliveService.stop();
+      }
+      process.exit(0);
+    });
   });
 }
