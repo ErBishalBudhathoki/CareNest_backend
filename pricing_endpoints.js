@@ -454,14 +454,12 @@ async function updateCustomPricing(req, res) {
       reason: updateReason || 'No reason provided'
     };
 
-    updateDoc.$push = {
-      auditTrail: auditEntry
-    };
-
-    // Perform update
+    // Perform update: keep $set and $push operators separate
+    // IMPORTANT: Do NOT include a `$push` key inside the $set payload.
+    // MongoDB forbids field names beginning with `$` in documents.
     const result = await db.collection('customPricing').updateOne(
       { _id: new ObjectId(pricingId) },
-      { $set: updateDoc, $push: updateDoc.$push }
+      { $set: updateDoc, $push: { auditTrail: auditEntry } }
     );
 
     if (result.matchedCount === 0) {
@@ -501,7 +499,15 @@ async function updateCustomPricing(req, res) {
     });
 
   } catch (error) {
-    console.error('Error updating custom pricing:', error);
+    // Improve error logging to aid diagnosis of 500s in production
+    console.error('Error updating custom pricing', {
+      pricingId: req?.params?.pricingId,
+      userEmail: req?.body?.userEmail,
+      errorName: error?.name,
+      errorMessage: error?.message,
+      errorCode: error?.code,
+      stack: error?.stack
+    });
     res.status(500).json({
       statusCode: 500,
       message: 'Error updating pricing record'
@@ -977,6 +983,23 @@ async function getBulkPricingLookup(req, res) {
     await client.connect();
     const db = client.db('Invoice');
 
+    // Fetch organization-level pricing settings (fallback base rate)
+    let fallbackBaseRate = null;
+    try {
+      const settingsDoc = await db.collection('pricingSettings').findOne({
+        organizationId: organizationId,
+        isActive: true
+      });
+      if (settingsDoc && typeof settingsDoc.fallbackBaseRate === 'number') {
+        fallbackBaseRate = settingsDoc.fallbackBaseRate;
+        console.log('⚙️ Using configured fallback base rate:', fallbackBaseRate);
+      } else {
+        console.log('⚠️ No configured fallback base rate found for organization');
+      }
+    } catch (settingsError) {
+      console.warn('Unable to read pricingSettings for fallback base rate:', settingsError?.message);
+    }
+
     const currentDate = new Date();
     const results = {};
     
@@ -1072,8 +1095,12 @@ async function getBulkPricingLookup(req, res) {
       
       // Only set default pricing for items without custom pricing
       if (itemsWithoutCustomPricing.includes(item.supportItemNumber)) {
-        // Use $30.00 base rate as specified in requirements
-        const baseRate = 30.00;
+        // Use admin-configured fallback base rate if available
+        const baseRate = fallbackBaseRate;
+        if (baseRate == null) {
+          // No fallback configured; skip adding default pricing
+          return;
+        }
         let priceCap = null;
         let exceedsNdisCap = false;
         let priceCapWarning = null;
@@ -1096,7 +1123,7 @@ async function getBulkPricingLookup(req, res) {
         });
         
         ndisDefaultPricing[item.supportItemNumber] = {
-          source: 'base-rate',
+          source: 'fallback-base-rate',
           supportItemNumber: item.supportItemNumber,
           supportItemName: item.supportItemName,
           price: baseRate,
@@ -1359,6 +1386,191 @@ async function bulkImportPricing(req, res) {
   }
 }
 
+/**
+ * Get organization fallback base rate setting
+ * GET /api/pricing/fallback-base-rate/:organizationId
+ */
+async function getFallbackBaseRate(req, res) {
+  let client;
+  try {
+    const { organizationId } = req.params;
+    if (!organizationId) {
+      return res.status(400).json({
+        statusCode: 400,
+        message: 'organizationId is required'
+      });
+    }
+
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    await client.connect();
+    const db = client.db('Invoice');
+
+    const settingsDoc = await db.collection('pricingSettings').findOne({
+      organizationId,
+      isActive: true
+    });
+
+    if (!settingsDoc || typeof settingsDoc.fallbackBaseRate !== 'number') {
+      return res.status(404).json({
+        statusCode: 404,
+        message: 'No fallback base rate configured for this organization'
+      });
+    }
+
+    return res.status(200).json({
+      statusCode: 200,
+      data: {
+        organizationId,
+        fallbackBaseRate: settingsDoc.fallbackBaseRate,
+        updatedAt: settingsDoc.updatedAt,
+        updatedBy: settingsDoc.updatedBy,
+        version: settingsDoc.version || 1
+      }
+    });
+  } catch (error) {
+    console.error('Error getting fallback base rate:', error);
+    return res.status(500).json({
+      statusCode: 500,
+      message: 'Error retrieving fallback base rate'
+    });
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+}
+
+/**
+ * Set organization fallback base rate setting
+ * PUT /api/pricing/fallback-base-rate/:organizationId
+ * Body: { fallbackBaseRate, userEmail }
+ */
+async function setFallbackBaseRate(req, res) {
+  let client;
+  try {
+    const { organizationId } = req.params;
+    const { fallbackBaseRate, userEmail } = req.body;
+
+    if (!organizationId || fallbackBaseRate === undefined || fallbackBaseRate === null || !userEmail) {
+      return res.status(400).json({
+        statusCode: 400,
+        message: 'organizationId, fallbackBaseRate, and userEmail are required'
+      });
+    }
+
+    const numericRate = Number(fallbackBaseRate);
+    if (!Number.isFinite(numericRate) || numericRate <= 0) {
+      return res.status(400).json({
+        statusCode: 400,
+        message: 'fallbackBaseRate must be a positive number'
+      });
+    }
+
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    await client.connect();
+    const db = client.db('Invoice');
+
+    // Verify user belongs to organization
+    const user = await db.collection('login').findOne({
+      email: userEmail,
+      organizationId
+    });
+    if (!user) {
+      return res.status(403).json({
+        statusCode: 403,
+        message: 'User not authorized for this organization'
+      });
+    }
+
+    const existing = await db.collection('pricingSettings').findOne({
+      organizationId,
+      isActive: true
+    });
+
+    let resultDoc;
+    if (existing) {
+      await db.collection('pricingSettings').updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            fallbackBaseRate: numericRate,
+            updatedBy: userEmail,
+            updatedAt: new Date(),
+            version: (existing.version || 1) + 1
+          },
+          $push: {
+            auditTrail: {
+              action: 'updated',
+              performedBy: userEmail,
+              timestamp: new Date(),
+              changes: `fallbackBaseRate set to ${numericRate}`
+            }
+          }
+        }
+      );
+      resultDoc = await db.collection('pricingSettings').findOne({ _id: existing._id });
+    } else {
+      const settingsDoc = {
+        _id: new ObjectId(),
+        organizationId,
+        fallbackBaseRate: numericRate,
+        createdBy: userEmail,
+        createdAt: new Date(),
+        updatedBy: userEmail,
+        updatedAt: new Date(),
+        isActive: true,
+        version: 1,
+        auditTrail: [{
+          action: 'created',
+          performedBy: userEmail,
+          timestamp: new Date(),
+          changes: `fallbackBaseRate set to ${numericRate}`
+        }]
+      };
+      await db.collection('pricingSettings').insertOne(settingsDoc);
+      resultDoc = settingsDoc;
+    }
+
+    // Audit log entry
+    try {
+      await createAuditLog({
+        action: AUDIT_ACTIONS.UPDATE,
+        entityType: AUDIT_ENTITIES.PRICING,
+        entityId: (resultDoc._id || resultDoc.id || '').toString(),
+        userEmail,
+        organizationId,
+        newValues: { fallbackBaseRate: numericRate },
+        reason: 'Updated fallback base rate',
+        metadata: { setting: 'fallbackBaseRate' }
+      });
+    } catch (auditError) {
+      console.error('Error creating audit log for fallback rate update:', auditError);
+    }
+
+    return res.status(200).json({
+      statusCode: 200,
+      message: 'Fallback base rate updated',
+      data: {
+        organizationId,
+        fallbackBaseRate: resultDoc.fallbackBaseRate,
+        updatedAt: resultDoc.updatedAt,
+        updatedBy: resultDoc.updatedBy,
+        version: resultDoc.version
+      }
+    });
+  } catch (error) {
+    console.error('Error setting fallback base rate:', error);
+    return res.status(500).json({
+      statusCode: 500,
+      message: 'Error updating fallback base rate'
+    });
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+}
+
 module.exports = {
   createCustomPricing,
   getOrganizationPricing,
@@ -1368,5 +1580,7 @@ module.exports = {
   updatePricingApproval,
   getPricingLookup,
   getBulkPricingLookup,
-  bulkImportPricing
+  bulkImportPricing,
+  getFallbackBaseRate,
+  setFallbackBaseRate
 };

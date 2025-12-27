@@ -65,7 +65,9 @@ const {
   updatePricingApproval,
   getPricingLookup,
   getBulkPricingLookup,
-  bulkImportPricing
+  bulkImportPricing,
+  getFallbackBaseRate,
+  setFallbackBaseRate
 } = require('./pricing_endpoints');
 console.log('Pricing endpoints loaded successfully');
 const {
@@ -156,6 +158,10 @@ const {
   getPricingComplianceReport
 } = require('./endpoints/pricing_analytics_endpoints');
 console.log('Pricing analytics endpoints loaded successfully');
+// General Settings endpoints
+const { updateGeneralSettings, createOrUpdateGeneralSettings } = require('./settings_endpoints');
+const { authenticateUser } = require('./middleware/auth');
+console.log('General settings endpoints loaded successfully');
 const {
   getClientActivityAnalytics,
   getTopPerformingClients,
@@ -180,6 +186,8 @@ const securityDashboardRoutes = require('./routes/securityDashboard');
 console.log('Security dashboard routes loaded successfully');
 const apiUsageRoutes = require('./routes/apiUsageRoutes');
 console.log('API usage routes loaded successfully');
+const bankDetailsRoutes = require('./routes/bankDetails');
+console.log('Bank details routes loaded successfully');
 const uri = process.env.MONGODB_URI;
 
 var app = express();
@@ -233,6 +241,9 @@ app.use('/auth-test', authTestEndpoint);
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Mount bank details routes (keeps existing endpoint paths)
+app.use('/', bankDetailsRoutes);
 
 // Configure multer to handle file uploads
 const upload = multer({
@@ -564,11 +575,13 @@ app.post('/invoicingEmailDetailKey', async (req, res) => {
       await client.close();
     }
   }
-});
+  });
 
-// ============================================================================
-// NEW ENDPOINT FOR FETCHING WORKED TIME
-// ============================================================================
+  // Bank details endpoints moved to routes/bankDetails.js
+
+  // ============================================================================
+  // NEW ENDPOINT FOR FETCHING WORKED TIME
+  // ============================================================================
 
 /**
  * Get worked time records for a specific user and client, ensuring it belongs to an organization.
@@ -5531,6 +5544,42 @@ app.post('/api/pricing/bulk-lookup', getBulkPricingLookup);
 app.post('/api/pricing/bulk-import', bulkImportPricing);
 
 /**
+ * Get organization fallback base rate
+ * GET /api/pricing/fallback-base-rate/:organizationId
+ */
+app.get('/api/pricing/fallback-base-rate/:organizationId', getFallbackBaseRate);
+
+/**
+ * Set organization fallback base rate
+ * PUT /api/pricing/fallback-base-rate/:organizationId
+ */
+app.put('/api/pricing/fallback-base-rate/:organizationId', setFallbackBaseRate);
+
+/**
+ * General Settings (atomic update)
+ * PUT /api/settings/general
+ */
+app.put('/api/settings/general', authenticateUser, updateGeneralSettings);
+
+/**
+ * General Settings (fallback POST)
+ * POST /api/settings/general
+ */
+app.post('/api/settings/general', authenticateUser, createOrUpdateGeneralSettings);
+
+/**
+ * Versioned General Settings
+ * PUT /api/v1/settings/general
+ */
+app.put('/api/v1/settings/general', authenticateUser, updateGeneralSettings);
+
+/**
+ * Versioned General Settings (fallback POST)
+ * POST /api/v1/settings/general
+ */
+app.post('/api/v1/settings/general', authenticateUser, createOrUpdateGeneralSettings);
+
+/**
 Ho * Get custom price for organization (legacy endpoint)
  * GET /custom-price-organization/:ndisItemNumber
  */
@@ -6329,9 +6378,11 @@ if (process.env.SERVERLESS === 'true') {
   console.log(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
   console.log(`📋 Port: ${PORT}`);
   
-  app.listen(PORT, async () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`✅ Server is now listening on port ${PORT}`);
-    console.log(`🌐 Server URL: http://localhost:${PORT}`);
+    console.log(`🌐 Server URL: http://0.0.0.0:${PORT}`);
+    console.log(`🌐 Local URL: http://localhost:${PORT}`);
+    console.log(`🌐 Network URL: http://localhost:${PORT}`);
     console.log(`⚙️  Health Check: http://localhost:${PORT}/health`);
     
     try {

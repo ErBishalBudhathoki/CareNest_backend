@@ -12,16 +12,48 @@ The system follows a strict priority order for price lookup:
    - Custom pricing configured specifically for a client
    - Requires approval and NDIS compliance validation
    - Stored in `customPricing` collection with `clientId` field
+   - Source: `'client-specific'`
 
 2. **Organization Pricing** (Medium Priority)
    - Custom pricing configured at organization level
    - Applied when no client-specific pricing exists
    - Stored in `customPricing` collection without `clientId` field
+   - Source: `'organization'`
 
-3. **NDIS Standard Pricing** (Lowest Priority)
-   - Official NDIS price caps and standard rates
-   - State-specific and provider-type-specific pricing
-   - Always NDIS compliant by definition
+3. **Organization Fallback Base Rate** (Fallback Priority)
+   - Configured in Pricing Configuration Dashboard
+   - Applied when no custom pricing exists for the item
+   - Stored in `pricingSettings` collection with `fallbackBaseRate` field
+   - Source: `'fallback-base-rate'`
+   - **Note**: This is a valid configured rate, not a missing price
+
+4. **Missing Pricing** (Requires Manual Configuration)
+   - Returned when no pricing is configured at any level
+   - Triggers price prompt dialog in the UI
+   - Source: `'missing'`
+   - Requires admin to set custom price or configure fallback base rate
+
+## Connection Between Dashboards
+
+### NDIS Pricing Management Dashboard
+- View and search all NDIS support items
+- Set custom prices per item (organization-wide or client-specific)
+- View base rates and NDIS price caps
+- Reset custom prices to use fallback rates
+
+### Pricing Configuration Dashboard
+- Set organization-wide **Fallback Base Rate**
+- Configure pricing rules and validation settings
+- Manage integration settings
+- View pricing analytics
+
+### Invoice Generation Flow
+1. Admin selects employees and clients for invoice generation
+2. System performs **preflight rate check** to identify missing prices
+3. Items with `source: 'missing'` are flagged for attention
+4. Items with `source: 'fallback-base-rate'` use the configured fallback rate
+5. Admin can set price overrides or navigate to Pricing Management
+6. Invoice is generated with resolved pricing
 
 ## Enhanced Features
 
@@ -39,7 +71,7 @@ Each pricing lookup returns:
 ```javascript
 {
   price: 150.00,
-  source: 'client-specific', // 'client-specific', 'organization', 'ndis-standard'
+  source: 'client-specific', // 'client-specific', 'organization', 'fallback-base-rate', 'missing'
   isCustom: true,
   ndisCompliant: true,
   exceedsNdisCap: false,
@@ -57,6 +89,16 @@ Each pricing lookup returns:
     quoteRequired: false
   }
 }
+```
+
+### Pricing Source Values
+
+| Source | Description | Action Required |
+|--------|-------------|-----------------|
+| `client-specific` | Custom price set for specific client | None |
+| `organization` | Custom price set at organization level | None |
+| `fallback-base-rate` | Using organization's fallback base rate | None (configured in Pricing Configuration) |
+| `missing` | No pricing configured | Set custom price or configure fallback rate |
 ```
 
 ### 3. Enhanced Validation System

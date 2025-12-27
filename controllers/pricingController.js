@@ -280,6 +280,45 @@ class PricingController {
   }
 
   /**
+   * Get standard price for an NDIS support item
+   * GET /standard-price/:ndisItemNumber
+   */
+  async getStandardPrice(req, res) {
+    try {
+      const { ndisItemNumber } = req.params;
+      const { clientId } = req.query || {};
+
+      if (!ndisItemNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'ndisItemNumber is required'
+        });
+      }
+
+      const result = await pricingService.getStandardPrice(ndisItemNumber, clientId || null);
+
+      // Do not inject synthetic 0 fallback; surface null when unavailable
+      return res.status(200).json({
+        success: true,
+        price: result?.price ?? null,
+        hasStandardPrice: result?.price != null,
+        data: result,
+      });
+    } catch (error) {
+      logger.error('Error getting standard price', {
+        error: error.message,
+        stack: error.stack,
+        ndisItemNumber: req.params?.ndisItemNumber,
+        clientId: req.query?.clientId
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Error retrieving standard price'
+      });
+    }
+  }
+
+  /**
    * Get pricing lookup for a single item
    * GET /api/pricing/lookup
    */
