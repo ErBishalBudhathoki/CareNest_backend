@@ -8,6 +8,11 @@
  * @returns {string} Base URL (e.g., 'https://example.com' or 'http://localhost:8080')
  */
 function getBaseUrl(req) {
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL.endsWith('/')
+      ? process.env.BASE_URL.slice(0, -1)
+      : process.env.BASE_URL;
+  }
   const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
   const host = req.get('host') || `localhost:${process.env.PORT || 8080}`;
   return `${protocol}://${host}`;

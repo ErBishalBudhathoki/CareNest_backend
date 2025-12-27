@@ -618,7 +618,8 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
 
     // 2. Get the FCM tokens for these specific admin users.
     const tokenDocs = await db.collection('fcmTokens').find({
-      userEmail: { $in: adminEmails }
+      userEmail: { $in: adminEmails },
+      organizationId: organizationId
     }).toArray();
 
     const validTokens = tokenDocs.map(doc => doc.fcmToken).filter(Boolean);

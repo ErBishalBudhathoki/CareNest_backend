@@ -25,7 +25,17 @@ const invoiceSchema = {
     unit: 'String',
     totalPrice: 'Number',
     date: 'Date',
-    organizationId: 'String'
+    organizationId: 'String',
+    // MMM/location-aware pricing metadata
+    providerType: 'String', // 'standard' | 'highIntensity'
+    serviceLocationPostcode: 'String', // Postcode where service was delivered
+    pricingMetadata: {
+      timeBand: 'String', // 'Weekday Daytime' | 'Weekday Evening' | 'Weekday Night'
+      mmmRating: 'Number', // 1..7
+      mmmMultiplier: 'Number', // 1.0, 1.4, 1.5
+      priceCapBase: 'Number', // Base NDIS price cap before MMM loading
+      priceCapApplied: 'Number' // Final applied cap after MMM loading
+    }
   }],
   
   // Financial summary

@@ -62,6 +62,12 @@ router.post('/api/pricing/bulk-lookup', pricingController.getBulkPricingLookup);
 router.post('/api/pricing/bulk-import', pricingController.bulkImportPricing);
 
 /**
+ * Get standard price for an NDIS item (NDIS default)
+ * GET /standard-price/:ndisItemNumber
+ */
+router.get('/standard-price/:ndisItemNumber', pricingController.getStandardPrice);
+
+/**
  * Get custom price for organization (legacy endpoint)
  * GET /custom-price-organization/:ndisItemNumber
  */
