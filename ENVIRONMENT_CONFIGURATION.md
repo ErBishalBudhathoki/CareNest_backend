@@ -1,0 +1,228 @@
+# Environment-Based Configuration & Health Endpoint Implementation
+
+## Overview
+
+This document describes the implementation of environment-based configuration (development vs production) and health endpoint for the Multi-Tenant Invoice Backend.
+
+## Key Features Implemented
+
+### 1. Environment-Based Configuration
+
+#### Files Created:
+- `config/environment.js` - Central environment configuration management
+- `.env.example` - Template for environment variables
+- `.env.development` - Development-specific configuration
+- `.env.production` - Production-specific configuration  
+
+#### Features:
+- **Automatic Environment Detection**: Based on `NODE_ENV` variable
+- **Secure Logging**: Sensitive data hidden in production
+- **Environment-Specific Settings**: Different configurations for dev/production
+- **Configuration Validation**: Ensures proper environment setup
+
+### 2. Enhanced Security
+
+#### Production Security Features:
+- ✅ **Sensitive Data Protection**: Firebase keys, credentials hidden in logs
+- ✅ **Rate Limiting**: Stricter limits in production (50 vs 100 requests)
+- ✅ **JWT Expiry**: Shorter token lifespan in production (8h vs 24h)
+- ✅ **Password Policy**: Stricter requirements (min 10 chars vs 8)
+- ✅ **Bcrypt Rounds**: Higher security (14 vs 12 rounds)
+
+#### Development Features:
+- 🛠️ **Detailed Logging**: Full debug information available
+- 🛠️ **Verbose Errors**: Complete error details and stack traces
+- 🛠️ **Debug Endpoints**: Additional debugging capabilities
+- 🛠️ **Lenient Rate Limiting**: Higher limits for development work
+
+### 3. Health Endpoint
+
+#### Endpoint: `GET /health`
+
+**Response Format:**
+```json
+{
+  \"status\": \"OK\",
+  \"timestamp\": \"2025-09-10T08:13:43.014Z\",
+  \"environment\": \"development\",
+  \"version\": \"1.0.0\",
+  \"uptime\": 55.372988875,
+  \"memory\": {
+    \"used\": 34,
+    \"total\": 36,
+    \"external\": 24
+  },
+  \"services\": {
+    \"mongodb\": \"connected\",
+    \"firebase\": \"initialized\"
+  }
+}
+```
+
+**Features:**
+- ✅ **Service Status**: MongoDB and Firebase connectivity checks
+- ✅ **System Metrics**: Memory usage, uptime tracking
+- ✅ **Environment Info**: Shows current environment and version
+- ✅ **Error Handling**: Proper status codes (200/503) based on health
+- ✅ **Environment-Aware**: Only shows detailed errors in development
+
+### 4. Firebase Configuration Security
+
+#### Enhanced `firebase-admin-config.js.template`:
+- **Environment-Aware Logging**: Respects production security requirements
+- **Safe Logging Function**: Automatically hides sensitive data in production
+- **Configuration Validation**: Ensures all required variables are present
+- **Debug Information**: Available only in development mode
+
+### 5. NPM Scripts Enhancement
+
+#### New Scripts Added:
+```json
+{
+  \"start:dev\": \"cp .env.development .env && nodemon server.js\",
+  \"start:prod\": \"cp .env.production .env && NODE_ENV=production node server.js\",
+  \"dev\": \"cp .env.development .env && NODE_ENV=development nodemon server.js\",
+  \"prod\": \"cp .env.production .env && NODE_ENV=production node server.js\",
+  \"health-check\": \"curl http://localhost:8080/health || echo 'Server not responding'\"
+}
+```
+
+## Usage
+
+### Development Mode
+```bash
+# Start development server with detailed logging
+npm run dev
+
+# OR using the alternative command
+npm run start:dev
+```
+
+**Features in Development:**
+- 🟡 Detailed credential logging for debugging
+- 🟡 Complete error messages with stack traces
+- 🟡 Debug endpoints enabled
+- 🟡 Lenient rate limiting
+- 🟡 Longer JWT expiry times
+
+### Production Mode
+```bash
+# Start production server with secure logging
+npm run prod
+
+# OR using the alternative command
+npm run start:prod
+```
+
+**Features in Production:**
+- 🟢 Credentials hidden in logs (\"[HIDDEN IN PRODUCTION]\")
+- 🟢 Generic error messages (no stack traces)
+- 🟢 Debug endpoints disabled
+- 🟢 Strict rate limiting
+- 🟢 Shorter JWT expiry times
+- 🟢 Enhanced password requirements
+
+### Health Check
+```bash
+# Test server health
+npm run health-check
+
+# OR direct curl
+curl http://localhost:8080/health
+```
+
+## Environment Variables
+
+### Development vs Production Differences
+
+| Variable | Development | Production |
+|----------|------------|------------|
+| `NODE_ENV` | `development` | `production` |
+| `JWT_EXPIRES_IN` | `24h` | `8h` |
+| `JWT_REFRESH_EXPIRY` | `7d` | `3d` |
+| `BCRYPT_ROUNDS` | `12` | `14` |
+| `RATE_LIMIT_MAX_REQUESTS` | `100` | `50` |
+| `MAX_LOGIN_ATTEMPTS` | `5` | `3` |
+| `PASSWORD_MIN_LENGTH` | `8` | `10` |
+| `LOG_LEVEL` | `debug` | `warn` |
+| `DEBUG_MODE` | `true` | `false` |
+
+### Environment File Structure
+
+1. **`.env.example`** - Template with documentation
+2. **`.env.development`** - Development settings (committed to repo)
+3. **`.env.production`** - Production settings (should be customized for deployment)
+4. **`.env`** - Active configuration (auto-generated by npm scripts)
+
+## Security Improvements
+
+### Before vs After
+
+**Before:**
+- ❌ Sensitive credentials logged in all environments
+- ❌ Same security settings for dev and production
+- ❌ No health monitoring endpoint
+- ❌ Manual environment switching
+
+**After:**
+- ✅ Credentials automatically hidden in production
+- ✅ Environment-specific security configurations
+- ✅ Comprehensive health monitoring
+- ✅ Automated environment management
+- ✅ Clear environment indicators in logs
+
+## Server Startup Messages
+
+### Development Mode
+```
+🛠️  Configuring DEVELOPMENT environment
+🚀 Starting Multi-Tenant Invoice Backend...
+🌍 Environment: development
+📋 Port: 8080
+✅ Server is now listening on port 8080
+🌐 Server URL: http://localhost:8080
+⚙️  Health Check: http://localhost:8080/health
+🔥 Firebase Admin SDK verified and server is ready!
+🟡 Development mode: Detailed logging enabled
+🔍 Debug endpoints available
+```
+
+### Production Mode
+```
+🚀 Configuring PRODUCTION environment
+🚀 Starting Multi-Tenant Invoice Backend...
+🌍 Environment: production
+📋 Port: 8080
+✅ Server is now listening on port 8080
+🌐 Server URL: http://localhost:8080
+⚙️  Health Check: http://localhost:8080/health
+🔥 Firebase Admin SDK verified and server is ready!
+🟢 Production mode: Secure logging enabled
+🔒 Sensitive data logging disabled
+```
+
+## Deployment Considerations
+
+### For Render/Production Deployment:
+1. **Environment Variables**: Set production values in Render dashboard
+2. **NODE_ENV**: Must be set to `production`
+3. **SERVERLESS**: Set to `true` for serverless deployment if needed
+4. **Monitoring**: Use the `/health` endpoint for health checks
+5. **Logging**: Production logs will be clean and secure
+
+### For Local Development:
+1. **Use Development Script**: `npm run dev`
+2. **Environment Switching**: Scripts automatically handle `.env` file copying
+3. **Debug Information**: Full logging available for troubleshooting
+4. **Hot Reloading**: Nodemon enabled for development
+
+## Benefits
+
+1. **Security**: Automatic credential protection in production
+2. **Debugging**: Rich logging information in development
+3. **Monitoring**: Health endpoint for system status
+4. **Maintenance**: Easy environment switching
+5. **Deployment**: Production-ready configuration management
+6. **Compliance**: Follows security best practices
+
+This implementation provides a robust, secure, and maintainable solution for managing different environments while protecting sensitive information in production deployments.

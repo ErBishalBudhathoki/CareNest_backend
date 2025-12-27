@@ -224,7 +224,8 @@ async function validateInvoiceLineItems(req, res) {
       providerType: item.providerType || defaultProviderType,
       serviceDate: item.serviceDate || new Date(),
       quantity: item.quantity || 1,
-      description: item.description || item.itemName
+      description: item.description || item.itemName,
+      servicePostcode: item.serviceLocationPostcode || item.servicePostcode || null
     }));
 
     const results = await priceValidationService.validatePricesBatch(validations);

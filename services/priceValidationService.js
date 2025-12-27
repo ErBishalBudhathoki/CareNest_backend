@@ -8,6 +8,7 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 const logger = require('../config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+const { mmmService } = require('./mmmService');
 
 const uri = process.env.MONGODB_URI;
 
@@ -63,7 +64,14 @@ class PriceValidationService {
    * @param {Date} serviceDate - Date of service (for validity period check)
    * @returns {Promise<ValidationResult>} Validation result
    */
-  async validatePrice(supportItemNumber, proposedPrice, state = 'NSW', providerType = 'standard', serviceDate = new Date()) {
+  async validatePrice(
+    supportItemNumber,
+    proposedPrice,
+    state = 'NSW',
+    providerType = 'standard',
+    serviceDate = new Date(),
+    options = {}
+  ) {
     try {
       await this.connect();
 
@@ -154,24 +162,55 @@ class PriceValidationService {
         };
       }
 
-      // Get price cap for the specified provider type and state
-      const priceCap = this.getPriceCap(supportItem, normalizedState, providerType);
+      // Infer provider type from support item metadata if missing
+      let providerTypeUsed = providerType;
+      if (!providerTypeUsed || providerTypeUsed === '') {
+        const name = (supportItem.supportItemName || '').toLowerCase();
+        providerTypeUsed = name.includes('high intensity') ? 'highIntensity' : 'standard';
+      }
 
-      if (priceCap === null) {
+      // Get base price cap for provider type and state
+      const basePriceCap = this.getPriceCap(supportItem, normalizedState, providerTypeUsed);
+
+      if (basePriceCap === null) {
         return {
           isValid: false,
           status: 'no_cap_found',
           priceCap: null,
           proposedPrice,
-          message: `No price cap found for ${supportItemNumber} in ${normalizedState} for ${providerType} providers`,
+          message: `No price cap found for ${supportItemNumber} in ${normalizedState} for ${providerTypeUsed} providers`,
           supportItem,
           validationDetails: {
             state: normalizedState,
-            providerType,
+            providerType: providerTypeUsed,
             availableCaps: supportItem.priceCaps
           }
         };
       }
+
+      // MMM-aware adjustment: derive MMM from service location postcode, apply multiplier
+      let mmmRating = null;
+      let mmmMultiplier = 1.0;
+      const servicePostcode = options?.servicePostcode;
+
+      if (servicePostcode) {
+        try {
+          const mmmInfo = await mmmService.getMmmByPostcode(servicePostcode);
+          if (mmmInfo && typeof mmmInfo.mmm === 'number') {
+            mmmRating = mmmInfo.mmm;
+            mmmMultiplier = mmmService.getMultiplierForMmm(mmmRating);
+          }
+        } catch (e) {
+          logger.warn('MMM derivation failed during price validation', {
+            error: e.message,
+            supportItemNumber,
+            servicePostcode
+          });
+        }
+      }
+
+      const { adjustedCap } = mmmService.applyMultiplierToCap(basePriceCap, mmmRating);
+      const priceCap = adjustedCap ?? basePriceCap;
 
       // Validate price against cap
       const isValid = proposedPrice <= priceCap;
@@ -189,7 +228,10 @@ class PriceValidationService {
         supportItem,
         validationDetails: {
           state: normalizedState,
-          providerType,
+          providerType: providerTypeUsed,
+          priceCapBase: basePriceCap,
+          mmmRating,
+          mmmMultiplier,
           exceedsBy: isValid ? 0 : proposedPrice - priceCap,
           compliancePercentage: (priceCap / proposedPrice * 100).toFixed(2)
         }
@@ -225,7 +267,10 @@ class PriceValidationService {
         validation.proposedPrice,
         validation.state,
         validation.providerType,
-        validation.serviceDate
+        validation.serviceDate,
+        {
+          servicePostcode: validation.servicePostcode
+        }
       );
       results.push({
         ...result,

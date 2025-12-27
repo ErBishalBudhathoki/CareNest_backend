@@ -1,6 +1,7 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const auditService = require('./auditService');
-const priceValidationService = require('./priceValidationService');
+// Use the singleton instance for validation helpers
+const { priceValidationService } = require('./priceValidationService');
 
 const uri = process.env.MONGODB_URI;
 
@@ -458,6 +459,14 @@ class PricingService {
     try {
       const currentDate = new Date();
       let clientIdForQuery = null;
+      let stateUsed = 'NSW'; // default fallback
+      let stateSource = 'fallback';
+      let providerTypeUsed = 'standard';
+
+      // Pre-fetch support item for caps and metadata
+      const supportItemDoc = await db.collection('supportItems').findOne({
+        supportItemNumber
+      });
 
       // Convert clientId to string for consistent querying
       if (clientId) {
@@ -467,6 +476,22 @@ class PricingService {
           clientIdForQuery = clientId._id.toString();
         } else {
           clientIdForQuery = clientId.toString();
+        }
+
+        // Resolve client state for accurate cap selection
+        try {
+          const clientDoc = await db.collection('clients').findOne(
+            { _id: new ObjectId(clientIdForQuery) },
+            { projection: { clientState: 1 } }
+          );
+          if (clientDoc && clientDoc.clientState) {
+            stateUsed = String(clientDoc.clientState).toUpperCase();
+            stateSource = 'client';
+          }
+        } catch (e) {
+          // Keep fallback on errors; include no sensitive error surfaces
+          stateUsed = 'NSW';
+          stateSource = 'fallback';
         }
       }
 
@@ -489,10 +514,32 @@ class PricingService {
         });
 
         if (clientSpecificPricing) {
+          // Base price-only policy: do not clamp custom price to cap
+          const originalPrice = clientSpecificPricing.customPrice;
+
+          // Validate against NDIS cap for metadata only
+          const validation = await priceValidationService.validatePrice(
+            supportItemNumber,
+            originalPrice,
+            stateUsed,
+            providerTypeUsed
+          );
+
           return {
             ...clientSpecificPricing,
-            price: clientSpecificPricing.customPrice,
-            source: 'client_specific'
+            price: originalPrice,
+            source: 'client_specific',
+            ndisCompliant: validation.isValid,
+            exceedsNdisCap: !validation.isValid && validation.status === 'exceeds_cap',
+            priceCap: validation.priceCap,
+            priceCaps: supportItemDoc?.priceCaps,
+            supportItemName: supportItemDoc?.supportItemName,
+            validationDetails: validation,
+            metadata: {
+              stateUsed,
+              stateSource,
+              providerTypeUsed
+            }
           };
         }
       }
@@ -514,43 +561,82 @@ class PricingService {
       });
 
       if (organizationPricing) {
+        // Base price-only policy: do not clamp custom price to cap
+        const originalPrice = organizationPricing.customPrice;
+
+        // Validate against NDIS cap for metadata only
+        const validation = await priceValidationService.validatePrice(
+          supportItemNumber,
+          originalPrice,
+          stateUsed,
+          providerTypeUsed
+        );
+
         return {
           ...organizationPricing,
-          price: organizationPricing.customPrice,
-          source: 'organization'
+          price: originalPrice,
+          source: 'organization',
+          ndisCompliant: validation.isValid,
+          exceedsNdisCap: !validation.isValid && validation.status === 'exceeds_cap',
+          priceCap: validation.priceCap,
+          priceCaps: supportItemDoc?.priceCaps,
+          supportItemName: supportItemDoc?.supportItemName,
+          validationDetails: validation,
+          metadata: {
+            stateUsed,
+            stateSource,
+            providerTypeUsed
+          }
         };
       }
 
       // Priority 3: NDIS default pricing
-      const ndisItem = await db.collection('supportItems').findOne({
-        supportItemNumber
-      });
+      if (supportItemDoc) {
+        // Base price-only: Never return cap as price; surface caps for metadata only
+        let priceCap = priceValidationService.getPriceCap(
+          supportItemDoc,
+          stateUsed,
+          providerTypeUsed
+        );
 
-      if (ndisItem) {
-        const baseRate = 30.00;
-        let priceCap = null;
-        let exceedsNdisCap = false;
-        let priceCapWarning = null;
-
-        if (ndisItem.priceCaps?.standard?.NSW) {
-          priceCap = ndisItem.priceCaps.standard.NSW;
-          if (baseRate > priceCap) {
-            exceedsNdisCap = true;
-            priceCapWarning = `Base rate $${baseRate.toFixed(2)} exceeds NDIS price cap of $${priceCap.toFixed(2)} for NSW standard services`;
-          }
+        if (priceCap !== null) {
+          return {
+            source: 'ndis_default',
+            supportItemNumber,
+            supportItemName: supportItemDoc.supportItemName,
+            price: null,
+            standardPrice: null,
+            pricingType: 'cap_rate',
+            ndisCompliant: true,
+            exceedsNdisCap: false,
+            priceCap,
+            priceCaps: supportItemDoc.priceCaps,
+            metadata: {
+              stateUsed,
+              stateSource,
+              providerTypeUsed
+            }
+          };
         }
 
+        // No cap found – do not inject a synthetic $30 fallback
         return {
           source: 'ndis_default',
           supportItemNumber,
-          supportItemName: ndisItem.supportItemName,
-          price: baseRate,
-          pricingType: 'fixed',
-          ndisCompliant: !exceedsNdisCap,
-          exceedsNdisCap,
-          priceCap,
-          priceCapWarning,
-          priceCaps: ndisItem.priceCaps
+          supportItemName: supportItemDoc.supportItemName,
+          price: null,
+          standardPrice: null,
+          pricingType: 'unknown',
+          ndisCompliant: true,
+          exceedsNdisCap: false,
+          priceCap: null,
+          priceCaps: supportItemDoc.priceCaps,
+          metadata: {
+            stateUsed,
+            stateSource,
+            providerTypeUsed,
+            baselinePolicy: 'No cap found; reasonable price agreement applies; notional unit price $1.00'
+          }
         };
       }
 
@@ -568,6 +654,9 @@ class PricingService {
     
     try {
       let clientIdForQuery = null;
+      let stateUsed = 'NSW';
+      let stateSource = 'fallback';
+      let providerTypeUsed = 'standard';
       if (clientId) {
         if (typeof clientId === 'string') {
           clientIdForQuery = clientId;
@@ -575,6 +664,21 @@ class PricingService {
           clientIdForQuery = clientId._id.toString();
         } else {
           clientIdForQuery = clientId.toString();
+        }
+
+        // Resolve state from client when possible
+        try {
+          const clientDoc = await db.collection('clients').findOne(
+            { _id: new ObjectId(clientIdForQuery) },
+            { projection: { clientState: 1 } }
+          );
+          if (clientDoc && clientDoc.clientState) {
+            stateUsed = String(clientDoc.clientState).toUpperCase();
+            stateSource = 'client';
+          }
+        } catch (e) {
+          stateUsed = 'NSW';
+          stateSource = 'fallback';
         }
       }
 
@@ -657,53 +761,107 @@ class PricingService {
         };
 
         if (itemsWithoutCustomPricing.includes(item.supportItemNumber)) {
-          const baseRate = 30.00;
-          let priceCap = null;
-          let exceedsNdisCap = false;
-          let priceCapWarning = null;
+          const priceCap = priceValidationService.getPriceCap(
+            item,
+            stateUsed,
+            providerTypeUsed
+          );
 
-          if (item.priceCaps?.standard?.NSW) {
-            priceCap = item.priceCaps.standard.NSW;
-            if (baseRate > priceCap) {
-              exceedsNdisCap = true;
-              priceCapWarning = `Base rate $${baseRate.toFixed(2)} exceeds NDIS price cap of $${priceCap.toFixed(2)} for NSW standard services`;
-            }
+          if (priceCap !== null) {
+            ndisDefaultPricing[item.supportItemNumber] = {
+              source: 'ndis_default',
+              supportItemNumber: item.supportItemNumber,
+              supportItemName: item.supportItemName,
+              price: priceCap,
+              standardPrice: priceCap,
+              pricingType: 'cap_rate',
+              ndisCompliant: true,
+              exceedsNdisCap: false,
+              priceCap,
+              priceCaps: item.priceCaps,
+              metadata: {
+                stateUsed,
+                stateSource,
+                providerTypeUsed
+              }
+            };
+          } else {
+            ndisDefaultPricing[item.supportItemNumber] = {
+              source: 'ndis_default',
+              supportItemNumber: item.supportItemNumber,
+              supportItemName: item.supportItemName,
+              price: null,
+              standardPrice: null,
+              pricingType: 'unknown',
+              ndisCompliant: true,
+              exceedsNdisCap: false,
+              priceCap: null,
+              priceCaps: item.priceCaps,
+              metadata: {
+                stateUsed,
+                stateSource,
+                providerTypeUsed,
+                baselinePolicy: 'No cap found; reasonable price agreement applies; notional unit price $1.00'
+              }
+            };
           }
-
-          ndisDefaultPricing[item.supportItemNumber] = {
-            source: 'ndis_default',
-            supportItemNumber: item.supportItemNumber,
-            supportItemName: item.supportItemName,
-            price: baseRate,
-            pricingType: 'fixed',
-            ndisCompliant: !exceedsNdisCap,
-            exceedsNdisCap,
-            priceCap,
-            priceCapWarning,
-            priceCaps: item.priceCaps
-          };
         }
       });
 
       // Combine results
-      supportItemNumbers.forEach(itemNumber => {
+      for (const itemNumber of supportItemNumbers) {
         if (customPricingMap[itemNumber]) {
+          const cp = customPricingMap[itemNumber];
+          const priceCapsObj = priceCapsData[itemNumber]?.priceCaps;
+          const supportName = priceCapsData[itemNumber]?.supportItemName;
+
+          const originalPrice = cp.price;
+          // Validate against NDIS cap for metadata only
+          const validation = await priceValidationService.validatePrice(
+            itemNumber,
+            originalPrice,
+            stateUsed,
+            providerTypeUsed
+          );
+
           results[itemNumber] = {
-            ...customPricingMap[itemNumber],
-            priceCaps: priceCapsData[itemNumber]?.priceCaps,
-            supportItemName: priceCapsData[itemNumber]?.supportItemName
+            ...cp,
+            price: originalPrice,
+            customPrice: cp.price,
+            priceCaps: priceCapsObj,
+            supportItemName: supportName,
+            ndisCompliant: validation.isValid,
+            exceedsNdisCap: !validation.isValid && validation.status === 'exceeds_cap',
+            priceCap: validation.priceCap,
+            validationDetails: validation,
+            metadata: {
+              stateUsed,
+              stateSource,
+              providerTypeUsed
+            }
           };
         } else if (ndisDefaultPricing[itemNumber]) {
-          results[itemNumber] = ndisDefaultPricing[itemNumber];
+          // Ensure base-only behavior in default pricing
+          const def = ndisDefaultPricing[itemNumber];
+          results[itemNumber] = {
+            ...def,
+            price: null,
+            standardPrice: null
+          };
         } else {
           results[itemNumber] = {
             error: 'No pricing found for this support item',
             supportItemNumber: itemNumber,
             priceCaps: priceCapsData[itemNumber]?.priceCaps,
-            supportItemName: priceCapsData[itemNumber]?.supportItemName
+            supportItemName: priceCapsData[itemNumber]?.supportItemName,
+            metadata: {
+              stateUsed,
+              stateSource,
+              providerTypeUsed
+            }
           };
         }
-      });
+      }
 
       return {
         data: results,
@@ -864,6 +1022,67 @@ class PricingService {
     }
   }
 
+  /**
+   * Get standard price for a single support item (base price-only)
+   * Does NOT consider custom pricing; returns null for price and surfaces caps for validation metadata.
+   */
+  async getStandardPrice(supportItemNumber, clientId = null) {
+    const db = await this.connect();
+    try {
+      let stateUsed = 'NSW';
+      let stateSource = 'fallback';
+      let providerTypeUsed = 'standard';
+
+      // Resolve state from client when possible
+      if (clientId) {
+        try {
+          const clientIdStr = typeof clientId === 'string' ? clientId : clientId?.toString();
+          if (clientIdStr) {
+            const clientDoc = await db.collection('clients').findOne(
+              { _id: new ObjectId(clientIdStr) },
+              { projection: { clientState: 1 } }
+            );
+            if (clientDoc && clientDoc.clientState) {
+              stateUsed = String(clientDoc.clientState).toUpperCase();
+              stateSource = 'client';
+            }
+          }
+        } catch (e) {
+          stateUsed = 'NSW';
+          stateSource = 'fallback';
+        }
+      }
+
+      const supportItemDoc = await db.collection('supportItems').findOne({ supportItemNumber });
+      if (!supportItemDoc) {
+        return {
+          supportItemNumber,
+          supportItemName: null,
+          price: null,
+          priceCap: null,
+          metadata: { stateUsed, stateSource, providerTypeUsed }
+        };
+      }
+
+      const priceCap = priceValidationService.getPriceCap(
+        supportItemDoc,
+        stateUsed,
+        providerTypeUsed
+      );
+
+      // Base price-only: never return cap as price
+      return {
+        supportItemNumber,
+        supportItemName: supportItemDoc.supportItemName,
+        price: null,
+        priceCap: priceCap,
+        priceCaps: supportItemDoc.priceCaps,
+        metadata: { stateUsed, stateSource, providerTypeUsed }
+      };
+    } finally {
+      await this.disconnect();
+    }
+  }
   /**
    * Validate user authorization for organization
    */
