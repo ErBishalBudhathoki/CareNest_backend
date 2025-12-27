@@ -141,6 +141,12 @@ Most endpoints require authentication via:
 | POST | `/save-custom-price-organization` | Save org custom price (legacy) | Yes |
 | POST | `/save-custom-price-client` | Save client custom price (legacy) | Yes |
 
+### NDIS Default Pricing
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/standard-price/:ndisItemNumber` | Get base price information for a support item (no cap-based pricing). Returns `null` for `price` when no explicit base price exists; includes `hasStandardPrice` to indicate base price availability, and `data` with `priceCap`, `priceCaps`, `supportItemName`, and `metadata` (`stateUsed`, `stateSource`, `providerTypeUsed`). | No |
+
 ### Expense Management
 
 | Method | Endpoint | Description | Auth Required |

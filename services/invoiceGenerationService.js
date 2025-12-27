@@ -368,153 +368,6 @@ class InvoiceGenerationService {
      return errors;
    }
    
-   /**
-    * Get pricing for a specific NDIS item
-    * This method looks up pre-configured pricing from the pricing collection
-    */
-   async getPricingForItem(ndisItemNumber, organizationId, clientId, state = 'NSW', providerType = 'standard') {
-     try {
-       // First try to find organization-specific pricing
-       let pricing = await this.db.collection('pricing').findOne({
-         ndisItemNumber: ndisItemNumber,
-         organizationId: organizationId,
-         isActive: true,
-         $or: [
-           { state: state },
-           { state: { $exists: false } }, // Global pricing
-           { state: null }
-         ]
-       });
-       
-       if (pricing) {
-         return {
-           price: pricing.unitPrice || pricing.price,
-           source: 'organization-specific',
-           pricingId: pricing._id,
-           state: pricing.state || 'global',
-           providerType: pricing.providerType || 'standard'
-         };
-       }
-       
-       // If no organization-specific pricing, try client-specific pricing
-       // Convert clientId to string for consistent querying
-       let clientIdForQuery;
-       if (typeof clientId === 'string') {
-         clientIdForQuery = clientId;
-       } else if (clientId && clientId._id) {
-         clientIdForQuery = clientId._id.toString();
-       } else if (clientId && clientId.toString) {
-         clientIdForQuery = clientId.toString();
-       } else {
-         clientIdForQuery = clientId;
-       }
-       
-       pricing = await this.db.collection('pricing').findOne({
-         ndisItemNumber: ndisItemNumber,
-         clientId: clientIdForQuery,
-         isActive: true,
-         $or: [
-           { state: state },
-           { state: { $exists: false } },
-           { state: null }
-         ]
-       });
-       
-       if (pricing) {
-         return {
-           price: pricing.unitPrice || pricing.price,
-           source: 'client-specific',
-           pricingId: pricing._id,
-           state: pricing.state || 'global',
-           providerType: pricing.providerType || 'standard'
-         };
-       }
-       
-       // Finally, try to find default/global pricing
-       pricing = await this.db.collection('pricing').findOne({
-         ndisItemNumber: ndisItemNumber,
-         isActive: true,
-         $and: [
-           { organizationId: { $exists: false } },
-           { clientId: { $exists: false } }
-         ],
-         $or: [
-           { state: state },
-           { state: { $exists: false } },
-           { state: null }
-         ]
-       });
-       
-       if (pricing) {
-         return {
-           price: pricing.unitPrice || pricing.price,
-           source: 'default',
-           pricingId: pricing._id,
-           state: pricing.state || 'global',
-           providerType: pricing.providerType || 'standard'
-         };
-       }
-       
-       // If no pricing found, try to get NDIS standard pricing
-       const ndisStandardPricing = await this.getNdisStandardPricing(ndisItemNumber, state);
-       if (ndisStandardPricing) {
-         return {
-           price: ndisStandardPricing.price,
-           source: 'ndis-standard',
-           state: state,
-           providerType: 'standard'
-         };
-       }
-       
-       return null;
-       
-     } catch (error) {
-       logger.error('Error getting pricing for item', {
-         ndisItemNumber,
-         error: error.message,
-         stack: error.stack
-       });
-       return null;
-     }
-   }
-   
-   /**
-    * Get NDIS standard pricing for an item
-    * This is a placeholder for NDIS price guide integration
-    */
-   async getNdisStandardPricing(ndisItemNumber, state = 'NSW') {
-     try {
-       // This would typically integrate with NDIS price guide API or database
-       // For now, return some default pricing based on common NDIS items
-       const standardPrices = {
-         '01_011_0107_1_1': { price: 62.17, description: 'Assistance with self-care activities' },
-         '01_013_0107_1_1': { price: 62.17, description: 'Assistance with household tasks' },
-         '04_104_0136_6_1': { price: 193.99, description: 'Group and centre based activities' },
-         '15_054_0128_1_1': { price: 194.46, description: 'Therapeutic supports' },
-         'EXPENSE_OTHER': { price: 0, description: 'Other expenses' }
-       };
-       
-       const standardPrice = standardPrices[ndisItemNumber];
-       if (standardPrice) {
-         return {
-           price: standardPrice.price,
-           description: standardPrice.description,
-           source: 'ndis-standard',
-           state: state
-         };
-       }
-       
-       return null;
-       
-     } catch (error) {
-       logger.error('Error getting NDIS standard pricing', {
-        ndisItemNumber,
-        error: error.message,
-        stack: error.stack
-      });
-       return null;
-     }
-   }
 
   /**
    * Generate invoice line items based on clientAssignment data
@@ -680,6 +533,27 @@ class InvoiceGenerationService {
   /**
    * Create line item from schedule data
    */
+  /**
+   * Create an invoice line item from an assignment schedule entry.
+   *
+   * Derives pricing via getPricingForItem using organization/client custom pricing,
+   * MMM-aware NDIS caps, and time-band ratios. When base pricing is missing,
+   * returns a prompt-enabled line item instead of a $0.00 rate.
+   *
+   * Parameters:
+   * - scheduleItem: Object containing date, startTime, endTime, break, and optional postcode.
+   * - assignment: Assignment object providing NDIS item fallbacks and metadata.
+   * - client: Client object with ids and default postcode.
+   * - workedTimeData: Optional supporting worked-time info.
+   *
+   * Returns:
+   * - A line item object with quantity, unitPrice, totalPrice, and pricingMetadata fields:
+   *   - pricingSource, isCustomPricing, ndisCompliant
+   *   - basePrice, capRatio
+   *   - priceCapApplied, priceCapBase
+   *   - mmmRating, mmmMultiplier
+   * - Or a prompt-enabled item (pricingStatus: 'missing') when base price is not configured.
+   */
   async createLineItemFromSchedule(scheduleItem, assignment, client, workedTimeData) {
     try {
       // Get NDIS item information
@@ -697,10 +571,27 @@ class InvoiceGenerationService {
       // Calculate hours worked
       const startTime = this.parseTime(scheduleItem.startTime);
       const endTime = this.parseTime(scheduleItem.endTime);
-      const breakMinutes = parseInt(scheduleItem.break) || 0;
+      const breakMinutes = this.parseBreakMinutes(scheduleItem.break);
       
       const totalMinutes = this.calculateWorkMinutes(startTime, endTime, breakMinutes);
       const hoursWorked = totalMinutes / 60;
+
+      // Determine provider type: use provided or infer from item metadata
+      const inferredProviderType = (() => {
+        const name = (ndisItem.itemName || ndisItem.description || '').toLowerCase();
+        return name.includes('high intensity') ? 'highIntensity' : 'standard';
+      })();
+
+      const providerTypeUsed = scheduleItem.providerType || inferredProviderType || 'standard';
+
+      // Determine service delivery postcode for MMM pricing
+      const serviceLocationPostcode = (
+        scheduleItem.serviceLocationPostcode ||
+        scheduleItem.postcode ||
+        assignment.serviceLocationPostcode ||
+        client.clientZip ||
+        null
+      );
 
       // Get pricing information with enhanced validation
       const pricing = await this.getPricingForItem(
@@ -708,7 +599,8 @@ class InvoiceGenerationService {
         client.organizationId,
         client._id,
         scheduleItem.state || 'NSW',
-        scheduleItem.providerType || 'standard'
+        providerTypeUsed,
+        serviceLocationPostcode
       );
 
       // Determine quantity and unit price based on NDIS item unit
@@ -733,10 +625,80 @@ class InvoiceGenerationService {
         unitPrice = pricing.price * hoursWorked;
       }
 
+      // Handle missing pricing - store prompt data for later resolution instead of $0 rate
+      if (pricing.source === 'missing') {
+        const safeQuantity = isNaN(quantity) ? 0 : quantity;
+        return {
+          date: scheduleItem.date,
+          description: `${ndisItem.itemNumber} - ${ndisItem.itemName || ndisItem.description}`,
+          quantity: parseFloat(safeQuantity.toFixed(2)),
+          unitPrice: 0,
+          totalPrice: 0,
+          ndisItemNumber: ndisItem.itemNumber,
+          ndisItemName: ndisItem.itemName || ndisItem.description,
+          unit: ndisItem.unit || 'H',
+          isHighIntensity: scheduleItem.highIntensity || false,
+          startTime: scheduleItem.startTime,
+          endTime: scheduleItem.endTime,
+          breakMinutes: breakMinutes,
+          hoursWorked: parseFloat(hoursWorked.toFixed(2)),
+          source: 'clientAssignment',
+          organizationId: client.organizationId,
+          clientId: client._id,
+          assignmentId: assignment._id,
+          providerType: providerTypeUsed,
+          serviceLocationPostcode: serviceLocationPostcode,
+          pricingStatus: 'missing',
+          promptRequired: true,
+          promptData: {
+            ...pricing.promptData,
+            quantity: safeQuantity,
+            unit: ndisItem.unit || 'H',
+            scheduleId: scheduleItem._id,
+            organizationId: client.organizationId,
+            clientId: client._id
+          },
+          pricingMetadata: {
+            pricingSource: pricing.source,
+            isCustomPricing: pricing.isCustom,
+            ndisCompliant: pricing.ndisCompliant,
+            servicePostcode: serviceLocationPostcode,
+            basePrice: pricing.basePrice,
+            capRatio: pricing.capRatio,
+            priceCapApplied: pricing.priceCap,
+            priceCapBase: pricing.validationDetails?.priceCapBase,
+            mmmRating: pricing.validationDetails?.mmmRating,
+            mmmMultiplier: pricing.validationDetails?.mmmMultiplier
+          }
+        };
+      }
+
       // Ensure values are valid numbers before calling toFixed
       const safeQuantity = isNaN(quantity) ? 0 : quantity;
       const safeUnitPrice = isNaN(unitPrice) ? 0 : unitPrice;
       const safeTotalPrice = safeQuantity * safeUnitPrice;
+
+      // Detect time band (Weekday Daytime/Evening/Night) for annotation only
+      const dateObj = new Date(scheduleItem.date);
+      const isWeekend = [0,6].includes(dateObj.getDay());
+      const timeBand = (() => {
+        if (isWeekend) return null; // Focus on weekday bands per requirement
+        // Weekday Daytime: 06:00–20:00; Evening: 20:00–24:00; Night: crosses midnight or before 06:00
+        const startMin = startTime;
+        const endMin = endTime;
+        const crossesMidnight = endMin < startMin; // e.g., 23:00→01:00
+        const sixAM = 6 * 60;
+        const eightPM = 20 * 60;
+        if (!crossesMidnight) {
+          if (startMin >= sixAM && endMin <= eightPM) return 'Weekday Daytime';
+          if (startMin >= eightPM && endMin <= (24 * 60)) return 'Weekday Evening';
+          if (startMin < sixAM || endMin > eightPM) return 'Weekday Night';
+        } else {
+          // Any service finishing after midnight counts as Night
+          return 'Weekday Night';
+        }
+        return null;
+      })();
 
       return {
         date: scheduleItem.date,
@@ -756,10 +718,20 @@ class InvoiceGenerationService {
         organizationId: client.organizationId,
         clientId: client._id,
         assignmentId: assignment._id,
+        providerType: providerTypeUsed,
+        serviceLocationPostcode: serviceLocationPostcode,
         pricingMetadata: {
           pricingSource: pricing.source,
           isCustomPricing: pricing.isCustom,
-          ndisCompliant: pricing.ndisCompliant
+          ndisCompliant: pricing.ndisCompliant,
+          timeBand: timeBand,
+          servicePostcode: serviceLocationPostcode,
+          basePrice: pricing.basePrice,
+          capRatio: pricing.capRatio,
+          priceCapApplied: pricing.priceCap,
+          priceCapBase: pricing.validationDetails?.priceCapBase,
+          mmmRating: pricing.validationDetails?.mmmRating,
+          mmmMultiplier: pricing.validationDetails?.mmmMultiplier
         }
       };
 
@@ -775,6 +747,19 @@ class InvoiceGenerationService {
 
   /**
    * Create line item from worked time data (fallback method)
+   *
+   * Similar to schedule-based builder but uses a worked-time entry. Pricing is
+   * derived via getPricingForItem with MMM-aware caps. When pricing cannot be
+   * resolved, returns a prompt-enabled item rather than a $0.00 rate.
+   *
+   * Parameters:
+   * - workEntry: Worked time record with date, timeWorked, providerType, and optional postcode.
+   * - assignment: Assignment context providing NDIS item number and metadata.
+   * - client: Client context with ids and default postcode.
+   *
+   * Returns:
+   * - A line item with pricingMetadata (basePrice, capRatio, priceCapApplied, priceCapBase,
+   *   mmmRating, mmmMultiplier) or prompt-enabled when pricing is missing/invalid.
    */
   async createLineItemFromWorkedTime(workEntry, assignment, client) {
     try {
@@ -783,6 +768,13 @@ class InvoiceGenerationService {
       
       // Get NDIS item details
       const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
+      // Resolve base cap for target item (MMM applied later during validation)
+      try {
+        const baseCap = priceValidationService.getPriceCap(ndisItem, state, providerType);
+        itemPriceCap = typeof baseCap === 'number' ? baseCap : null;
+      } catch (capErr) {
+        logger.warn('Price cap lookup failed; proceeding without cap clamp', { ndisItemNumber, state, providerType, error: capErr.message });
+      }
       
       if (!ndisItem) {
         logger.warn('NDIS item not found', {
@@ -791,13 +783,30 @@ class InvoiceGenerationService {
         return null;
       }
 
+      // Determine provider type: use provided or infer from item metadata
+      const inferredProviderType = (() => {
+        const name = (ndisItem.itemName || '').toLowerCase();
+        return name.includes('high intensity') ? 'highIntensity' : 'standard';
+      })();
+      const providerTypeUsed = workEntry.providerType || inferredProviderType || 'standard';
+
+      // Determine service delivery postcode for MMM pricing
+      const serviceLocationPostcode = (
+        workEntry.serviceLocationPostcode ||
+        workEntry.postcode ||
+        assignment.serviceLocationPostcode ||
+        client.clientZip ||
+        null
+      );
+
       // Get pricing information with enhanced validation
       const pricing = await this.getPricingForItem(
         ndisItemNumber,
         client.organizationId,
         client._id,
         workEntry.state || 'NSW',
-        workEntry.providerType || 'standard'
+        providerTypeUsed,
+        serviceLocationPostcode
       );
 
       const hoursWorked = parseFloat(workEntry.timeWorked) || 0;
@@ -825,6 +834,8 @@ class InvoiceGenerationService {
           assignmentId: assignment._id,
           pricingStatus: 'invalid',
           promptRequired: true,
+          providerType: providerTypeUsed,
+          serviceLocationPostcode: serviceLocationPostcode,
           pricingMetadata: {
             pricingSource: 'invalid',
             isCustomPricing: false,
@@ -862,6 +873,8 @@ class InvoiceGenerationService {
           assignmentId: assignment._id,
           pricingStatus: 'missing',
           promptRequired: true,
+          providerType: providerTypeUsed,
+          serviceLocationPostcode: serviceLocationPostcode,
           promptData: {
             ...pricing.promptData,
             quantity: quantity,
@@ -898,10 +911,18 @@ class InvoiceGenerationService {
         organizationId: client.organizationId,
         clientId: client._id,
         assignmentId: assignment._id,
+        providerType: providerTypeUsed,
+        serviceLocationPostcode: serviceLocationPostcode,
         pricingMetadata: {
           pricingSource: pricing.source,
           isCustomPricing: pricing.isCustom,
-          ndisCompliant: pricing.ndisCompliant
+          ndisCompliant: pricing.ndisCompliant,
+          basePrice: pricing.basePrice,
+          capRatio: pricing.capRatio,
+          priceCapApplied: pricing.priceCap,
+          priceCapBase: pricing.validationDetails?.priceCapBase,
+          mmmRating: pricing.validationDetails?.mmmRating,
+          mmmMultiplier: pricing.validationDetails?.mmmMultiplier
         }
       };
 
@@ -920,12 +941,24 @@ class InvoiceGenerationService {
    */
   async getWorkedTimeData(userEmail, clientEmail, startDate, endDate) {
     try {
+      // Normalize start/end to Date objects for reliable range queries
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        logger.warn('getWorkedTimeData: Invalid date inputs, using raw values', {
+          userEmail,
+          clientEmail,
+          startDate,
+          endDate
+        });
+      }
+
       const workedTimeData = await this.db.collection('workedTime').find({
         userEmail: userEmail,
         clientEmail: clientEmail,
         date: {
-          $gte: startDate,
-          $lte: endDate
+          $gte: isNaN(start.getTime()) ? startDate : start,
+          $lte: isNaN(end.getTime()) ? endDate : end
         }
       }).toArray();
 
@@ -1142,7 +1175,25 @@ class InvoiceGenerationService {
    * Get pricing for NDIS item with dynamic lookup
    * Priority: Client-specific → Organization → NDIS caps
    */
-  async getPricingForItem(ndisItemNumber, organizationId, clientId, state = 'NSW', providerType = 'standard') {
+  /**
+   * Retrieve pricing for a specific NDIS item and derive the actual chargeable price (base price-only).
+   *
+   * Pricing resolution order (base price-only):
+   * 1) Client-specific custom pricing for the exact item
+   * 2) Organization custom pricing for the exact item
+   * 3) If no base price found, return a prompt-required payload (source: 'missing')
+   *
+   * Business rule: Never use NDIS cap for Rate. No clamping to cap.
+   *
+   * @param {string} ndisItemNumber - Support item number being priced
+   * @param {string} organizationId - Organization identifier
+   * @param {string|object} clientId - Client identifier (string or ObjectId)
+   * @param {string} [state='NSW'] - Australian state used for cap lookup
+   * @param {('standard'|'highIntensity')} [providerType='standard'] - Provider type used for cap lookup
+   * @param {string|null} [servicePostcode=null] - Optional service delivery postcode for MMM adjustments
+   * @returns {Promise<{price:number, source:string, isCustom:boolean, ndisCompliant:boolean, exceedsNdisCap:boolean, priceCap:number|null, priceCapWarning?:string, validationDetails?:object, basePrice?:number, capRatio?:number, requiresManualPricing?:boolean, promptData?:object}>}
+   */
+  async getPricingForItem(ndisItemNumber, organizationId, clientId, state = 'NSW', providerType = 'standard', servicePostcode = null) {
     try {
       // Convert clientId to string to match how it's stored in customPricing collection
       let clientIdForQuery;
@@ -1156,6 +1207,9 @@ class InvoiceGenerationService {
         clientIdForQuery = clientId;
       }
 
+      // Resolve MMM-aware price cap for the requested item (for validation metadata only; never used for Rate)
+      let itemPriceCap = null;
+
       // 1. Check for client-specific pricing
       const clientPricing = await this.db.collection('customPricing').findOne({
         supportItemNumber: ndisItemNumber,
@@ -1166,29 +1220,26 @@ class InvoiceGenerationService {
       });
 
       if (clientPricing) {
-        // Validate client-specific pricing against NDIS caps
-        const validation = await priceValidationService.validatePrice(
+        // Use exact-item base price directly (no clamping to cap)
+        const derivedValidation = await priceValidationService.validatePrice(
           ndisItemNumber,
           clientPricing.customPrice,
           state,
-          providerType
+          providerType,
+          servicePostcode
         );
-
-        // Generate warning message if price exceeds cap
-        let priceCapWarning = null;
-        if (!validation.isValid && validation.status === 'exceeds_cap') {
-          priceCapWarning = `Client-specific price $${clientPricing.customPrice.toFixed(2)} exceeds NDIS price cap of $${validation.priceCap.toFixed(2)} for ${state} ${providerType} services`;
-        }
 
         return {
           price: clientPricing.customPrice,
           source: 'client-specific',
           isCustom: true,
-          ndisCompliant: validation.isValid,
-          exceedsNdisCap: !validation.isValid && validation.status === 'exceeds_cap',
-          priceCap: validation.priceCap,
-          priceCapWarning: priceCapWarning,
-          validationDetails: validation
+          ndisCompliant: derivedValidation.isValid,
+          exceedsNdisCap: !derivedValidation.isValid && derivedValidation.status === 'exceeds_cap',
+          priceCap: derivedValidation.priceCap ?? itemPriceCap,
+          priceCapWarning: !derivedValidation.isValid && derivedValidation.status === 'exceeds_cap' ? `Client-specific price $${clientPricing.customPrice.toFixed(2)} exceeds NDIS price cap of $${(derivedValidation.priceCap ?? itemPriceCap).toFixed(2)} for ${state} ${providerType} services` : null,
+          validationDetails: derivedValidation,
+          basePrice: clientPricing.customPrice,
+          capRatio: 1.0
         };
       }
 
@@ -1202,67 +1253,93 @@ class InvoiceGenerationService {
       });
 
       if (orgPricing) {
-        // Validate organization pricing against NDIS caps
-        const validation = await priceValidationService.validatePrice(
+        const derivedValidation = await priceValidationService.validatePrice(
           ndisItemNumber,
           orgPricing.customPrice,
           state,
-          providerType
+          providerType,
+          servicePostcode
         );
-
-        // Generate warning message if price exceeds cap
-        let priceCapWarning = null;
-        if (!validation.isValid && validation.status === 'exceeds_cap') {
-          priceCapWarning = `Organization price $${orgPricing.customPrice.toFixed(2)} exceeds NDIS price cap of $${validation.priceCap.toFixed(2)} for ${state} ${providerType} services`;
-        }
 
         return {
           price: orgPricing.customPrice,
           source: 'organization',
           isCustom: true,
-          ndisCompliant: validation.isValid,
-          exceedsNdisCap: !validation.isValid && validation.status === 'exceeds_cap',
-          priceCap: validation.priceCap,
-          priceCapWarning: priceCapWarning,
-          validationDetails: validation
+          ndisCompliant: derivedValidation.isValid,
+          exceedsNdisCap: !derivedValidation.isValid && derivedValidation.status === 'exceeds_cap',
+          priceCap: derivedValidation.priceCap ?? itemPriceCap,
+          priceCapWarning: !derivedValidation.isValid && derivedValidation.status === 'exceeds_cap' ? `Organization price $${orgPricing.customPrice.toFixed(2)} exceeds NDIS price cap of $${(derivedValidation.priceCap ?? itemPriceCap).toFixed(2)} for ${state} ${providerType} services` : null,
+          validationDetails: derivedValidation,
+          basePrice: orgPricing.customPrice,
+          capRatio: 1.0
         };
       }
 
-      // 3. Fall back to $30.00 base rate as specified in requirements
-      const baseRate = 30.00;
-      const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
-      
-      // Get price cap for validation if NDIS item exists
-      let priceCap = null;
-      let exceedsNdisCap = false;
-      let priceCapWarning = null;
-      
-      if (ndisItem && ndisItem.priceCaps) {
-        const stateKey = state.toUpperCase();
-        const providerKey = providerType === 'highIntensity' ? 'highIntensity' : 'standard';
-        
-        // Get the appropriate price cap for validation
-        if (ndisItem.priceCaps[providerKey] && ndisItem.priceCaps[providerKey][stateKey]) {
-          priceCap = parseFloat(ndisItem.priceCaps[providerKey][stateKey]);
-        } else if (ndisItem.priceCaps.standard && ndisItem.priceCaps.standard[stateKey]) {
-          priceCap = parseFloat(ndisItem.priceCaps.standard[stateKey]);
-        }
-        
-        // Check if base rate exceeds price cap
-        if (priceCap && baseRate > priceCap) {
-          exceedsNdisCap = true;
-          priceCapWarning = `Base rate $${baseRate.toFixed(2)} exceeds NDIS price cap of $${priceCap.toFixed(2)} for ${state} ${providerType} services`;
-        }
+      // 3. Check for organization fallback base rate from pricingSettings
+      const pricingSettings = await this.db.collection('pricingSettings').findOne({
+        organizationId: organizationId,
+        isActive: true
+      });
+
+      if (pricingSettings && typeof pricingSettings.fallbackBaseRate === 'number' && pricingSettings.fallbackBaseRate > 0) {
+        const fallbackRate = pricingSettings.fallbackBaseRate;
+        logger.info('Using organization fallback base rate for invoice pricing', {
+          ndisItemNumber,
+          organizationId,
+          fallbackRate
+        });
+
+        const derivedValidation = await priceValidationService.validatePrice(
+          ndisItemNumber,
+          fallbackRate,
+          state,
+          providerType,
+          servicePostcode
+        );
+
+        const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
+        return {
+          price: fallbackRate,
+          source: 'fallback-base-rate',
+          isCustom: false,
+          ndisCompliant: derivedValidation.isValid,
+          exceedsNdisCap: !derivedValidation.isValid && derivedValidation.status === 'exceeds_cap',
+          priceCap: derivedValidation.priceCap ?? itemPriceCap,
+          priceCapWarning: !derivedValidation.isValid && derivedValidation.status === 'exceeds_cap' 
+            ? `Fallback base rate ${fallbackRate.toFixed(2)} exceeds NDIS price cap of ${(derivedValidation.priceCap ?? itemPriceCap).toFixed(2)} for ${state} ${providerType} services` 
+            : null,
+          validationDetails: derivedValidation,
+          basePrice: fallbackRate,
+          capRatio: 1.0,
+          supportItemDetails: ndisItem ? {
+            supportItemName: ndisItem.supportItemName,
+            supportType: ndisItem.supportType,
+            unit: ndisItem.unit,
+            quoteRequired: ndisItem.quoteRequired
+          } : null
+        };
       }
 
+      // No base price found: return prompt-required payload (no cap fallback)
+      const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
       return {
-        price: baseRate,
-        source: 'base-rate',
+        price: 0,
+        source: 'missing',
         isCustom: false,
-        ndisCompliant: !exceedsNdisCap,
-        exceedsNdisCap: exceedsNdisCap,
-        priceCap: priceCap,
-        priceCapWarning: priceCapWarning,
+        ndisCompliant: true,
+        exceedsNdisCap: false,
+        priceCap: itemPriceCap,
+        requiresManualPricing: true,
+        promptData: {
+          required: true,
+          message: 'Base price not configured. Please set a custom price or configure a fallback base rate in Pricing Configuration.',
+          context: {
+            targetItemNumber: ndisItemNumber,
+            state,
+            providerType,
+            suggestion: 'Navigate to Pricing Configuration Dashboard to set a fallback base rate, or use NDIS Pricing Management to set a custom price for this item.'
+          }
+        },
         supportItemDetails: ndisItem ? {
           supportItemName: ndisItem.supportItemName,
           supportType: ndisItem.supportType,
@@ -1279,7 +1356,8 @@ class InvoiceGenerationService {
         organizationId,
         clientId,
         state,
-        providerType
+        providerType,
+        servicePostcode
       });
       return {
         price: 0,
@@ -1315,10 +1393,120 @@ class InvoiceGenerationService {
 
   /**
    * Parse time string to minutes from midnight
+   *
+   * Supported formats:
+   * - "6:00 AM", "12:30 pm"
+   * - "18:45" (24-hour)
+   * - "6 AM", "3 pm"
+   * - "6" (hour only)
+   * - Embedded time in a string (e.g., "6:00 AM NSW")
+   *
+   * Returns minutes from midnight; falls back to 0 on unrecognized input.
    */
   parseTime(timeStr) {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours * 60 + minutes;
+    // Robustly handle formats like:
+    // - "6:00 AM", "12:30 pm"
+    // - "18:45" (24h)
+    // - "6 AM", "3 pm"
+    // - "6" (hour only)
+    try {
+      if (!timeStr) return 0;
+      const str = String(timeStr).trim();
+
+      // Match h:mm a/pm
+      const ampmMatch = str.match(/^\s*(\d{1,2}):(\d{2})\s*([AaPp][Mm])\s*$/);
+      if (ampmMatch) {
+        let h = parseInt(ampmMatch[1], 10) % 12; // 12 AM/PM handled below
+        const m = parseInt(ampmMatch[2], 10);
+        const isPm = ampmMatch[3].toLowerCase() === 'pm';
+        if (isPm) h += 12;
+        // 12 AM -> 0 hours; 12 PM -> 12 hours already handled via %12 and PM add
+        return h * 60 + m;
+      }
+
+      // Match 24-hour HH:mm
+      const twentyFourMatch = str.match(/^\s*(\d{1,2}):(\d{2})\s*$/);
+      if (twentyFourMatch) {
+        const h = parseInt(twentyFourMatch[1], 10);
+        const m = parseInt(twentyFourMatch[2], 10);
+        if (!isNaN(h) && !isNaN(m)) {
+          return h * 60 + m;
+        }
+      }
+
+      // Match "h AM/PM" without minutes
+      const hourAmPmMatch = str.match(/^\s*(\d{1,2})\s*([AaPp][Mm])\s*$/);
+      if (hourAmPmMatch) {
+        let h = parseInt(hourAmPmMatch[1], 10) % 12;
+        const isPm = hourAmPmMatch[2].toLowerCase() === 'pm';
+        if (isPm) h += 12;
+        return h * 60; // no minutes implies :00
+      }
+
+      // Generic "h:mm" inside longer strings (e.g., "6:00 AM NSW")
+      const embeddedMatch = str.match(/(\d{1,2}):(\d{2})/);
+      if (embeddedMatch) {
+        let h = parseInt(embeddedMatch[1], 10);
+        const m = parseInt(embeddedMatch[2], 10);
+        if (/pm/i.test(str) && h < 12) h += 12;
+        if (/am/i.test(str) && h === 12) h = 0;
+        return h * 60 + m;
+      }
+
+      // Hour-only numeric string
+      const hourOnlyMatch = str.match(/^\d{1,2}$/);
+      if (hourOnlyMatch) {
+        return parseInt(hourOnlyMatch[0], 10) * 60;
+      }
+
+      // Last chance: parse integer minutes directly
+      const asInt = parseInt(str, 10);
+      if (!isNaN(asInt)) return asInt;
+
+      // Unrecognized format
+      logger && logger.warn && logger.warn('Unable to parse time string', { timeStr });
+      return 0;
+    } catch (err) {
+      logger && logger.error && logger.error('parseTime error', { timeStr, error: err.message });
+      return 0;
+    }
+  }
+
+  /**
+   * Parse break field to minutes. Accepts numeric minutes, "HH:MM", or strings like "30 minutes".
+   *
+   * Examples:
+   * - "30" -> 30
+   * - "00:30" -> 30
+   * - "1:00" -> 60
+   * - "30 minutes" -> 30
+   * - null/undefined/invalid -> 0
+   */
+  parseBreakMinutes(breakStr) {
+    try {
+      if (breakStr === null || breakStr === undefined) return 0;
+      const str = String(breakStr).trim();
+
+      // Numeric minutes
+      if (/^\d+$/.test(str)) return parseInt(str, 10);
+
+      // HH:MM format
+      const hm = str.match(/^(\d{1,2}):(\d{2})$/);
+      if (hm) {
+        const h = parseInt(hm[1], 10);
+        const m = parseInt(hm[2], 10);
+        return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+      }
+
+      // Extract first number in string (e.g., "30 minutes")
+      const anyNum = str.match(/(\d{1,3})/);
+      if (anyNum) return parseInt(anyNum[1], 10);
+
+      return 0;
+    } catch (err) {
+      logger && logger.error && logger.error('parseBreakMinutes error', { breakStr, error: err.message });
+      return 0;
+    }
   }
 
   /**
@@ -1539,6 +1727,23 @@ class InvoiceGenerationService {
                 requiresQuote: priceResult.requiresQuote,
                 compliancePercentage: priceResult.compliancePercentage
               };
+
+              // Attach MMM and cap metadata back to the original line item for UI/processing
+              const li = lineItems[index];
+              if (li) {
+                li.exceedsPriceCap = priceResult.status === 'exceeds_cap';
+                li.priceCap = priceResult.priceCap;
+                li.pricingMetadata = li.pricingMetadata || {};
+                if (priceResult.validationDetails) {
+                  const { priceCapBase, mmmRating, mmmMultiplier } = priceResult.validationDetails;
+                  if (priceCapBase !== undefined) li.pricingMetadata.priceCapBase = priceCapBase;
+                  if (mmmRating !== undefined) li.pricingMetadata.mmmRating = mmmRating;
+                  if (mmmMultiplier !== undefined) li.pricingMetadata.mmmMultiplier = mmmMultiplier;
+                }
+                if (priceResult.priceCap !== undefined) {
+                  li.pricingMetadata.priceCapApplied = priceResult.priceCap;
+                }
+              }
             }
           });
 
@@ -1590,7 +1795,8 @@ class InvoiceGenerationService {
         providerType: item.providerType || defaultProviderType,
         serviceDate: item.serviceDate || new Date(),
         quantity: item.quantity || 1,
-        description: item.description || item.itemName
+        description: item.description || item.itemName,
+        servicePostcode: item.serviceLocationPostcode || item.servicePostcode || null
       }));
 
       // Use the price validation service directly
