@@ -722,8 +722,8 @@ class InvoiceManagementService {
             totalRevenue: {
               $sum: {
                 $cond: {
-                  if: { $isNumber: "$totals.grandTotal" },
-                  then: "$totals.grandTotal",
+                  if: { $isNumber: "$financialSummary.totalAmount" },
+                  then: "$financialSummary.totalAmount",
                   else: 0
                 }
               }
@@ -772,11 +772,11 @@ class InvoiceManagementService {
    */
   formatCurrency(amount) {
     if (amount >= 1000000) {
-      return `₹${(amount / 1000000).toFixed(1)}M`;
+      return `$${(amount / 1000000).toFixed(1)}M`;
     } else if (amount >= 1000) {
-      return `₹${(amount / 1000).toFixed(1)}k`;
+      return `$${(amount / 1000).toFixed(1)}k`;
     } else {
-      return `₹${amount.toFixed(0)}`;
+      return `$${amount.toFixed(2)}`;
     }
   }
 }
