@@ -1,199 +1,99 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.dart_tool/flutter_build/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# iOS related
-/ios/Pods/
-/ios/*.xcworkspace/
-/ios/Flutter/App.framework
-/ios/Flutter/Flutter.framework
-/ios/Flutter/Generated.xcconfig
-/ios/Flutter/app.flx
-/ios/Flutter/app.zip
-/ios/Flutter/flutter_assets/
-
-# Node.js related
+# Dependencies
 node_modules/
-
-# Backend folder - exclude entire backend
-/backend/
-backend/
-
-# Scripts and deployment files
-*.sh
-/android/*.sh
-/ios/*.sh
-/scripts/
-scripts/
-
-# Uploads directory
-uploads/
-/uploads/
-/backend/uploads/
-
-# Generated PDFs
-*.pdf
-
-# Log files
-*.log
-nohup.out
-*.out
-
-# API response files and test data
-api_response*.json
-expense_*.json
-users_response.json
-assignment_response.json
-
-# CSV data files
-*.csv
-NDIS.csv
-holiday.csv
-
-# Large data files
-support-items-all.json
-
-# Large image files
-assets/icons/fav-folder-dynamic-color.png
-assets/icons/fav-folder-dynamic-premium.png
-assets/images/he_sitting_with_notebook.png
-assets/images/she_with_phone.png
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Environment files
 .env
-.env.*
-!.env.example
+.env.local
+.env.development
+.env.production
+.env.test
 
-# Gradle files
-/android/gradle/wrapper/dists/
-/android/gradle/caches/
-/android/.gradle/
-/android/build/
-/android/.kotlin/
+# Logs
+logs/
+logs/*
+!logs/.gitkeep
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
-# Fastlane reports and metadata
-/android/fastlane/report.xml
-/android/fastlane/metadata/
-/ios/fastlane/report.xml
-/ios/fastlane/metadata/
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-# Release notes
-release_notes_*.txt
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Firebase files
+firebase-admin-config.js
+firebase-service-account.json
+
+# Uploads and user content
+uploads/*
+!uploads/.gitkeep
 
 # Test files
-test_*.js
-test_*.dart
-test_*.sh
-*_test.dart
+*.test.js
+test*.js
 *_test.js
-
-# Debug and fix files
-debug_*.dart
-fix_*.dart
-fix_*.js
-
-# Sensitive files and keys
-*google-play-service-key.json
-*firebase*.json
-firebase-admin-config.js
-*service-account*.json
-*private-key*.json
-
-# Google Play service key (sensitive)
-android/fastlane/google-play-service-key.json
-
-# Firebase admin configuration (sensitive)
-backend/firebase-admin-config.js
-
-# Firebase configuration files
-**/google-services.json
-**/GoogleService-Info.plist
-lib/firebase_options.dart
-**/firebase_options.dart
-
-# Documentation that might contain sensitive info
-SENSITIVE_FILES_GUIDE.md
-SECURITY.md
-FIREBASE_ADMIN_SDK_GUIDE.md
-
-# AI and development notes
-AI_*.md
-*.mdc
-technical_reference.md
-
-# Package files
-package-lock.json
-Procfile
-
-# Migration and seed scripts
-migration_scripts/
-seed_*.js
-init_*.js
-check_*.js
-
-# Temporary and build files
-.tmp/
-.vercel/
-next\ step.md
-tast.md
-backend/
-
-# Java heap dump files
-*.hprof
-
-# User-specified ignores
-.claude/
-.trae/
-logs/
-tasks/
+*.spec.js
 test/
 tests/
-.cursorrules
-*.js
-superPrompt.xml
+check_test_user.js
+update_test_user.js
 
-# Gemini CLI config folder
-.gemini/
+# XML files
+*.xml
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Generated files
+*.pdf
+Invoice Number*.pdf
+
+# Documentation and development files that shouldn't be in production
+issues.md
+*.draft.md
+superPrompt.xml
+refactor-plan.json
+ai_technical_reference.json
+
+# Build artifacts
+dist/
+build/
+
+# Dart specific
+.dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
