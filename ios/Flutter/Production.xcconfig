@@ -1,5 +1,0 @@
-#include "Release.xcconfig"
-FLUTTER_FLAVOR=production
-FLUTTER_TARGET=lib/main_production.dart
-PRODUCT_BUNDLE_IDENTIFIER=com.CareNest.app
-DISPLAY_NAME=Invoice
