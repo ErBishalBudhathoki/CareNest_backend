@@ -208,7 +208,6 @@ class OrganizationController {
       
       if (!organizationId) {
         return res.status(400).json({
-          statusCode: 400,
           message: "Organization ID is required"
         });
       }
@@ -216,25 +215,77 @@ class OrganizationController {
       const organization = await organizationService.getOrganizationById(organizationId);
       
       if (organization) {
+        // Construct full URL for logo if present
+        if (organization.logoUrl && !organization.logoUrl.startsWith('http')) {
+          const protocol = req.protocol;
+          const host = req.get('host');
+          const cleanPath = organization.logoUrl.startsWith('/') ? organization.logoUrl : `/${organization.logoUrl}`;
+          organization.logoUrl = `${protocol}://${host}${cleanPath}`;
+        }
+
         res.status(200).json({
-          statusCode: 200,
-          organization: organization
+          message: "Organization details fetched successfully",
+          organization
         });
       } else {
         res.status(404).json({
-          statusCode: 404,
           message: "Organization not found"
         });
       }
     } catch (error) {
-      logger.error('Error getting organization', {
+      logger.error('Error fetching organization details', {
         error: error.message,
         stack: error.stack,
         organizationId: req.params.organizationId
       });
       res.status(500).json({
-        statusCode: 500,
-        message: "Error getting organization"
+        message: "Error fetching organization details"
+      });
+    }
+  }
+
+  async updateOrganizationDetails(req, res) {
+    try {
+      const { organizationId } = req.params;
+      const updates = req.body;
+      
+      if (!organizationId) {
+        return res.status(400).json({
+          message: "Organization ID is required"
+        });
+      }
+
+      // If logoUrl is provided, try to extract relative path if it's a local upload
+      if (updates.logoUrl) {
+        const match = updates.logoUrl.match(/(\/uploads\/[^?#]*)/);
+        if (match) {
+          updates.logoUrl = match[1];
+        }
+      }
+      
+      const success = await organizationService.updateOrganizationDetails(organizationId, updates);
+      
+      if (success) {
+        res.status(200).json({
+          message: "Organization details updated successfully",
+          success: true
+        });
+      } else {
+        // Could be that the ID doesn't exist or no changes were made
+        res.status(200).json({ 
+          message: "No changes made or organization not found",
+          success: false
+        });
+      }
+    } catch (error) {
+      logger.error('Error updating organization details', {
+        error: error.message,
+        stack: error.stack,
+        organizationId: req.params.organizationId,
+        updates: req.body
+      });
+      res.status(500).json({
+        message: "Error updating organization details"
       });
     }
   }
