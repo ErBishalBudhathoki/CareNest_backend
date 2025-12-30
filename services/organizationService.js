@@ -105,11 +105,34 @@ class OrganizationService {
       return {
         id: organization._id.toString(),
         name: organization.name,
+        tradingName: organization.tradingName,
         code: organization.code,
         ownerEmail: organization.ownerEmail,
         createdAt: organization.createdAt,
-        settings: organization.settings
+        settings: organization.settings,
+        abn: organization.abn,
+        address: organization.address,
+        contactDetails: organization.contactDetails,
+        bankDetails: organization.bankDetails,
+        ndisRegistration: organization.ndisRegistration,
+        logoUrl: organization.logoUrl,
+        isActive: organization.isActive
       };
+    } finally {
+      await client.close();
+    }
+  }
+
+  async updateOrganizationDetails(organizationId, updates) {
+    const { client, db } = await this.getDbConnection();
+    
+    try {
+      const result = await db.collection("organizations").updateOne(
+        { _id: new ObjectId(organizationId) },
+        { $set: updates }
+      );
+      
+      return result.modifiedCount > 0;
     } finally {
       await client.close();
     }
