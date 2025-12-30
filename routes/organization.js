@@ -39,6 +39,12 @@ router.get('/verifyOrganizationCode/:code', organizationController.verifyOrganiz
 router.get('/:organizationId', organizationController.getOrganizationById);
 
 /**
+ * Update organization details
+ * PUT /organization/:organizationId
+ */
+router.put('/:organizationId', organizationController.updateOrganizationDetails);
+
+/**
  * Get organization members
  * GET /organization/:organizationId/members
  */
