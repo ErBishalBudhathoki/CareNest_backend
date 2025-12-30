@@ -293,7 +293,10 @@ async function createInvoice(req, res) {
       pdfPath,
       userEmail,
       calculatedPayloadData,
-      invoiceNumber: providedInvoiceNumber
+      invoiceNumber: providedInvoiceNumber,
+      invoiceType,
+      issuer,
+      billedTo
     } = req.body;
 
     // Validate required fields
@@ -301,6 +304,25 @@ async function createInvoice(req, res) {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: organizationId, clientEmail, and lineItems are required'
+      });
+    }
+    // Validate invoiceType and header entities
+    if (!invoiceType || !['client', 'employee'].includes(String(invoiceType))) {
+      return res.status(400).json({
+        success: false,
+        error: 'invoiceType must be either "client" or "employee"'
+      });
+    }
+    if (!issuer || !issuer.businessName || !issuer.businessAddress || !issuer.contactEmail || !issuer.contactPhone) {
+      return res.status(400).json({
+        success: false,
+        error: 'issuer (admin profile) is required with businessName, businessAddress, contactEmail and contactPhone'
+      });
+    }
+    if (!billedTo || !billedTo.name) {
+      return res.status(400).json({
+        success: false,
+        error: 'billedTo entity is required'
       });
     }
 
@@ -336,7 +358,7 @@ async function createInvoice(req, res) {
         dueDate: financialSummary?.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       },
       metadata: {
-        invoiceType: metadata.invoiceType || 'service',
+        invoiceType: invoiceType,
         generationMethod: metadata.generationMethod || 'automatic',
         templateUsed: metadata.templateUsed || 'default',
         customizations: metadata.customizations || [],
@@ -345,6 +367,10 @@ async function createInvoice(req, res) {
         priority: metadata.priority || 'normal',
         internalNotes: metadata.internalNotes || '',
         pdfPath: pdfPath || null
+      },
+      header: {
+        issuer,
+        billedTo,
       },
       calculatedPayloadData: calculatedPayloadData || null,
       compliance: {
@@ -405,6 +431,9 @@ async function createInvoice(req, res) {
         canRestore: true
       }
     };
+
+    console.log('HEADER VALIDATION:', { invoiceType, issuer, billedTo });
+    console.log('METADATA AFTER BUILD:', invoiceData.metadata);
 
     // Create the invoice
     const result = await invoiceManagementService.createInvoice(invoiceData);

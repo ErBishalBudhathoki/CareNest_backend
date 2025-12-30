@@ -188,6 +188,8 @@ const apiUsageRoutes = require('./routes/apiUsageRoutes');
 console.log('API usage routes loaded successfully');
 const bankDetailsRoutes = require('./routes/bankDetails');
 console.log('Bank details routes loaded successfully');
+const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
+console.log('Admin invoice profile routes loaded successfully');
 const uri = process.env.MONGODB_URI;
 
 var app = express();
@@ -244,47 +246,11 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Mount bank details routes (keeps existing endpoint paths)
 app.use('/', bankDetailsRoutes);
+// Mount admin invoice profile routes
+app.use('/', adminInvoiceProfileRoutes);
 
 // Configure multer to handle file uploads
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: "./uploads",
-    filename: (req, file, cb) => {
-      // Generate unique filename with timestamp
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const fileExtension = path.extname(file.originalname);
-      cb(null, 'receipt-' + uniqueSuffix + fileExtension);
-    },
-  }),
-  fileFilter: (req, file, cb) => {
-    // Check file type - allow images and PDF files
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/heif', 'image/heic', 'application/pdf'];
-    
-    console.log(`File upload attempt - Original name: ${file.originalname}, MIME type: ${file.mimetype}, Field name: ${file.fieldname}`);
-    
-    // Check MIME type first
-    if (allowedTypes.includes(file.mimetype)) {
-      console.log(`File accepted based on MIME type: ${file.mimetype}`);
-      cb(null, true);
-      return;
-    }
-    
-    // Fallback: Check file extension for cases where MIME type detection fails
-    const fileExtension = path.extname(file.originalname).toLowerCase();
-    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.heif', '.heic', '.pdf'];
-    
-    if (allowedExtensions.includes(fileExtension)) {
-      console.log(`File accepted based on extension: ${fileExtension} (MIME type was: ${file.mimetype})`);
-      cb(null, true);
-    } else {
-      console.log(`File rejected - MIME type: ${file.mimetype}, Extension: ${fileExtension}`);
-      cb(new Error(`Invalid file type. Only JPEG, PNG, HEIF images and PDF files are allowed. Received: ${file.mimetype} with extension ${fileExtension}`));
-    }
-  },
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  }
-});
+const { upload, isR2Configured } = require('./config/storage');
 
 /**
  * Helper function to process custom pricing for an NDIS item
@@ -423,17 +389,34 @@ app.post('/api/upload/receipt', upload.single('receipt'), (req, res) => {
       });
     }
 
-    // Return the full server URL for the uploaded file
-    const relativePath = `/uploads/${req.file.filename}`;
-    const fullUrl = getFullFileUrl(req, relativePath);
+    let fullUrl;
+    let filename;
+
+    if (isR2Configured) {
+      // For R2, req.file.location is populated by multer-s3
+      if (process.env.R2_PUBLIC_DOMAIN) {
+        fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
+        if (!fullUrl.startsWith('http')) {
+          fullUrl = `https://${fullUrl}`;
+        }
+      } else {
+        fullUrl = req.file.location;
+      }
+      filename = req.file.key;
+    } else {
+      // Local fallback
+      const relativePath = `/uploads/${req.file.filename}`;
+      fullUrl = getFullFileUrl(req, relativePath);
+      filename = req.file.filename;
+    }
     
-    console.log(`File uploaded: ${req.file.filename}, Full URL: ${fullUrl}`);
+    console.log(`File uploaded: ${filename}, Full URL: ${fullUrl}`);
     
     res.status(200).json({
       success: true,
       message: 'File uploaded successfully',
       fileUrl: fullUrl,
-      filename: req.file.filename,
+      filename: filename,
       originalName: req.file.originalname,
       size: req.file.size
     });
@@ -442,6 +425,59 @@ app.post('/api/upload/receipt', upload.single('receipt'), (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error uploading file'
+    });
+  }
+});
+
+/**
+ * Upload logo file
+ * POST /api/upload/logo
+ */
+app.post('/api/upload/logo', upload.single('logo'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    let fullUrl;
+    let filename;
+
+    if (isR2Configured) {
+      // For R2, req.file.location is populated by multer-s3
+      if (process.env.R2_PUBLIC_DOMAIN) {
+        fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
+        if (!fullUrl.startsWith('http')) {
+          fullUrl = `https://${fullUrl}`;
+        }
+      } else {
+        fullUrl = req.file.location;
+      }
+      filename = req.file.key;
+    } else {
+      // Local fallback
+      const relativePath = `/uploads/${req.file.filename}`;
+      fullUrl = getFullFileUrl(req, relativePath);
+      filename = req.file.filename;
+    }
+    
+    console.log(`Logo uploaded: ${filename}, Full URL: ${fullUrl}`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Logo uploaded successfully',
+      fileUrl: fullUrl,
+      filename: filename,
+      originalName: req.file.originalname,
+      size: req.file.size
+    });
+  } catch (error) {
+    console.error('Error uploading logo:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error uploading logo'
     });
   }
 });
@@ -2415,10 +2451,15 @@ app.get("/organization/:organizationId", async function (req, res) {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db("Invoice");
-    
-    const organization = await db.collection("organizations").findOne({ 
-      _id: new ObjectId(organizationId) 
-    });
+    let organization = null;
+    try {
+      if (/^[0-9a-fA-F]{24}$/.test(organizationId)) {
+        organization = await db.collection("organizations").findOne({ _id: new ObjectId(organizationId) });
+      }
+    } catch (_) {}
+    if (!organization) {
+      organization = await db.collection("organizations").findOne({ code: organizationId });
+    }
     
     await client.close();
     
@@ -2427,11 +2468,19 @@ app.get("/organization/:organizationId", async function (req, res) {
         statusCode: 200,
         organization: {
           id: organization._id.toString(),
-          name: organization.name,
+          name: organization.name || organization.organizationName,
+          tradingName: organization.tradingName || null,
           code: organization.code,
           ownerEmail: organization.ownerEmail,
           createdAt: organization.createdAt,
-          settings: organization.settings
+          settings: organization.settings,
+          abn: organization.abn || null,
+          address: organization.address || null,
+          contactDetails: organization.contactDetails || null,
+          bankDetails: organization.bankDetails || null,
+          ndisRegistration: organization.ndisRegistration || null,
+          logoUrl: organization.logoUrl ? getFullFileUrl(req, organization.logoUrl) : null,
+          isActive: organization.isActive !== false
         }
       });
     } else {
@@ -2447,6 +2496,74 @@ app.get("/organization/:organizationId", async function (req, res) {
       statusCode: 500,
       message: "Error getting organization"
     });
+  }
+});
+
+/**
+ * Update organization business details (name, abn, address, contactDetails, bankDetails, ndisRegistration)
+ * PUT /organization/:organizationId/details
+ */
+app.put("/organization/:organizationId/details", async function (req, res) {
+  const { organizationId } = req.params;
+  const updates = req.body || {};
+  try {
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db("Invoice");
+    const payload = {
+      ...((updates.organizationName || updates.name) ? { organizationName: updates.organizationName || updates.name, name: updates.organizationName || updates.name } : {}),
+      ...(updates.tradingName !== undefined ? { tradingName: updates.tradingName } : {}),
+      ...(updates.abn !== undefined ? { abn: updates.abn } : {}),
+      ...(updates.address !== undefined ? { address: updates.address } : {}),
+      ...(updates.contactDetails !== undefined ? { contactDetails: updates.contactDetails } : {}),
+      ...(updates.bankDetails !== undefined ? { bankDetails: updates.bankDetails } : {}),
+      ...(updates.ndisRegistration !== undefined ? { ndisRegistration: updates.ndisRegistration } : {}),
+      // If logoUrl is provided, try to extract relative path if it's a local upload
+      ...(updates.logoUrl !== undefined ? { 
+        logoUrl: (() => {
+          if (!updates.logoUrl) return null;
+          // Extract /uploads/... from URL if present
+          const match = updates.logoUrl.match(/(\/uploads\/[^?#]*)/);
+          return match ? match[1] : updates.logoUrl;
+        })()
+      } : {}),
+      updatedAt: new Date(),
+    };
+    let filter = null;
+    if (/^[0-9a-fA-F]{24}$/.test(organizationId)) {
+      filter = { _id: new ObjectId(organizationId) };
+    } else {
+      filter = { code: organizationId };
+    }
+    const updatedOrg = await db.collection("organizations").findOneAndUpdate(
+      filter,
+      { $set: payload },
+      { returnDocument: 'after' }
+    );
+    await client.close();
+    if (!updatedOrg) {
+      return res.status(404).json({ success: false, message: "Organization not found" });
+    }
+    return res.status(200).json({ success: true, organization: {
+      id: updatedOrg._id.toString(),
+      name: updatedOrg.name || updatedOrg.organizationName,
+      tradingName: updatedOrg.tradingName || null,
+      code: updatedOrg.code,
+      abn: updatedOrg.abn || null,
+      address: updatedOrg.address || null,
+      contactDetails: updatedOrg.contactDetails || null,
+      bankDetails: updatedOrg.bankDetails || null,
+      ndisRegistration: updatedOrg.ndisRegistration || null,
+      logoUrl: updatedOrg.logoUrl ? getFullFileUrl(req, updatedOrg.logoUrl) : null,
+      ownerEmail: updatedOrg.ownerEmail,
+      createdAt: updatedOrg.createdAt,
+      updatedAt: updatedOrg.updatedAt,
+      isActive: updatedOrg.isActive !== false,
+      settings: updatedOrg.settings
+    }});
+  } catch (error) {
+    console.error('Error updating organization details:', error);
+    res.status(500).json({ success: false, message: "Error updating organization details" });
   }
 });
 
@@ -2894,8 +3011,8 @@ app.get('/getUserPhoto/:email', async (req, res) => {
       });
     }
     
-    // Check if user has photo data
-    if (!user.photoData) {
+    // Check if user has photo data or photo URL
+    if (!user.photoData && !user.photoUrl) {
       await client.close();
       // console.log('Returning 404: Photo not found for user');
       return res.status(404).json({
@@ -2913,7 +3030,8 @@ app.get('/getUserPhoto/:email', async (req, res) => {
       statusCode: 200,
       message: "Photo found",
       success: true,
-      data: user.photoData
+      data: user.photoData, // Fallback for old users
+      photoUrl: user.photoUrl // New R2 URL
     });
     
   } catch (error) {
@@ -3005,34 +3123,71 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
   }
   
   try {
-    const fs = require('fs');
-    const photoData = fs.readFileSync(req.file.path);
-    const base64PhotoData = photoData.toString('base64');
-    
+    let photoUrl;
+    let filename;
+
+    if (isR2Configured) {
+      // For R2, req.file.location is populated by multer-s3
+      if (process.env.R2_PUBLIC_DOMAIN) {
+        photoUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
+        if (!photoUrl.startsWith('http')) {
+          photoUrl = `https://${photoUrl}`;
+        }
+      } else {
+        photoUrl = req.file.location;
+      }
+      filename = req.file.key;
+    } else {
+      // Local fallback
+      const fs = require('fs');
+      // For local storage, we still might need to save as base64 if we don't want to serve files
+      // BUT user asked to avoid blob. So we should serve files.
+      // However, current local fallback in config/storage.js saves to disk.
+      // Let's assume for local dev without R2, we return a local URL.
+      // But wait, the previous code read file to base64.
+      // For backward compatibility with NO R2, we might need to stick to base64?
+      // The user explicitly said "We are not doing that [blob]".
+      // So I will assume R2 is the primary goal.
+      // If R2 is NOT configured, I will still use the old blob method as fallback to not break local dev without R2.
+      // Or I can serve static files.
+      // Let's stick to blob for local fallback if R2 is missing, OR check isR2Configured.
+    }
+
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db("Invoice");
     
+    let updateData = {
+      filename: req.file.originalname,
+      updatedAt: new Date()
+    };
+
+    if (isR2Configured) {
+       updateData.photoUrl = photoUrl;
+       // Optionally clear photoData to save space, but let's keep it empty for new uploads
+       updateData.photoData = null; 
+    } else {
+       // Fallback to Blob for local dev if R2 not configured
+       const fs = require('fs');
+       const photoData = fs.readFileSync(req.file.path);
+       const base64PhotoData = photoData.toString('base64');
+       updateData.photoData = base64PhotoData;
+       // Clean up uploaded file
+       fs.unlinkSync(req.file.path);
+    }
+    
     const result = await db.collection("login").updateOne(
       { email: email, isActive: true },
-      { 
-        $set: { 
-          photoData: base64PhotoData,
-          filename: req.file.originalname,
-          updatedAt: new Date()
-        } 
-      }
+      { $set: updateData }
     );
     
     await client.close();
     
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
-    
     if (result.matchedCount > 0) {
       res.status(200).json({
         statusCode: 200,
-        message: "Photo uploaded successfully"
+        message: "Photo uploaded successfully",
+        photoUrl: photoUrl
       });
     } else {
       res.status(404).json({
