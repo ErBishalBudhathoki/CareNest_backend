@@ -48,8 +48,6 @@ jobs:
         run: |
           echo "NODE_ENV=development" >> .env
           echo "MONGODB_URI=${{ secrets.MONGODB_URI }}" >> .env
-          echo "APP_PASSWORD=${{ secrets.APP_PASSWORD }}" >> .env
-          echo "ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}" >> .env
           echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
           echo "JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN || '24h' }}" >> .env
 
