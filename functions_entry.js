@@ -3,4 +3,5 @@ const app = require('./server');
 
 // Create and export the HTTPS function
 // This exposes the Express app as a Cloud Function named 'api'
-exports.api = functions.https.onRequest(app);
+// Deployed to australia-southeast1 (Sydney)
+exports.api = functions.region('australia-southeast1').https.onRequest(app);
