@@ -15,7 +15,6 @@ process.on('uncaughtException', (error) => {
 });
 
 const express = require("express");
-const bodyParser = require("body-parser");
 const iconv = require("iconv-lite");
 const fs = require("fs");
 const csv = require("csv-parser");
@@ -218,8 +217,8 @@ app.use(helmet({
 }));
 
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(systemHealthMiddleware);
 app.use(loggingMiddleware);
 app.use(errorTrackingMiddleware);
@@ -1775,12 +1774,7 @@ try {
   // process.exit(1);
 }
 
-app.use(
-  bodyParser.urlencoded({
-    extended: true,
-  })
-);
-app.use(bodyParser.json());
+
 
 app.use(function (req, res, next) {
   res.header("Content-Type", "application/json");

@@ -28,7 +28,6 @@
     "argon2": "^0.44.0",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
-    "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.5.0",
@@ -42,7 +41,6 @@
     "mongodb": "^6.17.0",
     "multer": "^2.0.2",
     "multer-s3": "^3.0.1",
-    "node-fetch": "^3.3.2",
     "nodemailer": "^7.0.12",
     "serverless-http": "^3.2.0",
     "uuid": "^11.1.0",
@@ -53,6 +51,9 @@
     "jest": "^30.2.0",
     "nodemon": "^3.0.2",
     "supertest": "^7.1.4"
+  },
+  "overrides": {
+    "test-exclude": "^7.0.0"
   },
   "jest": {
     "testEnvironment": "node",
