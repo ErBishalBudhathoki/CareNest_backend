@@ -1,90 +1,132 @@
-# Firebase Admin SDK Deployment Guide
+# Firebase Backend Deployment Guide
 
-## Overview
+This guide details how to deploy the Node.js backend to Firebase Hosting (using Cloud Functions) with automated CI/CD via GitHub Actions. It also covers setting up Budget Alerts to monitor costs.
 
-This guide explains how to securely handle Firebase Admin SDK credentials during deployment without committing sensitive information to the repository.
+## Architecture
 
-## Problem
+- **Cloud Functions**: The Express backend (`server.js`) is wrapped and deployed as a Firebase Cloud Function named `api`.
+- **Firebase Hosting**: Acts as a global CDN and reverse proxy. It is configured to rewrite all requests (`**`) to the `api` Cloud Function.
+- **GitHub Actions**: Automates the deployment process on every push to the `main` branch affecting the `backend` folder.
 
-The application requires Firebase Admin SDK credentials to function, but these credentials should not be committed to the repository for security reasons. The `firebase-admin-config.js` file contains sensitive credentials and is listed in `.gitignore`, but the application expects this file to exist during runtime.
+## Prerequisites
 
-## Solution
+1.  **Firebase Project**: Create a project at [console.firebase.google.com](https://console.firebase.google.com/).
+2.  **Blaze Plan**: Upgrade your project to the **Blaze (Pay as you go)** plan. This is required for Node.js 10+ Cloud Functions.
+3.  **GitHub Repository**: Ensure this code is pushed to GitHub.
 
-We've implemented a solution that:
+## 1. Initial Setup
 
-1. Uses a template file (`firebase-admin-config.js.template`) that reads credentials from environment variables
-2. Includes a script that generates the actual configuration file during deployment
-3. Updates the npm scripts to run this generation script automatically
-
-## How It Works
-
-### 1. Template File
-
-The `firebase-admin-config.js.template` file is a version-controlled template that reads Firebase credentials from environment variables. This file doesn't contain any sensitive information itself.
-
-### 2. Generation Script
-
-The `scripts/generate-firebase-config.js` script copies the template to create the actual `firebase-admin-config.js` file during deployment.
-
-### 3. Automatic Execution
-
-The script is automatically executed:
-- During application startup (`npm start`)
-- After dependencies are installed (`npm postinstall`)
-
-## Deployment Setup
-
-### Required Environment Variables
-
-Ensure these environment variables are set in your deployment environment (e.g., Render, Heroku, etc.):
-
-```
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_PRIVATE_KEY_ID=your-private-key-id
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYour Private Key Here\n-----END PRIVATE KEY-----\n"
-FIREBASE_CLIENT_EMAIL=your-client-email@your-project.iam.gserviceaccount.com
-FIREBASE_CLIENT_ID=your-client-id
-FIREBASE_CLIENT_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/your-client-email%40your-project.iam.gserviceaccount.com
+### Firebase CLI (Local)
+Ensure you have the Firebase CLI installed locally for testing (optional but recommended).
+```bash
+npm install -g firebase-tools
+firebase login
 ```
 
-### Render Deployment
+### Project Configuration
+The project is already configured with:
+- `firebase.json`: Defines Hosting rewrites and Functions source.
+- `functions_entry.js`: Entry point for Cloud Functions.
+- `.firebaserc`: Stores project aliases.
 
-For Render deployments:
+**Action Required**:
+Update `.firebaserc` with your actual project ID if you want to use local commands, or just rely on CI/CD.
+```json
+{
+  "projects": {
+    "default": "your-actual-project-id"
+  }
+}
+```
 
-1. Add all the required environment variables in the Render dashboard
-2. Make sure to properly format the `FIREBASE_PRIVATE_KEY` with escaped newlines
-3. The build command will automatically run `npm install`, which triggers the `postinstall` script
+## 2. GitHub Actions Secrets
 
-## Troubleshooting
+For the CI/CD pipeline to work, you must add the following secrets to your GitHub Repository (**Settings > Secrets and variables > Actions**).
 
-### Error: "MODULE_NOT_FOUND"
+### Firebase Token
+1.  Run `firebase login:ci` locally.
+2.  Copy the token printed in the terminal.
+3.  Add secret: `FIREBASE_TOKEN`.
 
-If you encounter a `MODULE_NOT_FOUND` error for `./firebase-admin-config`:
+### Project ID
+1.  Add secret: `FIREBASE_PROJECT_ID` with your Firebase Project ID (e.g., `my-invoice-app`).
 
-1. Verify that all required environment variables are set
-2. Check the application logs for any errors during the generation script execution
-3. Ensure the `scripts/generate-firebase-config.js` file has execute permissions
+### Application Configuration
+In addition to the Firebase credentials, you must add the following secrets for the backend to function (Database, Auth, etc.):
+- `MONGODB_URI`: Connection string for MongoDB.
+- `JWT_SECRET`: Secret key for JWT signing.
+- `ADMIN_EMAIL`: Email for sending notifications.
+- `APP_PASSWORD`: App password for the admin email (if using Gmail).
+- `JWT_EXPIRES_IN`: (Optional) Token expiry, defaults to '24h'.
 
-### Error: "Error initializing Firebase Admin SDK"
+### Firebase Admin SDK Credentials
+These are required to generate `firebase-admin-config.js` during deployment. Get these from your Service Account JSON file (Firebase Console > Project Settings > Service accounts).
 
-If Firebase initialization fails:
+Add the following secrets:
+- `FIREBASE_PRIVATE_KEY_ID`
+- `FIREBASE_PRIVATE_KEY` (Copy the entire private key including `-----BEGIN...` and `...END-----`)
+- `FIREBASE_CLIENT_EMAIL`
+- `FIREBASE_CLIENT_ID`
+- `FIREBASE_CLIENT_CERT_URL`
 
-1. Check that the private key is properly formatted with newlines
-2. Verify that all environment variables contain the correct values
-3. Ensure the service account has the necessary permissions in Firebase
+## 3. Budget Alerts Setup (Crucial)
 
-## Local Development
+To prevent unexpected costs, set up a budget alert in the Google Cloud Console.
 
-For local development:
+1.  **Access Billing**:
+    - Go to the [Google Cloud Console](https://console.cloud.google.com/).
+    - Select your Firebase project.
+    - Navigate to **Billing** > **Budgets & alerts** in the left sidebar.
 
-1. Create a `.env` file based on `.env.example`
-2. Add your Firebase credentials to the `.env` file
-3. Run `node scripts/generate-firebase-config.js` to generate the configuration file
-4. Start the application with `npm run dev`
+2.  **Create Budget**:
+    - Click **Create Budget**.
+    - **Name**: e.g., "Monthly Backend Budget".
+    - **Time range**: Monthly.
+    - **Projects**: Select your specific project.
 
-## Security Best Practices
+3.  **Set Amount**:
+    - **Budget type**: Specified amount.
+    - **Target amount**: Enter your limit (e.g., $10 or $50). This is just a threshold for alerts, it does not auto-stop services (unless you configure programmatic actions, which is advanced).
 
-1. Never commit the `firebase-admin-config.js` file to version control
-2. Never commit your `.env` file to version control
-3. Regularly rotate your service account keys
-4. Apply the principle of least privilege - only grant necessary permissions to your service account
+4.  **Set Thresholds**:
+    - Configure alert percentages:
+        - 50% (Warning)
+        - 90% (Critical)
+        - 100% (Budget Reached)
+    - Ensure **Email alerts to billing admins and users** is checked.
+    - (Optional) Add specific email addresses for developers.
+
+5.  **Finish**: Click **Save**. You will now receive emails if costs spike.
+
+## 4. Deployment
+
+### Automated (CI/CD)
+Push changes to the `main` branch in the `backend/` directory.
+```bash
+git add backend/
+git commit -m "feat: configure firebase deployment"
+git push origin main
+```
+Go to the **Actions** tab in GitHub to monitor the `Deploy Backend to Firebase` workflow.
+
+### Manual (Local)
+If you need to deploy manually:
+1.  Set up environment variables in `.env`.
+2.  Run the generation script:
+    ```bash
+    node scripts/generate-firebase-config.js
+    ```
+3.  Deploy:
+    ```bash
+    firebase deploy --only functions,hosting
+    ```
+
+## 5. Troubleshooting
+
+- **Cold Starts**: Cloud Functions may take a few seconds to start if inactive. This is normal.
+- **Memory Limit**: If the app crashes with memory errors, increase memory in `firebase.json` or `functions_entry.js` (e.g., `functions.runWith({ memory: '1GB' })`).
+- **Logs**: View runtime logs in the Firebase Console > Functions > Logs.
+
+## 6. Security Note
+
+Never commit `.env` files or `firebase-admin-config.js` to the repository. The CI/CD pipeline generates the config file on the fly using GitHub Secrets, ensuring credentials are never hardcoded in the codebase.
