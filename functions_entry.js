@@ -1,7 +1,11 @@
-const functions = require('firebase-functions');
+const { onRequest } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2');
 const app = require('./server');
+
+// Set global options for 2nd Gen functions
+setGlobalOptions({ region: 'australia-southeast1' });
 
 // Create and export the HTTPS function
 // This exposes the Express app as a Cloud Function named 'api'
 // Deployed to australia-southeast1 (Sydney)
-exports.api = functions.region('australia-southeast1').https.onRequest(app);
+exports.api = onRequest(app);
