@@ -16,7 +16,7 @@ const uri = process.env.MONGODB_URI;
  * @returns {Promise<Object>} Result object with success status and data
  */
 async function processCustomPricing(pricingData) {
-  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
   
   try {
     await client.connect();
@@ -128,7 +128,7 @@ async function processCustomPricing(pricingData) {
  * @returns {Promise<Object|null>} Custom pricing data or null if not found
  */
 async function getCustomPricing(query) {
-  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
   
   try {
     await client.connect();
@@ -184,7 +184,7 @@ async function getCustomPricing(query) {
  * @returns {Promise<Object>} Result object with success status
  */
 async function deleteCustomPricing(query, userId, userName) {
-  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
   
   try {
     await client.connect();

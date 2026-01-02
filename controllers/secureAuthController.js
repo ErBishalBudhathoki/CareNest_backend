@@ -19,7 +19,7 @@ class SecureAuthController {
    * User registration with enhanced security
    */
   static async register(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       // Validate request body size
@@ -235,7 +235,7 @@ class SecureAuthController {
    * Register FCM Token for push notifications
    */
   static async registerFcmToken(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       const email = req.body?.email || req.body?.userEmail;
@@ -390,7 +390,7 @@ class SecureAuthController {
     console.log('=== LOGIN METHOD CALLED ===');
     console.log('Login method called with:', { email: req.body?.email, hasPassword: !!req.body?.password });
     console.log('Request body:', req.body);
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       // Validate request body size
@@ -612,7 +612,7 @@ class SecureAuthController {
    * Email verification
    */
   static async verifyEmail(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       const { email, otp, verificationKey } = req.body;
@@ -728,7 +728,7 @@ class SecureAuthController {
    * Password reset request
    */
   static async requestPasswordReset(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       const { email } = req.body;
@@ -800,7 +800,7 @@ class SecureAuthController {
    * Password reset confirmation
    */
   static async resetPassword(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       const { email, otp, verificationKey, newPassword, confirmPassword } = req.body;
@@ -944,7 +944,7 @@ class SecureAuthController {
    * Get user profile
    */
   static async getProfile(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       const { userId } = req.user;
@@ -1044,7 +1044,7 @@ class SecureAuthController {
    * Assign Job Role to User
    */
   static async assignJobRole(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       const { userId, jobRoleTitle } = req.body;
