@@ -193,7 +193,10 @@ const logPeriodicHealthMetrics = () => {
 };
 
 // Log system health every 5 minutes
-setInterval(logPeriodicHealthMetrics, 5 * 60 * 1000);
+if (process.env.NODE_ENV !== 'test') {
+  const intervalId = setInterval(logPeriodicHealthMetrics, 5 * 60 * 1000);
+  intervalId.unref();
+}
 
 module.exports = {
   systemHealthMiddleware,

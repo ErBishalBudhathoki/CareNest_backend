@@ -497,12 +497,14 @@ class AlertingSystem {
    * Start queue processor
    */
   startQueueProcessor() {
-    // Process queue every 5 seconds
-    setInterval(() => {
+    if (process.env.NODE_ENV === 'test') return;
+
+    const intervalId = setInterval(() => {
       if (!this.isProcessing && this.alertQueue.length > 0) {
         this.processAlertQueue();
       }
     }, 5000);
+    intervalId.unref();
   }
 
   /**

@@ -598,9 +598,12 @@ class SecurityMonitor {
    * Start periodic cleanup of old events
    */
   startPeriodicCleanup() {
-    setInterval(() => {
+    if (process.env.NODE_ENV === 'test') return;
+
+    const intervalId = setInterval(() => {
       this.cleanupOldEvents();
-    }, 60 * 60 * 1000); // Every hour
+    }, 60 * 60 * 1000);
+    intervalId.unref();
   }
 
   /**

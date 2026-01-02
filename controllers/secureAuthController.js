@@ -5,6 +5,7 @@ const { createLogger } = require('../utils/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { generateOTP, verifyOTP, hashPassword } = require('../utils/cryptoHelpers');
+const { messaging } = require('../firebase-admin-config');
 
 const logger = createLogger('SecureAuthController');
 const uri = process.env.MONGODB_URI;
@@ -176,6 +177,7 @@ class SecureAuthController {
         phone: phoneValidation.sanitized,
         organizationCode: orgCodeValidation.sanitized,
         roles: ['user'],
+        jobRole: null, // Initialize jobRole
         isActive: true,
         isEmailVerified: false,
         createdAt: new Date(),
@@ -224,6 +226,158 @@ class SecureAuthController {
           'REGISTRATION_ERROR'
         )
       );
+    } finally {
+      await client.close();
+    }
+  }
+
+  /**
+   * Register FCM Token for push notifications
+   */
+  static async registerFcmToken(req, res) {
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    
+    try {
+      const email = req.body?.email || req.body?.userEmail;
+      let { organizationId, fcmToken, deviceId, deviceInfo } = req.body || {};
+
+      if (!email || !fcmToken) {
+        return res.status(400).json(
+          SecureErrorHandler.createErrorResponse(
+            'Email and FCM Token are required',
+            400,
+            'MISSING_FIELDS'
+          )
+        );
+      }
+
+      await client.connect();
+      const db = client.db('Invoice');
+      const usersCollection = db.collection('login');
+      const fcmTokensCollection = db.collection('fcmTokens');
+
+      if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.trim() === '') {
+        return res.status(400).json(
+          SecureErrorHandler.createErrorResponse(
+            'Invalid FCM token provided',
+            400,
+            'INVALID_FCM_TOKEN'
+          )
+        );
+      }
+
+      const user = await usersCollection.findOne(
+        organizationId ? { email: email, organizationId } : { email: email },
+        { projection: { email: 1, organizationId: 1 } }
+      );
+
+      if (!user) {
+        return res.status(404).json(
+          SecureErrorHandler.createErrorResponse(
+            'User not found',
+            404,
+            'USER_NOT_FOUND'
+          )
+        );
+      }
+
+      if (!organizationId) {
+        organizationId = user.organizationId;
+      }
+
+      try {
+        await messaging.send(
+          {
+            token: fcmToken,
+            data: { type: 'token_verification' },
+            android: { priority: 'normal' },
+            apns: { headers: { 'apns-priority': '5' } }
+          },
+          true
+        );
+      } catch (error) {
+        return res.status(400).json(
+          SecureErrorHandler.createErrorResponse(
+            `Invalid FCM token: ${error.message}`,
+            400,
+            'INVALID_FCM_TOKEN'
+          )
+        );
+      }
+
+      const existingToken = await fcmTokensCollection.findOne({ fcmToken: fcmToken });
+      if (
+        existingToken &&
+        (existingToken.userEmail !== email || existingToken.organizationId !== organizationId)
+      ) {
+        await fcmTokensCollection.deleteOne({ fcmToken: fcmToken });
+      }
+
+      const fcmTokenFilter =
+        deviceId && typeof deviceId === 'string' && deviceId.trim() !== ''
+          ? { userEmail: email, organizationId, deviceId: deviceId }
+          : { userEmail: email, organizationId };
+
+      await fcmTokensCollection.updateOne(
+        fcmTokenFilter,
+        {
+          $set: {
+            fcmToken: fcmToken,
+            updatedAt: new Date(),
+            lastValidated: new Date(),
+            deviceId: deviceId || null,
+            deviceInfo: deviceInfo || null
+          },
+          $setOnInsert: { createdAt: new Date() }
+        },
+        { upsert: true }
+      );
+
+      // CRITICAL FIX: Ensure this token is NOT associated with any other user in the login collection
+      // This prevents notifications meant for one user from being sent to a device now used by another
+      await usersCollection.updateMany(
+        { fcmToken: fcmToken, email: { $ne: email } },
+        { $unset: { fcmToken: "" } }
+      );
+
+      // Update user with FCM token
+      const result = await usersCollection.updateOne(
+        organizationId ? { email: email, organizationId } : { email: email },
+        { 
+          $set: { 
+            fcmToken: fcmToken,
+            lastFcmUpdate: new Date(),
+            deviceId: deviceId || null,
+            deviceInfo: deviceInfo || null
+          } 
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json(
+          SecureErrorHandler.createErrorResponse(
+            'User not found',
+            404,
+            'USER_NOT_FOUND'
+          )
+        );
+      }
+
+      logger.info('FCM token registered successfully', { email, organizationId, deviceId });
+
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          { updated: true },
+          'FCM token registered successfully'
+        )
+      );
+
+    } catch (error) {
+      logger.error('FCM token registration error', {
+        error: error.message,
+        email: req.body?.email
+      });
+      return SecureErrorHandler.handleError(error, res);
     } finally {
       await client.close();
     }
@@ -425,6 +579,7 @@ class SecureAuthController {
               firstName: user.firstName,
               lastName: user.lastName,
               roles: user.roles,
+              jobRole: user.jobRole, // Add jobRole to response
               organizationId: user.organizationId,
               isEmailVerified: user.isEmailVerified
             }
@@ -496,7 +651,7 @@ class SecureAuthController {
           )
         );
       }
-
+      
       // Verify OTP
       const otpVerification = await verifyOTP(otpValidation.sanitized, verificationKey);
       if (!otpVerification.success) {
@@ -882,6 +1037,70 @@ class SecureAuthController {
           'LOGOUT_ERROR'
         )
       );
+    }
+  }
+
+  /**
+   * Assign Job Role to User
+   */
+  static async assignJobRole(req, res) {
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    
+    try {
+      const { userId, jobRoleTitle } = req.body;
+      
+      if (!userId || !jobRoleTitle) {
+        return res.status(400).json(
+          SecureErrorHandler.createErrorResponse(
+            'User ID and Job Role Title are required',
+            400,
+            'MISSING_FIELDS'
+          )
+        );
+      }
+
+      await client.connect();
+      const db = client.db('Invoice');
+      const usersCollection = db.collection('login');
+
+      const result = await usersCollection.updateOne(
+        { userId: userId },
+        { 
+          $set: { 
+            jobRole: jobRoleTitle,
+            updatedAt: new Date()
+          } 
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json(
+          SecureErrorHandler.createErrorResponse(
+            'User not found',
+            404,
+            'USER_NOT_FOUND'
+          )
+        );
+      }
+
+      res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          { userId, jobRole: jobRoleTitle },
+          'Job role assigned successfully'
+        )
+      );
+
+    } catch (error) {
+      logger.error('Error assigning job role', error);
+      res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          SecureErrorHandler.GENERIC_SERVER_ERROR,
+          500,
+          'ASSIGN_ROLE_ERROR'
+        )
+      );
+    } finally {
+      await client.close();
     }
   }
 }
