@@ -52,7 +52,8 @@
     "jest": "^30.2.0",
     "nodemon": "^3.0.2",
     "picomatch": "^4.0.3",
-    "supertest": "^7.1.4"
+    "supertest": "^7.1.4",
+    "typescript": "^5.9.3"
   },
   "overrides": {
     "test-exclude": "^7.0.0",
