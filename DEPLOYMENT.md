@@ -30,8 +30,6 @@ These secrets are used for the `dev` branch deployment:
 *   `FIREBASE_CLIENT_ID`
 *   `FIREBASE_CLIENT_CERT_URL`
 *   `MONGODB_URI`
-*   `APP_PASSWORD`
-*   `ADMIN_EMAIL`
 *   `JWT_SECRET`
 
 #### Production Secrets (New - Required)
@@ -44,9 +42,14 @@ You must generate a new Service Account for your **Production** Firebase project
 *   `PROD_FIREBASE_CLIENT_ID`
 *   `PROD_FIREBASE_CLIENT_CERT_URL`
 *   `PROD_MONGODB_URI`: Connection string for your **Production** database.
-*   `PROD_APP_PASSWORD`: App password for prod email sending.
-*   `PROD_ADMIN_EMAIL`: Admin email for prod.
 *   `PROD_JWT_SECRET`: Secret for signing tokens in prod.
+
+#### Generating JWT Secrets
+You can generate a secure random string for `PROD_JWT_SECRET` (and `JWT_SECRET` if not set) using this terminal command:
+```bash
+openssl rand -hex 32
+```
+Example output (DO NOT USE THIS ONE): `e664d92028ec116952d76csda4854f9cae3fa964aaaa3d562cb8985bb8c64b75`
 
 ### 3. Workflow & Merging Strategy
 
