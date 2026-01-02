@@ -284,7 +284,6 @@ class AlertingSystem {
     }
     
     try {
-      const fetch = require('node-fetch');
       const response = await fetch(this.channels.webhook.url, {
         method: 'POST',
         headers,
