@@ -30,6 +30,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const serverless = require("serverless-http");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const app = express(); // Initialize express app early
 
 // Firebase Admin SDK Configuration Generation
 // fs and path are already imported at the top of server.js
@@ -54,8 +55,12 @@ const logger = require('./config/logger'); // Import structured logger
 console.log('Logger loaded successfully');
 const { keepAliveService } = require('./utils/keepAlive'); // Import keep-alive service
 console.log('Keep-alive service loaded successfully');
-const { startTimerWithTracking, stopTimerWithTracking, getActiveTimers } = require('./active_timers_endpoints');
+const { startTimerWithTracking,
+  stopTimerWithTracking,
+  getActiveTimers
+} = require('./active_timers_endpoints');
 console.log('Active timers endpoints loaded successfully');
+
 const {
   createCustomPricing,
   getOrganizationPricing,
@@ -180,6 +185,7 @@ const invoiceManagementRoutes = require('./routes/invoiceManagement');
 console.log('Invoice management routes loaded successfully');
 const authRoutes = require('./routes/auth');
 console.log('Auth routes loaded successfully');
+const SecureAuthController = require('./controllers/secureAuthController');
 const { apiUsageMonitor } = require('./utils/apiUsageMonitor');
 console.log('API usage monitor loaded successfully');
 const securityDashboardRoutes = require('./routes/securityDashboard');
@@ -190,9 +196,9 @@ const bankDetailsRoutes = require('./routes/bankDetails');
 console.log('Bank details routes loaded successfully');
 const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
 console.log('Admin invoice profile routes loaded successfully');
+const requestRoutes = require('./routes/request');
+console.log('Request routes loaded successfully');
 const uri = process.env.MONGODB_URI;
-
-var app = express();
 
 // Security middleware - must be first
 app.use(helmet({
@@ -236,6 +242,18 @@ app.use('/api/security', securityDashboardRoutes);
 
 // Mount API usage analytics routes
 app.use('/api/analytics', apiUsageRoutes);
+
+// Mount request routes
+app.use('/api/requests', requestRoutes);
+
+// Mount active timer endpoints directly to app
+app.post('/startTimerWithTracking', startTimerWithTracking);
+app.post('/stopTimerWithTracking', stopTimerWithTracking);
+app.get('/getActiveTimers/:organizationId', getActiveTimers);
+
+// Mount config routes
+const configRoutes = require('./routes/config');
+app.use('/api/config', configRoutes);
 
 // Authentication test endpoint
 const authTestEndpoint = require('./auth_test_endpoint');
@@ -1285,71 +1303,11 @@ app.get('/getTimerStatus/:userEmail', async (req, res) => {
  * POST /registerFcmToken
  */
 app.post('/registerFcmToken', async (req, res) => {
-  let client;
-  try {
-    const { userEmail, organizationId, fcmToken } = req.body;
-
-    if (!userEmail || !organizationId || !fcmToken) {
-      return res.status(400).json({ success: false, message: 'userEmail, organizationId, and fcmToken are required.' });
-    }
-
-    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db("Invoice");
-
-    // Validate FCM token
-    if (!fcmToken || fcmToken.trim() === '') {
-      return res.status(400).json({ success: false, message: 'Invalid FCM token provided.' });
-    }
-
-    // Verify token with Firebase
-    try {
-      await messaging.send({
-        token: fcmToken,
-        data: { type: 'token_verification' },
-        android: { priority: 'normal' },
-        apns: { headers: { 'apns-priority': '5' } }
-      }, true);
-      console.log('FCM token verified successfully:', fcmToken.substring(0, 10) + '...');
-    } catch (error) {
-      console.error('Invalid FCM token:', error);
-      return res.status(400).json({ success: false, message: 'Invalid FCM token: ' + error.message });
-    }
-
-    // Check if token already exists for another user
-    const existingToken = await db.collection('fcmTokens').findOne({ fcmToken: fcmToken });
-    if (existingToken && 
-        (existingToken.userEmail !== userEmail || existingToken.organizationId !== organizationId)) {
-      // Remove the token from the old user/organization
-      await db.collection('fcmTokens').deleteOne({ fcmToken: fcmToken });
-      console.log('Removed token from previous user:', existingToken.userEmail);
-    }
-
-    // Upsert the FCM token: update if exists, insert if not
-    await db.collection('fcmTokens').updateOne(
-      { userEmail: userEmail, organizationId: organizationId },
-      { 
-        $set: { 
-          fcmToken: fcmToken, 
-          updatedAt: new Date(),
-          lastValidated: new Date()
-        }, 
-        $setOnInsert: { createdAt: new Date() } 
-      },
-      { upsert: true }
-    );
-
-    console.log('FCM token registered for:', { userEmail, organizationId });
-
-    res.status(200).json({ success: true, message: 'FCM token registered successfully.' });
-
-  } catch (error) {
-    console.error('Error in /registerFcmToken:', error);
-    res.status(500).json({ success: false, message: 'Failed to register FCM token.', error: error.message });
-  } finally {
-    if (client) {
-      await client.close();
-    }
-  }
+  req.body = {
+    ...req.body,
+    email: req.body?.email ?? req.body?.userEmail,
+  };
+  return SecureAuthController.registerFcmToken(req, res);
 });
 
 // // ===========================================================================
@@ -6522,9 +6480,11 @@ app.get('/api/analytics/business/revenue/:organizationId', getRevenueForecastAna
 app.get('/api/analytics/business/efficiency/:organizationId', getOperationalEfficiencyReport);
 
 // Handle both serverless and local environments
+module.exports = app;
+
 if (process.env.SERVERLESS === 'true') {
   module.exports.handler = serverless(app);
-} else {
+} else if (require.main === module) {
   // Ensure PORT is available for server startup
   const PORT = process.env.PORT || 8080;
   

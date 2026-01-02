@@ -37,6 +37,14 @@ coverage/
 # Firebase files
 firebase-admin-config.js
 firebase-service-account.json
+google-services.json
+GoogleService-Info.plist
+service-account.json
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
 
 # Uploads and user content
 uploads/*

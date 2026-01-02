@@ -58,6 +58,26 @@ router.post('/login',
 );
 
 /**
+ * @route POST /api/auth/register-fcm-token
+ * @desc Register FCM token for push notifications
+ * @access Public
+ */
+router.post('/register-fcm-token',
+  async (req, res) => {
+    try {
+      const result = await SecureAuthController.registerFcmToken(req, res);
+      return result;
+    } catch (error) {
+      logger.error('Register FCM token route error', {
+        error: error.message,
+        email: req.body?.email
+      });
+      return SecureErrorHandler.handleError(error, res);
+    }
+  }
+);
+
+/**
  * @route POST /api/auth/secure-login
  * @desc Secure authenticate user and return token (enhanced security)
  * @access Public
@@ -445,5 +465,24 @@ router.use((error, req, res, next) => {
   
   return SecureErrorHandler.handleError(error, res);
 });
+
+/**
+ * @route POST /api/auth/assign-role
+ * @desc Assign job role to user
+ * @access Private (should be Admin only, but leaving public for now as per constraints)
+ */
+router.post('/assign-role',
+  async (req, res) => {
+    try {
+      const result = await SecureAuthController.assignJobRole(req, res);
+      return result;
+    } catch (error) {
+      logger.error('Assign role route error', {
+        error: error.message
+      });
+      return SecureErrorHandler.handleError(error, res);
+    }
+  }
+);
 
 module.exports = router;

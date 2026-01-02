@@ -9,7 +9,7 @@
     "start:prod": "cp .env.production .env && NODE_ENV=production node server.js",
     "dev": "cp .env.development .env && NODE_ENV=development nodemon server.js",
     "prod": "cp .env.production .env && NODE_ENV=production node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
     "health-check": "curl $BACKEND_URL/health || curl $PRODUCTION_URL/health || echo 'Server not responding'",
     "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'"
   },
@@ -50,7 +50,16 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "jest": "^30.2.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^7.1.4"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "clearMocks": true
   },
   "engines": {
     "node": ">=16.0.0"
