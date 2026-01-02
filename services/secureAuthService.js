@@ -19,7 +19,7 @@ class SecureAuthService {
    * Check if email exists in the system
    */
   static async checkEmailExists(email) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -47,7 +47,7 @@ class SecureAuthService {
    * Get user by email
    */
   static async getUserByEmail(email) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -71,7 +71,7 @@ class SecureAuthService {
    * Get user by ID
    */
   static async getUserById(userId) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -99,7 +99,7 @@ class SecureAuthService {
    * Create new user
    */
   static async createUser(userData) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -160,7 +160,7 @@ class SecureAuthService {
    * Update user information
    */
   static async updateUser(userId, updateData) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -200,7 +200,7 @@ class SecureAuthService {
    * Authenticate user with email and password
    */
   static async authenticateUser(email, password) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -355,7 +355,7 @@ class SecureAuthService {
    * Update user password
    */
   static async updatePassword(userId, newPassword) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -399,7 +399,7 @@ class SecureAuthService {
    * Verify user email
    */
   static async verifyEmail(email) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -438,7 +438,7 @@ class SecureAuthService {
    * Lock user account
    */
   static async lockAccount(userId, lockDuration = 30 * 60 * 1000) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -477,7 +477,7 @@ class SecureAuthService {
    * Unlock user account
    */
   static async unlockAccount(userId) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -517,7 +517,7 @@ class SecureAuthService {
    * Deactivate user account
    */
   static async deactivateAccount(userId) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -556,7 +556,7 @@ class SecureAuthService {
    * Activate user account
    */
   static async activateAccount(userId) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -595,7 +595,7 @@ class SecureAuthService {
    * Get user activity logs
    */
   static async getUserActivityLogs(userId, limit = 50) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();
@@ -624,7 +624,7 @@ class SecureAuthService {
    * Log user activity
    */
   static async logUserActivity(userId, activity, metadata = {}) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     
     try {
       await client.connect();

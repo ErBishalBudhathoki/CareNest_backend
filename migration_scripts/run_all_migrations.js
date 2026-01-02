@@ -132,7 +132,7 @@ async function checkMigrationStatus() {
   const path = require('path');
   require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
   
-  const client = new MongoClient(process.env.MONGODB_URI);
+  const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
   
   try {
     await client.connect();

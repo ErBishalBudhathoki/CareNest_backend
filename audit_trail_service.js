@@ -95,7 +95,7 @@ async function createAuditLog(auditData) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -172,7 +172,7 @@ async function getEntityAuditHistory(entityType, entityId, organizationId, optio
     } = options;
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -255,7 +255,7 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
     } = options;
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -332,7 +332,7 @@ async function getAuditStatistics(organizationId, options = {}) {
     } = options;
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -443,7 +443,7 @@ async function cleanupOldAuditLogs(retentionDays = 365) {
   
   try {
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 

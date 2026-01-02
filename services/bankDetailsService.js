@@ -11,7 +11,7 @@ class BankDetailsService {
   }
 
   async getConnection() {
-    const client = new MongoClient(this.uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
     await client.connect();
     return client;
   }

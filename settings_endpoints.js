@@ -131,7 +131,7 @@ async function updateGeneralSettings(req, res) {
       return res.status(400).json({ statusCode: 400, errors: validation.errors, message: 'Invalid input' });
     }
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 

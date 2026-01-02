@@ -19,7 +19,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
     console.log('Getting employee tracking data for organization:', organizationId);
     
     // Connect to MongoDB
-    client = await MongoClient.connect(uri, {
+    client = await MongoClient.connect(uri, { tls: true, family: 4, 
       serverApi: ServerApiVersion.v1
     });
     

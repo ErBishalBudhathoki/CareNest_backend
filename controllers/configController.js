@@ -9,7 +9,7 @@ class ConfigController {
   // --- Job Roles ---
 
   async getJobRoles(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db('Invoice');
@@ -55,7 +55,7 @@ class ConfigController {
   }
 
   async createJobRole(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db('Invoice');
@@ -96,7 +96,7 @@ class ConfigController {
   // --- Leave Types ---
 
   async getLeaveTypes(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db('Invoice');
@@ -142,7 +142,7 @@ class ConfigController {
   }
 
   async createLeaveType(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db('Invoice');

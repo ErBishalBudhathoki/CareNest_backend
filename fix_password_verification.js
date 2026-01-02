@@ -6,7 +6,7 @@ const argon2 = require('argon2');
 require('dotenv').config({ path: './.env' });
 
 async function fixPasswordVerification() {
-  const client = new MongoClient(process.env.MONGODB_URI);
+  const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
   
   try {
     await client.connect();

@@ -196,7 +196,7 @@ async function startTimerWithTracking(req, res) {
       return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, clientEmail, organizationId' });
     }
 
-    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     const db = client.db('Invoice');
 
     const existingTimer = await db.collection('activeTimers').findOne({ userEmail });
@@ -311,7 +311,7 @@ async function stopTimerWithTracking(req, res) {
       return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, organizationId' });
     }
 
-    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     const db = client.db('Invoice');
 
     logger.info('Looking for active timer', { userEmail });
@@ -475,7 +475,7 @@ async function getActiveTimers(req, res) {
   let client;
   try {
     const { organizationId } = req.params;
-    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     const db = client.db('Invoice');
     const activeTimers = await db.collection('activeTimers').find({ organizationId }).toArray();
     res.status(200).json({ success: true, activeTimers, count: activeTimers.length });

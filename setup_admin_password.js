@@ -15,7 +15,7 @@ async function setupAdminPassword() {
     logger.info('Setting up password for admin user...');
     
     // Connect to MongoDB
-    client = new MongoClient(process.env.MONGODB_URI);
+    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
     
     const db = client.db('Invoice');
