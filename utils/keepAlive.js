@@ -23,20 +23,25 @@ class KeepAliveService {
    * @param {string} serverUrl - The server URL to ping
    */
   initialize(serverUrl) {
-    // Only enable in production on Render platform
+    // Only enable in production (Render or Firebase/GCP)
     if (!environmentConfig.isProductionEnvironment()) {
       logger.info('Keep-alive service disabled in development mode');
       return;
     }
 
-    // Check if running on Render (common environment variables)
+    // Check if running on Render or Firebase/GCP
     const isRender = process.env.RENDER || 
                      process.env.RENDER_SERVICE_ID || 
                      process.env.RENDER_EXTERNAL_URL ||
                      serverUrl?.includes('onrender.com');
+                     
+    const isGCP = process.env.K_SERVICE || 
+                  process.env.FUNCTION_TARGET ||
+                  process.env.GCLOUD_PROJECT ||
+                  process.env.FIREBASE_CONFIG;
 
-    if (!isRender) {
-      logger.info('Keep-alive service disabled - not running on Render platform');
+    if (!isRender && !isGCP) {
+      logger.info('Keep-alive service disabled - not running on a supported platform (Render/GCP)');
       return;
     }
 
@@ -45,13 +50,14 @@ class KeepAliveService {
                      process.env.BACKEND_URL ||
                      process.env.PRODUCTION_URL ||
                      process.env.RENDER_EXTERNAL_URL || 
-                     'https://more-than-invoice.onrender.com';
+                     (isGCP ? `https://${process.env.GCLOUD_PROJECT}.web.app` : 'https://more-than-invoice.onrender.com');
     
     this.isEnabled = true;
     
     logger.info('Keep-alive service initialized', {
       serverUrl: this.serverUrl,
-      interval: this.pingInterval / 1000 / 60 + ' minutes'
+      interval: this.pingInterval / 1000 / 60 + ' minutes',
+      platform: isRender ? 'Render' : 'GCP/Firebase'
     });
 
     this.start();
