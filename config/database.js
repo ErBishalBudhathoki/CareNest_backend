@@ -27,7 +27,11 @@ class DatabaseConfig {
       this.client = await MongoClient.connect(this.uri, {
         serverApi: ServerApiVersion.v1
       });
-      this.db = this.client.db('Invoice');
+      // Use DB_NAME from env, or 'Invoice' as default. 
+      // Note: If you want to use the db name from the connection string, you can use this.client.db() without arguments,
+      // but explicitly naming it is safer if the URI doesn't include it.
+      const dbName = process.env.DB_NAME || 'Invoice';
+      this.db = this.client.db(dbName);
       return this.client;
     } catch (error) {
       console.error('Failed to connect to MongoDB:', error);
