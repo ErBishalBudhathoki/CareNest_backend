@@ -34,6 +34,16 @@ jobs:
           FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
           FIREBASE_CLIENT_CERT_URL: ${{ secrets.FIREBASE_CLIENT_CERT_URL }}
 
+      - name: Generate Service Account Key
+        run: node scripts/create-service-account.js
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_PRIVATE_KEY_ID: ${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
+          FIREBASE_CLIENT_CERT_URL: ${{ secrets.FIREBASE_CLIENT_CERT_URL }}
+
       - name: Create .env file
         run: |
           echo "NODE_ENV=production" >> .env
@@ -50,4 +60,6 @@ jobs:
           echo "FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}" >> .env
 
       - name: Deploy to Firebase
-        run: npx firebase-tools deploy --only functions,hosting --non-interactive --token "${{ secrets.FIREBASE_TOKEN }}" --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+        run: npx firebase-tools deploy --only functions,hosting --non-interactive --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: service-account.json
