@@ -5,7 +5,8 @@
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
-const logger = require('./utils/structuredLogger');
+const { createLogger } = require('./utils/logger');
+const logger = createLogger('AdminSetup');
 
 async function setupAdminPassword() {
   let client;
@@ -20,13 +21,13 @@ async function setupAdminPassword() {
     const db = client.db('Invoice');
     
     // Check if admin user exists
-    const adminUser = await db.collection('users').findOne({
+    const adminUser = await db.collection('login').findOne({
       email: 'admin@test.com',
       role: 'admin'
     });
     
     if (!adminUser) {
-      logger.info('Admin user not found during password setup');
+      logger.info('Admin user not found in login collection during password setup');
       return;
     }
     
@@ -45,7 +46,7 @@ async function setupAdminPassword() {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
     
     // Update the admin user with password and additional required fields
-    const updateResult = await db.collection('users').updateOne(
+    const updateResult = await db.collection('login').updateOne(
       { email: 'admin@test.com' },
       {
         $set: {

@@ -275,7 +275,10 @@ const logPeriodicErrorMetrics = () => {
 };
 
 // Log error metrics every 10 minutes
-setInterval(logPeriodicErrorMetrics, 10 * 60 * 1000);
+if (process.env.NODE_ENV !== 'test') {
+  const intervalId = setInterval(logPeriodicErrorMetrics, 10 * 60 * 1000);
+  intervalId.unref();
+}
 
 module.exports = {
   errorTrackingMiddleware,
