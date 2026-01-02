@@ -58,7 +58,7 @@ async function createCustomPricing(req, res) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -192,7 +192,7 @@ async function getOrganizationPricing(req, res) {
     } = req.query;
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -279,7 +279,7 @@ async function getPricingById(req, res) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -351,7 +351,7 @@ async function updateCustomPricing(req, res) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -545,7 +545,7 @@ async function deleteCustomPricing(req, res) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -679,7 +679,7 @@ async function updatePricingApproval(req, res) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -807,7 +807,7 @@ async function getPricingLookup(req, res) {
     });
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -979,7 +979,7 @@ async function getBulkPricingLookup(req, res) {
     });
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -1207,7 +1207,7 @@ async function bulkImportPricing(req, res) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -1401,7 +1401,7 @@ async function getFallbackBaseRate(req, res) {
       });
     }
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -1466,7 +1466,7 @@ async function setFallbackBaseRate(req, res) {
       });
     }
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 

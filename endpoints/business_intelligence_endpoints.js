@@ -33,7 +33,7 @@ async function getBusinessIntelligenceDashboard(req, res) {
     }
     
     // Connect to database
-    client = new MongoClient(process.env.MONGODB_URI);
+    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     
@@ -145,7 +145,7 @@ async function getRevenueForecastAnalysis(req, res) {
     const { organizationId } = req.params;
     const { periods = 6, confidence = 0.95 } = req.query;
     
-    client = new MongoClient(process.env.MONGODB_URI);
+    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     
@@ -202,7 +202,7 @@ async function getOperationalEfficiencyReport(req, res) {
     const { organizationId } = req.params;
     const { startDate, endDate } = req.query;
     
-    client = new MongoClient(process.env.MONGODB_URI);
+    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     

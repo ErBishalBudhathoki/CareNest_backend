@@ -4,7 +4,7 @@ const argon2 = require('argon2');
 
 async function checkStoredPassword() {
   try {
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
     console.log('Connected to MongoDB');
     

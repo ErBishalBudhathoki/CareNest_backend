@@ -10,7 +10,7 @@ const crypto = require('crypto');
 
 async function fixAuthSystem() {
   try {
-    const client = new MongoClient(process.env.MONGODB_URI);
+    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
     console.log('Connected to MongoDB');
     

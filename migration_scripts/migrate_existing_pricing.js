@@ -9,7 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
  */
 
 async function migrateExistingPricing() {
-  const client = new MongoClient(process.env.MONGODB_URI);
+  const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
   
   try {
     await client.connect();

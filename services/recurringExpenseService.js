@@ -121,7 +121,7 @@ async function processRecurringExpenses(organizationId = null) {
   };
   
   try {
-    client = new MongoClient(uri, {
+    client = new MongoClient(uri, { tls: true, family: 4, 
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -283,7 +283,7 @@ async function createRecurringExpense(expenseData) {
       throw new Error(`Invalid frequency. Must be one of: ${validFrequencies.join(', ')}`);
     }
     
-    client = new MongoClient(uri, {
+    client = new MongoClient(uri, { tls: true, family: 4, 
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -378,7 +378,7 @@ async function updateRecurringExpense(expenseId, updateData) {
   let client;
   
   try {
-    client = new MongoClient(uri, {
+    client = new MongoClient(uri, { tls: true, family: 4, 
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -476,7 +476,7 @@ async function deactivateRecurringExpense(expenseId, userEmail) {
   let client;
   
   try {
-    client = new MongoClient(uri, {
+    client = new MongoClient(uri, { tls: true, family: 4, 
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -548,7 +548,7 @@ async function getRecurringExpenses(organizationId, options = {}) {
   let client;
   
   try {
-    client = new MongoClient(uri, {
+    client = new MongoClient(uri, { tls: true, family: 4, 
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -602,7 +602,7 @@ async function getRecurringExpenseStats(organizationId) {
   let client;
   
   try {
-    client = new MongoClient(uri, {
+    client = new MongoClient(uri, { tls: true, family: 4, 
       serverApi: {
         version: ServerApiVersion.v1,
         strict: true,

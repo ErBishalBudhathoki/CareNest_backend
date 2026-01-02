@@ -16,8 +16,10 @@ class BackwardCompatibilityService {
 
   async connect() {
     if (!this.client) {
-      this.client = await MongoClient.connect(uri, {
-        serverApi: ServerApiVersion.v1
+      this.client = await MongoClient.connect(uri, { tls: true, family: 4, 
+        serverApi: ServerApiVersion.v1,
+        tls: true,
+        family: 4,
       });
       this.db = this.client.db('Invoice');
     }
