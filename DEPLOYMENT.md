@@ -13,8 +13,10 @@ Each environment requires its own Firebase Project to ensure complete isolation 
 ## Setup Instructions
 
 ### 1. Firebase Projects
+You can host these projects in the **same** Google Account or **different** Google Accounts (e.g., a personal account for Dev and a company account for Prod). The CI/CD pipeline connects via Service Accounts, so the owner account doesn't matter.
+
 *   **Development Project**: Already set up (ID: `invoice-660f3`).
-*   **Production Project**: You need to create a new project in the [Firebase Console](https://console.firebase.google.com/) (e.g., `invoice-prod`).
+*   **Production Project**: Create this in the [Firebase Console](https://console.firebase.google.com/) (e.g., `invoice-prod`). This can be under a completely different Google/Gmail account.
 
 ### 2. GitHub Secrets
 You need to add the following secrets to your GitHub repository settings (`Settings` > `Secrets and variables` > `Actions`).
