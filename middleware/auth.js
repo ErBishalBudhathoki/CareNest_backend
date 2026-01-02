@@ -471,9 +471,12 @@ class AuthMiddleware {
 }
 
 // Cleanup expired records every 5 minutes
-setInterval(() => {
-  AuthMiddleware.cleanup();
-}, 5 * 60 * 1000);
+if (process.env.NODE_ENV !== 'test') {
+  const intervalId = setInterval(() => {
+    AuthMiddleware.cleanup();
+  }, 5 * 60 * 1000);
+  intervalId.unref();
+}
 
 /**
  * Rate limiting middleware factory
