@@ -20,7 +20,6 @@ const iconv = require("iconv-lite");
 const fs = require("fs");
 const csv = require("csv-parser");
 const https = require("https");
-const xlsx = require("xlsx");
 const multer = require("multer");
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
