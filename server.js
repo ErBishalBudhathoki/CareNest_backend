@@ -28,6 +28,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const serverless = require("serverless-http");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const DB_NAME = process.env.DB_NAME || 'Invoice';
 const app = express(); // Initialize express app early
 
 // Firebase Admin SDK Configuration Generation
@@ -520,7 +521,7 @@ app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Check if invoicing email details already exist for this user
     const existingDetails = await db.collection("invoicingEmailDetails").findOne({
@@ -585,7 +586,7 @@ app.post('/invoicingEmailDetailKey', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Check if key already exists for this user
     const existingKey = await db.collection("invoicingEmailKeys").findOne({
@@ -657,7 +658,7 @@ app.get('/getWorkedTime/:userEmail/:clientEmail', async (req, res) => {
     }
 
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
 
     // 1. Find the specific client assignment for this user, client, and organization.
     const assignment = await db.collection("clientAssignments").findOne({
@@ -724,7 +725,7 @@ app.get('/getInvoicingEmailDetails', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Find invoicing email details for the user
     const invoicingDetails = await db.collection("invoicingEmailDetails").findOne({
@@ -777,7 +778,7 @@ app.get('/checkInvoicingEmailKey', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Find invoicing email key for the user
     const keyDetails = await db.collection("invoicingEmailKeys").findOne({
@@ -826,7 +827,7 @@ app.post('/addNotes', async (req, res) => {
     }
 
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
 
     // 1. Verify the user exists and is active
     const user = await db.collection("login").findOne({
@@ -917,7 +918,7 @@ app.post('/getEmailDetailToSendEmail', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Find user details
     const user = await db.collection("login").findOne({
@@ -986,7 +987,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get all active assignments for the organization
     const assignments = await db.collection("clientAssignments").aggregate([
@@ -1272,7 +1273,7 @@ app.get('/getTimerStatus/:userEmail', async (req, res) => {
     const { userEmail } = req.params;
 
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
 
     const activeTimer = await db.collection('activeTimers').findOne({ userEmail: userEmail });
 
@@ -1336,7 +1337,7 @@ app.post('/registerFcmToken', async (req, res) => {
 //     }
 
 //     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-//     const db = client.db("Invoice");
+//     const db = client.db(DB_NAME);
 
 //     let fcmTokens = [];
 //     console.log('Sending notification:', { recipientEmail, organizationId, title });
@@ -1569,7 +1570,7 @@ app.post('/sendNotification', async (req, res) => {
 
     // 2. FETCH TARGET FCM TOKENS FROM DATABASE
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const fcmTokensCollection = db.collection('fcmTokens');
 
     let fcmTokens = [];
@@ -1703,7 +1704,7 @@ app.get("/getLineItems/", async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Find all line items
     const lineItems = await db.collection("lineItems")
@@ -1887,7 +1888,7 @@ app.get("/health", async (req, res) => {
     });
     
     await client.connect();
-    await client.db("Invoice").admin().ping();
+    await client.db(DB_NAME).admin().ping();
     healthData.services.mongodb = "connected";
     
   } catch (error) {
@@ -2126,7 +2127,7 @@ app.post("/organization/create", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Check if organization name already exists
     const existingOrg = await db.collection("organizations").findOne({ 
@@ -2195,7 +2196,7 @@ app.post("/createOrganization", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Check if organization name already exists
     const existingOrg = await db.collection("organizations").findOne({ 
@@ -2269,7 +2270,7 @@ app.post("/organization/verify-code", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const organization = await db.collection("organizations").findOne({ 
       code: organizationCode,
@@ -2311,7 +2312,7 @@ app.get("/organization/verify/:organizationCode", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const organization = await db.collection("organizations").findOne({ 
       code: organizationCode,
@@ -2357,7 +2358,7 @@ app.get("/verifyOrganizationCode/:code", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const organization = await db.collection("organizations").findOne({ 
       code: code,
@@ -2401,7 +2402,7 @@ app.get("/organization/:organizationId", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     let organization = null;
     try {
       if (/^[0-9a-fA-F]{24}$/.test(organizationId)) {
@@ -2460,7 +2461,7 @@ app.put("/organization/:organizationId/details", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const payload = {
       ...((updates.organizationName || updates.name) ? { organizationName: updates.organizationName || updates.name, name: updates.organizationName || updates.name } : {}),
       ...(updates.tradingName !== undefined ? { tradingName: updates.tradingName } : {}),
@@ -2528,7 +2529,7 @@ app.get("/organization/:organizationId/members", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const members = await db.collection("login").find({ 
       organizationId: organizationId 
@@ -2567,7 +2568,7 @@ app.get("/checkEmail/:email", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const user = await db.collection("login").findOne(
       { email: email },
@@ -2623,7 +2624,7 @@ app.get("/getClientDetails/:email", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Find client details in the clients collection
     const clientDetails = await db.collection("clients").findOne(
@@ -2699,7 +2700,7 @@ app.post("/signup/:email", async function (req, res) {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     // console.log('Connected to MongoDB successfully');
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Check if email already exists
     // console.log('Checking if email exists:', email);
@@ -2825,7 +2826,7 @@ app.post("/login", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const user = await db.collection("login").findOne({ 
       email: email,
@@ -2935,7 +2936,7 @@ app.get('/getUserPhoto/:email', async (req, res) => {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const user = await db.collection("login").findOne({ 
       email: email,
@@ -3006,7 +3007,7 @@ app.get('/initData/:email', async (req, res) => {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const user = await db.collection("login").findOne({ 
       email: email,
@@ -3106,7 +3107,7 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
 
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     let updateData = {
       filename: req.file.originalname,
@@ -3168,7 +3169,7 @@ app.post('/getSalt', async (req, res) => {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const user = await db.collection("login").findOne({ 
       email: email,
@@ -3244,7 +3245,7 @@ app.post("/addBusiness", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Verify user belongs to organization (if organizationId provided)
     if (organizationId && userEmail) {
@@ -3325,7 +3326,7 @@ app.get("/businesses/:organizationId", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const businesses = await db.collection("businesses").find({ 
       organizationId: organizationId,
@@ -3376,7 +3377,7 @@ app.post("/addClient", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Verify user belongs to organization (if organizationId provided)
     if (organizationId && userEmail) {
@@ -3441,7 +3442,7 @@ app.get("/organization/:organizationId/businesses", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const businesses = await db.collection("businesses").find({ 
       organizationId: organizationId,
@@ -3474,7 +3475,7 @@ app.get("/organization/:organizationId/clients", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const clients = await db.collection("clients").find({ 
       organizationId: organizationId,
@@ -3507,7 +3508,7 @@ app.get("/clients/:organizationId", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const clients = await db.collection("clients").find({ 
       organizationId: organizationId,
@@ -3538,7 +3539,7 @@ app.get("/getClients", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const clients = await db.collection("clients").find({ 
       isActive: true 
@@ -3580,7 +3581,7 @@ app.get("/getMultipleClients/:emails", async function (req, res) {
     });
     await client.connect();
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const collection = db.collection("clients");
     
     // Find clients with matching emails
@@ -3680,7 +3681,7 @@ app.post('/assignClientToUser', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Verify client exists
     const clientExists = await db.collection("clients").findOne({ 
@@ -4066,7 +4067,7 @@ app.get('/getUserAssignments/:userEmail', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get assignments with client details
     const assignments = await db.collection("clientAssignments").aggregate([
@@ -4124,7 +4125,7 @@ app.get('/loadAppointments/:email', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get appointments (client assignments) with client details for the specific user
     const appointments = await db.collection("clientAssignments").aggregate([
@@ -4255,7 +4256,7 @@ app.get('/loadAppointmentDetails/:userEmail/:clientEmail', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get the specific appointment assignment with client details
     const appointmentDetails = await db.collection("clientAssignments").aggregate([
@@ -4393,7 +4394,7 @@ app.get('/getOrganizationAssignments/:organizationId', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get assignments with client details for the organization
     const assignments = await db.collection("clientAssignments").aggregate([
@@ -4512,7 +4513,7 @@ app.delete('/removeClientAssignment', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Soft delete assignment
     const result = await db.collection("clientAssignments").updateOne(
@@ -4630,7 +4631,7 @@ app.post('/updatePassword', async (req, res) => {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     const result = await db.collection("login").updateOne(
       { email: email },
@@ -4761,7 +4762,7 @@ app.post('/setWorkedTime', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Find the assigned client record
     const assignedClient = await db.collection("clientAssignments").findOne({
@@ -4864,7 +4865,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get all active assignments for the organization
     const assignments = await db.collection("clientAssignments").aggregate([
@@ -5082,7 +5083,7 @@ app.get("/getUsers/", async (req, res) => {
     });
     
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Query all users from the login collection
     const users = await db.collection("login").find({}).toArray();
@@ -5121,7 +5122,7 @@ app.get("/getHolidays", async (req, res) => {
       serverApi: ServerApiVersion.v1 
     });
     
-    const db = client.db("Invoice"); 
+    const db = client.db(DB_NAME); 
     const collection = db.collection("holidaysList"); 
 
     // Find all documents in the collection 
@@ -5201,7 +5202,7 @@ app.post("/uploadCSV", async (req, res) => {
       serverApi: ServerApiVersion.v1,
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
     
     // Delete existing data and insert new data
@@ -5250,7 +5251,7 @@ app.delete("/deleteHoliday/:id", async (req, res) => {
       serverApi: ServerApiVersion.v1 
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
 
     // Delete the document with the given ID
@@ -5315,7 +5316,7 @@ app.post("/addHolidayItem", async (req, res) => {
       serverApi: ServerApiVersion.v1 
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
 
     // Check if holiday already exists on the same date
@@ -5374,7 +5375,7 @@ app.post('/fixClientOrganizationId', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Verify user belongs to organization
     const user = await db.collection("login").findOne({ 
@@ -5455,7 +5456,7 @@ app.get("/organization/:organizationId/employees", async function (req, res) {
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
 
     // ==========================================================
     // THE FIX: The collection name was incorrect. It should be "login".
@@ -5518,7 +5519,7 @@ app.post("/check-holidays", async (req, res) => {
       serverApi: ServerApiVersion.v1 
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
     
     // Find holidays matching the dates
@@ -5558,7 +5559,7 @@ app.get('/api/support-items/search', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing search query' });
     }
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db('Invoice');
+    const db = client.db(DB_NAME);
     // Ensure text index exists (run once, then comment out for prod)
     // await db.collection('supportItems').createIndex({ supportItemName: 'text', supportItemNumber: 'text' });
     const items = await db.collection('supportItems')
@@ -5582,7 +5583,7 @@ app.get('/api/support-items/all', async (req, res) => {
   let client;
   try {
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
-    const db = client.db('Invoice');
+    const db = client.db(DB_NAME);
     const items = await db.collection('supportItems').find({}).limit(1000).toArray();
     res.json({ success: true, items });
   } catch (error) {
@@ -6217,7 +6218,7 @@ app.get('/assigned-client-data', async (req, res) => {
       serverApi: ServerApiVersion.v1
     });
     
-    const db = client.db("Invoice");
+    const db = client.db(DB_NAME);
     
     // Get all active client assignments
     const assignments = await db.collection("clientAssignments").find({

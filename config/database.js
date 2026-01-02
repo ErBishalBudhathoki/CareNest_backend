@@ -93,7 +93,8 @@ class DatabaseConfig {
         timestamp: new Date().toISOString()
       });
       
-      const db = client.db('Invoice');
+      const dbName = process.env.DB_NAME || 'Invoice';
+      const db = client.db(dbName);
       const operationStartTime = Date.now();
       
       const result = await operation(db, client);
@@ -208,6 +209,12 @@ module.exports = {
   DatabaseConfig,
   databaseConfig,
   connectToDatabase,
+  getDatabase: async () => {
+    if (!databaseConfig.db) {
+      await databaseConfig.connect();
+    }
+    return databaseConfig.getDatabase();
+  },
   // Legacy exports for backward compatibility
   uri: process.env.MONGODB_URI,
   MongoClient,
