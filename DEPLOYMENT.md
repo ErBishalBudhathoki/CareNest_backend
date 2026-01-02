@@ -46,9 +46,32 @@ You must generate a new Service Account for your **Production** Firebase project
 *   `PROD_ADMIN_EMAIL`: Admin email for prod.
 *   `PROD_JWT_SECRET`: Secret for signing tokens in prod.
 
-### 3. Workflow
-1.  **Develop**: Create a feature branch from `dev`.
-2.  **Test**: Push changes. Open a PR to `dev`.
-3.  **Deploy Dev**: Merge into `dev`. GitHub Actions will automatically deploy to the Development Firebase project using the standard secrets.
-4.  **Release**: When ready, open a PR from `dev` to `main`.
-5.  **Deploy Prod**: Merge into `main`. GitHub Actions will automatically deploy to the Production Firebase project using the `PROD_` prefixed secrets.
+### 3. Workflow & Merging Strategy
+
+This project uses a "Git Flow" inspired strategy to manage releases.
+
+#### Step 1: Feature Development
+1.  **Start**: Create a new branch from `dev` (e.g., `feature/new-login`).
+    ```bash
+    git checkout dev
+    git pull origin dev
+    git checkout -b feature/new-login
+    ```
+2.  **Work**: Write code, commit changes.
+3.  **Merge to Dev**: Open a **Pull Request (PR)** on GitHub from `feature/new-login` → `dev`.
+    *   Once approved and merged, GitHub Actions triggers **[deploy-dev.yml]**.
+    *   Your code is now live on the **Development** Firebase project.
+    *   *Verification*: Test your changes on the dev URL.
+
+#### Step 2: Production Release
+1.  **Prepare**: When `dev` is stable and you are ready to release to users.
+2.  **Merge to Main**: Open a **Pull Request (PR)** on GitHub from `dev` → `main`.
+    *   This PR represents your "Release Candidate".
+    *   Review the changes one last time.
+    *   Once merged, GitHub Actions triggers **[deploy-prod.yml]**.
+    *   Your code is now live on the **Production** Firebase project.
+
+### Why this approach?
+*   **Safety**: You never push directly to `main`. All code must pass through `dev` first.
+*   **Verification**: You can test features in a live "Development" environment that mirrors production before real users see them.
+*   **Automation**: No manual `firebase deploy` commands required. Merging branches triggers the deployments.
