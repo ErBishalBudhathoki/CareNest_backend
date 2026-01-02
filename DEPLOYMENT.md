@@ -53,12 +53,36 @@ openssl rand -hex 32
 ```
 Example output (DO NOT USE THIS ONE): `e664d92028ec116952d76csda4854f9cae3fa964aaaa3d562cb8985bb8c64b75`
 
-### 3. Workflow & Merging Strategy
+### 4. Required Permissions & APIs
+
+To ensure smooth automated deployment, your **Firebase Service Account** (used in GitHub Secrets) must have the following permissions in the **Google Cloud Console**:
+
+#### Required IAM Roles
+Go to [Google Cloud IAM Admin](https://console.cloud.google.com/iam-admin/iam) > Edit your Service Account > Add these roles:
+
+*   **Editor** (Simplest option - covers almost everything)
+*   **Service Usage Admin** (Critical: allows the CLI to enable required APIs automatically)
+*   **Cloud Functions Admin** (Allows deploying functions)
+*   **Firebase Admin** (Allows hosting and rules deployment)
+*   **API Keys Admin** (Allows managing API keys if needed)
+*   **Service Account User** (Required to act as the service account)
+
+#### Required Google Cloud APIs
+The deployment script will try to enable these automatically (if you have the "Service Usage Admin" role), but you can also enable them manually in the [API Library](https://console.cloud.google.com/apis/library):
+
+1.  **Cloud Functions API** (`cloudfunctions.googleapis.com`)
+2.  **Cloud Build API** (`cloudbuild.googleapis.com`)
+3.  **Artifact Registry API** (`artifactregistry.googleapis.com`)
+4.  **Firebase Tools API** (`firebase.googleapis.com`)
+
 
 This project uses a "Git Flow" inspired strategy to manage releases.
 
-#### Step 1: Feature Development
-1.  **Start**: Create a new branch from `dev` (e.g., `feature/new-login`).
+### 5. Workflow & Merging Strategy
+ 
+ This project uses a "Git Flow" inspired strategy to manage releases.
+ 
+ #### Step 1: Feature Development
     ```bash
     git checkout dev
     git pull origin dev
