@@ -48,7 +48,7 @@ async function createExpense(expenseData) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -231,7 +231,7 @@ async function getOrganizationExpenses(organizationId, options = {}) {
     } = options;
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -385,7 +385,7 @@ async function getExpenseById(expenseId) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -453,7 +453,7 @@ async function updateExpense(expenseId, updateData) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -663,7 +663,7 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -764,7 +764,7 @@ async function updateExpenseApproval(expenseId, approvalData) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 
@@ -859,7 +859,7 @@ async function bulkImportExpenses(importData) {
     }
 
     // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
 

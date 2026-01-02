@@ -17,7 +17,7 @@ const email = args[0] || 'test@tester.com';
 const uri = process.env.MONGODB_URI;
 
 async function checkUserPassword() {
-  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
   
   try {
     await client.connect();

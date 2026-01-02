@@ -25,7 +25,7 @@ const PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN;
 async function migratePhotos() {
     console.log('Starting migration from MongoDB to R2...');
     
-    const client = new MongoClient(MONGO_URI);
+    const client = new MongoClient(MONGO_URI, { tls: true, family: 4 });
     
     try {
         await client.connect();

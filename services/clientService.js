@@ -22,7 +22,7 @@ class ClientService {
       userEmail 
     } = clientData;
 
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -84,7 +84,7 @@ class ClientService {
   }
 
   async getClients(organizationId, userEmail) {
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -119,7 +119,7 @@ class ClientService {
   }
 
   async getClientById(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -162,7 +162,7 @@ class ClientService {
   }
 
   async updateClient(clientId, updateData, organizationId, userEmail) {
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -227,7 +227,7 @@ class ClientService {
   }
 
   async deleteClient(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -292,7 +292,7 @@ class ClientService {
   }
 
   async getClientPricing(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -331,7 +331,7 @@ class ClientService {
   }
 
   async updateClientPricing(clientId, pricingData, organizationId, userEmail) {
-    const client = new MongoClient(this.uri);
+    const client = new MongoClient(this.uri, { tls: true, family: 4,  tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db("Invoice");
@@ -377,7 +377,7 @@ class ClientService {
   }
 
   async getMultipleClients(emails) {
-    const client = new MongoClient(process.env.MONGODB_URI, {
+    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, 
       serverApi: ServerApiVersion.v1
     });
     
@@ -401,7 +401,7 @@ class ClientService {
   }
 
   async assignClientToUser(assignmentData) {
-    const client = new MongoClient(process.env.MONGODB_URI, {
+    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, 
       serverApi: ServerApiVersion.v1
     });
     
@@ -599,7 +599,7 @@ class ClientService {
   }
 
   async getUserAssignments(userEmail) {
-    const client = new MongoClient(process.env.MONGODB_URI, {
+    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, 
       serverApi: ServerApiVersion.v1
     });
     

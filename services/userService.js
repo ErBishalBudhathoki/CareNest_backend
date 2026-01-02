@@ -6,7 +6,7 @@ class UserService {
   }
 
   async getConnection() {
-    const client = new MongoClient(this.uri, {
+    const client = new MongoClient(this.uri, { tls: true, family: 4, 
       serverApi: ServerApiVersion.v1
     });
     await client.connect();

@@ -4,7 +4,7 @@ require('dotenv').config();
 const uri = process.env.MONGODB_URI;
 
 async function resetLoginAttempts() {
-  const client = new MongoClient(uri);
+  const client = new MongoClient(uri, { tls: true, family: 4 });
   
   try {
     await client.connect();

@@ -38,7 +38,7 @@ class PriceValidationService {
    */
   async connect() {
     if (!this.client) {
-      this.client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+      this.client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
       await this.client.connect();
       this.db = this.client.db('Invoice');
     }

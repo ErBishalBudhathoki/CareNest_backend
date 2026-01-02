@@ -78,7 +78,7 @@ function formatPrometheusMetrics(metrics) {
  * Get business metrics from database
  */
 async function getBusinessMetrics() {
-  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
   
   try {
     await client.connect();

@@ -40,7 +40,7 @@ async function getEntityAuditHistoryEndpoint(req, res) {
     }
 
     // Verify user belongs to organization
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     
@@ -111,7 +111,7 @@ async function getOrganizationAuditLogsEndpoint(req, res) {
     }
 
     // Verify user belongs to organization
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     
@@ -183,7 +183,7 @@ async function getAuditStatisticsEndpoint(req, res) {
     }
 
     // Verify user belongs to organization
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     
@@ -257,7 +257,7 @@ async function createAuditLogEndpoint(req, res) {
     }
 
     // Verify user belongs to organization
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     
@@ -360,7 +360,7 @@ async function exportAuditLogsEndpoint(req, res) {
     }
 
     // Verify user belongs to organization and has admin privileges
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
+    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     await client.connect();
     const db = client.db('Invoice');
     

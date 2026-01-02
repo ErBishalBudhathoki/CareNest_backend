@@ -2,7 +2,7 @@ require('dotenv').config({ path: './.env' });
 const { MongoClient } = require('mongodb');
 
 async function checkPasswordFormat() {
-  const client = new MongoClient(process.env.MONGODB_URI);
+  const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
   
   try {
     await client.connect();
