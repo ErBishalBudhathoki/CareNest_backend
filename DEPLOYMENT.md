@@ -30,6 +30,7 @@ These secrets are used for the `dev` branch deployment:
 *   `FIREBASE_CLIENT_ID`
 *   `FIREBASE_CLIENT_CERT_URL`
 *   `MONGODB_URI`
+*   `DB_NAME`: (Optional) Database name. Defaults to `Invoice` if not set.
 *   `JWT_SECRET`
 
 #### Production Secrets (New - Required)
@@ -42,6 +43,7 @@ You must generate a new Service Account for your **Production** Firebase project
 *   `PROD_FIREBASE_CLIENT_ID`
 *   `PROD_FIREBASE_CLIENT_CERT_URL`
 *   `PROD_MONGODB_URI`: Connection string for your **Production** database.
+*   `PROD_DB_NAME`: (Optional) Database name for prod. Defaults to `Invoice` if not set.
 *   `PROD_JWT_SECRET`: Secret for signing tokens in prod.
 
 #### Generating JWT Secrets
