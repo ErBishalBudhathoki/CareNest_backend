@@ -258,6 +258,131 @@ app.use('/api/config', configRoutes);
 const authTestEndpoint = require('./auth_test_endpoint');
 app.use('/auth-test', authTestEndpoint);
 
+const filesDownloadHandler = async (req, res) => {
+  const rawUrl = (req.query.url || '').toString().trim();
+  if (!rawUrl) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing required query parameter: url'
+    });
+  }
+
+  let target;
+  try {
+    target = new URL(rawUrl);
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid url parameter'
+    });
+  }
+
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return res.status(400).json({
+      success: false,
+      message: 'Only http/https URLs are supported'
+    });
+  }
+
+  const requestHost = (req.get('host') || '').split(':')[0].toLowerCase();
+  const targetHost = (target.hostname || '').toLowerCase();
+
+  let r2PublicHost = '';
+  if (process.env.R2_PUBLIC_DOMAIN) {
+    try {
+      r2PublicHost = new URL(
+        process.env.R2_PUBLIC_DOMAIN.startsWith('http')
+          ? process.env.R2_PUBLIC_DOMAIN
+          : `https://${process.env.R2_PUBLIC_DOMAIN}`
+      ).hostname.toLowerCase();
+    } catch (_) {
+      r2PublicHost = '';
+    }
+  }
+
+  const isAllowedHost =
+    targetHost === requestHost ||
+    (r2PublicHost && targetHost === r2PublicHost) ||
+    targetHost.endsWith('.r2.cloudflarestorage.com');
+
+  if (!isAllowedHost) {
+    return res.status(403).json({
+      success: false,
+      message: 'Download URL host is not allowed'
+    });
+  }
+
+  const safeBasename = path.basename(target.pathname || '').replace(/[^\w.\-]/g, '_');
+  const filename = safeBasename || 'download';
+
+  try {
+    if (targetHost === requestHost && target.pathname.startsWith('/uploads/')) {
+      const uploadsDir = path.join(__dirname, 'uploads');
+      const requestedPath = path.normalize(target.pathname.replace(/^\/uploads\//, ''));
+      const localPath = path.join(uploadsDir, requestedPath);
+      if (!localPath.startsWith(uploadsDir)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Invalid file path'
+        });
+      }
+      if (!fs.existsSync(localPath)) {
+        return res.status(404).json({
+          success: false,
+          message: 'File not found'
+        });
+      }
+      return res.download(localPath, filename);
+    }
+
+    const response = await axios.get(rawUrl, { responseType: 'stream' });
+    const contentType = response.headers['content-type'] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (response.headers['content-length']) {
+      res.setHeader('Content-Length', response.headers['content-length']);
+    }
+
+    response.data.on('error', (streamError) => {
+      logger.error('Error streaming download response', {
+        error: streamError?.message || String(streamError),
+        url: rawUrl
+      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to stream download'
+        });
+      } else {
+        res.end();
+      }
+    });
+
+    return response.data.pipe(res);
+  } catch (error) {
+    const status = error?.response?.status;
+    const message =
+      status === 404
+        ? 'File not found'
+        : 'Failed to download file';
+
+    logger.error('Download endpoint failed', {
+      url: rawUrl,
+      status,
+      error: error?.message || String(error)
+    });
+
+    return res.status(status || 500).json({
+      success: false,
+      message
+    });
+  }
+};
+
+app.get('/api/files/download', filesDownloadHandler);
+app.get('/files/download', filesDownloadHandler);
+
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
