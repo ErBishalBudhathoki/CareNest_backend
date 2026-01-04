@@ -300,9 +300,15 @@ const filesDownloadHandler = async (req, res) => {
     }
   }
 
+  const extraAllowedHosts = (process.env.ALLOWED_DOWNLOAD_HOSTS || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
   const isAllowedHost =
     targetHost === requestHost ||
     (r2PublicHost && targetHost === r2PublicHost) ||
+    extraAllowedHosts.includes(targetHost) ||
     targetHost.endsWith('.r2.cloudflarestorage.com');
 
   if (!isAllowedHost) {
