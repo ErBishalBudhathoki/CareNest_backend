@@ -510,7 +510,7 @@ class AppointmentService {
    * @param {string} oldUserEmail - Current user email
    * @param {string} newUserEmail - New user email
    * @param {string} clientEmail - Client email
-   * @param {Object} shiftDetails - Details of the shift to swap { date, startTime, endTime, break }
+   * @param {Object} shiftDetails - Details of the shift to swap { date, startTime, endTime, break, ndisItem, highIntensity }
    * @returns {Promise<Object>} Result
    */
   static async reassignShift(organizationId, oldUserEmail, newUserEmail, clientEmail, shiftDetails) {
@@ -519,7 +519,24 @@ class AppointmentService {
       client = await getDbConnection();
       const db = client.db("Invoice");
 
-      // 1. Remove shift from old user
+      // CRITICAL: Fetch clientId from clients collection for proper assignment creation
+      const clientDoc = await db.collection("clients").findOne({
+        clientEmail: clientEmail,
+        isActive: { $ne: false }
+      });
+
+      const clientId = clientDoc?._id || null;
+
+      logger.info('=== REASSIGN SHIFT STARTING ===', {
+        organizationId,
+        oldUserEmail,
+        newUserEmail,
+        clientEmail,
+        clientId: clientId?.toString(),
+        shiftDetails
+      });
+
+      // 1. Remove shift from old user (using simple equality - $eq wrapper can cause issues)
       const removeResult = await db.collection("clientAssignments").updateOne(
         {
           organizationId,
@@ -530,18 +547,20 @@ class AppointmentService {
         {
           $pull: {
             schedule: {
-              date: { $eq: shiftDetails.date },
-              startTime: { $eq: shiftDetails.startTime }
+              date: shiftDetails.date,
+              startTime: shiftDetails.startTime
             }
           }
         }
       );
 
+      logger.info('Remove shift from old user result', {
+        matchedCount: removeResult.matchedCount,
+        modifiedCount: removeResult.modifiedCount
+      });
+
       if (removeResult.modifiedCount === 0) {
-        // Check if it's legacy format or if doc exists
-        // simplified for now: fail if can't find/remove
-        // In production, might need to handle legacy dateList/startTimeList removal too if used
-        logger.warn('Could not remove shift from old user or shift not found', {
+        logger.warn('Could not remove shift from old user or shift not found - continuing anyway', {
           oldUserEmail, clientEmail, shiftDetails
         });
       }
@@ -555,37 +574,52 @@ class AppointmentService {
         isActive: true
       });
 
+      logger.info('Existing assignment check for new user', {
+        found: !!existingAssignment,
+        assignmentId: existingAssignment?._id?.toString()
+      });
+
       if (existingAssignment) {
-        // Push to schedule
-        await db.collection("clientAssignments").updateOne(
+        // Push to existing schedule
+        const pushResult = await db.collection("clientAssignments").updateOne(
           { _id: existingAssignment._id },
           {
-            $push: {
-              schedule: shiftDetails
-            }
+            $push: { schedule: shiftDetails },
+            $set: { updatedAt: new Date() }
           }
         );
+        logger.info('Pushed shift to existing assignment', {
+          assignmentId: existingAssignment._id.toString(),
+          modifiedCount: pushResult.modifiedCount
+        });
       } else {
-        // Create new assignment
-        await db.collection("clientAssignments").insertOne({
+        // Create new assignment - CRITICAL: Include clientId
+        const newAssignment = {
           organizationId,
           userEmail: newUserEmail,
           clientEmail: clientEmail,
+          clientId: clientId, // ADDED: Required for some frontend queries
           schedule: [shiftDetails],
           isActive: true,
           createdAt: new Date(),
-          dateList: [], // Legacy fields initialized empty
-          startTimeList: [],
-          endTimeList: [],
-          breakList: []
+          updatedAt: new Date()
+        };
+
+        const insertResult = await db.collection("clientAssignments").insertOne(newAssignment);
+        logger.info('Created new assignment for new user', {
+          insertedId: insertResult.insertedId?.toString(),
+          newUserEmail,
+          clientEmail
         });
       }
 
+      logger.info('=== REASSIGN SHIFT COMPLETED ===');
       return { success: true };
     } catch (error) {
       logger.error('Reassign shift failed', { error: error.message, stack: error.stack });
       throw error;
     } finally {
+      // Connection pooling - don't close shared connection
     }
   }
 }
