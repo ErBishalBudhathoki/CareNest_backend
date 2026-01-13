@@ -273,14 +273,16 @@ class RequestService {
         // Reassign the shift
         await AppointmentService.reassignShift(
           originalRequest.organizationId,
-          originalRequest.userId, // Old user (requester)
+          originalRequest.createdBy, // Old user (requester) - Use createdBy which is email
           details.claimantEmail, // New user (claimant) - MUST be present if claimed
           details.clientEmail,
           {
             date: details.date,
             startTime: details.startTime,
             endTime: details.endTime,
-            break: details.break
+            break: details.break,
+            ndisItem: details.ndisItem,
+            highIntensity: details.highIntensity
           }
         );
         console.log(`Shift swap executed for request ${requestId}`);

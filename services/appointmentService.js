@@ -530,8 +530,8 @@ class AppointmentService {
         {
           $pull: {
             schedule: {
-              date: shiftDetails.date,
-              startTime: shiftDetails.startTime
+              date: { $eq: shiftDetails.date },
+              startTime: { $eq: shiftDetails.startTime }
             }
           }
         }
