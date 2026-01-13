@@ -197,6 +197,10 @@ const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
 console.log('Admin invoice profile routes loaded successfully');
 const requestRoutes = require('./routes/request');
 console.log('Request routes loaded successfully');
+const timesheetReminderRoutes = require('./routes/timesheetReminderRoutes');
+console.log('Timesheet reminder routes loaded successfully');
+const expenseReminderRoutes = require('./routes/expenseReminderRoutes');
+console.log('Expense reminder routes loaded successfully');
 const uri = process.env.MONGODB_URI;
 
 // Security middleware - must be first
@@ -244,6 +248,12 @@ app.use('/api/analytics', apiUsageRoutes);
 
 // Mount request routes
 app.use('/api/requests', requestRoutes);
+
+// Mount timesheet reminder routes
+app.use('/api/reminders', timesheetReminderRoutes);
+
+// Mount expense reminder routes
+app.use('/api/reminders', expenseReminderRoutes);
 
 // Mount active timer endpoints directly to app
 app.post('/startTimerWithTracking', startTimerWithTracking);
@@ -6741,6 +6751,24 @@ if (process.env.SERVERLESS === 'true') {
         keepAliveService.initialize(serverUrl);
         console.log('🔄 Keep-alive service initialized for Render platform');
         console.log(`🌐 Production URL: ${serverUrl}`);
+      }
+
+      // Initialize timesheet reminder scheduler
+      try {
+        const { startTimesheetReminderScheduler } = require('./timesheet_reminder_scheduler');
+        await startTimesheetReminderScheduler();
+        console.log('📅 Timesheet reminder scheduler initialized');
+      } catch (schedulerError) {
+        console.warn('⚠️ Timesheet reminder scheduler failed to start:', schedulerError.message);
+      }
+
+      // Initialize expense reminder scheduler
+      try {
+        const { startExpenseReminderScheduler } = require('./expense_reminder_scheduler');
+        startExpenseReminderScheduler();
+        console.log('🧾 Expense reminder scheduler initialized');
+      } catch (expenseSchedulerError) {
+        console.warn('⚠️ Expense reminder scheduler failed to start:', expenseSchedulerError.message);
       }
 
     } catch (error) {
