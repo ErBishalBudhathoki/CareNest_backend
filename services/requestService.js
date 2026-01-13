@@ -270,25 +270,6 @@ class RequestService {
         const AppointmentService = require('./appointmentService');
         const details = originalRequest.details;
 
-        // Detailed logging for debugging shift swap
-        console.log('=== SHIFT SWAP SIDE EFFECT ===');
-        console.log('Request ID:', requestId);
-        console.log('Original Request:', JSON.stringify(originalRequest, null, 2));
-        console.log('Details for reassign:', {
-          organizationId: originalRequest.organizationId,
-          oldUserEmail: originalRequest.createdBy,
-          newUserEmail: details.claimantEmail,
-          clientEmail: details.clientEmail,
-          shiftDetails: {
-            date: details.date,
-            startTime: details.startTime,
-            endTime: details.endTime,
-            break: details.break,
-            ndisItem: details.ndisItem,
-            highIntensity: details.highIntensity
-          }
-        });
-
         // Reassign the shift
         await AppointmentService.reassignShift(
           originalRequest.organizationId,
@@ -304,7 +285,7 @@ class RequestService {
             highIntensity: details.highIntensity
           }
         );
-        console.log(`Shift swap executed successfully for request ${requestId}`);
+        console.log(`Shift swap executed for request ${requestId}`);
       } catch (err) {
         console.error('Failed to execute shift swap side effect', err);
         // Should we revert status? Or just log? 
