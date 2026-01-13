@@ -105,3 +105,9 @@ build/
 .pub-cache/
 .pub/
 build/
+
+# csv files
+*.csv
+
+# uploads folder where user uploaded img, files stays
+uploads/
