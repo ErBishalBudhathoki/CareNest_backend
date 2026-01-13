@@ -58,7 +58,7 @@ class RequestService {
     };
 
     await db.collection('requests').insertOne(requestDoc);
-    
+
     // Notify admins
     try {
       // Get admins with their FCM tokens directly from login collection
@@ -91,17 +91,17 @@ class RequestService {
 
       const tokenDocs = adminEmails.length > 0
         ? await db.collection('fcmTokens').find({
-            organizationId: organizationId,
-            userEmail: { $in: adminEmails },
-            fcmToken: { $exists: true, $ne: null, $ne: '' }
-          }).project({ fcmToken: 1 }).toArray()
+          organizationId: organizationId,
+          userEmail: { $in: adminEmails },
+          fcmToken: { $exists: true, $ne: null, $ne: '' }
+        }).project({ fcmToken: 1 }).toArray()
         : [];
 
       tokens = tokens.concat(tokenDocs.map((doc) => doc.fcmToken).filter(Boolean));
-      
+
       // Deduplicate tokens
       tokens = [...new Set(tokens)];
-      
+
       console.log(`Found ${tokens.length} admin FCM tokens for organization ${organizationId}`);
 
       if (tokens.length > 0) {
@@ -139,7 +139,7 @@ class RequestService {
     } catch (error) {
       console.error('Error sending admin notification:', error);
     }
-    
+
     return requestDoc;
   }
 
@@ -184,9 +184,57 @@ class RequestService {
     return await db.collection('requests').find(query).sort({ createdAt: -1 }).toArray();
   }
 
+  async claimRequest(requestId, claimantId, claimantName, claimantEmail) {
+    const db = await this.connect();
+
+    // 1. Verify request is pending and type is SHIFT_SWAP_OFFER
+    const request = await db.collection('requests').findOne({
+      _id: new ObjectId(requestId),
+      status: 'Pending',
+      type: 'SHIFT_SWAP_OFFER'
+    });
+
+    if (!request) {
+      throw new Error('Request not found or not available for claim');
+    }
+
+    // 2. Update request with claim details
+    const update = {
+      $set: {
+        'details.claimantId': claimantId,
+        'details.claimantName': claimantName,
+        'details.claimantEmail': claimantEmail,
+        status: 'Claimed', // Intermediate status awaiting admin approval? Or Pending Approval?
+        // Let's use 'Pending Approval' if admin needs to approve. 
+        // Or if 'Claimed' means it waits for admin. 
+        // Implementation plan said "Admin approval workflow".
+        // So let's set status to 'Pending Approval' or keep 'Claimed' and admin filters by 'Claimed'.
+        // Let's use 'Claimed' as a status distinct from 'Pending' (Open) and 'Approved' (Final).
+        updatedAt: new Date()
+      },
+      $push: {
+        history: {
+          action: 'claimed',
+          performedBy: claimantEmail,
+          timestamp: new Date()
+        }
+      }
+    };
+
+    const result = await db.collection('requests').findOneAndUpdate(
+      { _id: new ObjectId(requestId) },
+      update,
+      { returnDocument: 'after' }
+    );
+
+    // Notify Admin? (Should be handled by separate notification logic or here)
+    // For now we return result.
+    return result.value;
+  }
+
   async updateRequestStatus(requestId, status, userEmail, reason) {
     const db = await this.connect();
-    
+
     // 1. Get the original request to find the requester
     const originalRequest = await db.collection('requests').findOne({ _id: new ObjectId(requestId) });
     if (!originalRequest) {
@@ -216,7 +264,34 @@ class RequestService {
       { returnDocument: 'after' }
     );
 
-    // 2. Send Notification to the User
+    // SIDE EFFECTS
+    if (result.value && status === 'Approved' && originalRequest.type === 'SHIFT_SWAP_OFFER') {
+      try {
+        const AppointmentService = require('./appointmentService');
+        const details = originalRequest.details;
+
+        // Reassign the shift
+        await AppointmentService.reassignShift(
+          originalRequest.organizationId,
+          originalRequest.userId, // Old user (requester)
+          details.claimantEmail, // New user (claimant) - MUST be present if claimed
+          details.clientEmail,
+          {
+            date: details.date,
+            startTime: details.startTime,
+            endTime: details.endTime,
+            break: details.break
+          }
+        );
+        console.log(`Shift swap executed for request ${requestId}`);
+      } catch (err) {
+        console.error('Failed to execute shift swap side effect', err);
+        // Should we revert status? Or just log? 
+        // For safely, logging is safest for now to avoid inconsistent state loops.
+      }
+    }
+
+    // 2. Send Notification to the User (Existing logic)
     if (result) {
       try {
         console.log('Request status updated, processing notification for request:', requestId);
@@ -235,14 +310,14 @@ class RequestService {
         }
 
         const organizationId = originalRequest.organizationId;
-        
+
         // Primary: Get FCM token directly from login collection
         let userTokens = [];
         if (user && user.fcmToken) {
           userTokens = [user.fcmToken];
           console.log(`Found FCM token in login collection for ${requesterEmail}`);
         }
-        
+
         // Fallback: Check fcmTokens collection if no token in login
         if (userTokens.length === 0 && requesterEmail) {
           const userTokenDocs = await db.collection('fcmTokens').find({
@@ -255,10 +330,10 @@ class RequestService {
             console.log(`Found FCM token in fcmTokens collection for ${requesterEmail}`);
           }
         }
-        
+
         // Deduplicate tokens
         userTokens = [...new Set(userTokens)];
-        
+
         console.log(`Total FCM tokens found for user ${requesterEmail || requesterId}: ${userTokens.length}`);
 
         if (userTokens.length > 0) {
