@@ -113,11 +113,11 @@ const {
   getRecurringExpenseByIdEndpoint
 } = require('./recurring_expense_endpoints');
 console.log('Recurring expense endpoints loaded successfully');
-const { 
-  generateInvoiceLineItems, 
-  getInvoicePreview, 
-  getAvailableAssignments, 
-  validateInvoiceGenerationData, 
+const {
+  generateInvoiceLineItems,
+  getInvoicePreview,
+  getAvailableAssignments,
+  validateInvoiceGenerationData,
   generateBulkInvoices,
   validateExistingInvoiceLineItems,
   validatePricingRealtime,
@@ -408,7 +408,7 @@ async function processCustomPricing(db, customPricing, ndisItem, organizationId,
     // Determine if this is client-specific pricing
     const isClientSpecific = customPricing.clientSpecific || false;
     const targetClientId = isClientSpecific ? clientExists._id.toString() : null;
-    
+
     // Build the query to check for existing custom pricing
     // For organization-level pricing: organizationId + supportItemNumber + clientSpecific=false
     // For client-specific pricing: organizationId + supportItemNumber + clientId + clientSpecific=true
@@ -418,7 +418,7 @@ async function processCustomPricing(db, customPricing, ndisItem, organizationId,
       clientSpecific: isClientSpecific,
       isActive: true
     };
-    
+
     // Only add clientId to query if it's client-specific pricing
     if (isClientSpecific) {
       duplicateCheckQuery.clientId = targetClientId;
@@ -426,16 +426,16 @@ async function processCustomPricing(db, customPricing, ndisItem, organizationId,
       // For organization-level pricing, ensure clientId is null
       duplicateCheckQuery.clientId = null;
     }
-    
+
     console.log(`Checking for duplicate custom pricing with query:`, JSON.stringify(duplicateCheckQuery, null, 2));
-    
+
     const existingCustomPricing = await db.collection('customPricing').findOne(duplicateCheckQuery);
 
     if (existingCustomPricing) {
       // Check if the price is different before updating
       const newPrice = customPricing.price || customPricing.customPrice;
       const existingPrice = existingCustomPricing.customPrice;
-      
+
       if (newPrice !== existingPrice) {
         // Update existing custom pricing with new price
         await db.collection('customPricing').updateOne(
@@ -557,9 +557,9 @@ app.post('/api/upload/receipt', upload.single('receipt'), (req, res) => {
       fullUrl = getFullFileUrl(req, relativePath);
       filename = req.file.filename;
     }
-    
+
     console.log(`File uploaded: ${filename}, Full URL: ${fullUrl}`);
-    
+
     res.status(200).json({
       success: true,
       message: 'File uploaded successfully',
@@ -610,9 +610,9 @@ app.post('/api/upload/logo', upload.single('logo'), (req, res) => {
       fullUrl = getFullFileUrl(req, relativePath);
       filename = req.file.filename;
     }
-    
+
     console.log(`Logo uploaded: ${filename}, Full URL: ${fullUrl}`);
-    
+
     res.status(200).json({
       success: true,
       message: 'Logo uploaded successfully',
@@ -636,7 +636,7 @@ app.post('/api/upload/logo', upload.single('logo'), (req, res) => {
  */
 app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
   let client;
-  
+
   try {
     const {
       userEmail,
@@ -644,21 +644,21 @@ app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
       email,
       encryptedPassword
     } = req.body;
-    
+
     // console.log('addUpdateInvoicingEmailDetail called for:', userEmail);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Check if invoicing email details already exist for this user
     const existingDetails = await db.collection("invoicingEmailDetails").findOne({
       userEmail: userEmail
     });
-    
+
     const invoicingEmailData = {
       userEmail: userEmail,
       invoicingBusinessName: invoicingBusinessName,
@@ -666,7 +666,7 @@ app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
       encryptedPassword: encryptedPassword,
       updatedAt: new Date()
     };
-    
+
     let result;
     if (existingDetails) {
       // Update existing record
@@ -679,16 +679,16 @@ app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
       invoicingEmailData.createdAt = new Date();
       result = await db.collection("invoicingEmailDetails").insertOne(invoicingEmailData);
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Invoicing email details saved successfully"
     });
   } catch (error) {
     console.error('Error saving invoicing email details:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Error saving invoicing email details" 
+      message: "Error saving invoicing email details"
     });
   } finally {
     if (client) {
@@ -703,33 +703,33 @@ app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
  */
 app.post('/invoicingEmailDetailKey', async (req, res) => {
   let client;
-  
+
   try {
     const {
       userEmail,
       invoicingBusinessKey
     } = req.body;
-    
+
     // console.log('invoicingEmailDetailKey called for:', userEmail);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Check if key already exists for this user
     const existingKey = await db.collection("invoicingEmailKeys").findOne({
       userEmail: userEmail
     });
-    
+
     const keyData = {
       userEmail: userEmail,
       invoicingBusinessKey: invoicingBusinessKey,
       updatedAt: new Date()
     };
-    
+
     let result;
     if (existingKey) {
       // Update existing key
@@ -743,29 +743,114 @@ app.post('/invoicingEmailDetailKey', async (req, res) => {
       keyData.createdAt = new Date();
       result = await db.collection("invoicingEmailKeys").insertOne(keyData);
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Invoicing email key saved successfully"
     });
   } catch (error) {
     console.error('Error saving invoicing email key:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Error saving invoicing email key" 
+      message: "Error saving invoicing email key"
     });
   } finally {
     if (client) {
       await client.close();
     }
   }
-  });
+});
 
-  // Bank details endpoints moved to routes/bankDetails.js
+// Bank details endpoints moved to routes/bankDetails.js
 
-  // ============================================================================
-  // NEW ENDPOINT FOR FETCHING WORKED TIME
-  // ============================================================================
+// ============================================================================
+// NEW ENDPOINT FOR FETCHING WORKED TIME
+// ============================================================================
+
+/**
+ * Get worked time records for a specific user within a date range.
+ * POST /getWorkedTime
+ */
+app.post('/getWorkedTime', async (req, res) => {
+  let client;
+  try {
+    const { email, startDate, endDate } = req.body;
+
+    // console.log(`Fetching worked time (POST) for: ${email}, range: ${startDate} to ${endDate}`);
+
+    if (!email || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Email, startDate, and endDate are required."
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Ensure we cover the full end day
+    end.setHours(23, 59, 59, 999);
+
+    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    const db = client.db(DB_NAME);
+
+    // Query workedTime collection
+    // We fetch all records for the user and then filter by date because date formats might vary
+    // (string 'YYYY-MM-DD' vs ISO vs Date object) and we want to be robust.
+    const query = {
+      userEmail: email,
+      // Optionally add isActive: true if we only want active records
+      isActive: true
+    };
+
+    const records = await db.collection("workedTime").find(query).toArray();
+
+    const filteredRecords = records.filter(record => {
+      // Check shiftDate first (string YYYY-MM-DD usually)
+      // Then workDate (sometimes Date map or string)
+      let recordDate;
+
+      if (record.shiftDate) {
+        recordDate = new Date(record.shiftDate);
+      } else if (record.workDate) {
+        if (record.workDate instanceof Date) {
+          recordDate = record.workDate;
+        } else if (typeof record.workDate === 'string') {
+          recordDate = new Date(record.workDate);
+        } else if (record.workDate.$date) {
+          recordDate = new Date(record.workDate.$date);
+        }
+      }
+
+      if (!recordDate || isNaN(recordDate.getTime())) return false;
+
+      return recordDate >= start && recordDate <= end;
+    });
+
+    // Sort by date descending
+    filteredRecords.sort((a, b) => {
+      const dateA = new Date(a.shiftDate || a.workDate);
+      const dateB = new Date(b.shiftDate || b.workDate);
+      return dateB - dateA;
+    });
+
+    res.status(200).json({
+      success: true,
+      data: filteredRecords
+    });
+
+  } catch (error) {
+    console.error('Error fetching timesheets:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch timesheets'
+    });
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+});
 
 /**
  * Get worked time records for a specific user and client, ensuring it belongs to an organization.
@@ -777,7 +862,7 @@ app.get('/getWorkedTime/:userEmail/:clientEmail', async (req, res) => {
   try {
     const { userEmail, clientEmail } = req.params;
     // We get the organizationId from the query string, which the admin will provide.
-    const { organizationId } = req.query; 
+    const { organizationId } = req.query;
 
     // console.log(`Fetching worked time for user: ${userEmail}, client: ${clientEmail}, within org: ${organizationId}`);
 
@@ -809,7 +894,7 @@ app.get('/getWorkedTime/:userEmail/:clientEmail', async (req, res) => {
     // 2. Use the assignment's _id to find all related workedTime records.
     const records = await db.collection("workedTime").find({
       // This is the correct way to query.
-      assignedClientId: assignment._id, 
+      assignedClientId: assignment._id,
       isActive: true
     }).sort({ shiftDate: 1 }).toArray();
 
@@ -845,31 +930,31 @@ app.get('/getWorkedTime/:userEmail/:clientEmail', async (req, res) => {
  */
 app.get('/getInvoicingEmailDetails', async (req, res) => {
   let client;
-  
+
   try {
     const { email } = req.query;
-    
+
     // console.log('getInvoicingEmailDetails called for:', email);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Find invoicing email details for the user
     const invoicingDetails = await db.collection("invoicingEmailDetails").findOne({
       userEmail: email
     });
-    
+
     if (!invoicingDetails) {
       return res.status(404).json({
         success: false,
         message: "No invoicing email details found"
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Invoicing email details found",
@@ -881,9 +966,9 @@ app.get('/getInvoicingEmailDetails', async (req, res) => {
     });
   } catch (error) {
     console.error('Error retrieving invoicing email details:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Error retrieving invoicing email details" 
+      message: "Error retrieving invoicing email details"
     });
   } finally {
     if (client) {
@@ -898,31 +983,31 @@ app.get('/getInvoicingEmailDetails', async (req, res) => {
  */
 app.get('/checkInvoicingEmailKey', async (req, res) => {
   let client;
-  
+
   try {
     const { email } = req.query;
-    
+
     // console.log('checkInvoicingEmailKey called for:', email);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Find invoicing email key for the user
     const keyDetails = await db.collection("invoicingEmailKeys").findOne({
       userEmail: email
     });
-    
+
     if (!keyDetails) {
       return res.status(404).json({
         success: false,
         message: "No invoicing email key found"
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Invoicing email key found",
@@ -930,9 +1015,9 @@ app.get('/checkInvoicingEmailKey', async (req, res) => {
     });
   } catch (error) {
     console.error('Error retrieving invoicing email key:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Error retrieving invoicing email key" 
+      message: "Error retrieving invoicing email key"
     });
   } finally {
     if (client) {
@@ -985,19 +1070,19 @@ app.post('/addNotes', async (req, res) => {
         message: "Client not found or is not active."
       });
     }
-    
+
     // 3. (Optional but recommended) Verify the user is assigned to the client
     const assignment = await db.collection("clientAssignments").findOne({
-        userEmail: userEmail,
-        clientEmail: clientEmail,
-        isActive: true
+      userEmail: userEmail,
+      clientEmail: clientEmail,
+      isActive: true
     });
 
     if (!assignment) {
-        return res.status(403).json({
-            success: false,
-            message: "User is not assigned to this client."
-        });
+      return res.status(403).json({
+        success: false,
+        message: "User is not assigned to this client."
+      });
     }
 
     // 4. Insert the note
@@ -1038,44 +1123,44 @@ app.post('/addNotes', async (req, res) => {
  */
 app.post('/getEmailDetailToSendEmail', async (req, res) => {
   let client;
-  
+
   try {
     const { userEmail } = req.body;
-    
+
     // console.log('getEmailDetailToSendEmail called for:', userEmail);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Find user details
     const user = await db.collection("login").findOne({
       email: userEmail,
       isActive: true
     });
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
         message: "No user found"
       });
     }
-    
+
     // Find invoicing email details
     const invoicingDetails = await db.collection("invoicingEmailDetails").findOne({
       userEmail: userEmail
     });
-    
+
     if (!invoicingDetails) {
       return res.status(404).json({
         success: false,
         message: "No invoicing email details found"
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Email details found",
@@ -1085,9 +1170,9 @@ app.post('/getEmailDetailToSendEmail', async (req, res) => {
     });
   } catch (error) {
     console.error('Error retrieving email details:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Error retrieving email details" 
+      message: "Error retrieving email details"
     });
   } finally {
     if (client) {
@@ -1107,19 +1192,19 @@ app.post('/getEmailDetailToSendEmail', async (req, res) => {
  */
 app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
   let client;
-  
+
   try {
     const { organizationId } = req.params;
-    
+
     // console.log('Getting employee tracking data for organization:', organizationId);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get all active assignments for the organization
     const assignments = await db.collection("clientAssignments").aggregate([
       {
@@ -1160,7 +1245,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         }
       }
     ]).toArray();
-    
+
     // If no assignments found, get employees directly from login collection
     let employeesFromLogin = [];
     if (assignments.length === 0) {
@@ -1169,9 +1254,9 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         organizationId: organizationId,
         isActive: true
       }).toArray();
-      
+
       // console.log(`Found ${employeesFromLogin.length} employees in login collection`);
-      
+
       // Transform login collection data to match assignment structure
       employeesFromLogin.forEach(employee => {
         assignments.push({
@@ -1196,7 +1281,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         });
       });
     }
-    
+
     // Get worked time records for the organization (including both active and completed shifts)
     let workedTimeRecords = await db.collection("workedTime").aggregate([
       {
@@ -1251,17 +1336,17 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         $sort: { createdAt: -1 }
       }
     ]).toArray();
-    
+
     // If no worked time records found, create sample data for demonstration
     if (workedTimeRecords.length === 0 && assignments.length > 0) {
       // console.log('No worked time records found, creating sample shift data...');
-      
+
       // Create sample shift data using existing assignments
       const sampleShifts = [];
-      
+
       for (let i = 0; i < Math.min(assignments.length, 2); i++) {
         const assignment = assignments[i];
-        
+
         // Add a completed shift for today
         sampleShifts.push({
           userEmail: assignment.userEmail,
@@ -1277,9 +1362,9 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
           createdAt: new Date(),
           _id: `sample_${Date.now()}_${i + 1}`
         });
-        
+
         // Add a completed shift for yesterday
-        const yesterday = new Date(Date.now() - 24*60*60*1000);
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
         sampleShifts.push({
           userEmail: assignment.userEmail,
           userDetails: assignment.userDetails,
@@ -1295,20 +1380,20 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
           _id: `sample_${Date.now()}_${i + 2}`
         });
       }
-      
+
       workedTimeRecords = sampleShifts;
       // console.log(`Created ${sampleShifts.length} sample shifts for demonstration`);
     }
-    
+
     // Get actual active timers from database
     // console.log(`🔍 DEBUG: Querying activeTimers collection for organizationId: ${organizationId}`);
     const activeTimers = await db.collection('activeTimers').find({
       organizationId: organizationId
     }).toArray();
-    
+
     // console.log(`🔍 DEBUG: Found ${activeTimers.length} active timers for organization ${organizationId}`);
     // console.log(`🔍 DEBUG: Active timers data:`, JSON.stringify(activeTimers, null, 2));
-    
+
     // Process the data to create employee tracking summary
     const employeeTrackingData = {
       totalEmployees: assignments.length,
@@ -1361,12 +1446,12 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         totalShiftsCompleted: workedTimeRecords.length
       }
     };
-    
+
     res.status(200).json({
       success: true,
       data: employeeTrackingData
     });
-    
+
   } catch (error) {
     console.error('Error getting employee tracking data:', error);
     res.status(500).json({
@@ -1537,7 +1622,7 @@ app.post('/registerFcmToken', async (req, res) => {
 //       },
 //       tokens: fcmTokens
 //     };
-    
+
 //     console.log('Sending FCM message:', JSON.stringify(message, null, 2));
 
 //     try {
@@ -1828,36 +1913,36 @@ var PORT = process.env.PORT || 8080;
 // Secure GET endpoint for line items
 app.get("/getLineItems/", async (req, res) => {
   let client;
-  
+
   try {
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Find all line items
     const lineItems = await db.collection("lineItems")
       .find({})
       .toArray();
-    
+
     if (!lineItems || lineItems.length === 0) {
       return res.status(404).json({
         success: false,
         message: "No line items found"
       });
     }
-    
+
     // Map to required format
     const list = lineItems.map(item => ({
       itemNumber: item.itemNumber,
       itemDescription: item.itemDescription
     }));
-    
+
     // Return the array directly as expected by the Flutter app
     res.status(200).json(list);
-    
+
   } catch (error) {
     console.error('Error retrieving line items:', error);
     res.status(500).json({
@@ -1918,20 +2003,20 @@ app.use(function (req, res, next) {
 app.use((req, res, next) => {
   const start = Date.now();
   const requestId = uuidv4().slice(0, 8);
-  
+
   // Log request
   console.log(`[${new Date().toISOString()}] [${requestId}] REQUEST: ${req.method} ${req.originalUrl}`);
   if (Object.keys(req.body).length > 0) {
     console.log(`[${new Date().toISOString()}] [${requestId}] REQUEST BODY:`, JSON.stringify(req.body, null, 2));
   }
-  
+
   // Capture the original methods
   const originalSend = res.send;
   const originalJson = res.json;
   const originalEnd = res.end;
-  
+
   // Override send
-  res.send = function(body) {
+  res.send = function (body) {
     const duration = Date.now() - start;
     console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE: ${res.statusCode} (${duration}ms)`);
     if (body) {
@@ -1947,9 +2032,9 @@ app.use((req, res, next) => {
     }
     return originalSend.apply(res, arguments);
   };
-  
+
   // Override json
-  res.json = function(body) {
+  res.json = function (body) {
     const duration = Date.now() - start;
     console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE: ${res.statusCode} (${duration}ms)`);
     if (body) {
@@ -1957,9 +2042,9 @@ app.use((req, res, next) => {
     }
     return originalJson.apply(res, arguments);
   };
-  
+
   // Override end
-  res.end = function(chunk) {
+  res.end = function (chunk) {
     const duration = Date.now() - start;
     // console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE: ${res.statusCode} (${duration}ms)`);
     if (chunk && typeof chunk !== 'function') {
@@ -1967,7 +2052,7 @@ app.use((req, res, next) => {
     }
     return originalEnd.apply(res, arguments);
   };
-  
+
   next();
 });
 
@@ -1987,7 +2072,7 @@ app.get("/hello", (req, res) => {
 app.get("/health", async (req, res) => {
   const { environmentConfig } = require('./config/environment');
   const { MongoClient, ServerApiVersion } = require("mongodb");
-  
+
   const healthData = {
     status: "OK",
     timestamp: new Date().toISOString(),
@@ -2004,12 +2089,12 @@ app.get("/health", async (req, res) => {
       firebase: "initialized"
     }
   };
-  
+
   // Add keep-alive status in production
   if (environmentConfig.isProductionEnvironment()) {
     healthData.keepAlive = keepAliveService.getStatus();
   }
-  
+
   // Test database connectivity
   let client;
   try {
@@ -2017,15 +2102,15 @@ app.get("/health", async (req, res) => {
       serverApi: ServerApiVersion.v1,
       serverSelectionTimeoutMS: 5000 // 5 second timeout
     });
-    
+
     await client.connect();
     await client.db(DB_NAME).admin().ping();
     healthData.services.mongodb = "connected";
-    
+
   } catch (error) {
     healthData.services.mongodb = "disconnected";
     healthData.status = "DEGRADED";
-    
+
     // Only include error details in development
     if (environmentConfig.shouldShowDetailedErrors()) {
       healthData.mongodb_error = error.message;
@@ -2035,10 +2120,10 @@ app.get("/health", async (req, res) => {
       await client.close();
     }
   }
-  
+
   // Set appropriate HTTP status code
   const statusCode = healthData.status === "OK" ? 200 : 503;
-  
+
   res.status(statusCode).json(healthData);
 });
 
@@ -2117,12 +2202,12 @@ function encryptOTP(otp, flutterEncryptKey) {
   let iv = crypto.randomBytes(IV_LENGTH);
   let timestamp = padLeft(Date.now().toString(), 13, '0');
   let encryptionKey = generateEncryptionKey();
-  
+
   let combinedKey = (flutterEncryptKey + encryptionKey).slice(0, 32);
   let dataToEncrypt = Buffer.from(timestamp + otp);
   let cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(combinedKey, 'utf-8'), iv);
   let encrypted = Buffer.concat([iv, cipher.update(dataToEncrypt), cipher.final()]);
-  
+
   return encrypted.toString('hex');
 }
 
@@ -2140,7 +2225,7 @@ function decryptOTP(encryptedData, flutterEncryptKey, encryptionKey) {
     let encryptedBuffer = Buffer.from(encryptedData, 'hex');
     let iv = encryptedBuffer.slice(0, IV_LENGTH);
     let encrypted = encryptedBuffer.slice(IV_LENGTH);
-    
+
     const minKeyLength = 16;
     let combinedKey = (
       flutterEncryptKey.padEnd(minKeyLength, '0') +
@@ -2215,10 +2300,10 @@ function verifyOTP(userOTP, userVerificationKey, generatedOTP, encryptVerificati
 
   const serverGeneratedVerificationKey = serverEncryptionKey;
   const extractedData = decryptOTP(encryptVerificationKey, userVerificationKey, serverGeneratedVerificationKey);
-  
+
   if (extractedData !== null) {
     const { timestamp, otp } = extractedData;
-    
+
     const currentTime = Math.floor(new Date().getTime() / 1000);
     const isTimestampValid = (currentTime - timestamp / 1000) <= timeLimitSeconds;
 
@@ -2228,12 +2313,12 @@ function verifyOTP(userOTP, userVerificationKey, generatedOTP, encryptVerificati
       // console.log('Timestamp not valid');
       return false;
     }
-    
+
     if (otp !== userOTP) {
       // console.log('OTP not valid');
       return false;
     }
-    
+
     // console.log('OTP valid');
     return true;
   } else {
@@ -2252,36 +2337,36 @@ function verifyOTP(userOTP, userVerificationKey, generatedOTP, encryptVerificati
  */
 app.post("/organization/create", async function (req, res) {
   const { organizationName, ownerEmail } = req.body;
-  
+
   // console.log('Create organization called:', organizationName, ownerEmail);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     // Check if organization name already exists
-    const existingOrg = await db.collection("organizations").findOne({ 
-      name: { $regex: new RegExp(`^${organizationName}$`, 'i') } 
+    const existingOrg = await db.collection("organizations").findOne({
+      name: { $regex: new RegExp(`^${organizationName}$`, 'i') }
     });
-    
+
     if (existingOrg) {
       await client.close();
       return res.status(400).json({
         message: "Organization name already exists"
       });
     }
-    
+
     // Generate unique organization code
     let organizationCode;
     let codeExists = true;
-    
+
     while (codeExists) {
       organizationCode = generateOrganizationCode();
       const existingCode = await db.collection("organizations").findOne({ code: organizationCode });
       codeExists = !!existingCode;
     }
-    
+
     // Create organization document
     const organizationDoc = {
       _id: new ObjectId(),
@@ -2295,18 +2380,18 @@ app.post("/organization/create", async function (req, res) {
         maxEmployees: 100
       }
     };
-    
+
     const result = await db.collection("organizations").insertOne(organizationDoc);
-    
+
     await client.close();
-    
+
     res.status(200).json({
       message: "Organization created successfully",
       organizationId: result.insertedId.toString(),
       organizationCode: organizationCode,
       organizationName: organizationName
     });
-    
+
   } catch (error) {
     console.error('Error creating organization:', error);
     res.status(500).json({
@@ -2321,19 +2406,19 @@ app.post("/organization/create", async function (req, res) {
  */
 app.post("/createOrganization", async function (req, res) {
   const { organizationName, ownerFirstName, ownerLastName, ownerEmail } = req.body;
-  
+
   // console.log('Create organization called:', organizationName, ownerEmail);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     // Check if organization name already exists
-    const existingOrg = await db.collection("organizations").findOne({ 
-      name: { $regex: new RegExp(`^${organizationName}$`, 'i') } 
+    const existingOrg = await db.collection("organizations").findOne({
+      name: { $regex: new RegExp(`^${organizationName}$`, 'i') }
     });
-    
+
     if (existingOrg) {
       await client.close();
       return res.status(409).json({
@@ -2341,17 +2426,17 @@ app.post("/createOrganization", async function (req, res) {
         message: "Organization name already exists"
       });
     }
-    
+
     // Generate unique organization code
     let organizationCode;
     let codeExists = true;
-    
+
     while (codeExists) {
       organizationCode = generateOrganizationCode();
       const existingCode = await db.collection("organizations").findOne({ code: organizationCode });
       codeExists = !!existingCode;
     }
-    
+
     // Create organization document
     const organizationDoc = {
       _id: new ObjectId(),
@@ -2367,11 +2452,11 @@ app.post("/createOrganization", async function (req, res) {
         maxEmployees: 100
       }
     };
-    
+
     const result = await db.collection("organizations").insertOne(organizationDoc);
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       message: "Organization created successfully",
@@ -2379,7 +2464,7 @@ app.post("/createOrganization", async function (req, res) {
       organizationCode: organizationCode,
       organizationName: organizationName
     });
-    
+
   } catch (error) {
     console.error('Error creating organization:', error);
     res.status(500).json({
@@ -2395,21 +2480,21 @@ app.post("/createOrganization", async function (req, res) {
  */
 app.post("/organization/verify-code", async function (req, res) {
   const { organizationCode } = req.body;
-  
+
   // console.log('Verify organization code called:', organizationCode);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const organization = await db.collection("organizations").findOne({ 
+
+    const organization = await db.collection("organizations").findOne({
       code: organizationCode,
-      isActive: true 
+      isActive: true
     });
-    
+
     await client.close();
-    
+
     if (organization) {
       res.status(200).json({
         message: "Organization code is valid",
@@ -2422,7 +2507,7 @@ app.post("/organization/verify-code", async function (req, res) {
         message: "Invalid organization code"
       });
     }
-    
+
   } catch (error) {
     console.error('Error verifying organization code:', error);
     res.status(500).json({
@@ -2437,21 +2522,21 @@ app.post("/organization/verify-code", async function (req, res) {
  */
 app.get("/organization/verify/:organizationCode", async function (req, res) {
   const { organizationCode } = req.params;
-  
+
   // console.log('Verify organization code called:', organizationCode);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const organization = await db.collection("organizations").findOne({ 
+
+    const organization = await db.collection("organizations").findOne({
       code: organizationCode,
-      isActive: true 
+      isActive: true
     });
-    
+
     await client.close();
-    
+
     if (organization) {
       res.status(200).json({
         success: true,
@@ -2467,7 +2552,7 @@ app.get("/organization/verify/:organizationCode", async function (req, res) {
         message: "Invalid organization code"
       });
     }
-    
+
   } catch (error) {
     console.error('Error verifying organization code:', error);
     res.status(500).json({
@@ -2483,21 +2568,21 @@ app.get("/organization/verify/:organizationCode", async function (req, res) {
  */
 app.get("/verifyOrganizationCode/:code", async function (req, res) {
   const { code } = req.params;
-  
+
   // console.log('Verify organization code called:', code);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const organization = await db.collection("organizations").findOne({ 
+
+    const organization = await db.collection("organizations").findOne({
       code: code,
-      isActive: true 
+      isActive: true
     });
-    
+
     await client.close();
-    
+
     if (organization) {
       res.status(200).json({
         success: true,
@@ -2513,7 +2598,7 @@ app.get("/verifyOrganizationCode/:code", async function (req, res) {
         message: "Invalid organization code"
       });
     }
-    
+
   } catch (error) {
     console.error('Error verifying organization code:', error);
     res.status(500).json({
@@ -2529,7 +2614,7 @@ app.get("/verifyOrganizationCode/:code", async function (req, res) {
  */
 app.get("/organization/:organizationId", async function (req, res) {
   const { organizationId } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
@@ -2539,13 +2624,13 @@ app.get("/organization/:organizationId", async function (req, res) {
       if (/^[0-9a-fA-F]{24}$/.test(organizationId)) {
         organization = await db.collection("organizations").findOne({ _id: new ObjectId(organizationId) });
       }
-    } catch (_) {}
+    } catch (_) { }
     if (!organization) {
       organization = await db.collection("organizations").findOne({ code: organizationId });
     }
-    
+
     await client.close();
-    
+
     if (organization) {
       res.status(200).json({
         statusCode: 200,
@@ -2572,7 +2657,7 @@ app.get("/organization/:organizationId", async function (req, res) {
         message: "Organization not found"
       });
     }
-    
+
   } catch (error) {
     console.error('Error getting organization:', error);
     res.status(500).json({
@@ -2602,7 +2687,7 @@ app.put("/organization/:organizationId/details", async function (req, res) {
       ...(updates.bankDetails !== undefined ? { bankDetails: updates.bankDetails } : {}),
       ...(updates.ndisRegistration !== undefined ? { ndisRegistration: updates.ndisRegistration } : {}),
       // If logoUrl is provided, try to extract relative path if it's a local upload
-      ...(updates.logoUrl !== undefined ? { 
+      ...(updates.logoUrl !== undefined ? {
         logoUrl: (() => {
           if (!updates.logoUrl) return null;
           // Extract /uploads/... from URL if present
@@ -2627,23 +2712,25 @@ app.put("/organization/:organizationId/details", async function (req, res) {
     if (!updatedOrg) {
       return res.status(404).json({ success: false, message: "Organization not found" });
     }
-    return res.status(200).json({ success: true, organization: {
-      id: updatedOrg._id.toString(),
-      name: updatedOrg.name || updatedOrg.organizationName,
-      tradingName: updatedOrg.tradingName || null,
-      code: updatedOrg.code,
-      abn: updatedOrg.abn || null,
-      address: updatedOrg.address || null,
-      contactDetails: updatedOrg.contactDetails || null,
-      bankDetails: updatedOrg.bankDetails || null,
-      ndisRegistration: updatedOrg.ndisRegistration || null,
-      logoUrl: updatedOrg.logoUrl ? getFullFileUrl(req, updatedOrg.logoUrl) : null,
-      ownerEmail: updatedOrg.ownerEmail,
-      createdAt: updatedOrg.createdAt,
-      updatedAt: updatedOrg.updatedAt,
-      isActive: updatedOrg.isActive !== false,
-      settings: updatedOrg.settings
-    }});
+    return res.status(200).json({
+      success: true, organization: {
+        id: updatedOrg._id.toString(),
+        name: updatedOrg.name || updatedOrg.organizationName,
+        tradingName: updatedOrg.tradingName || null,
+        code: updatedOrg.code,
+        abn: updatedOrg.abn || null,
+        address: updatedOrg.address || null,
+        contactDetails: updatedOrg.contactDetails || null,
+        bankDetails: updatedOrg.bankDetails || null,
+        ndisRegistration: updatedOrg.ndisRegistration || null,
+        logoUrl: updatedOrg.logoUrl ? getFullFileUrl(req, updatedOrg.logoUrl) : null,
+        ownerEmail: updatedOrg.ownerEmail,
+        createdAt: updatedOrg.createdAt,
+        updatedAt: updatedOrg.updatedAt,
+        isActive: updatedOrg.isActive !== false,
+        settings: updatedOrg.settings
+      }
+    });
   } catch (error) {
     console.error('Error updating organization details:', error);
     res.status(500).json({ success: false, message: "Error updating organization details" });
@@ -2656,26 +2743,26 @@ app.put("/organization/:organizationId/details", async function (req, res) {
  */
 app.get("/organization/:organizationId/members", async function (req, res) {
   const { organizationId } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const members = await db.collection("login").find({ 
-      organizationId: organizationId 
-    }).project({ 
-      password: 0, 
-      salt: 0 
+
+    const members = await db.collection("login").find({
+      organizationId: organizationId
+    }).project({
+      password: 0,
+      salt: 0
     }).toArray();
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       members: members
     });
-    
+
   } catch (error) {
     console.error('Error getting organization members:', error);
     res.status(500).json({
@@ -2695,12 +2782,12 @@ app.get("/organization/:organizationId/members", async function (req, res) {
  */
 app.get("/checkEmail/:email", async function (req, res) {
   const { email } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     const user = await db.collection("login").findOne(
       { email: email },
       {
@@ -2716,13 +2803,13 @@ app.get("/checkEmail/:email", async function (req, res) {
         }
       }
     );
-    
+
     await client.close();
-    
+
     if (user) {
       // Create a name field for compatibility
       user.name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-      
+
       res.status(200).json({
         statusCode: 200,
         message: "Email exists",
@@ -2735,7 +2822,7 @@ app.get("/checkEmail/:email", async function (req, res) {
         message: "Email does not exist"
       });
     }
-    
+
   } catch (error) {
     console.error('Error checking email:', error);
     res.status(500).json({
@@ -2751,16 +2838,16 @@ app.get("/checkEmail/:email", async function (req, res) {
  */
 app.get("/getClientDetails/:email", async function (req, res) {
   const { email } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     // Find client details in the clients collection
     const clientDetails = await db.collection("clients").findOne(
       { clientEmail: email, isActive: true },
-      { 
+      {
         projection: {
           clientFirstName: 1,
           clientLastName: 1,
@@ -2776,9 +2863,9 @@ app.get("/getClientDetails/:email", async function (req, res) {
         }
       }
     );
-    
+
     await client.close();
-    
+
     if (clientDetails) {
       res.status(200).json({
         statusCode: 200,
@@ -2791,7 +2878,7 @@ app.get("/getClientDetails/:email", async function (req, res) {
         message: "Client not found"
       });
     }
-    
+
   } catch (error) {
     console.error('Error retrieving client details:', error);
     res.status(500).json({
@@ -2807,21 +2894,21 @@ app.get("/getClientDetails/:email", async function (req, res) {
  */
 app.post("/signup/:email", async function (req, res) {
   const { email } = req.params;
-  const { 
-    firstName, 
-    lastName, 
-    password, 
-    salt, 
-    abn, 
-    role, 
+  const {
+    firstName,
+    lastName,
+    password,
+    salt,
+    abn,
+    role,
     organizationId,
-    organizationCode 
+    organizationCode
   } = req.body;
-  
+
   // console.log('Signup called:', email, firstName, lastName, role, organizationId);
   // console.log('Request body:', JSON.stringify(req.body, null, 2));
   // console.log('About to enter try block for database operations');
-  
+
   try {
     // console.log('Connecting to MongoDB...');
     // console.log('MongoDB URI exists:', !!process.env.MONGODB_URI);
@@ -2832,12 +2919,12 @@ app.post("/signup/:email", async function (req, res) {
     await client.connect();
     // console.log('Connected to MongoDB successfully');
     const db = client.db(DB_NAME);
-    
+
     // Check if email already exists
     // console.log('Checking if email exists:', email);
     const existingUser = await db.collection("login").findOne({ email: email });
     // console.log('Existing user check result:', existingUser ? 'User exists' : 'User does not exist');
-    
+
     if (existingUser) {
       await client.close();
       return res.status(409).json({
@@ -2845,17 +2932,17 @@ app.post("/signup/:email", async function (req, res) {
         message: "Email already exists"
       });
     }
-    
+
     let finalOrganizationId = organizationId;
     let organizationName = '';
-    
+
     // If organizationCode is provided (employee signup), verify and get organizationId
     if (organizationCode && !organizationId) {
-      const organization = await db.collection("organizations").findOne({ 
+      const organization = await db.collection("organizations").findOne({
         code: organizationCode,
-        isActive: true 
+        isActive: true
       });
-      
+
       if (!organization) {
         await client.close();
         return res.status(400).json({
@@ -2863,11 +2950,11 @@ app.post("/signup/:email", async function (req, res) {
           message: "Invalid organization code"
         });
       }
-      
+
       finalOrganizationId = organization._id.toString();
       organizationName = organization.name;
     }
-    
+
     // If organizationId is provided, validate and get organization name
     if (finalOrganizationId) {
       // Validate ObjectId format
@@ -2878,11 +2965,11 @@ app.post("/signup/:email", async function (req, res) {
           message: "Invalid organization ID format"
         });
       }
-      
-      const organization = await db.collection("organizations").findOne({ 
-        _id: new ObjectId(finalOrganizationId) 
+
+      const organization = await db.collection("organizations").findOne({
+        _id: new ObjectId(finalOrganizationId)
       });
-      
+
       if (organization) {
         organizationName = organization.name;
       } else {
@@ -2893,12 +2980,12 @@ app.post("/signup/:email", async function (req, res) {
         });
       }
     }
-    
+
     // Create user document
     // console.log('Creating user document with data:', {
-      // firstName, lastName, email, role, finalOrganizationId, organizationName
+    // firstName, lastName, email, role, finalOrganizationId, organizationName
     // });
-    
+
     const userDoc = {
       _id: new ObjectId(),
       firstName: firstName,
@@ -2914,14 +3001,14 @@ app.post("/signup/:email", async function (req, res) {
       isActive: true,
       lastLogin: null
     };
-    
+
     // console.log('Inserting user document into login collection...');
     const result = await db.collection("login").insertOne(userDoc);
     // console.log('User insertion result:', result.insertedId ? 'Success' : 'Failed', result.insertedId);
-    
+
     await client.close();
     // console.log('Database connection closed');
-    
+
     // console.log('Sending success response to client');
     res.status(200).json({
       statusCode: 200,
@@ -2932,7 +3019,7 @@ app.post("/signup/:email", async function (req, res) {
       organizationId: finalOrganizationId,
       organizationName: organizationName
     });
-    
+
   } catch (error) {
     console.error('Error creating user:', error);
     console.error('Error stack:', error.stack);
@@ -2951,19 +3038,19 @@ app.post("/signup/:email", async function (req, res) {
  */
 app.post("/login", async function (req, res) {
   const { email, password } = req.body;
-  
+
   // console.log('Login called:', email);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const user = await db.collection("login").findOne({ 
+
+    const user = await db.collection("login").findOne({
       email: email,
-      isActive: true 
+      isActive: true
     });
-    
+
     if (!user) {
       await client.close();
       return res.status(401).json({
@@ -2971,7 +3058,7 @@ app.post("/login", async function (req, res) {
         message: "Invalid email or password"
       });
     }
-    
+
     // Verify password (assuming password is already hashed on client side)
     if (user.password !== password) {
       await client.close();
@@ -2980,21 +3067,21 @@ app.post("/login", async function (req, res) {
         message: "Invalid email or password"
       });
     }
-    
+
     // Update last login
     await db.collection("login").updateOne(
       { _id: user._id },
       { $set: { lastLogin: new Date() } }
     );
-    
+
     // Get organization details if user belongs to one
     let organizationDetails = null;
     if (user.organizationId) {
-      organizationDetails = await db.collection("organizations").findOne({ 
-        _id: new ObjectId(user.organizationId) 
+      organizationDetails = await db.collection("organizations").findOne({
+        _id: new ObjectId(user.organizationId)
       });
     }
-    
+
     // Generate JWT token
     const jwt = require('jsonwebtoken');
     const tokenPayload = {
@@ -3003,7 +3090,7 @@ app.post("/login", async function (req, res) {
       roles: [user.role || 'user'],
       organizationId: user.organizationId
     };
-    
+
     const jwtSecret = process.env.JWT_SECRET || process.env.PRIVATE_KEY;
     if (!jwtSecret) {
       await client.close();
@@ -3012,19 +3099,19 @@ app.post("/login", async function (req, res) {
         message: "Server configuration error. Please contact administrator."
       });
     }
-    
+
     const token = jwt.sign(
       tokenPayload,
       jwtSecret,
-      { 
+      {
         expiresIn: '24h',
         issuer: 'invoice-app',
         audience: 'invoice-app-users'
       }
     );
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       message: "Login successful",
@@ -3045,7 +3132,7 @@ app.post("/login", async function (req, res) {
         } : null
       }
     });
-    
+
   } catch (error) {
     console.error('Error during login:', error);
     res.status(500).json({
@@ -3061,19 +3148,19 @@ app.post("/login", async function (req, res) {
  */
 app.get('/getUserPhoto/:email', async (req, res) => {
   const { email } = req.params;
-  
+
   // console.log('getUserPhoto called for:', email);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const user = await db.collection("login").findOne({ 
+
+    const user = await db.collection("login").findOne({
       email: email,
-      isActive: true 
+      isActive: true
     });
-    
+
     // console.log('User found:', !!user);
     if (user) {
       // console.log('User document keys:', Object.keys(user));
@@ -3084,7 +3171,7 @@ app.get('/getUserPhoto/:email', async (req, res) => {
       // console.log('User email:', user.email);
       // console.log('User filename:', user.filename);
     }
-    
+
     if (!user) {
       await client.close();
       // console.log('Returning 404: User not found');
@@ -3093,7 +3180,7 @@ app.get('/getUserPhoto/:email', async (req, res) => {
         message: "User not found"
       });
     }
-    
+
     // Check if user has photo data or photo URL
     if (!user.photoData && !user.photoUrl) {
       await client.close();
@@ -3105,10 +3192,10 @@ app.get('/getUserPhoto/:email', async (req, res) => {
         hasPhoto: false
       });
     }
-    
+
     await client.close();
     // console.log('Returning 200: Photo found');
-    
+
     res.status(200).json({
       statusCode: 200,
       message: "Photo found",
@@ -3116,7 +3203,7 @@ app.get('/getUserPhoto/:email', async (req, res) => {
       data: user.photoData, // Fallback for old users
       photoUrl: user.photoUrl // New R2 URL
     });
-    
+
   } catch (error) {
     console.error('Error getting user photo:', error);
     res.status(500).json({
@@ -3132,19 +3219,19 @@ app.get('/getUserPhoto/:email', async (req, res) => {
  */
 app.get('/initData/:email', async (req, res) => {
   const { email } = req.params;
-  
+
   // console.log('initData called for:', email);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const user = await db.collection("login").findOne({ 
+
+    const user = await db.collection("login").findOne({
       email: email,
-      isActive: true 
+      isActive: true
     });
-    
+
     if (!user) {
       await client.close();
       return res.status(404).json({
@@ -3152,17 +3239,17 @@ app.get('/initData/:email', async (req, res) => {
         message: "User not found"
       });
     }
-    
+
     // Get organization details if user belongs to one
     let organizationDetails = null;
     if (user.organizationId) {
-      organizationDetails = await db.collection("organizations").findOne({ 
-        _id: new ObjectId(user.organizationId) 
+      organizationDetails = await db.collection("organizations").findOne({
+        _id: new ObjectId(user.organizationId)
       });
     }
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       message: "User data found",
@@ -3179,7 +3266,7 @@ app.get('/initData/:email', async (req, res) => {
         code: organizationDetails.code
       } : null
     });
-    
+
   } catch (error) {
     console.error('Error getting user data:', error);
     res.status(500).json({
@@ -3195,16 +3282,16 @@ app.get('/initData/:email', async (req, res) => {
  */
 app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
   const { email } = req.body;
-  
+
   // console.log('uploadPhoto called for:', email);
-  
+
   if (!req.file) {
     return res.status(400).json({
       statusCode: 400,
       message: "No photo file provided"
     });
   }
-  
+
   try {
     let photoUrl;
     let filename;
@@ -3239,33 +3326,33 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     let updateData = {
       filename: req.file.originalname,
       updatedAt: new Date()
     };
 
     if (isR2Configured) {
-       updateData.photoUrl = photoUrl;
-       // Optionally clear photoData to save space, but let's keep it empty for new uploads
-       updateData.photoData = null; 
+      updateData.photoUrl = photoUrl;
+      // Optionally clear photoData to save space, but let's keep it empty for new uploads
+      updateData.photoData = null;
     } else {
-       // Fallback to Blob for local dev if R2 not configured
-       const fs = require('fs');
-       const photoData = fs.readFileSync(req.file.path);
-       const base64PhotoData = photoData.toString('base64');
-       updateData.photoData = base64PhotoData;
-       // Clean up uploaded file
-       fs.unlinkSync(req.file.path);
+      // Fallback to Blob for local dev if R2 not configured
+      const fs = require('fs');
+      const photoData = fs.readFileSync(req.file.path);
+      const base64PhotoData = photoData.toString('base64');
+      updateData.photoData = base64PhotoData;
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
     }
-    
+
     const result = await db.collection("login").updateOne(
       { email: email, isActive: true },
       { $set: updateData }
     );
-    
+
     await client.close();
-    
+
     if (result.matchedCount > 0) {
       res.status(200).json({
         statusCode: 200,
@@ -3278,7 +3365,7 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
         message: "User not found"
       });
     }
-    
+
   } catch (error) {
     console.error('Error uploading photo:', error);
     res.status(500).json({
@@ -3294,35 +3381,35 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
  */
 app.post('/getSalt', async (req, res) => {
   const { email } = req.body;
-  
+
   // console.log('getSalt called for:', email);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const user = await db.collection("login").findOne({ 
+
+    const user = await db.collection("login").findOne({
       email: email,
-      isActive: true 
+      isActive: true
     });
-    
+
     await client.close();
-    
+
     if (!user) {
       return res.status(400).json({
         statusCode: 400,
         message: "User not found"
       });
     }
-    
+
     if (!user.password) {
       return res.status(400).json({
         statusCode: 400,
         message: "Password not found for user"
       });
     }
-    
+
     // Extract salt from the password field
     // Password format: hashedPassword(64 chars) + salt(64 chars) = 128 chars total
     const passwordWithSalt = user.password;
@@ -3332,15 +3419,15 @@ app.post('/getSalt', async (req, res) => {
         message: "Invalid password format"
       });
     }
-    
+
     // Extract the last 64 characters as salt
     const salt = passwordWithSalt.substring(passwordWithSalt.length - 64);
-    
+
     res.status(200).json({
       statusCode: 200,
       salt: salt
     });
-    
+
   } catch (error) {
     console.error('Error getting salt:', error);
     res.status(500).json({
@@ -3359,32 +3446,32 @@ app.post('/getSalt', async (req, res) => {
  * POST /addBusiness
  */
 app.post("/addBusiness", async function (req, res) {
-  const { 
-    businessName, 
-    businessEmail, 
-    businessPhone, 
-    businessAddress, 
-    businessCity, 
-    businessState, 
+  const {
+    businessName,
+    businessEmail,
+    businessPhone,
+    businessAddress,
+    businessCity,
+    businessState,
     businessZip,
     organizationId,
-    userEmail 
+    userEmail
   } = req.body;
-  
+
   // console.log('Add business called:', businessName, organizationId);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     // Verify user belongs to organization (if organizationId provided)
     if (organizationId && userEmail) {
-      const user = await db.collection("login").findOne({ 
+      const user = await db.collection("login").findOne({
         email: userEmail,
-        organizationId: organizationId 
+        organizationId: organizationId
       });
-      
+
       if (!user) {
         await client.close();
         return res.status(403).json({
@@ -3393,7 +3480,7 @@ app.post("/addBusiness", async function (req, res) {
         });
       }
     }
-    
+
     // Check for duplicate business (same name and email within organization)
     const duplicateQuery = {
       businessName: businessName,
@@ -3401,9 +3488,9 @@ app.post("/addBusiness", async function (req, res) {
       organizationId: organizationId || null,
       isActive: true
     };
-    
+
     const existingBusiness = await db.collection("businesses").findOne(duplicateQuery);
-    
+
     if (existingBusiness) {
       await client.close();
       return res.status(409).json({
@@ -3411,7 +3498,7 @@ app.post("/addBusiness", async function (req, res) {
         message: "Business with this name and email already exists"
       });
     }
-    
+
     // Create business document with organization context
     const businessDoc = {
       _id: new ObjectId(),
@@ -3427,17 +3514,17 @@ app.post("/addBusiness", async function (req, res) {
       createdAt: new Date(),
       isActive: true
     };
-    
+
     const result = await db.collection("businesses").insertOne(businessDoc);
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       message: "Business added successfully",
       businessId: result.insertedId.toString()
     });
-    
+
   } catch (error) {
     console.error('Error adding business:', error);
     res.status(500).json({
@@ -3453,24 +3540,24 @@ app.post("/addBusiness", async function (req, res) {
  */
 app.get("/businesses/:organizationId", async function (req, res) {
   const { organizationId } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const businesses = await db.collection("businesses").find({ 
+
+    const businesses = await db.collection("businesses").find({
       organizationId: organizationId,
-      isActive: true 
+      isActive: true
     }).toArray();
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       businesses: businesses
     });
-    
+
   } catch (error) {
     console.error('Error getting businesses:', error);
     res.status(500).json({
@@ -3489,34 +3576,34 @@ app.get("/businesses/:organizationId", async function (req, res) {
  * POST /addClient
  */
 app.post("/addClient", async function (req, res) {
-  const { 
-    clientFirstName, 
-    clientLastName, 
-    clientEmail, 
-    clientPhone, 
-    clientAddress, 
-    clientCity, 
-    clientState, 
-    clientZip, 
+  const {
+    clientFirstName,
+    clientLastName,
+    clientEmail,
+    clientPhone,
+    clientAddress,
+    clientCity,
+    clientState,
+    clientZip,
     businessName,
     organizationId,
-    userEmail 
+    userEmail
   } = req.body;
-  
+
   // console.log('Add client called:', clientEmail, organizationId);
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     // Verify user belongs to organization (if organizationId provided)
     if (organizationId && userEmail) {
-      const user = await db.collection("login").findOne({ 
+      const user = await db.collection("login").findOne({
         email: userEmail,
-        organizationId: organizationId 
+        organizationId: organizationId
       });
-      
+
       if (!user) {
         await client.close();
         return res.status(403).json({
@@ -3525,7 +3612,7 @@ app.post("/addClient", async function (req, res) {
         });
       }
     }
-    
+
     // Create client document with organization context
     const clientDoc = {
       _id: new ObjectId(),
@@ -3543,17 +3630,17 @@ app.post("/addClient", async function (req, res) {
       createdAt: new Date(),
       isActive: true
     };
-    
+
     const result = await db.collection("clients").insertOne(clientDoc);
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       message: "Client added successfully",
       clientId: result.insertedId.toString()
     });
-    
+
   } catch (error) {
     console.error('Error adding client:', error);
     res.status(500).json({
@@ -3569,24 +3656,24 @@ app.post("/addClient", async function (req, res) {
  */
 app.get("/organization/:organizationId/businesses", async function (req, res) {
   const { organizationId } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const businesses = await db.collection("businesses").find({ 
+
+    const businesses = await db.collection("businesses").find({
       organizationId: organizationId,
-      isActive: true 
+      isActive: true
     }).toArray();
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       businesses: businesses
     });
-    
+
   } catch (error) {
     console.error('Error getting businesses:', error);
     res.status(500).json({
@@ -3602,24 +3689,24 @@ app.get("/organization/:organizationId/businesses", async function (req, res) {
  */
 app.get("/organization/:organizationId/clients", async function (req, res) {
   const { organizationId } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const clients = await db.collection("clients").find({ 
+
+    const clients = await db.collection("clients").find({
       organizationId: organizationId,
-      isActive: true 
+      isActive: true
     }).toArray();
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       clients: clients
     });
-    
+
   } catch (error) {
     console.error('Error getting clients:', error);
     res.status(500).json({
@@ -3635,24 +3722,24 @@ app.get("/organization/:organizationId/clients", async function (req, res) {
  */
 app.get("/clients/:organizationId", async function (req, res) {
   const { organizationId } = req.params;
-  
+
   try {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const clients = await db.collection("clients").find({ 
+
+    const clients = await db.collection("clients").find({
       organizationId: organizationId,
-      isActive: true 
+      isActive: true
     }).toArray();
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       clients: clients
     });
-    
+
   } catch (error) {
     console.error('Error getting clients:', error);
     res.status(500).json({
@@ -3671,18 +3758,18 @@ app.get("/getClients", async function (req, res) {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
-    const clients = await db.collection("clients").find({ 
-      isActive: true 
+
+    const clients = await db.collection("clients").find({
+      isActive: true
     }).toArray();
-    
+
     await client.close();
-    
+
     res.status(200).json({
       statusCode: 200,
       clients: clients
     });
-    
+
   } catch (error) {
     console.error('Error getting clients:', error);
     res.status(500).json({
@@ -3698,34 +3785,34 @@ app.get("/getClients", async function (req, res) {
  */
 app.get("/getMultipleClients/:emails", async function (req, res) {
   let client;
-  
+
   try {
     const emails = req.params.emails;
     // console.log('getMultipleClients called for emails:', emails);
-    
+
     // Split emails if multiple are provided (comma-separated)
     const emailList = emails.split(',').map(email => email.trim());
-    
+
     // Connect to MongoDB
     client = new MongoClient(process.env.MONGODB_URI, {
       serverApi: ServerApiVersion.v1
     });
     await client.connect();
-    
+
     const db = client.db(DB_NAME);
     const collection = db.collection("clients");
-    
+
     // Find clients with matching emails
     const clients = await collection.find({
       clientEmail: { $in: emailList },
       isActive: true
     }).toArray();
-    
+
     // console.log(`Found ${clients.length} clients for emails:`, emailList);
-    
+
     // Return clients as array (expected by frontend)
     res.status(200).json(clients);
-    
+
   } catch (error) {
     console.error('Error in getMultipleClients:', error);
     res.status(500).json({
@@ -3750,10 +3837,10 @@ app.get("/getMultipleClients/:emails", async function (req, res) {
  */
 app.post('/assignClientToUser', async (req, res) => {
   let client;
-  
+
   try {
     const { userEmail, clientEmail, dateList, startTimeList, endTimeList, breakList, ndisItem, highIntensityList, customPricing, scheduleWithNdisItems } = req.body;
-    
+
     // Log all received data for debugging
     console.log('=== BACKEND RECEIVED DATA - assignClientToUser ENDPOINT ===');
     console.log('User Email:', userEmail);
@@ -3774,9 +3861,9 @@ app.post('/assignClientToUser', async (req, res) => {
       });
     }
     console.log('=== END OF BACKEND RECEIVED DATA LOG ===');
-    
+
     // console.log('assignClientToUser called with request body:', JSON.stringify(req.body, null, 2));
-    
+
     // Validate required fields
     if (!userEmail || !clientEmail || !dateList || !startTimeList || !endTimeList || !breakList || !highIntensityList) {
       console.error('Missing required fields in request body');
@@ -3785,17 +3872,17 @@ app.post('/assignClientToUser', async (req, res) => {
         message: 'Missing required fields: userEmail, clientEmail, dateList, startTimeList, endTimeList, breakList, highIntensityList'
       });
     }
-    
+
     // Validate array lengths match
-    if (dateList.length !== startTimeList.length || dateList.length !== endTimeList.length || 
-        dateList.length !== breakList.length || dateList.length !== highIntensityList.length) {
+    if (dateList.length !== startTimeList.length || dateList.length !== endTimeList.length ||
+      dateList.length !== breakList.length || dateList.length !== highIntensityList.length) {
       console.error('Array length mismatch in request body');
       return res.status(400).json({
         success: false,
         message: 'All arrays (dateList, startTimeList, endTimeList, breakList, highIntensityList) must have the same length'
       });
     }
-    
+
     // If scheduleWithNdisItems is provided, validate it matches the array lengths
     if (scheduleWithNdisItems && scheduleWithNdisItems.length !== dateList.length) {
       console.error('scheduleWithNdisItems length mismatch in request body');
@@ -3804,18 +3891,18 @@ app.post('/assignClientToUser', async (req, res) => {
         message: 'scheduleWithNdisItems array must have the same length as other schedule arrays'
       });
     }
-    
+
     // console.log('Validation passed. Processing assignment...');
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Verify client exists
-    const clientExists = await db.collection("clients").findOne({ 
+    const clientExists = await db.collection("clients").findOne({
       clientEmail: clientEmail,
       isActive: true
     });
@@ -3823,7 +3910,7 @@ app.post('/assignClientToUser', async (req, res) => {
     // console.log('Client existence check result:', JSON.stringify(clientExists, null, 2));
 
     if (!clientExists) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
         error: 'Client not found or inactive'
       });
@@ -3890,11 +3977,11 @@ app.post('/assignClientToUser', async (req, res) => {
     if (parsedScheduleWithNdisItems.length > 0 && parsedScheduleWithNdisItems[0].ndisItem) {
       clientNdisItem = parsedScheduleWithNdisItems[0].ndisItem;
     }
-    
+
     if (clientNdisItem) {
       const clientUpdateResult = await db.collection("clients").updateOne(
         { clientEmail: clientEmail },
-        { 
+        {
           $set: {
             ndisItem: clientNdisItem
           }
@@ -3906,31 +3993,31 @@ app.post('/assignClientToUser', async (req, res) => {
     // Get user's organizationId if client doesn't have one
     let organizationId = clientExists.organizationId;
     if (!organizationId) {
-      const user = await db.collection("login").findOne({ 
+      const user = await db.collection("login").findOne({
         email: userEmail,
-        isActive: true 
+        isActive: true
       });
-      
+
       // console.log('User details for organizationId lookup:', JSON.stringify(user, null, 2));
 
       if (user && user.organizationId) {
         organizationId = user.organizationId;
-        
+
         // Update the client record with the organizationId
         const orgIdUpdateResult = await db.collection("clients").updateOne(
           { _id: clientExists._id },
-          { 
+          {
             $set: {
               organizationId: organizationId,
               updatedAt: new Date()
             }
           }
         );
-  
+
         // console.log(`Updated client ${clientEmail} with organizationId: ${organizationId}. Result:`, JSON.stringify(orgIdUpdateResult, null, 2));
       }
     }
-    
+
     // Create assignment data with support for multiple NDIS items per schedule entry
     console.log('=== CONSTRUCTING SCHEDULE DATA ===');
     const scheduleData = dateList.map((date, i) => {
@@ -3943,7 +4030,7 @@ app.post('/assignClientToUser', async (req, res) => {
         highIntensity: highIntensityList[i],
       };
       console.log(`Base schedule entry ${i}:`, JSON.stringify(scheduleEntry, null, 2));
-      
+
       // Use individual NDIS item if provided, otherwise fall back to the single ndisItem
       if (parsedScheduleWithNdisItems.length > i && parsedScheduleWithNdisItems[i].ndisItem) {
         scheduleEntry.ndisItem = parsedScheduleWithNdisItems[i].ndisItem;
@@ -3954,13 +4041,13 @@ app.post('/assignClientToUser', async (req, res) => {
       } else {
         console.log(`No NDIS item for schedule entry ${i}`);
       }
-      
+
       console.log(`Final schedule entry ${i}:`, JSON.stringify(scheduleEntry, null, 2));
       return scheduleEntry;
     });
     console.log('Final scheduleData:', JSON.stringify(scheduleData, null, 2));
     console.log('=== END CONSTRUCTING SCHEDULE DATA ===');
-    
+
     const assignmentData = {
       userEmail: userEmail,
       clientEmail: clientEmail,
@@ -3971,7 +4058,7 @@ app.post('/assignClientToUser', async (req, res) => {
       createdAt: new Date(),
       isActive: true
     };
-    
+
     // console.log('Assignment data before insertion/update:', JSON.stringify(assignmentData, null, 2));
 
     // Check if assignment already exists
@@ -3994,36 +4081,36 @@ app.post('/assignClientToUser', async (req, res) => {
           break: breakList[i],
           highIntensity: highIntensityList[i],
         };
-        
+
         // Use individual NDIS item if provided, otherwise fall back to the single ndisItem
         if (parsedScheduleWithNdisItems.length > i && parsedScheduleWithNdisItems[i].ndisItem) {
           scheduleEntry.ndisItem = parsedScheduleWithNdisItems[i].ndisItem;
         } else if (parsedNdisItem) {
           scheduleEntry.ndisItem = parsedNdisItem;
         }
-        
+
         return scheduleEntry;
       });
-      
+
       // console.log('New schedules to be added/updated:', JSON.stringify(newSchedules, null, 2));
-      
+
       // Get existing schedule array or initialize empty array
       const existingSchedules = existingAssignment.schedule || [];
       // console.log('Existing schedules count:', existingSchedules.length);
-      
+
       // Update existing schedules and add new ones
       const combinedSchedules = [...existingSchedules];
       let updatedCount = 0;
       let addedCount = 0;
-      
+
       newSchedules.forEach(newSchedule => {
         // Check for time conflicts with existing schedules on the same date
-        const conflictingScheduleIndex = combinedSchedules.findIndex(existingSchedule => 
+        const conflictingScheduleIndex = combinedSchedules.findIndex(existingSchedule =>
           existingSchedule.date === newSchedule.date &&
           existingSchedule.startTime === newSchedule.startTime &&
           existingSchedule.endTime === newSchedule.endTime
         );
-        
+
         if (conflictingScheduleIndex > -1) {
           // Update existing schedule with exact same time
           // console.log(`Updating existing schedule for date: ${newSchedule.date} at ${newSchedule.startTime}-${newSchedule.endTime}`);
@@ -4036,16 +4123,16 @@ app.post('/assignClientToUser', async (req, res) => {
           addedCount++;
         }
       });
-      
+
       // console.log(`Schedule processing complete. Updated: ${updatedCount}, Added: ${addedCount}, Total: ${combinedSchedules.length}`);
-      
+
       // console.log('Combined schedules for update:', JSON.stringify(combinedSchedules, null, 2));
 
       const updateResult = await db.collection("clientAssignments").updateOne(
-        { 
+        {
           _id: existingAssignment._id
         },
-        { 
+        {
           $set: {
             schedule: combinedSchedules,
             updatedAt: new Date()
@@ -4071,10 +4158,10 @@ app.post('/assignClientToUser', async (req, res) => {
       }
       finalAssignmentId = insertResult.insertedId;
     }
-    
+
     // Handle custom pricing for each schedule entry with NDIS items
     const customPricingPromises = [];
-    
+
     console.log('=== PROCESSING CUSTOM PRICING ===');
     // Process custom pricing from the new format (scheduleWithNdisItems)
     console.log('DEBUG: scheduleWithNdisItems received:', JSON.stringify(parsedScheduleWithNdisItems, null, 2));
@@ -4083,21 +4170,21 @@ app.post('/assignClientToUser', async (req, res) => {
       for (let i = 0; i < parsedScheduleWithNdisItems.length; i++) {
         const scheduleItem = parsedScheduleWithNdisItems[i];
         console.log(`DEBUG: Checking schedule item ${i} for custom pricing:`, JSON.stringify(scheduleItem, null, 2));
-        
+
         if (scheduleItem.ndisItem) {
           console.log(`DEBUG: Schedule item ${i} has NDIS item:`, JSON.stringify(scheduleItem.ndisItem, null, 2));
-          
+
           if (scheduleItem.customPricing) {
             console.log(`DEBUG: Schedule item ${i} has custom pricing:`, JSON.stringify(scheduleItem.customPricing, null, 2));
-            
+
             if (scheduleItem.customPricing.isCustom) {
               console.log(`DEBUG: Processing custom pricing for schedule ${i} - Price: ${scheduleItem.customPricing.price}, Type: ${scheduleItem.customPricing.pricingType}`);
               customPricingPromises.push(processCustomPricing(
-                db, 
-                scheduleItem.customPricing, 
-                scheduleItem.ndisItem, 
-                organizationId, 
-                clientExists, 
+                db,
+                scheduleItem.customPricing,
+                scheduleItem.ndisItem,
+                organizationId,
+                clientExists,
                 userEmail
               ));
             } else {
@@ -4113,20 +4200,20 @@ app.post('/assignClientToUser', async (req, res) => {
     } else {
       console.log('DEBUG: No scheduleWithNdisItems received or empty array');
     }
-    
+
     // Process custom pricing from the legacy format (single ndisItem with customPricing)
     if (extractedCustomPricing && extractedCustomPricing.isCustom && parsedNdisItem) {
       console.log('Processing legacy custom pricing:', JSON.stringify(extractedCustomPricing, null, 2));
       customPricingPromises.push(processCustomPricing(
-        db, 
-        extractedCustomPricing, 
-        parsedNdisItem, 
-        organizationId, 
-        clientExists, 
+        db,
+        extractedCustomPricing,
+        parsedNdisItem,
+        organizationId,
+        clientExists,
         userEmail
       ));
     }
-    
+
     // Execute all custom pricing operations
     console.log(`DEBUG: Total custom pricing promises to execute: ${customPricingPromises.length}`);
     if (customPricingPromises.length > 0) {
@@ -4141,32 +4228,32 @@ app.post('/assignClientToUser', async (req, res) => {
       console.log('DEBUG: No custom pricing to process');
     }
     console.log('=== END PROCESSING CUSTOM PRICING ===');
-    
-    const responseData = { 
-      success: true, 
+
+    const responseData = {
+      success: true,
       message: existingAssignment ? 'Assignment updated successfully' : 'Assignment created successfully',
       assignmentId: finalAssignmentId
     };
-    
+
     // console.log('Sending success response:', JSON.stringify(responseData, null, 2));
     res.status(200).json(responseData);
   } catch (error) {
     console.error('Error in assignClientToUser:', error);
     console.error('Error stack:', error.stack);
-    
+
     // Provide more specific error messages based on error type
     if (error.name === 'MongoError' || error.name === 'MongoServerError') {
       console.error('MongoDB error details:', error.code, error.message);
-      res.status(500).json({ 
-        success: false, 
-        message: 'Database error occurred', 
+      res.status(500).json({
+        success: false,
+        message: 'Database error occurred',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined,
         code: error.code
       });
     } else if (error.message && error.message.includes('not found')) {
-      res.status(404).json({ 
-        success: false, 
-        message: error.message 
+      res.status(404).json({
+        success: false,
+        message: error.message
       });
     } else {
       res.status(500).json({
@@ -4189,17 +4276,17 @@ app.post('/assignClientToUser', async (req, res) => {
  */
 app.get('/getUserAssignments/:userEmail', async (req, res) => {
   let client;
-  
+
   try {
     const { userEmail } = req.params;
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get assignments with client details
     const assignments = await db.collection("clientAssignments").aggregate([
       {
@@ -4220,12 +4307,12 @@ app.get('/getUserAssignments/:userEmail', async (req, res) => {
         $unwind: "$clientDetails"
       }
     ]).toArray();
-    
+
     res.status(200).json({
       success: true,
       assignments: assignments
     });
-    
+
   } catch (error) {
     console.error('Error getting user assignments:', error);
     res.status(500).json({
@@ -4245,19 +4332,19 @@ app.get('/getUserAssignments/:userEmail', async (req, res) => {
  */
 app.get('/loadAppointments/:email', async (req, res) => {
   let client;
-  
+
   try {
     const { email } = req.params;
-    
+
     // console.log('Loading appointments for user:', email);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get appointments (client assignments) with client details for the specific user
     const appointments = await db.collection("clientAssignments").aggregate([
       {
@@ -4347,15 +4434,15 @@ app.get('/loadAppointments/:email', async (req, res) => {
         }
       }
     ]).toArray();
-    
+
     // console.log(`Found ${appointments.length} appointments for user ${email}`);
-    
+
     // Return data in the format expected by the frontend
     res.status(200).json({
       success: true,
       data: appointments
     });
-    
+
   } catch (error) {
     console.error('Error loading appointments:', error);
     res.status(500).json({
@@ -4376,19 +4463,19 @@ app.get('/loadAppointments/:email', async (req, res) => {
  */
 app.get('/loadAppointmentDetails/:userEmail/:clientEmail', async (req, res) => {
   let client;
-  
+
   try {
     const { userEmail, clientEmail } = req.params;
-    
+
     // console.log('Loading appointment details for:', { userEmail, clientEmail });
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get the specific appointment assignment with client details
     const appointmentDetails = await db.collection("clientAssignments").aggregate([
       {
@@ -4474,18 +4561,18 @@ app.get('/loadAppointmentDetails/:userEmail/:clientEmail', async (req, res) => {
         }
       }
     ]).toArray();
-    
+
     if (appointmentDetails.length === 0) {
       return res.status(404).json({
         success: false,
         error: 'No appointment found for this user-client combination'
       });
     }
-    
+
     const appointment = appointmentDetails[0];
-    
+
     // console.log(`Found appointment details for ${userEmail} - ${clientEmail}`);
-    
+
     // Return data in the format expected by the frontend
     res.status(200).json({
       success: true,
@@ -4494,7 +4581,7 @@ app.get('/loadAppointmentDetails/:userEmail/:clientEmail', async (req, res) => {
         clientDetails: [appointment.clientDetails]
       }
     });
-    
+
   } catch (error) {
     console.error('Error loading appointment details:', error);
     res.status(500).json({
@@ -4514,19 +4601,19 @@ app.get('/loadAppointmentDetails/:userEmail/:clientEmail', async (req, res) => {
  */
 app.get('/getOrganizationAssignments/:organizationId', async (req, res) => {
   let client;
-  
+
   try {
     const { organizationId } = req.params;
-    
+
     // console.log('Getting assignments for organization:', organizationId);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get assignments with client details for the organization
     const assignments = await db.collection("clientAssignments").aggregate([
       {
@@ -4608,14 +4695,14 @@ app.get('/getOrganizationAssignments/:organizationId', async (req, res) => {
         }
       }
     ]).toArray();
-    
+
     // console.log(`Found ${assignments.length} assignments for organization ${organizationId}`);
-    
+
     res.status(200).json({
       success: true,
       assignments: assignments
     });
-    
+
   } catch (error) {
     console.error('Error getting organization assignments:', error);
     res.status(500).json({
@@ -4635,17 +4722,17 @@ app.get('/getOrganizationAssignments/:organizationId', async (req, res) => {
  */
 app.delete('/removeClientAssignment', async (req, res) => {
   let client;
-  
+
   try {
     const { userEmail, clientEmail } = req.body;
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Soft delete assignment
     const result = await db.collection("clientAssignments").updateOne(
       {
@@ -4660,19 +4747,19 @@ app.delete('/removeClientAssignment', async (req, res) => {
         }
       }
     );
-    
+
     if (result.matchedCount === 0) {
       return res.status(404).json({
         success: false,
         error: 'Assignment not found'
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: 'Assignment removed successfully'
     });
-    
+
   } catch (error) {
     console.error('Error removing assignment:', error);
     res.status(500).json({
@@ -4696,11 +4783,11 @@ app.delete('/removeClientAssignment', async (req, res) => {
  */
 app.post('/sendOTP', async (req, res) => {
   const { email, clientEncryptionKey } = req.body;
-  
+
   try {
     const { otp, verificationKey } = await sendOtpEmail(email, clientEncryptionKey);
     // console.log('Send OTP called', otp);
-    
+
     res.status(200).json({
       statusCode: 200,
       message: 'OTP sent successfully',
@@ -4763,14 +4850,14 @@ app.post('/updatePassword', async (req, res) => {
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     const result = await db.collection("login").updateOne(
       { email: email },
       { $set: { password: newPassword, updatedAt: new Date() } }
     );
-    
+
     await client.close();
-    
+
     if (result.matchedCount > 0) {
       res.status(200).json({
         statusCode: 200,
@@ -4782,7 +4869,7 @@ app.post('/updatePassword', async (req, res) => {
         message: 'User not found'
       });
     }
-    
+
   } catch (error) {
     console.error('Error updating password:', error);
     res.status(500).json({
@@ -4810,17 +4897,17 @@ let startTime;
  */
 app.post('/startTimer', async (req, res) => {
   // console.log('Legacy start timer called - redirecting to new implementation');
-  
+
   // For backward compatibility, we'll use default values if not provided
   const requestBody = {
     userEmail: req.body.userEmail || 'legacy@user.com',
     clientEmail: req.body.clientEmail || 'legacy@client.com',
     organizationId: req.body.organizationId || 'legacy-org'
   };
-  
+
   // Create a new request object with the body
   const newReq = { body: requestBody };
-  
+
   // Call the new implementation
   await startTimerWithTracking(newReq, res);
 });
@@ -4831,16 +4918,16 @@ app.post('/startTimer', async (req, res) => {
  */
 app.post('/stopTimer', async (req, res) => {
   // console.log('Legacy stop timer called - redirecting to new implementation');
-  
+
   // For backward compatibility, we'll use default values if not provided
   const requestBody = {
     userEmail: req.body.userEmail || 'legacy@user.com',
     organizationId: req.body.organizationId || 'legacy-org'
   };
-  
+
   // Create a new request object with the body
   const newReq = { body: requestBody };
-  
+
   // Call the new implementation
   await stopTimerWithTracking(newReq, res);
 });
@@ -4869,7 +4956,7 @@ app.get('/getActiveTimers/:organizationId', getActiveTimers);
  */
 app.post('/setWorkedTime', async (req, res) => {
   let client;
-  
+
   try {
     const {
       'User-Email': userEmail,
@@ -4877,9 +4964,9 @@ app.post('/setWorkedTime', async (req, res) => {
       'TimeList': timeList,
       shiftIndex
     } = req.body;
-    
+
     // console.log('setWorkedTime called for:', userEmail, clientEmail, timeList, shiftIndex);
-    
+
     // Validate required fields
     if (!userEmail || !clientEmail || !timeList) {
       return res.status(400).json({
@@ -4887,34 +4974,34 @@ app.post('/setWorkedTime', async (req, res) => {
         message: 'Missing required fields: User-Email, Client-Email, TimeList'
       });
     }
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Find the assigned client record
     const assignedClient = await db.collection("clientAssignments").findOne({
       userEmail: userEmail,
       clientEmail: clientEmail,
       isActive: true
     });
-    
+
     if (!assignedClient) {
       return res.status(404).json({
         success: false,
         message: 'Assigned client not found'
       });
     }
-    
+
     // Get shift details from the assigned client record
     let shiftDate = null;
     let shiftStartTime = null;
     let shiftEndTime = null;
     let shiftBreak = null;
-    
+
     // Extract shift details based on shiftIndex
     if (assignedClient.schedule && assignedClient.schedule.length > shiftIndex) {
       // Use new schedule array format
@@ -4930,7 +5017,7 @@ app.post('/setWorkedTime', async (req, res) => {
       shiftEndTime = assignedClient.endTimeList ? assignedClient.endTimeList[shiftIndex] : null;
       shiftBreak = assignedClient.breakList ? assignedClient.breakList[shiftIndex] : null;
     }
-    
+
     // Create worked time record with specific shift details
     const workedTimeRecord = {
       userEmail: userEmail,
@@ -4948,10 +5035,10 @@ app.post('/setWorkedTime', async (req, res) => {
       createdAt: new Date(),
       isActive: true
     };
-    
+
     // Insert the worked time record
     const result = await db.collection("workedTime").insertOne(workedTimeRecord);
-    
+
     res.status(200).json({
       success: true,
       message: 'Worked time saved successfully',
@@ -4960,10 +5047,10 @@ app.post('/setWorkedTime', async (req, res) => {
         timeWorked: timeList
       }
     });
-    
+
   } catch (error) {
     console.error('Error saving worked time:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: 'Error saving worked time: ' + error.message
     });
@@ -4985,19 +5072,19 @@ app.post('/setWorkedTime', async (req, res) => {
  */
 app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
   let client;
-  
+
   try {
     const { organizationId } = req.params;
-    
+
     // console.log('Getting employee tracking data for organization:', organizationId);
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get all active assignments for the organization
     const assignments = await db.collection("clientAssignments").aggregate([
       {
@@ -5029,7 +5116,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         $unwind: "$userDetails"
       }
     ]).toArray();
-    
+
     // Get worked time records for the organization
     let workedTimeRecords = await db.collection("workedTime").aggregate([
       {
@@ -5075,17 +5162,17 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         $sort: { createdAt: -1 }
       }
     ]).toArray();
-    
+
     // If no worked time records found, create sample data for demonstration
     if (workedTimeRecords.length === 0 && assignments.length > 0) {
       // console.log('No worked time records found, creating sample shift data...');
-      
+
       // Create sample shift data using existing assignments
       const sampleShifts = [];
-      
+
       for (let i = 0; i < Math.min(assignments.length, 2); i++) {
         const assignment = assignments[i];
-        
+
         // Add a completed shift for today
         sampleShifts.push({
           userEmail: assignment.userEmail,
@@ -5101,9 +5188,9 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
           createdAt: new Date(),
           _id: `sample_${Date.now()}_${i + 1}`
         });
-        
+
         // Add a completed shift for yesterday
-        const yesterday = new Date(Date.now() - 24*60*60*1000);
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
         sampleShifts.push({
           userEmail: assignment.userEmail,
           userDetails: assignment.userDetails,
@@ -5119,11 +5206,11 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
           _id: `sample_${Date.now()}_${i + 2}`
         });
       }
-      
+
       workedTimeRecords = sampleShifts;
       // console.log(`Created ${sampleShifts.length} sample shifts for demonstration`);
     }
-    
+
     // Get currently active timers from database
     // console.log('DEBUG: Querying activeTimers for organizationId:', organizationId);
     const activeTimers = await db.collection('activeTimers').find({
@@ -5131,7 +5218,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
     }).toArray();
     // console.log('DEBUG: Found active timers count:', activeTimers.length);
     // console.log('DEBUG: Active timers data:', JSON.stringify(activeTimers, null, 2));
-    
+
     // Process the data to create employee tracking summary
     const employeeTrackingData = {
       totalEmployees: assignments.length,
@@ -5179,12 +5266,12 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
         totalShiftsCompleted: workedTimeRecords.length
       }
     };
-    
+
     res.status(200).json({
       success: true,
       data: employeeTrackingData
     });
-    
+
   } catch (error) {
     console.error('Error getting employee tracking data:', error);
     res.status(500).json({
@@ -5212,18 +5299,18 @@ app.get("/getUsers/", async (req, res) => {
     client = new MongoClient(process.env.MONGODB_URI, {
       serverApi: ServerApiVersion.v1,
     });
-    
+
     await client.connect();
     const db = client.db(DB_NAME);
-    
+
     // Query all users from the login collection
     const users = await db.collection("login").find({}).toArray();
-    
+
     // If no users found, return an empty array
     if (!users || users.length === 0) {
       return res.status(200).json([]);
     }
-    
+
     // Map the users to the expected format
     const formattedUsers = users.map(user => ({
       firstName: user.firstName || "",
@@ -5231,7 +5318,7 @@ app.get("/getUsers/", async (req, res) => {
       email: user.email || "",
       password: user.password || ""
     }));
-    
+
     // Return the formatted users
     res.status(200).json(formattedUsers);
   } catch (error) {
@@ -5245,29 +5332,29 @@ app.get("/getUsers/", async (req, res) => {
   }
 });
 
-app.get("/getHolidays", async (req, res) => { 
+app.get("/getHolidays", async (req, res) => {
   let client;
   try {
     // Connect to MongoDB 
-    client = await MongoClient.connect(uri, { 
-      serverApi: ServerApiVersion.v1 
+    client = await MongoClient.connect(uri, {
+      serverApi: ServerApiVersion.v1
     });
-    
-    const db = client.db(DB_NAME); 
-    const collection = db.collection("holidaysList"); 
+
+    const db = client.db(DB_NAME);
+    const collection = db.collection("holidaysList");
 
     // Find all documents in the collection 
     const holidays = await collection.find().toArray();
-    
+
     // Return the holidays
-    res.status(200).json(holidays); 
-  } catch (err) { 
-    console.error("Error in getHolidays endpoint: ", err); 
-    res.status(500).json({ 
+    res.status(200).json(holidays);
+  } catch (err) {
+    console.error("Error in getHolidays endpoint: ", err);
+    res.status(500).json({
       success: false,
       message: "Internal Server Error",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    }); 
+    });
   } finally {
     // Ensure client is closed even if an error occurs
     if (client) {
@@ -5280,23 +5367,23 @@ app.get("/getHolidays", async (req, res) => {
  * Upload CSV data from GitHub to MongoDB
  * Fetches holiday data from a remote CSV file and stores it in the database
  */
-app.post("/uploadCSV", async (req, res) => { 
+app.post("/uploadCSV", async (req, res) => {
   let client;
   try {
     // Create a promise to handle the CSV parsing
     const holidaysPromise = new Promise((resolve, reject) => {
       const holidays = [];
-      
+
       // Send an HTTP GET request to the remote CSV file
       // Using a specific GitHub raw URL for security
       const csvUrl = "https://raw.githubusercontent.com/BishalBudhathoki/backend_rest_api/main/holiday.csv";
-      
+
       https.get(csvUrl, (response) => {
         // Check if the response is successful
         if (response.statusCode !== 200) {
           return reject(new Error(`Failed to fetch CSV: ${response.statusCode}`));
         }
-        
+
         // Pipe the response data to csv.parse
         response
           .pipe(csv())
@@ -5305,10 +5392,10 @@ app.post("/uploadCSV", async (req, res) => {
             const updatedData = {};
             Object.keys(data).forEach((key) => {
               // Sanitize keys by replacing null bytes with underscores
-              const updatedKey = key.replace(/\0/g, "_"); 
+              const updatedKey = key.replace(/\0/g, "_");
               updatedData[updatedKey] = data[key];
             });
-            
+
             holidays.push(updatedData);
           })
           .on("end", () => {
@@ -5324,30 +5411,30 @@ app.post("/uploadCSV", async (req, res) => {
         reject(err);
       });
     });
-    
+
     // Wait for the CSV parsing to complete
     const holidays = await holidaysPromise;
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1,
     });
-    
+
     const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
-    
+
     // Delete existing data and insert new data
     await collection.deleteMany({});
     const result = await collection.insertMany(holidays);
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       success: true,
       message: "Upload successful",
-      count: result.insertedCount 
+      count: result.insertedCount
     });
   } catch (err) {
     console.error("Error in uploadCSV endpoint: ", err);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Internal Server Error",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
@@ -5368,41 +5455,41 @@ app.delete("/deleteHoliday/:id", async (req, res) => {
   let client;
   try {
     const id = req.params.id;
-    
+
     // Validate the ID format
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid holiday ID format" 
+      return res.status(400).json({
+        success: false,
+        message: "Invalid holiday ID format"
       });
     }
-    
+
     // Connect to MongoDB
-    client = await MongoClient.connect(uri, { 
-      serverApi: ServerApiVersion.v1 
+    client = await MongoClient.connect(uri, {
+      serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
 
     // Delete the document with the given ID
     const result = await collection.deleteOne({ _id: new ObjectId(id) });
-    
+
     if (result.deletedCount === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Holiday not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Holiday not found"
       });
     }
-    
-    res.status(200).json({ 
-      success: true, 
-      message: "Delete successful" 
+
+    res.status(200).json({
+      success: true,
+      message: "Delete successful"
     });
   } catch (err) {
     console.error("Error in deleteHoliday endpoint: ", err);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Internal Server Error",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -5423,54 +5510,54 @@ app.post("/addHolidayItem", async (req, res) => {
   try {
     // Validate required fields
     const { Holiday, Date, Day } = req.body;
-    
+
     if (!Holiday || !Date || !Day) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing required fields" 
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields"
       });
     }
-    
+
     // Validate date format (DD-MM-YYYY)
     const dateRegex = /^\d{2}-\d{2}-\d{4}$/;
     if (!dateRegex.test(Date)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid date format. Use DD-MM-YYYY" 
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format. Use DD-MM-YYYY"
       });
     }
-    
+
     const newHoliday = { Holiday, Date, Day };
-    
+
     // Connect to MongoDB
-    client = await MongoClient.connect(uri, { 
-      serverApi: ServerApiVersion.v1 
+    client = await MongoClient.connect(uri, {
+      serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
 
     // Check if holiday already exists on the same date
     const existingHoliday = await collection.findOne({ Date });
     if (existingHoliday) {
-      return res.status(409).json({ 
-        success: false, 
-        message: "A holiday already exists on this date" 
+      return res.status(409).json({
+        success: false,
+        message: "A holiday already exists on this date"
       });
     }
-    
+
     // Insert the new holiday
     const result = await collection.insertOne(newHoliday);
-    
-    res.status(200).json({ 
-      success: true, 
+
+    res.status(200).json({
+      success: true,
       message: "Holiday item added successfully",
-      id: result.insertedId 
+      id: result.insertedId
     });
   } catch (err) {
     console.error("Error in addHolidayItem endpoint: ", err);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Internal Server Error",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -5488,77 +5575,77 @@ app.post("/addHolidayItem", async (req, res) => {
  */
 app.post('/fixClientOrganizationId', async (req, res) => {
   let client;
-  
+
   try {
     const { userEmail, organizationId } = req.body;
-    
+
     // console.log('Fixing client organizationId for user:', userEmail, 'org:', organizationId);
-    
+
     if (!userEmail || !organizationId) {
       return res.status(400).json({
         success: false,
         error: 'userEmail and organizationId are required'
       });
     }
-    
+
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Verify user belongs to organization
-    const user = await db.collection("login").findOne({ 
+    const user = await db.collection("login").findOne({
       email: userEmail,
       organizationId: organizationId,
       isActive: true
     });
-    
+
     if (!user) {
       return res.status(403).json({
         success: false,
         error: 'User not authorized for this organization'
       });
     }
-    
+
     // Update clients that have null organizationId and were created by this user
     const clientUpdateResult = await db.collection("clients").updateMany(
-      { 
+      {
         createdBy: userEmail,
         organizationId: null,
         isActive: true
       },
-      { 
+      {
         $set: {
           organizationId: organizationId,
           updatedAt: new Date()
         }
       }
     );
-    
+
     // Update client assignments that have null organizationId for this user
     const assignmentUpdateResult = await db.collection("clientAssignments").updateMany(
-      { 
+      {
         userEmail: userEmail,
         organizationId: null,
         isActive: true
       },
-      { 
+      {
         $set: {
           organizationId: organizationId,
           updatedAt: new Date()
         }
       }
     );
-    
+
     res.status(200).json({
       success: true,
       message: 'Organization ID fixed successfully',
       clientsUpdated: clientUpdateResult.modifiedCount,
       assignmentsUpdated: assignmentUpdateResult.modifiedCount
     });
-    
+
   } catch (error) {
     console.error('Error fixing organizationId:', error);
     res.status(500).json({
@@ -5635,38 +5722,38 @@ app.post("/check-holidays", async (req, res) => {
   try {
     // Validate input
     const { dateList } = req.body;
-    
+
     if (!dateList) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing dateList parameter" 
+      return res.status(400).json({
+        success: false,
+        message: "Missing dateList parameter"
       });
     }
-    
+
     const dates = dateList.split(",");
-    
+
     // Connect to MongoDB
-    client = await MongoClient.connect(uri, { 
-      serverApi: ServerApiVersion.v1 
+    client = await MongoClient.connect(uri, {
+      serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
     const collection = db.collection("holidaysList");
-    
+
     // Find holidays matching the dates
     const query = { Date: { $in: dates } };
     const holidays = await collection.find(query).toArray();
-    
+
     // Create result array with "Holiday" or "No Holiday" for each date
-    const holidayStatusList = dates.map(date => 
+    const holidayStatusList = dates.map(date =>
       holidays.find(holiday => holiday.Date === date) ? "Holiday" : "No Holiday"
     );
-    
+
     res.status(200).json(holidayStatusList);
   } catch (err) {
     console.error("Error in check-holidays endpoint: ", err);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Internal Server Error",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -5825,7 +5912,7 @@ app.get('/custom-price-organization/:ndisItemNumber', async (req, res) => {
   try {
     const { ndisItemNumber } = req.params;
     const organizationId = req.headers['organization-id'];
-    
+
     if (!organizationId) {
       return res.status(400).json({
         success: false,
@@ -5838,7 +5925,7 @@ app.get('/custom-price-organization/:ndisItemNumber', async (req, res) => {
       params: { organizationId, supportItemNumber: ndisItemNumber },
       query: {} // No clientId for organization-level pricing
     };
-    
+
     const mockRes = {
       status: (code) => ({
         json: (data) => {
@@ -5856,7 +5943,7 @@ app.get('/custom-price-organization/:ndisItemNumber', async (req, res) => {
         }
       })
     };
-    
+
     await getPricingLookup(lookupReq, mockRes);
   } catch (error) {
     console.error('Error getting organization custom price:', error);
@@ -5875,7 +5962,7 @@ app.get('/custom-price-client/:ndisItemNumber/:clientId', async (req, res) => {
   try {
     const { ndisItemNumber, clientId } = req.params;
     const organizationId = req.headers['organization-id'];
-    
+
     if (!organizationId) {
       return res.status(400).json({
         success: false,
@@ -5888,7 +5975,7 @@ app.get('/custom-price-client/:ndisItemNumber/:clientId', async (req, res) => {
       params: { organizationId, supportItemNumber: ndisItemNumber },
       query: { clientId } // Include clientId for client-specific pricing
     };
-    
+
     const mockRes = {
       status: (code) => ({
         json: (data) => {
@@ -5906,7 +5993,7 @@ app.get('/custom-price-client/:ndisItemNumber/:clientId', async (req, res) => {
         }
       })
     };
-    
+
     await getPricingLookup(lookupReq, mockRes);
   } catch (error) {
     console.error('Error getting client custom price:', error);
@@ -5924,18 +6011,18 @@ app.get('/custom-price-client/:ndisItemNumber/:clientId', async (req, res) => {
 app.post('/save-custom-price-organization', async (req, res) => {
   try {
     const { ndisItemNumber, price, notes, metadata } = req.body;
-    
+
     // Get user info from session or token (simplified for now)
     const userEmail = req.headers['user-email'] || 'system@example.com';
     const organizationId = req.headers['organization-id'] || metadata?.organizationId;
-    
+
     if (!organizationId) {
       return res.status(400).json({
         success: false,
         message: 'Organization ID is required'
       });
     }
-    
+
     // Transform to new API format
     const transformedReq = {
       ...req,
@@ -5952,7 +6039,7 @@ app.post('/save-custom-price-organization', async (req, res) => {
         notes: notes
       }
     };
-    
+
     await createCustomPricing(transformedReq, res);
   } catch (error) {
     console.error('Error in save-custom-price-organization:', error);
@@ -5970,18 +6057,18 @@ app.post('/save-custom-price-organization', async (req, res) => {
 app.post('/save-custom-price-client', async (req, res) => {
   try {
     const { ndisItemNumber, clientId, price, notes, metadata } = req.body;
-    
+
     // Get user info from session or token (simplified for now)
     const userEmail = req.headers['user-email'] || 'system@example.com';
     const organizationId = req.headers['organization-id'] || metadata?.organizationId;
-    
+
     if (!organizationId) {
       return res.status(400).json({
         success: false,
         message: 'Organization ID is required'
       });
     }
-    
+
     // Transform to new API format
     const transformedReq = {
       ...req,
@@ -5999,7 +6086,7 @@ app.post('/save-custom-price-client', async (req, res) => {
         notes: notes
       }
     };
-    
+
     await createCustomPricing(transformedReq, res);
   } catch (error) {
     console.error('Error in save-custom-price-client:', error);
@@ -6075,8 +6162,8 @@ app.get('/api/expenses/:expenseId', async (req, res) => {
     res.status(result.statusCode || 200).json(result);
   } catch (error) {
     console.error('Error getting expense by ID:', error);
-    const statusCode = error.message.includes('not found') ? 404 : 
-                      error.message.includes('Invalid') ? 400 : 500;
+    const statusCode = error.message.includes('not found') ? 404 :
+      error.message.includes('Invalid') ? 400 : 500;
     res.status(statusCode).json({
       statusCode,
       message: error.message || 'Error retrieving expense record'
@@ -6095,9 +6182,9 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
     res.status(result.statusCode || 200).json(result);
   } catch (error) {
     console.error('Error updating expense:', error);
-    const statusCode = error.message.includes('not found') ? 404 : 
-                      error.message.includes('not authorized') ? 403 :
-                      error.message.includes('Invalid') ? 400 : 500;
+    const statusCode = error.message.includes('not found') ? 404 :
+      error.message.includes('not authorized') ? 403 :
+        error.message.includes('Invalid') ? 400 : 500;
     res.status(statusCode).json({
       statusCode,
       message: error.message || 'Error updating expense record'
@@ -6117,9 +6204,9 @@ app.delete('/api/expenses/:expenseId', async (req, res) => {
     res.status(result.statusCode || 200).json(result);
   } catch (error) {
     console.error('Error deleting expense:', error);
-    const statusCode = error.message.includes('not found') ? 404 : 
-                      error.message.includes('not authorized') ? 403 :
-                      error.message.includes('Invalid') ? 400 : 500;
+    const statusCode = error.message.includes('not found') ? 404 :
+      error.message.includes('not authorized') ? 403 :
+        error.message.includes('Invalid') ? 400 : 500;
     res.status(statusCode).json({
       statusCode,
       message: error.message || 'Error deleting expense record'
@@ -6138,9 +6225,9 @@ app.put('/api/expenses/:expenseId/approval', async (req, res) => {
     res.status(result.statusCode || 200).json(result);
   } catch (error) {
     console.error('Error updating expense approval:', error);
-    const statusCode = error.message.includes('not found') ? 404 : 
-                      error.message.includes('not authorized') ? 403 :
-                      error.message.includes('Invalid') ? 400 : 500;
+    const statusCode = error.message.includes('not found') ? 404 :
+      error.message.includes('not authorized') ? 403 :
+        error.message.includes('Invalid') ? 400 : 500;
     res.status(statusCode).json({
       statusCode,
       message: error.message || 'Error updating approval status'
@@ -6159,7 +6246,7 @@ app.post('/api/expenses/bulk-import', async (req, res) => {
   } catch (error) {
     console.error('Error bulk importing expenses:', error);
     const statusCode = error.message.includes('not authorized') ? 403 :
-                      error.message.includes('required') ? 400 : 500;
+      error.message.includes('required') ? 400 : 500;
     res.status(statusCode).json({
       statusCode,
       message: error.message || 'Error performing bulk import'
@@ -6342,20 +6429,20 @@ app.get('/api/invoice/preview/:userEmail/:clientEmail', getInvoicePreview);
  */
 app.get('/assigned-client-data', async (req, res) => {
   let client;
-  
+
   try {
     // Connect to MongoDB
     client = await MongoClient.connect(uri, {
       serverApi: ServerApiVersion.v1
     });
-    
+
     const db = client.db(DB_NAME);
-    
+
     // Get all active client assignments
     const assignments = await db.collection("clientAssignments").find({
       isActive: true
     }).toArray();
-    
+
     // Enrich with client details
     const enrichedAssignments = [];
     for (const assignment of assignments) {
@@ -6363,7 +6450,7 @@ app.get('/assigned-client-data', async (req, res) => {
         clientEmail: assignment.clientEmail,
         isActive: true
       });
-      
+
       if (client) {
         enrichedAssignments.push({
           clientEmail: assignment.clientEmail,
@@ -6377,12 +6464,12 @@ app.get('/assigned-client-data', async (req, res) => {
         });
       }
     }
-    
+
     res.status(200).json({
       success: true,
       assignedClientData: enrichedAssignments
     });
-    
+
   } catch (error) {
     console.error('Error getting assigned client data:', error);
     res.status(500).json({
@@ -6612,19 +6699,19 @@ if (process.env.SERVERLESS === 'true') {
 } else if (require.main === module) {
   // Ensure PORT is available for server startup
   const PORT = process.env.PORT || 8080;
-  
+
   // Start server with Firebase verification
   console.log(`🚀 Starting ${environmentConfig.getConfig().app.name}...`);
   console.log(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
   console.log(`📋 Port: ${PORT}`);
-  
+
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`✅ Server is now listening on port ${PORT}`);
     console.log(`🌐 Server URL: http://0.0.0.0:${PORT}`);
     console.log(`🌐 Local URL: http://localhost:${PORT}`);
     console.log(`🌐 Network URL: http://localhost:${PORT}`);
     console.log(`⚙️  Health Check: http://localhost:${PORT}/health`);
-    
+
     try {
       // Verify Firebase messaging is working
       await messaging.send({
@@ -6641,21 +6728,21 @@ if (process.env.SERVERLESS === 'true') {
         timestamp: new Date().toISOString()
       });
       console.log('🔥 Firebase Admin SDK verified and server is ready!');
-      
+
       if (environmentConfig.isDevelopmentEnvironment()) {
         console.log('🟡 Development mode: Detailed logging enabled');
         console.log('🔍 Debug endpoints available');
       } else {
         console.log('🟢 Production mode: Secure logging enabled');
         console.log('🔒 Sensitive data logging disabled');
-        
+
         // Initialize keep-alive service for production (Render platform)
         const serverUrl = process.env.RENDER_EXTERNAL_URL || 'https://more-than-invoice.onrender.com';
         keepAliveService.initialize(serverUrl);
         console.log('🔄 Keep-alive service initialized for Render platform');
         console.log(`🌐 Production URL: ${serverUrl}`);
       }
-      
+
     } catch (error) {
       logger.error('Firebase Messaging verification failed', {
         error: error.message,
@@ -6668,7 +6755,7 @@ if (process.env.SERVERLESS === 'true') {
       });
       console.log('⚠️ Server started but Firebase messaging has issues. Check logs for details.');
     }
-    
+
     // Graceful shutdown handlers
     process.on('SIGINT', () => {
       console.log('\n🛑 Received SIGINT, shutting down gracefully...');
@@ -6677,7 +6764,7 @@ if (process.env.SERVERLESS === 'true') {
       }
       process.exit(0);
     });
-    
+
     process.on('SIGTERM', () => {
       console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
       if (keepAliveService) {
