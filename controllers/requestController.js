@@ -62,6 +62,32 @@ class RequestController {
       });
     }
   }
+
+  async claimRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const { claimantId, claimantName, userEmail } = req.body;
+
+      if (!claimantId || !claimantName || !userEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required fields'
+        });
+      }
+
+      const request = await requestService.claimRequest(requestId, claimantId, claimantName, userEmail);
+      res.status(200).json({
+        success: true,
+        data: request
+      });
+    } catch (error) {
+      logger.error('Error claiming request', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Error claiming request'
+      });
+    }
+  }
 }
 
 module.exports = new RequestController();
