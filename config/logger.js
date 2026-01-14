@@ -96,7 +96,7 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     }),
-    
+
     // Combined logs
     new winston.transports.File({
       filename: path.join(logDir, 'combined.log'),
@@ -104,7 +104,7 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     }),
-    
+
     // Application logs
     new winston.transports.File({
       filename: path.join(logDir, 'application.log'),
@@ -113,7 +113,7 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     }),
-    
+
     // Access logs (for HTTP requests)
     new winston.transports.File({
       filename: path.join(logDir, 'access.log'),
@@ -123,7 +123,7 @@ const logger = winston.createLogger({
       tailable: true
     })
   ],
-  
+
   // Handle uncaught exceptions
   exceptionHandlers: [
     new winston.transports.File({
@@ -132,7 +132,7 @@ const logger = winston.createLogger({
       maxFiles: 3
     })
   ],
-  
+
   // Handle unhandled promise rejections
   rejectionHandlers: [
     new winston.transports.File({
@@ -159,7 +159,7 @@ const createLogMethods = (logger) => {
     info: (message, metadata = {}) => logger.info(message, { metadata }),
     http: (message, metadata = {}) => logger.http(message, { metadata }),
     debug: (message, metadata = {}) => logger.debug(message, { metadata }),
-    
+
     // Specialized logging methods
     request: (req, metadata = {}) => {
       logger.http('HTTP Request', {
@@ -172,7 +172,7 @@ const createLogMethods = (logger) => {
         }
       });
     },
-    
+
     response: (req, res, responseTime, metadata = {}) => {
       logger.http('HTTP Response', {
         metadata: {
@@ -185,7 +185,7 @@ const createLogMethods = (logger) => {
         }
       });
     },
-    
+
     database: (operation, collection, metadata = {}) => {
       logger.info('Database Operation', {
         metadata: {
@@ -195,7 +195,7 @@ const createLogMethods = (logger) => {
         }
       });
     },
-    
+
     auth: (action, userEmail, metadata = {}) => {
       logger.info('Authentication Event', {
         metadata: {
@@ -205,7 +205,7 @@ const createLogMethods = (logger) => {
         }
       });
     },
-    
+
     business: (event, metadata = {}) => {
       logger.info('Business Event', {
         metadata: {
