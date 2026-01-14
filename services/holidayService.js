@@ -1,16 +1,18 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const https = require('https');
 const csv = require('csv-parser');
+const HolidaySchema = require('../models/holidaySchema');
 
 // MongoDB connection URI from environment
 const uri = process.env.MONGODB_URI;
 
 class HolidayService {
   /**
-   * Get all holidays from the database
+   * Get all holidays from the database (Global + Organization Specific)
+   * @param {string} organizationId - Optional organization ID to filter custom holidays
    * @returns {Promise<Array>} Array of holiday objects
    */
-  static async getAllHolidays() {
+  static async getAllHolidays(organizationId = null) {
     let client;
     try {
       client = await MongoClient.connect(uri, { 
@@ -20,7 +22,17 @@ class HolidayService {
       const db = client.db("Invoice"); 
       const collection = db.collection("holidaysList"); 
 
-      const holidays = await collection.find().toArray();
+      // Filter: Public holidays (no organizationId) OR holidays for this organization
+      const query = {
+        $or: [
+          { organizationId: { $exists: false } },
+          { organizationId: null },
+          { isCustom: false }, // Legacy support
+          ...(organizationId ? [{ organizationId: organizationId }] : [])
+        ]
+      };
+
+      const holidays = await collection.find(query).toArray();
       return holidays;
     } finally {
       if (client) {
@@ -142,26 +154,28 @@ class HolidayService {
 
   /**
    * Add a new holiday
-   * @param {Object} holidayData - Holiday data (Holiday, Date, Day)
+   * @param {Object} holidayData - Holiday data (Holiday, Date, Day, organizationId)
    * @returns {Promise<Object>} Result object with success status and inserted ID
    */
   static async addHoliday(holidayData) {
     let client;
     try {
-      const { Holiday, Date, Day } = holidayData;
-      
-      // Validate required fields
-      if (!Holiday || !Date || !Day) {
-        throw new Error("Missing required fields");
+      // Validate schema
+      const validation = HolidaySchema.validate(holidayData);
+      if (!validation.isValid) {
+        throw new Error(validation.errors.join(', '));
       }
+
+      const { Holiday, Date, Day, organizationId } = holidayData;
       
-      // Validate date format (DD-MM-YYYY)
-      const dateRegex = /^\d{2}-\d{2}-\d{4}$/;
-      if (!dateRegex.test(Date)) {
-        throw new Error("Invalid date format. Use DD-MM-YYYY");
-      }
-      
-      const newHoliday = { Holiday, Date, Day };
+      const newHoliday = { 
+        Holiday, 
+        Date, 
+        Day,
+        organizationId: organizationId || null,
+        isCustom: !!organizationId, // Mark as custom if org ID is present
+        createdAt: new Date()
+      };
       
       // Connect to MongoDB
       client = await MongoClient.connect(uri, { 
@@ -171,10 +185,18 @@ class HolidayService {
       const db = client.db("Invoice");
       const collection = db.collection("holidaysList");
 
-      // Check if holiday already exists on the same date
-      const existingHoliday = await collection.findOne({ Date });
+      // Check if holiday already exists on the same date FOR THIS ORGANIZATION (or global)
+      const query = { 
+        Date: Date,
+        $or: [
+          { organizationId: organizationId || null }, // Same scope
+          { organizationId: { $exists: false } } // Or conflicts with global
+        ]
+      };
+
+      const existingHoliday = await collection.findOne(query);
       if (existingHoliday) {
-        throw new Error("A holiday already exists on this date");
+        throw new Error("A holiday already exists on this date for your organization");
       }
       
       // Insert the new holiday

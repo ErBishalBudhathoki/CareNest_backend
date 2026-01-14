@@ -197,7 +197,12 @@ class OrganizationService {
         salt: 0 
       }).toArray();
       
-      return employees;
+      return employees.map(emp => ({
+        ...emp,
+        payRate: emp.payRate || null,
+        payType: emp.payType || 'Hourly',
+        payRates: emp.payRates || null
+      }));
     } finally {
       await client.close();
     }

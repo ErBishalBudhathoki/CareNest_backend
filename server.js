@@ -198,6 +198,8 @@ console.log('Admin invoice profile routes loaded successfully');
 const requestRoutes = require('./routes/request');
 console.log('Request routes loaded successfully');
 const timesheetReminderRoutes = require('./routes/timesheetReminderRoutes');
+const earningsRoutes = require('./routes/earningsRoutes');
+console.log('Earnings routes loaded successfully');
 console.log('Timesheet reminder routes loaded successfully');
 const expenseReminderRoutes = require('./routes/expenseReminderRoutes');
 console.log('Expense reminder routes loaded successfully');
@@ -251,6 +253,9 @@ app.use('/api/requests', requestRoutes);
 
 // Mount timesheet reminder routes
 app.use('/api/reminders', timesheetReminderRoutes);
+
+// Mount earnings routes
+app.use('/api/earnings', earningsRoutes);
 
 // Mount expense reminder routes
 app.use('/api/reminders', expenseReminderRoutes);
