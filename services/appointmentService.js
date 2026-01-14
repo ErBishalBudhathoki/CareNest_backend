@@ -519,51 +519,85 @@ class AppointmentService {
       client = await getDbConnection();
       const db = client.db("Invoice");
 
-      // 1. Remove shift from old user
-      const removeResult = await db.collection("clientAssignments").updateOne(
+      // INTERNAL HELPER: Normalize schedule from legacy fields
+      const getNormalizedSchedule = (doc) => {
+        if (doc.schedule && doc.schedule.length > 0) return doc.schedule;
+        if (!doc.dateList || !Array.isArray(doc.dateList)) return [];
+        return doc.dateList.map((date, i) => ({
+          date,
+          startTime: doc.startTimeList ? doc.startTimeList[i] : null,
+          endTime: doc.endTimeList ? doc.endTimeList[i] : null,
+          break: doc.breakList ? doc.breakList[i] : null,
+        }));
+      };
+
+      // 1. Process Old User (Remove Shift)
+      const oldAssignment = await db.collection("clientAssignments").findOne({
+        organizationId,
+        userEmail: oldUserEmail,
+        clientEmail: clientEmail,
+        isActive: true
+      });
+
+      if (!oldAssignment) {
+        throw new Error(`Assignment not found for old user: ${oldUserEmail}`);
+      }
+
+      let oldSchedule = getNormalizedSchedule(oldAssignment);
+      const initialLength = oldSchedule.length;
+
+      // Filter out the shift
+      oldSchedule = oldSchedule.filter(s =>
+        !(s.date === shiftDetails.date && s.startTime === shiftDetails.startTime)
+      );
+
+      if (oldSchedule.length === initialLength) {
+        // Shift not found in schedule
+        throw new Error(`Shift not found in old user's schedule (${shiftDetails.date} ${shiftDetails.startTime})`);
+      }
+
+      // Update old user doc (migrating to 'schedule' field)
+      await db.collection("clientAssignments").updateOne(
+        { _id: oldAssignment._id },
         {
-          organizationId,
-          userEmail: oldUserEmail,
-          clientEmail: clientEmail,
-          isActive: true
-        },
-        {
-          $pull: {
-            schedule: {
-              date: { $eq: shiftDetails.date },
-              startTime: { $eq: shiftDetails.startTime }
-            }
+          $set: {
+            schedule: oldSchedule,
+            updatedAt: new Date(),
+            // Clear legacy fields to prevent confusion
+            dateList: [],
+            startTimeList: [],
+            endTimeList: [],
+            breakList: []
           }
         }
       );
 
-      if (removeResult.modifiedCount === 0) {
-        // Check if it's legacy format or if doc exists
-        // simplified for now: fail if can't find/remove
-        // In production, might need to handle legacy dateList/startTimeList removal too if used
-        const errorMsg = 'Could not remove shift from old user or shift not found. Aborting swap.';
-        logger.error(errorMsg, {
-          oldUserEmail, clientEmail, shiftDetails
-        });
-        throw new Error(errorMsg);
-      }
-
-      // 2. Add shift to new user
-      // Check if assignment exists for new user
-      const existingAssignment = await db.collection("clientAssignments").findOne({
+      // 2. Process New User (Add Shift)
+      const newAssignment = await db.collection("clientAssignments").findOne({
         organizationId,
         userEmail: newUserEmail,
         clientEmail: clientEmail,
         isActive: true
       });
 
-      if (existingAssignment) {
-        // Push to schedule
+      if (newAssignment) {
+        let newSchedule = getNormalizedSchedule(newAssignment);
+        newSchedule.push(shiftDetails);
+
+        // Sort schedule by date/time (optional but good practice)
+        // Simply push is fine for now, standard sorting usually happens on read with aggregation
+
         await db.collection("clientAssignments").updateOne(
-          { _id: existingAssignment._id },
+          { _id: newAssignment._id },
           {
-            $push: {
-              schedule: shiftDetails
+            $set: {
+              schedule: newSchedule,
+              updatedAt: new Date(),
+              // Clear legacy fields if they existed
+              dateList: [],
+              startTimeList: [],
+              endTimeList: [],
+              breakList: []
             }
           }
         );
@@ -576,7 +610,7 @@ class AppointmentService {
           schedule: [shiftDetails],
           isActive: true,
           createdAt: new Date(),
-          dateList: [], // Legacy fields initialized empty
+          dateList: [],
           startTimeList: [],
           endTimeList: [],
           breakList: []
@@ -585,9 +619,20 @@ class AppointmentService {
 
       return { success: true };
     } catch (error) {
-      logger.error('Reassign shift failed', { error: error.message, stack: error.stack });
+      logger.error('Reassign shift failed', {
+        error: error.message,
+        stack: error.stack,
+        organizationId, oldUserEmail, newUserEmail
+      });
+      // Propagate error so RequestService knows it failed
       throw error;
     } finally {
+      if (client) {
+        // client.close() is handled by shared connection pool usually, 
+        // but if getDbConnection returns a new client each time, we should close it.
+        // Based on existing code, it seems to close.
+        await client.close();
+      }
     }
   }
 }
