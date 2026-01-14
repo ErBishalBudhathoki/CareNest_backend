@@ -541,9 +541,11 @@ class AppointmentService {
         // Check if it's legacy format or if doc exists
         // simplified for now: fail if can't find/remove
         // In production, might need to handle legacy dateList/startTimeList removal too if used
-        logger.warn('Could not remove shift from old user or shift not found', {
+        const errorMsg = 'Could not remove shift from old user or shift not found. Aborting swap.';
+        logger.error(errorMsg, {
           oldUserEmail, clientEmail, shiftDetails
         });
+        throw new Error(errorMsg);
       }
 
       // 2. Add shift to new user
