@@ -93,7 +93,7 @@ class RequestService {
         ? await db.collection('fcmTokens').find({
           organizationId: organizationId,
           userEmail: { $in: adminEmails },
-          fcmToken: { $exists: true, $ne: null, $ne: '' }
+          fcmToken: { $exists: true, $nin: [null, ''] }
         }).project({ fcmToken: 1 }).toArray()
         : [];
 
@@ -355,7 +355,7 @@ class RequestService {
           const userTokenDocs = await db.collection('fcmTokens').find({
             organizationId: organizationId,
             userEmail: requesterEmail,
-            fcmToken: { $exists: true, $ne: null, $ne: '' }
+            fcmToken: { $exists: true, $nin: [null, ''] }
           }).project({ fcmToken: 1 }).toArray();
           userTokens = userTokenDocs.map(doc => doc.fcmToken).filter(Boolean);
           if (userTokens.length > 0) {
