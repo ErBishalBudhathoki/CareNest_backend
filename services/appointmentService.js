@@ -546,14 +546,30 @@ class AppointmentService {
       let oldSchedule = getNormalizedSchedule(oldAssignment);
       const initialLength = oldSchedule.length;
 
-      // Filter out the shift
-      oldSchedule = oldSchedule.filter(s =>
-        !(s.date === shiftDetails.date && s.startTime === shiftDetails.startTime)
-      );
+      // Helper for robust comparison
+      const normalizeDate = (d) => {
+        if (!d) return '';
+        if (d instanceof Date) return d.toISOString().split('T')[0];
+        return d.toString().split('T')[0];
+      };
 
-      if (oldSchedule.length === initialLength) {
+      const isSameShift = (s, target) => {
+        const d1 = normalizeDate(s.date);
+        const d2 = normalizeDate(target.date);
+        const t1 = (s.startTime || '').toString().trim();
+        const t2 = (target.startTime || '').toString().trim();
+        return d1 === d2 && t1 === t2;
+      };
+
+      // Filter out the shift
+      const originalLength = oldSchedule.length;
+      oldSchedule = oldSchedule.filter(s => !isSameShift(s, shiftDetails));
+
+      if (oldSchedule.length === originalLength) {
         // Shift not found in schedule
-        throw new Error(`Shift not found in old user's schedule (${shiftDetails.date} ${shiftDetails.startTime})`);
+        console.error(`Shift not found in old user's schedule. Looking for: ${JSON.stringify(shiftDetails)} in schedule of size ${originalLength}`);
+        console.error('First few schedule items:', oldSchedule.slice(0, 3));
+        throw new Error(`Shift not found within old user's schedule: ${shiftDetails.date} ${shiftDetails.startTime}`);
       }
 
       // Update old user doc (migrating to 'schedule' field)
