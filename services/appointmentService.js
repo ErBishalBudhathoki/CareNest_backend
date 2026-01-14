@@ -563,7 +563,22 @@ class AppointmentService {
       if (oldSchedule.length === originalLength) {
         // Shift not found in schedule
         console.error(`Shift not found in old user's schedule. Looking for: ${JSON.stringify(shiftDetails)} in schedule of size ${originalLength}`);
-        console.error('First few schedule items:', oldSchedule.slice(0, 3));
+        
+        // Log normalized versions to help debug
+        const normalizedTarget = {
+            date: normalizeDate(shiftDetails.date),
+            startTime: (shiftDetails.startTime || '').toString().trim()
+        };
+        console.error('Normalized Target:', normalizedTarget);
+        
+        const normalizedSchedule = oldSchedule.map(s => ({
+            // original: s, // Too verbose
+            normalizedDate: normalizeDate(s.date),
+            normalizedStartTime: (s.startTime || '').toString().trim()
+        }));
+        
+        console.error('Schedule dump (first 10):', JSON.stringify(normalizedSchedule.slice(0, 10), null, 2));
+
         throw new Error(`Shift not found within old user's schedule: ${shiftDetails.date} ${shiftDetails.startTime}`);
       }
 
