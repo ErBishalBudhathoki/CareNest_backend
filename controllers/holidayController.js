@@ -8,7 +8,8 @@ class HolidayController {
    */
   static async getAllHolidays(req, res) {
     try {
-      const holidays = await HolidayService.getAllHolidays();
+      const organizationId = req.query.organizationId || req.body.organizationId;
+      const holidays = await HolidayService.getAllHolidays(organizationId);
       res.status(200).json(holidays);
     } catch (err) {
       logger.error('Error in getHolidays endpoint', {

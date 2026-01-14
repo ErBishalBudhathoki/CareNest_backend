@@ -1,4 +1,4 @@
-const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { getDatabase } = require('../config/database');
 const logger = require('../config/logger');
 
@@ -114,9 +114,7 @@ class AppointmentService {
       });
       throw new Error('Failed to load appointments');
     } finally {
-      if (client) {
-        await client.close();
-      }
+      // Shared connection, do not close
     }
   }
 
@@ -130,7 +128,8 @@ class AppointmentService {
     let client;
 
     try {
-      client = await getDbConnection();
+      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+      await client.connect();
       const db = client.db("Invoice");
 
       // Get the specific appointment assignment with client details
@@ -253,7 +252,8 @@ class AppointmentService {
     let client;
 
     try {
-      client = await getDbConnection();
+      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+      await client.connect();
       const db = client.db("Invoice");
 
       // Get assignments with client details for the organization
@@ -363,7 +363,8 @@ class AppointmentService {
     let client;
 
     try {
-      client = await getDbConnection();
+      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+      await client.connect();
       const db = client.db("Invoice");
 
       // Soft delete assignment
@@ -422,7 +423,8 @@ class AppointmentService {
         throw new Error('Missing required fields: userEmail, clientEmail, timeList');
       }
 
-      client = await getDbConnection();
+      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+      await client.connect();
       const db = client.db("Invoice");
 
       // Find the assigned client record
