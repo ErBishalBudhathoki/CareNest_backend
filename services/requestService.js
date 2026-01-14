@@ -288,8 +288,7 @@ class RequestService {
         console.log(`Shift swap executed for request ${requestId}`);
       } catch (err) {
         console.error('Failed to execute shift swap side effect', err);
-        // Should we revert status? Or just log? 
-        // For safely, logging is safest for now to avoid inconsistent state loops.
+        throw new Error(`Shift swap failed: ${err.message}`);
       }
     }
 
