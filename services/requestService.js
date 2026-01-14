@@ -253,31 +253,8 @@ class RequestService {
       throw new Error('Request not found');
     }
 
-    const update = {
-      $set: {
-        status,
-        updatedAt: new Date(),
-        updatedBy: userEmail
-      },
-      $push: {
-        history: {
-          action: 'status_updated',
-          status,
-          performedBy: userEmail,
-          reason,
-          timestamp: new Date()
-        }
-      }
-    };
-
-    const result = await db.collection('requests').findOneAndUpdate(
-      { _id: new ObjectId(requestId) },
-      update,
-      { returnDocument: 'after' }
-    );
-
-    // SIDE EFFECTS
-    if (result && status === 'Approved' && originalRequest.type === 'SHIFT_SWAP_OFFER') {
+    // SIDE EFFECTS - Execute BEFORE updating status to ensure consistency
+    if (status === 'Approved' && originalRequest.type === 'SHIFT_SWAP_OFFER') {
       try {
         const AppointmentService = require('./appointmentService');
         const details = originalRequest.details;
@@ -303,6 +280,48 @@ class RequestService {
         throw new Error(`Shift swap failed: ${err.message}`);
       }
     }
+
+    let finalStatus = status;
+    let unsetFields = {};
+
+    // Special handling for Declining a SHIFT_SWAP_OFFER that was already Claimed
+    // Instead of closing the request, we reset it to Pending so others can claim it
+    if (originalRequest.type === 'SHIFT_SWAP_OFFER' && status === 'Declined' && originalRequest.status === 'Claimed') {
+      finalStatus = 'Pending';
+      unsetFields = {
+        'details.claimantId': "",
+        'details.claimantName': "",
+        'details.claimantEmail': ""
+      };
+    }
+
+    const update = {
+      $set: {
+        status: finalStatus,
+        updatedAt: new Date(),
+        updatedBy: userEmail
+      },
+      $push: {
+        history: {
+          action: 'status_updated',
+          status: finalStatus,
+          performedBy: userEmail,
+          reason,
+          timestamp: new Date()
+        }
+      }
+    };
+
+    // Apply the unset if needed
+    if (Object.keys(unsetFields).length > 0) {
+      update.$unset = unsetFields;
+    }
+
+    const result = await db.collection('requests').findOneAndUpdate(
+      { _id: new ObjectId(requestId) },
+      update,
+      { returnDocument: 'after' }
+    );
 
     // 2. Send Notification to the User (Existing logic)
     if (result) {
