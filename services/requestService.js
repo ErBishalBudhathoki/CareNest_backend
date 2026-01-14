@@ -241,7 +241,7 @@ class RequestService {
 
     // Notify Admin? (Should be handled by separate notification logic or here)
     // For now we return result.
-    return result.value;
+    return result;
   }
 
   async updateRequestStatus(requestId, status, userEmail, reason) {
@@ -277,7 +277,7 @@ class RequestService {
     );
 
     // SIDE EFFECTS
-    if (result.value && status === 'Approved' && originalRequest.type === 'SHIFT_SWAP_OFFER') {
+    if (result && status === 'Approved' && originalRequest.type === 'SHIFT_SWAP_OFFER') {
       try {
         const AppointmentService = require('./appointmentService');
         const details = originalRequest.details;

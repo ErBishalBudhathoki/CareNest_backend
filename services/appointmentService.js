@@ -577,7 +577,6 @@ class AppointmentService {
             // Clear legacy fields to prevent confusion
             dateList: [],
             startTimeList: [],
-            endTimeList: [],
             breakList: []
           }
         }
