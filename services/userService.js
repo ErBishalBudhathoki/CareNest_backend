@@ -61,7 +61,17 @@ class UserService {
         salt: 0
       }).toArray();
       
-      return employees;
+      return employees.map(emp => ({
+        ...emp,
+        payRate: emp.payRate || null,
+        payType: emp.payType || 'Hourly',
+        payRates: emp.payRates || null,
+        classificationLevel: emp.classificationLevel || null,
+        payPoint: emp.payPoint || null,
+        stream: emp.stream || null,
+        employmentType: emp.employmentType || null,
+        activeAllowances: emp.activeAllowances || []
+      }));
     } finally {
       if (client) {
         await client.close();
