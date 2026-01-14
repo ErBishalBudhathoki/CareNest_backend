@@ -1,5 +1,5 @@
 const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
-const { getDbConnection } = require('../config/database');
+const { getDatabase } = require('../config/database');
 const logger = require('../config/logger');
 
 /**
@@ -12,11 +12,8 @@ class AppointmentService {
    * @returns {Promise<Array>} Array of appointments
    */
   static async loadAppointments(email) {
-    let client;
-
     try {
-      client = await getDbConnection();
-      const db = client.db("Invoice");
+      const db = await getDatabase();
 
       // Get appointments (client assignments) with client details
       const appointments = await db.collection("clientAssignments").aggregate([
@@ -514,10 +511,8 @@ class AppointmentService {
    * @returns {Promise<Object>} Result
    */
   static async reassignShift(organizationId, oldUserEmail, newUserEmail, clientEmail, shiftDetails) {
-    let client;
     try {
-      client = await getDbConnection();
-      const db = client.db("Invoice");
+      const db = await getDatabase();
 
       // INTERNAL HELPER: Normalize schedule from legacy fields
       const getNormalizedSchedule = (doc) => {
@@ -643,14 +638,8 @@ class AppointmentService {
       // Propagate error so RequestService knows it failed
       throw error;
     } finally {
-      if (client) {
-        // client.close() is handled by shared connection pool usually, 
-        // but if getDbConnection returns a new client each time, we should close it.
-        // Based on existing code, it seems to close.
-        await client.close();
-      }
+      // Shared connection, do not close
     }
   }
 }
-
 module.exports = AppointmentService;

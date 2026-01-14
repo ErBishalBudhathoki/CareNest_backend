@@ -150,7 +150,11 @@ class RequestService {
     if (filters.userId) {
       const filterUserId = filters.userId.toString();
       if (filterUserId.includes('@')) {
-        query.$or = [{ userId: filterUserId }, { createdBy: filterUserId }];
+        query.$or = [
+          { userId: filterUserId },
+          { createdBy: filterUserId },
+          { 'details.claimantEmail': filterUserId }
+        ];
       } else {
         if (ObjectId.isValid(filterUserId)) {
           const userDoc = await db.collection('login').findOne(
@@ -162,13 +166,21 @@ class RequestService {
             query.$or = [
               { userId: filterUserId },
               { userId: email },
-              { createdBy: email }
+              { createdBy: email },
+              { 'details.claimantId': filterUserId },
+              { 'details.claimantEmail': email }
             ];
           } else {
-            query.userId = filterUserId;
+            query.$or = [
+              { userId: filterUserId },
+              { 'details.claimantId': filterUserId }
+            ];
           }
         } else {
-          query.userId = filterUserId;
+          query.$or = [
+            { userId: filterUserId },
+            { 'details.claimantId': filterUserId }
+          ];
         }
       }
     }
