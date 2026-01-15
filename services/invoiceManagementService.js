@@ -737,12 +737,43 @@ class InvoiceManagementService {
       // Format revenue for display
       const formattedRevenue = this.formatCurrency(totalRevenue);
       
+      // Get invoice status breakdown
+      const statusAggregation = await invoicesCollection.aggregate([
+        { $match: activeInvoiceQuery },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 }
+          }
+        }
+      ]).toArray();
+
+      const statsByStatus = statusAggregation.reduce((acc, curr) => {
+        // Handle case where status might be missing or null
+        const status = curr._id || 'unknown';
+        acc[status] = curr.count;
+        return acc;
+      }, {});
+
+      // Calculate aggregated metrics
+      // Pending: Drafts
+      const pendingInvoices = statsByStatus['draft'] || 0;
+      
+      // Active: Sent, Overdue, Partial (everything except Draft, Paid, Void)
+      const activeInvoices = (statsByStatus['sent'] || 0) + 
+                             (statsByStatus['overdue'] || 0) + 
+                             (statsByStatus['partial'] || 0);
+
       const statistics = {
         activeBusinesses: activeBusinesses || 1, // At least 1 if organization exists
         totalClients,
         totalInvoices,
         totalRevenue: formattedRevenue,
-        rawRevenue: totalRevenue
+        rawRevenue: totalRevenue,
+        // Status breakdown
+        pendingInvoices,
+        activeInvoices,
+        statsByStatus
       };
       
       logger.info(`Business statistics calculated for organization: ${organizationId}`, {
