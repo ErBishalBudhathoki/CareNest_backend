@@ -547,6 +547,7 @@ function rateLimitMiddleware(type) {
 }
 
 module.exports = {
+  AuthMiddleware,
   authenticateUser: AuthMiddleware.authenticateUser,
   requireRoles: AuthMiddleware.requireRoles,
   authenticateAPIKey: AuthMiddleware.authenticateAPIKey,
