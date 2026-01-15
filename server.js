@@ -1133,6 +1133,138 @@ app.post('/addNotes', async (req, res) => {
 });
 
 /**
+ * Add a shift-specific note
+ * POST /addShiftNote
+ */
+app.post('/addShiftNote', async (req, res) => {
+  let client;
+  try {
+    const { userEmail, clientEmail, shiftDate, shiftStartTime, note } = req.body;
+
+    if (!userEmail || !clientEmail || !shiftDate || !shiftStartTime || !note) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: userEmail, clientEmail, shiftDate, shiftStartTime, note"
+      });
+    }
+
+    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    const db = client.db(DB_NAME);
+
+    // Find and update the specific schedule item in clientAssignments
+    const result = await db.collection("clientAssignments").updateOne(
+      {
+        userEmail: userEmail,
+        clientEmail: clientEmail,
+        isActive: true,
+        "schedule": {
+          $elemMatch: {
+            date: shiftDate,
+            startTime: shiftStartTime
+          }
+        }
+      },
+      {
+        $push: {
+          "schedule.$.notes": {
+            _id: new ObjectId(),
+            content: note,
+            author: userEmail,
+            timestamp: new Date()
+          }
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Shift not found or user not assigned."
+      });
+    }
+
+    if (result.modifiedCount === 0) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to add shift note."
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Shift note added successfully."
+    });
+
+  } catch (error) {
+    console.error('Error in /addShiftNote endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add shift note.',
+      error: error.message
+    });
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+});
+
+/**
+ * Update client extended details (Care Notes, Preferences)
+ * PUT /updateClientExtendedDetails
+ */
+app.put('/updateClientExtendedDetails', async (req, res) => {
+  let client;
+  try {
+    const { clientEmail, careNotes, preferences } = req.body;
+
+    if (!clientEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "clientEmail is required."
+      });
+    }
+
+    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    const db = client.db(DB_NAME);
+
+    const updateFields = {};
+    if (careNotes !== undefined) updateFields.careNotes = careNotes;
+    if (preferences !== undefined) updateFields.preferences = preferences;
+    updateFields.updatedAt = new Date();
+
+    const result = await db.collection("clients").updateOne(
+      { clientEmail: clientEmail },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Client not found."
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Client details updated successfully."
+    });
+
+  } catch (error) {
+    console.error('Error in /updateClientExtendedDetails endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update client details.',
+      error: error.message
+    });
+  } finally {
+    if (client) {
+      await client.close();
+    }
+  }
+});
+
+/**
  * Get email details to send email
  * POST /getEmailDetailToSendEmail
  */
