@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { authenticateUser } = require('../middleware/auth');
+const { requireAdmin, requireOrganizationMatch } = require('../middleware/rbac');
 const {
   getInvoicesList,
   getInvoiceDetails,
@@ -28,6 +30,12 @@ router.post('/api/invoices/:invoiceId/share/pdf', shareInvoice);
 router.delete('/api/invoices/:invoiceId', deleteInvoice);
 
 // Get invoice statistics
-router.get('/api/invoices/stats', getInvoiceStats);
+router.get(
+  '/api/invoices/stats/:organizationId',
+  authenticateUser,
+  requireAdmin,
+  requireOrganizationMatch('organizationId'),
+  getInvoiceStats
+);
 
 module.exports = router;
