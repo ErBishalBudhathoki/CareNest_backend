@@ -34,7 +34,7 @@ This directory contains core technical documentation for the Invoice Management 
 ### System Overview
 The Invoice Management System is a Node.js/Express.js backend that provides:
 - **Authentication**: Firebase Auth integration
-- **Data Storage**: MongoDB with Mongoose ODM
+- **Data Storage**: MongoDB Native Driver
 - **File Storage**: Local file system with Multer
 - **API**: RESTful endpoints with JWT authentication
 - **Architecture**: Controller-Service-Route pattern

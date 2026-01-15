@@ -106,7 +106,7 @@ npm start
 
 - **Runtime**: Node.js 16+
 - **Framework**: Express.js
-- **Database**: MongoDB with Mongoose ODM
+- **Database**: MongoDB Native Driver
 - **Authentication**: Firebase Auth
 - **File Storage**: Local file system / Cloud storage
 - **PDF Generation**: Custom PDF service
