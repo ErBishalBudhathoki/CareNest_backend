@@ -199,6 +199,8 @@ const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
 console.log('Admin invoice profile routes loaded successfully');
 const requestRoutes = require('./routes/request');
 console.log('Request routes loaded successfully');
+const tripRoutes = require('./routes/tripRoutes');
+console.log('Trip routes loaded successfully');
 const timesheetReminderRoutes = require('./routes/timesheetReminderRoutes');
 const earningsRoutes = require('./routes/earningsRoutes');
 console.log('Earnings routes loaded successfully');
