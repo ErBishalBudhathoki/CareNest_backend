@@ -35,6 +35,30 @@ class EarningsController {
       res.status(500).json({ success: false, message: error.message });
     }
   }
+
+  async getEarningsHistory(req, res) {
+    try {
+      const { userEmail } = req.params;
+      const { startDate, endDate, bucket } = req.query;
+
+      if (!userEmail) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'User email is required' });
+      }
+
+      const data = await earningsService.getEarningsHistory(
+        userEmail,
+        startDate,
+        endDate,
+        bucket
+      );
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      logger.error('Error fetching earnings history', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
   
   async setPayRate(req, res) {
       try {
