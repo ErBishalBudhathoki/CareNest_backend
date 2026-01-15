@@ -1,8 +1,5 @@
-const Certification = require('../models/Certification');
-const TrainingModule = require('../models/TrainingModule');
-const TrainingProgress = require('../models/TrainingProgress');
-const ComplianceChecklist = require('../models/ComplianceChecklist');
-const UserChecklistStatus = require('../models/UserChecklistStatus');
+const { getDatabase } = require('../config/database');
+const { ObjectId } = require('mongodb');
 
 class TrainingComplianceController {
   // --- Certifications ---
@@ -33,17 +30,23 @@ class TrainingComplianceController {
         fileUrl = `${req.protocol}://${req.get('host')}/uploads/certifications/${req.file.filename}`;
       }
 
-      const certification = await Certification.create({
+      const db = await getDatabase();
+      const certificationData = {
         userId,
         name,
         issuer,
         fileUrl,
-        expiryDate,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
         notes,
-        status: 'Pending'
-      });
+        status: 'Pending',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
 
-      res.status(201).json({ success: true, data: certification });
+      const result = await db.collection('certifications').insertOne(certificationData);
+      certificationData._id = result.insertedId;
+
+      res.status(201).json({ success: true, data: certificationData });
     } catch (error) {
       next(error);
     }
@@ -60,7 +63,12 @@ class TrainingComplianceController {
 
       if (status) query.status = status;
 
-      const certifications = await Certification.find(query).sort({ createdAt: -1 });
+      const db = await getDatabase();
+      const certifications = await db.collection('certifications')
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
       res.json({ success: true, data: certifications });
     } catch (error) {
       next(error);
@@ -73,22 +81,30 @@ class TrainingComplianceController {
       const { status, notes } = req.body;
       const auditorId = req.user.email || req.user.id || req.user;
 
-      const certification = await Certification.findByIdAndUpdate(
-        id,
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: 'Invalid ID format' });
+      }
+
+      const db = await getDatabase();
+      const result = await db.collection('certifications').findOneAndUpdate(
+        { _id: new ObjectId(id) },
         {
-          status,
-          notes,
-          auditedBy: auditorId,
-          auditDate: new Date()
+          $set: {
+            status,
+            notes,
+            auditedBy: auditorId,
+            auditDate: new Date(),
+            updatedAt: new Date()
+          }
         },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
-      if (!certification) {
+      if (!result) {
         return res.status(404).json({ success: false, message: 'Certification not found' });
       }
 
-      res.json({ success: true, data: certification });
+      res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }
@@ -99,9 +115,18 @@ class TrainingComplianceController {
   async createTrainingModule(req, res, next) {
     try {
       const createdBy = req.user.email || req.user.id || req.user;
-      const moduleData = { ...req.body, createdBy };
-      const module = await TrainingModule.create(moduleData);
-      res.status(201).json({ success: true, data: module });
+      const moduleData = { 
+        ...req.body, 
+        createdBy,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const db = await getDatabase();
+      const result = await db.collection('trainingModules').insertOne(moduleData);
+      moduleData._id = result.insertedId;
+
+      res.status(201).json({ success: true, data: moduleData });
     } catch (error) {
       next(error);
     }
@@ -109,14 +134,18 @@ class TrainingComplianceController {
 
   async getTrainingModules(req, res, next) {
     try {
-      const modules = await TrainingModule.find({ isPublished: true });
+      const db = await getDatabase();
+      const modules = await db.collection('trainingModules').find({ isPublished: true }).toArray();
       const userId = req.user.email || req.user.id || req.user;
 
       // Attach progress
       const modulesWithProgress = await Promise.all(modules.map(async (mod) => {
-        const progress = await TrainingProgress.findOne({ userId, moduleId: mod._id });
+        const progress = await db.collection('trainingProgress').findOne({ 
+          userId, 
+          moduleId: mod._id // Assuming stored as ObjectId
+        });
         return {
-          ...mod.toObject(),
+          ...mod,
           userProgress: progress || null
         };
       }));
@@ -133,23 +162,62 @@ class TrainingComplianceController {
       const { status, progressPercentage } = req.body;
       const userId = req.user.email || req.user.id || req.user;
 
-      let progress = await TrainingProgress.findOne({ userId, moduleId: id });
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: 'Invalid module ID' });
+      }
 
+      const db = await getDatabase();
+      const moduleId = new ObjectId(id);
+
+      const updateData = {
+        userId,
+        moduleId,
+        status,
+        progressPercentage,
+        updatedAt: new Date()
+      };
+
+      if (status === 'Completed') {
+        // We need to check if it's already completed to preserve original completion date or update it?
+        // Simple approach: set completedAt if not present, or update it.
+        // For upsert, we can use $setOnInsert for createdAt and $set for others.
+        // But logic below was: if completed && !completedAt -> set it.
+        updateData.completedAt = new Date();
+      }
+
+      // We'll use findOneAndUpdate with upsert to handle both create and update
+      // But we need to be careful not to overwrite completedAt if it already exists and we don't want to change it?
+      // The original logic: if exists, update. if status completed and !completedAt, set it.
+      
+      let progress = await db.collection('trainingProgress').findOne({ userId, moduleId });
+      
       if (progress) {
-        progress.status = status;
-        progress.progressPercentage = progressPercentage;
+        const setFields = {
+            status,
+            progressPercentage,
+            updatedAt: new Date()
+        };
         if (status === 'Completed' && !progress.completedAt) {
-          progress.completedAt = new Date();
+            setFields.completedAt = new Date();
         }
-        await progress.save();
+        
+        await db.collection('trainingProgress').updateOne(
+            { _id: progress._id },
+            { $set: setFields }
+        );
+        progress = { ...progress, ...setFields };
       } else {
-        progress = await TrainingProgress.create({
-          userId,
-          moduleId: id,
-          status,
-          progressPercentage,
-          completedAt: status === 'Completed' ? new Date() : null
-        });
+        const newProgress = {
+            userId,
+            moduleId,
+            status,
+            progressPercentage,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            completedAt: status === 'Completed' ? new Date() : null
+        };
+        const result = await db.collection('trainingProgress').insertOne(newProgress);
+        progress = { ...newProgress, _id: result.insertedId };
       }
 
       res.json({ success: true, data: progress });
@@ -162,8 +230,17 @@ class TrainingComplianceController {
 
   async createChecklist(req, res, next) {
     try {
-      const checklist = await ComplianceChecklist.create(req.body);
-      res.status(201).json({ success: true, data: checklist });
+      const checklistData = {
+        ...req.body,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const db = await getDatabase();
+      const result = await db.collection('complianceChecklists').insertOne(checklistData);
+      checklistData._id = result.insertedId;
+
+      res.status(201).json({ success: true, data: checklistData });
     } catch (error) {
       next(error);
     }
@@ -171,13 +248,17 @@ class TrainingComplianceController {
 
   async getChecklists(req, res, next) {
     try {
-      const checklists = await ComplianceChecklist.find();
+      const db = await getDatabase();
+      const checklists = await db.collection('complianceChecklists').find().toArray();
       const userId = req.user.email || req.user.id || req.user;
 
       const checklistsWithStatus = await Promise.all(checklists.map(async (list) => {
-        const status = await UserChecklistStatus.findOne({ userId, checklistId: list._id });
+        const status = await db.collection('userChecklistStatus').findOne({ 
+            userId, 
+            checklistId: list._id 
+        });
         return {
-          ...list.toObject(),
+          ...list,
           userStatus: status || null
         };
       }));
@@ -193,24 +274,33 @@ class TrainingComplianceController {
       const { checklistId, itemsStatus, isCompleted } = req.body;
       const userId = req.user.email || req.user.id || req.user;
 
-      let status = await UserChecklistStatus.findOne({ userId, checklistId });
-
-      if (status) {
-        status.itemsStatus = itemsStatus;
-        status.isCompleted = isCompleted;
-        status.lastUpdated = new Date();
-        await status.save();
-      } else {
-        status = await UserChecklistStatus.create({
-          userId,
-          checklistId,
-          itemsStatus,
-          isCompleted,
-          lastUpdated: new Date()
-        });
+      if (!ObjectId.isValid(checklistId)) {
+          return res.status(400).json({ success: false, message: 'Invalid checklist ID' });
       }
 
-      res.json({ success: true, data: status });
+      const db = await getDatabase();
+      const cId = new ObjectId(checklistId);
+
+      // Using updateOne with upsert is cleaner here
+      const result = await db.collection('userChecklistStatus').findOneAndUpdate(
+        { userId, checklistId: cId },
+        {
+            $set: {
+                itemsStatus,
+                isCompleted,
+                lastUpdated: new Date(),
+                updatedAt: new Date()
+            },
+            $setOnInsert: {
+                userId,
+                checklistId: cId,
+                createdAt: new Date()
+            }
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+
+      res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }
