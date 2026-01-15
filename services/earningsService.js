@@ -1,6 +1,8 @@
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const TripService = require('./tripService');
+const OrganizationService = require('./organizationService');
 
 const uri = process.env.MONGODB_URI;
 
@@ -64,16 +66,25 @@ class EarningsService {
   async getEarningsSummary(userEmail, startDate, endDate) {
     const db = await this.connect();
 
-    // 1. Get User Pay Rate
+    // 1. Get User Pay Rate and ID
     const user = await db.collection('login').findOne({ email: userEmail });
     const payRate = user?.payRate || 0;
     const payType = user?.payType || 'Hourly';
+    const userId = user?._id?.toString();
+    const organizationId = user?.organizationId;
 
-    // 2. Get Worked Time Records
-    // Assuming shiftDate is stored as "YYYY-MM-DD" string or Date object. 
-    // Based on previous search, it's likely a string "YYYY-MM-DD".
-    // We'll try to match strictly or use string comparison.
-    
+    // 2. Get Mileage Rate
+    let mileageRate = 0;
+    if (organizationId) {
+        try {
+            const org = await OrganizationService.getOrganizationById(organizationId);
+            mileageRate = org?.settings?.mileage?.reimbursementRate || 0;
+        } catch (e) {
+            console.error('Error fetching organization mileage rate', e);
+        }
+    }
+
+    // 3. Get Worked Time Records
     const query = {
       userEmail: userEmail,
       isActive: true
@@ -88,11 +99,24 @@ class EarningsService {
 
     const workedRecords = await db.collection('workedTime').find(query).toArray();
 
-    let totalHours = 0;
-    let earningsHistory = [];
+    // 4. Get Mileage Records
+    let mileageRecords = [];
+    if (userId && startDate && endDate) {
+        try {
+            // Ensure we use Date objects for comparison if TripService expects them, 
+            // but the startDate/endDate passed here are likely strings YYYY-MM-DD.
+            // TripService expects YYYY-MM-DD strings or Dates? 
+            // TripService: new Date(startDate) - so strings work.
+            mileageRecords = await TripService.getReimbursableTrips(userId, startDate, endDate);
+        } catch (e) {
+            console.error('Error fetching mileage records', e);
+        }
+    }
 
-    // Group by Month or Week could be done here, but let's return raw daily data for frontend to aggregate or pre-aggregate here.
-    // Let's aggregate by date.
+    let totalHours = 0;
+    let totalMileage = 0;
+    
+    // Aggregate by date
     const dailyMap = {};
 
     for (const record of workedRecords) {
@@ -101,21 +125,46 @@ class EarningsService {
         
         const dateKey = record.shiftDate;
         if (!dailyMap[dateKey]) {
-            dailyMap[dateKey] = 0;
+            dailyMap[dateKey] = { hours: 0, mileage: 0 };
         }
-        dailyMap[dateKey] += hours;
+        dailyMap[dateKey].hours += hours;
+    }
+
+    for (const trip of mileageRecords) {
+        const dist = parseFloat(trip.distance) || 0;
+        totalMileage += dist;
+        
+        // Trip date is Date object
+        const dateKey = trip.date.toISOString().split('T')[0];
+        
+        if (!dailyMap[dateKey]) {
+            dailyMap[dateKey] = { hours: 0, mileage: 0 };
+        }
+        dailyMap[dateKey].mileage += dist;
     }
 
     // Convert dailyMap to array
-    earningsHistory = Object.keys(dailyMap).map(date => ({
-        date,
-        hours: dailyMap[date],
-        earnings: dailyMap[date] * payRate
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    const earningsHistory = Object.keys(dailyMap).map(date => {
+        const dayData = dailyMap[date];
+        const hoursEarnings = dayData.hours * payRate;
+        const mileageEarnings = dayData.mileage * mileageRate;
+        
+        return {
+            date,
+            hours: dayData.hours,
+            earnings: hoursEarnings,
+            mileage: dayData.mileage,
+            mileageEarnings: mileageEarnings,
+            totalDailyEarnings: hoursEarnings + mileageEarnings
+        };
+    }).sort((a, b) => a.date.localeCompare(b.date));
 
     return {
         totalHours: parseFloat(totalHours.toFixed(2)),
         totalEarnings: parseFloat((totalHours * payRate).toFixed(2)),
+        totalMileage: parseFloat(totalMileage.toFixed(2)),
+        totalMileageEarnings: parseFloat((totalMileage * mileageRate).toFixed(2)),
+        mileageRate,
         payRate,
         payType,
         history: earningsHistory
