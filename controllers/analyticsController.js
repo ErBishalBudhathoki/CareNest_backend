@@ -54,6 +54,10 @@ async function getFinancialMetrics(req, res) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });
     }
 
+    // Adjust endDate to end of day to be inclusive
+    const endDateTime = new Date(endDate);
+    endDateTime.setHours(23, 59, 59, 999);
+
     await databaseConfig.executeOperation(async (db) => {
       // 1. Revenue (from invoiceLineItems)
       const revenueData = await db.collection('invoiceLineItems').aggregate([
@@ -62,7 +66,7 @@ async function getFinancialMetrics(req, res) {
             organizationId: orgId,
             createdAt: {
               $gte: new Date(startDate),
-              $lte: new Date(endDate)
+              $lte: endDateTime
             }
           }
         },
@@ -79,6 +83,7 @@ async function getFinancialMetrics(req, res) {
         // Filter by date range (shiftDate is string YYYY-MM-DD)
         {
           $match: {
+            organizationId: orgId,
             shiftDate: { $gte: startDate, $lte: endDate }
           }
         },
@@ -190,44 +195,45 @@ async function getUtilizationMetrics(req, res) {
       // Calculate total weeks in range for capacity
       const start = new Date(startDate);
       const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // Include full end date
+      
       const weeks = Math.max(1, (end - start) / (1000 * 60 * 60 * 24 * 7));
       const capacityPerEmployee = 40 * weeks;
 
-      // Aggregate Billable Hours per Employee (from invoiceLineItems? Or workedTime?)
-      // Requirement says: "Utilization Rate: (Total Billable Hours / Total Available Capacity Hours) * 100."
-      // "Billable Hours" usually implies hours charged to client.
-      // `invoiceLineItems` has `hours` and `employeeId` (or `providerName`?). 
-      // `business_intelligence_endpoints.js` uses `invoiceLineItems` grouped by `employeeId`.
-      // Let's assume `invoiceLineItems` is the source for Billable Hours.
-
+      // Aggregate Billable Hours per Employee (from invoiceLineItems)
       const utilizationData = await db.collection('invoiceLineItems').aggregate([
         {
           $match: {
             organizationId: orgId,
-            createdAt: { $gte: start, $lte: end }
+            createdAt: { $gte: start, $lte: end },
+            employeeId: { $exists: true, $ne: null } // Filter out invalid IDs
           }
         },
         {
           $group: {
-            _id: "$employeeId", // Assuming employeeId is stored, otherwise userEmail?
-            // BI endpoints use employeeId.
+            _id: "$employeeId",
             billableHours: { $sum: "$hours" },
             revenueGenerated: { $sum: "$totalPrice" }
           }
         },
-        // Lookup employee details
+        // Lookup employee details with safe ID conversion
+        {
+          $addFields: {
+            employeeObjId: {
+              $convert: {
+                input: "$_id",
+                to: "objectId",
+                onError: null,
+                onNull: null
+              }
+            }
+          }
+        },
         {
           $lookup: {
             from: 'login',
-            localField: '_id', // Assuming employeeId is the _id from login collection? 
-            // OR if employeeId is email? BI endpoints use employeeId.
-            // Let's assume it matches _id of login. But let's check if it matches email?
-            // Usually employeeId is ObjectId string.
-            // Let's try to lookup by _id (converting to ObjectId if needed)
-            let: { empId: "$_id" },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$_id", { $toObjectId: "$$empId" }] } } }
-            ],
+            localField: 'employeeObjId',
+            foreignField: '_id',
             as: 'employee'
           }
         },
