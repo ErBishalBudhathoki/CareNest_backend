@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/trainingComplianceController');
-const auth = require('../middleware/auth');
+const { authenticateUser: auth } = require('../middleware/auth');
 const { upload } = require('../config/storage');
 
 // Certifications
