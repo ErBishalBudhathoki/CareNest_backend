@@ -191,6 +191,7 @@ console.log('API usage monitor loaded successfully');
 const securityDashboardRoutes = require('./routes/securityDashboard');
 console.log('Security dashboard routes loaded successfully');
 const apiUsageRoutes = require('./routes/apiUsageRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 console.log('API usage routes loaded successfully');
 const bankDetailsRoutes = require('./routes/bankDetails');
 console.log('Bank details routes loaded successfully');
@@ -248,6 +249,7 @@ app.use('/api/security', securityDashboardRoutes);
 
 // Mount API usage analytics routes
 app.use('/api/analytics', apiUsageRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Mount request routes
 app.use('/api/requests', requestRoutes);
@@ -257,6 +259,9 @@ app.use('/api/reminders', timesheetReminderRoutes);
 
 // Mount earnings routes
 app.use('/api/earnings', earningsRoutes);
+
+// Mount trip routes
+app.use('/api/trips', tripRoutes);
 
 // Mount expense reminder routes
 app.use('/api/reminders', expenseReminderRoutes);
