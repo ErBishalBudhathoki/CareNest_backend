@@ -165,6 +165,7 @@ console.log('Pricing analytics endpoints loaded successfully');
 // General Settings endpoints
 const { updateGeneralSettings, createOrUpdateGeneralSettings } = require('./settings_endpoints');
 const { authenticateUser } = require('./middleware/auth');
+const { requireAdmin, requireOrganizationMatch } = require('./middleware/rbac');
 console.log('General settings endpoints loaded successfully');
 const {
   getClientActivityAnalytics,
@@ -1208,6 +1209,131 @@ app.post('/addShiftNote', async (req, res) => {
     }
   }
 });
+
+/**
+ * Get leave balances for a user
+ * GET /leave/balances/:userEmail
+ */
+app.get('/leave/balances/:userEmail', async (req, res) => {
+  let client;
+  try {
+    const { userEmail } = req.params;
+    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    const db = client.db(DB_NAME);
+
+    const user = await db.collection("users").findOne({ email: userEmail });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Default balances if not present
+    const balances = user.leaveBalances || {
+      annualLeave: 0.0,
+      personalLeave: 0.0,
+      longServiceLeave: 0.0,
+      accruedToDate: new Date()
+    };
+
+    res.status(200).json({ success: true, balances });
+  } catch (error) {
+    console.error('Error fetching leave balances:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch leave balances' });
+  } finally {
+    if (client) await client.close();
+  }
+});
+
+/**
+ * Submit a leave request
+ * POST /leave/request
+ */
+app.post('/leave/request', async (req, res) => {
+  let client;
+  try {
+    const { userEmail, leaveType, startDate, endDate, reason, totalHours } = req.body;
+
+    if (!userEmail || !leaveType || !startDate || !endDate) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    const db = client.db(DB_NAME);
+
+    // Get Organization ID from User
+    const user = await db.collection("users").findOne({ email: userEmail });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const leaveRequest = {
+      userEmail,
+      organizationId: user.organizationId,
+      leaveType,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      totalHours: parseFloat(totalHours) || 0, // Should be calculated or provided
+      reason,
+      status: 'Pending',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const result = await db.collection("leaveRequests").insertOne(leaveRequest);
+
+    res.status(201).json({ success: true, message: "Leave request submitted", requestId: result.insertedId });
+  } catch (error) {
+    console.error('Error submitting leave request:', error);
+    res.status(500).json({ success: false, message: 'Failed to submit leave request' });
+  } finally {
+    if (client) await client.close();
+  }
+});
+
+/**
+ * Get leave requests for a user
+ * GET /leave/requests/:userEmail
+ */
+app.get('/leave/requests/:userEmail', async (req, res) => {
+  let client;
+  try {
+    const { userEmail } = req.params;
+    client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
+    const db = client.db(DB_NAME);
+
+    const requests = await db.collection("leaveRequests")
+      .find({ userEmail })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({ success: true, requests });
+  } catch (error) {
+    console.error('Error fetching leave requests:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch leave requests' });
+  } finally {
+    if (client) await client.close();
+  }
+});
+
+/**
+ * Get upcoming public holidays
+ * GET /leave/public-holidays
+ */
+app.get('/leave/public-holidays', async (req, res) => {
+  // Mock data for Australia (VIC/NSW) 2024-2025
+  const holidays = [
+    { date: '2025-01-01', name: "New Year's Day" },
+    { date: '2025-01-27', name: "Australia Day Holiday" },
+    { date: '2025-03-10', name: "Labour Day (VIC)" },
+    { date: '2025-04-18', name: "Good Friday" },
+    { date: '2025-04-21', name: "Easter Monday" },
+    { date: '2025-04-25', name: "Anzac Day" },
+    { date: '2025-06-09', name: "King's Birthday" },
+    { date: '2025-11-04', name: "Melbourne Cup (VIC)" },
+    { date: '2025-12-25', name: "Christmas Day" },
+    { date: '2025-12-26', name: "Boxing Day" }
+  ];
+  res.status(200).json({ success: true, holidays });
+});
+
 
 /**
  * Update client extended details (Care Notes, Preferences)
@@ -6721,13 +6847,6 @@ app.post('/api/invoices/share/:invoiceId', shareInvoice);
  * Body: { organizationId, userEmail?, reason? }
  */
 app.delete('/api/invoices/delete/:invoiceId', deleteInvoice);
-
-/**
- * Get invoice statistics for an organization
- * GET /api/invoices/stats/:organizationId
- * Query params: period (7d, 30d, 90d)
- */
-app.get('/api/invoices/stats/:organizationId', getInvoiceStats);
 
 // ============================================================================
 // PRICE PROMPT API ENDPOINTS (Task 2.3: Price prompt system for missing prices)
