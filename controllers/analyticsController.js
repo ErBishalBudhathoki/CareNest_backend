@@ -55,6 +55,9 @@ async function getFinancialMetrics(req, res) {
     }
 
     // Adjust endDate to end of day to be inclusive
+    const startDateTime = new Date(startDate);
+    startDateTime.setHours(0, 0, 0, 0);
+    
     const endDateTime = new Date(endDate);
     endDateTime.setHours(23, 59, 59, 999);
 
@@ -65,7 +68,7 @@ async function getFinancialMetrics(req, res) {
           $match: {
             organizationId: orgId,
             createdAt: {
-              $gte: new Date(startDate),
+              $gte: startDateTime,
               $lte: endDateTime
             }
           }
@@ -194,10 +197,12 @@ async function getUtilizationMetrics(req, res) {
     await databaseConfig.executeOperation(async (db) => {
       // Calculate total weeks in range for capacity
       const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999); // Include full end date
+    start.setHours(0, 0, 0, 0); // Start of day
+    
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include full end date
       
-      const weeks = Math.max(1, (end - start) / (1000 * 60 * 60 * 24 * 7));
+    const weeks = Math.max(1, (end - start) / (1000 * 60 * 60 * 24 * 7));
       const capacityPerEmployee = 40 * weeks;
 
       // Aggregate Billable Hours per Employee (from invoiceLineItems)
@@ -384,6 +389,10 @@ async function getReliabilityMetrics(req, res) {
     }
 
     const todayStr = new Date().toISOString().split('T')[0];
+    
+    // Extract YYYY-MM-DD part for string comparison against date fields
+    const startStr = startDate.includes('T') ? startDate.split('T')[0] : startDate;
+    const endStr = endDate.includes('T') ? endDate.split('T')[0] : endDate;
 
     await databaseConfig.executeOperation(async (db) => {
       // 1. Get All Scheduled Shifts in Range (Past dates only for reliability)
@@ -420,7 +429,7 @@ async function getReliabilityMetrics(req, res) {
         { $unwind: "$schedule" },
         {
           $match: {
-            "schedule.date": { $gte: startDate, $lte: endDate, $lt: todayStr } // Only past shifts
+            "schedule.date": { $gte: startStr, $lte: endStr, $lt: todayStr } // Only past shifts
           }
         },
         {
@@ -441,7 +450,7 @@ async function getReliabilityMetrics(req, res) {
       const workedShifts = await db.collection('workedTime').aggregate([
         {
           $match: {
-            shiftDate: { $gte: startDate, $lte: endDate }
+            shiftDate: { $gte: startStr, $lte: endStr }
           }
         },
         // Join to check Org
