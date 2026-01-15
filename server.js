@@ -413,6 +413,11 @@ app.use('/', bankDetailsRoutes);
 // Mount admin invoice profile routes
 app.use('/', adminInvoiceProfileRoutes);
 
+// Mount training and compliance routes
+const trainingComplianceRoutes = require('./routes/trainingComplianceRoutes');
+app.use('/api', trainingComplianceRoutes);
+
+
 // Configure multer to handle file uploads
 const { upload, isR2Configured } = require('./config/storage');
 

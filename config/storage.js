@@ -69,6 +69,7 @@ if (isR2Configured) {
                 let folder = 'others';
                 if (file.fieldname === 'logo') folder = 'logos';
                 if (file.fieldname === 'receipt') folder = 'receipts';
+                if (file.fieldname === 'certification') folder = 'certifications';
                 // For profile photos, store in 'profileImage' folder
                 if (file.fieldname === 'photo') folder = 'profileImage';
                 
