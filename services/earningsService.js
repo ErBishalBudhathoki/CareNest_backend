@@ -201,6 +201,103 @@ class EarningsService {
         breakdown
     };
   }
+
+  _parseIsoDateToUtc(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3) return null;
+    const [y, m, d] = parts;
+    if (!y || !m || !d) return null;
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+
+  _formatUtcDate(date) {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  _getWeekStartUtc(date) {
+    const day = date.getUTCDay();
+    const daysSinceMonday = (day + 6) % 7;
+    const start = new Date(date);
+    start.setUTCDate(date.getUTCDate() - daysSinceMonday);
+    start.setUTCHours(0, 0, 0, 0);
+    return start;
+  }
+
+  _getMonthStartUtc(date) {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+  }
+
+  async getEarningsHistory(userEmail, startDate, endDate, bucket = 'month') {
+    const db = await this.connect();
+
+    const user = await db.collection('login').findOne({ email: userEmail });
+    const payRate = user?.payRate || 0;
+
+    const start =
+      this._parseIsoDateToUtc(startDate) ||
+      new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 5, 1));
+    const end =
+      this._parseIsoDateToUtc(endDate) ||
+      new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 0));
+
+    const query = {
+      userEmail: userEmail,
+      isActive: true,
+      shiftDate: {
+        $gte: this._formatUtcDate(start),
+        $lte: this._formatUtcDate(end),
+      },
+    };
+
+    const workedRecords = await db.collection('workedTime').find(query).toArray();
+
+    const byPeriod = {};
+    for (const record of workedRecords) {
+      const date = this._parseIsoDateToUtc(record.shiftDate);
+      if (!date) continue;
+
+      const hours = this.parseDurationToHours(record.timeWorked);
+      const startKeyDate =
+        String(bucket).toLowerCase() === 'week'
+          ? this._getWeekStartUtc(date)
+          : this._getMonthStartUtc(date);
+
+      const key = this._formatUtcDate(startKeyDate);
+      if (!byPeriod[key]) {
+        byPeriod[key] = 0;
+      }
+      byPeriod[key] += hours;
+    }
+
+    const results = Object.keys(byPeriod)
+      .sort((a, b) => a.localeCompare(b))
+      .map((periodStart) => {
+        const startUtc = this._parseIsoDateToUtc(periodStart);
+        const endUtc =
+          String(bucket).toLowerCase() === 'week'
+            ? new Date(Date.UTC(startUtc.getUTCFullYear(), startUtc.getUTCMonth(), startUtc.getUTCDate() + 6))
+            : new Date(Date.UTC(startUtc.getUTCFullYear(), startUtc.getUTCMonth() + 1, 0));
+
+        const hours = parseFloat(byPeriod[periodStart].toFixed(2));
+        const earnings = parseFloat((hours * payRate).toFixed(2));
+        return {
+          periodStart: this._formatUtcDate(startUtc),
+          periodEnd: this._formatUtcDate(endUtc),
+          hours,
+          earnings,
+        };
+      });
+
+    return {
+      bucket: String(bucket).toLowerCase() === 'week' ? 'week' : 'month',
+      payRate,
+      items: results,
+    };
+  }
   
   // Admin function to set rate (Enhanced for SCHADS)
   async setPayRate(userEmail, rate, type = 'Hourly', rates = null, classificationLevel = null, payPoint = null, stream = null, employmentType = null, activeAllowances = []) {
