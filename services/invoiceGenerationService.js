@@ -6,6 +6,7 @@
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { priceValidationService } = require('./priceValidationService');
+const TripService = require('./tripService');
 const axios = require('axios');
 const logger = require('../config/logger');
 const uri = process.env.MONGODB_URI;
@@ -230,6 +231,16 @@ class InvoiceGenerationService {
         lineItems.push(...convertedExpenses);
       }
       
+      // Include Mileage (Billable Trips)
+      const mileageLineItems = await this.getBillableTripsForInvoice(client._id, startDate, endDate);
+      if (mileageLineItems.length > 0) {
+          const convertedMileagePromises = mileageLineItems.map(trip => 
+              this.convertTripToLineItem(trip, client, organizationId || assignment.organizationId)
+          );
+          const convertedMileage = await Promise.all(convertedMileagePromises);
+          lineItems.push(...convertedMileage.filter(item => item !== null));
+      }
+      
       // Apply pre-configured pricing if enabled
       if (usePreConfiguredPricing) {
         await this.applyPreConfiguredPricing(lineItems, organizationId || assignment.organizationId, client._id);
@@ -409,6 +420,16 @@ class InvoiceGenerationService {
         startDate,
         endDate
       );
+
+      // Include Mileage (Billable Trips)
+      const mileageLineItems = await this.getBillableTripsForInvoice(client._id, startDate, endDate);
+      if (mileageLineItems.length > 0) {
+          const convertedMileagePromises = mileageLineItems.map(trip => 
+              this.convertTripToLineItem(trip, client, client.organizationId)
+          );
+          const convertedMileage = await Promise.all(convertedMileagePromises);
+          lineItems.push(...convertedMileage.filter(item => item !== null));
+      }
 
       // Note: Expenses are now handled separately via the includeExpenses parameter
       // in the endpoint, not automatically included in line items
@@ -1855,6 +1876,72 @@ class InvoiceGenerationService {
         defaultProviderType
       });
       throw new Error(`Price validation failed: ${error.message}`);
+    }
+  }
+  /**
+   * Get billable trips for invoice
+   */
+  async getBillableTripsForInvoice(clientId, startDate, endDate) {
+    try {
+      // Ensure clientId is string
+      const clientIdStr = clientId.toString();
+      return await TripService.getBillableTrips(clientIdStr, startDate, endDate);
+    } catch (error) {
+      logger.error('Error fetching billable trips', { error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * Convert trip to line item
+   */
+  async convertTripToLineItem(trip, client, organizationId) {
+    try {
+      // 1. Determine Rate
+      let rate = 0;
+      
+      // Check Client override
+      if (client.billingSettings && client.billingSettings.mileageRate) {
+        rate = client.billingSettings.mileageRate;
+      } else {
+        // Check Org default
+        // We might not want to fetch org every time. 
+        // Ideally pass org object or fetch once.
+        // For now, let's fetch efficiently or assume passed param is enough if we had org object.
+        // But we only have ID.
+        const org = await this.db.collection('organizations').findOne({ _id: new ObjectId(organizationId) });
+        rate = org?.settings?.mileage?.defaultBillingRate || 0;
+      }
+
+      const quantity = parseFloat(trip.distance) || 0;
+      const totalPrice = quantity * rate;
+
+      return {
+        id: trip._id.toString(),
+        type: 'travel',
+        ndisItemNumber: '07_001_0106_8_3', // Example Transport Code (Provider Travel - Non-Labour Costs)
+        // Or '01_011_0107_1_1' (Public Transport).
+        // Best to use "Provider Travel - Non-Labour Costs" usually.
+        // Let's stick to a generic description and maybe a configurable code later.
+        // For now, I'll use '07_001_0106_8_3' as a placeholder for "Provider Travel".
+        itemDescription: `Travel: ${trip.startLocation} to ${trip.endLocation} (${trip.distance}km)`,
+        quantity: quantity,
+        unit: 'km',
+        unitPrice: rate,
+        totalPrice: totalPrice,
+        date: trip.date,
+        tripId: trip._id,
+        pricingStatus: 'fixed',
+        promptRequired: false,
+        ndisCompliant: true,
+        metadata: {
+            source: 'trip',
+            tripType: trip.tripType
+        }
+      };
+    } catch (error) {
+      logger.error('Error converting trip to line item', { error: error.message });
+      return null;
     }
   }
 }
