@@ -2847,6 +2847,53 @@ app.get("/checkEmail/:email", async function (req, res) {
   }
 });
 
+app.get("/userPayDetails/:email", async function (req, res) {
+  const { email } = req.params;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: "Email is required"
+    });
+  }
+
+  try {
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(DB_NAME);
+
+    const user = await db.collection("login").findOne(
+      { email: email, isActive: true },
+      {
+        projection: {
+          password: 0,
+          salt: 0
+        }
+      }
+    );
+
+    await client.close();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: user
+    });
+  } catch (error) {
+    console.error("Error fetching user pay details:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching user pay details"
+    });
+  }
+});
+
 /**
  * Get client details by email
  * GET /getClientDetails/:email
