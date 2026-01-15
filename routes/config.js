@@ -10,4 +10,7 @@ router.post('/job-roles', configController.createJobRole);
 router.get('/leave-types/:organizationId', configController.getLeaveTypes);
 router.post('/leave-types', configController.createLeaveType);
 
+// System Configs
+router.get('/tax-brackets', configController.getTaxBrackets);
+
 module.exports = router;
