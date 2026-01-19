@@ -93,17 +93,31 @@ async function getFinancialMetrics(req, res) {
             shiftDate: { $gte: startStr, $lte: endStr }
           }
         },
+        // Normalize assignedClientId to ObjectId for lookup
+        {
+          $addFields: {
+            lookupId: { $toObjectId: "$assignedClientId" }
+          }
+        },
         // Join with clientAssignments to check Organization
         {
           $lookup: {
             from: 'clientAssignments',
-            localField: 'assignedClientId',
+            localField: 'lookupId',
             foreignField: '_id',
             as: 'assignment'
           }
         },
-        { $unwind: '$assignment' },
-        { $match: { 'assignment.organizationId': orgId } },
+        { $unwind: { path: '$assignment', preserveNullAndEmptyArrays: true } },
+        // Match Organization ID (either from direct record or lookup)
+        { 
+          $match: { 
+            $or: [
+              { organizationId: orgId },
+              { 'assignment.organizationId': orgId }
+            ]
+          } 
+        },
         
         // Deduplicate: Get latest workedTime entry per shiftKey
         { $sort: { createdAt: -1 } },
@@ -302,17 +316,31 @@ async function getOvertimeMetrics(req, res) {
             shiftDate: { $gte: startStr, $lte: endStr }
           }
         },
+        // Normalize assignedClientId to ObjectId for lookup
+        {
+          $addFields: {
+            lookupId: { $toObjectId: "$assignedClientId" }
+          }
+        },
         // Join to check Org
         {
           $lookup: {
             from: 'clientAssignments',
-            localField: 'assignedClientId',
+            localField: 'lookupId',
             foreignField: '_id',
             as: 'assignment'
           }
         },
-        { $unwind: '$assignment' },
-        { $match: { 'assignment.organizationId': orgId } },
+        { $unwind: { path: '$assignment', preserveNullAndEmptyArrays: true } },
+        // Match Organization ID (either from direct record or lookup)
+        { 
+          $match: { 
+            $or: [
+              { organizationId: orgId },
+              { 'assignment.organizationId': orgId }
+            ]
+          } 
+        },
 
         // Deduplicate Shifts
         { $sort: { createdAt: -1 } },
