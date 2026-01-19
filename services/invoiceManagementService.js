@@ -48,6 +48,7 @@ class InvoiceManagementService {
         status,
         clientEmail,
         paymentStatus,
+        invoiceType,
         dateFrom,
         dateTo,
         searchTerm
@@ -68,6 +69,10 @@ class InvoiceManagementService {
       
       if (status) {
         query['workflow.status'] = status;
+      }
+
+      if (invoiceType) {
+        query['metadata.invoiceType'] = invoiceType;
       }
       
       if (clientEmail) {
@@ -572,6 +577,30 @@ class InvoiceManagementService {
         // Retrieve the created invoice
         const createdInvoice = await invoicesCollection.findOne({ _id: result.insertedId });
         
+        // --- POPULATE ANALYTICS DATA (invoiceLineItems) ---
+        if (invoiceData.lineItems && invoiceData.lineItems.length > 0) {
+          const lineItemsCollection = this.db.collection('invoiceLineItems');
+          
+          const analyticsItems = invoiceData.lineItems.map(item => ({
+            ...item,
+            invoiceId: result.insertedId,
+            invoiceNumber: invoiceData.invoiceNumber,
+            organizationId: invoiceData.organizationId,
+            clientEmail: invoiceData.clientEmail,
+            // Ensure dates are Date objects for aggregation
+            createdAt: new Date(), 
+            date: item.date ? new Date(item.date) : new Date(),
+            // Ensure numeric values
+            totalPrice: parseFloat(item.totalPrice || 0),
+            hours: parseFloat(item.quantity || 0), // Assuming quantity is hours for services
+            employeeId: item.employeeId || null // Ensure employeeId exists for utilization
+          }));
+
+          await lineItemsCollection.insertMany(analyticsItems);
+          logger.info(`Inserted ${analyticsItems.length} line items for analytics`);
+        }
+        // --------------------------------------------------
+        
         logger.info('Invoice created in database', {
           invoiceId: result.insertedId,
           invoiceNumber: invoiceData.invoiceNumber,
@@ -678,6 +707,86 @@ class InvoiceManagementService {
     } catch (error) {
       logger.error('Error logging invoice access:', error);
       // Don't throw error as this is non-critical
+    }
+  }
+
+  /**
+   * Update invoice payment status
+   * @param {string} invoiceId - Invoice ID
+   * @param {string} organizationId - Organization identifier
+   * @param {string} status - New payment status
+   * @param {Object} paymentDetails - Additional payment details
+   * @returns {Object} Update result
+   */
+  async updatePaymentStatus(invoiceId, organizationId, status, paymentDetails = {}) {
+    try {
+      await this.connect();
+      
+      const invoicesCollection = this.db.collection('invoices');
+      
+      // Verify invoice exists
+      const invoice = await invoicesCollection.findOne({
+        _id: new ObjectId(invoiceId),
+        organizationId,
+        'deletion.isDeleted': { $ne: true }
+      });
+      
+      if (!invoice) {
+        return {
+          success: false,
+          error: 'Invoice not found'
+        };
+      }
+      
+      const updateData = {
+        'payment.status': status,
+        'auditTrail.updatedAt': new Date(),
+        'auditTrail.updatedBy': paymentDetails.updatedBy || 'system'
+      };
+
+      // If paid, update paid amount and date
+      if (status === PaymentStatus.PAID) {
+        updateData['payment.paidDate'] = new Date();
+        updateData['payment.paidAmount'] = invoice.financialSummary.totalAmount;
+        updateData['workflow.status'] = InvoiceStatus.PAID;
+      }
+      
+      // If partial, update paid amount
+      if (status === PaymentStatus.PARTIAL && paymentDetails.paidAmount) {
+        updateData['payment.paidAmount'] = (invoice.payment?.paidAmount || 0) + paymentDetails.paidAmount;
+      }
+
+      await invoicesCollection.updateOne(
+        { _id: new ObjectId(invoiceId) },
+        { 
+          $set: updateData,
+          $push: {
+            'auditTrail.changeHistory': {
+              timestamp: new Date(),
+              userId: paymentDetails.updatedBy || 'system',
+              action: 'payment_status_update',
+              changes: { oldStatus: invoice.payment?.status, newStatus: status },
+              reason: paymentDetails.notes || 'Payment status updated'
+            }
+          }
+        }
+      );
+      
+      return {
+        success: true,
+        data: {
+          invoiceId,
+          status,
+          updatedAt: new Date()
+        }
+      };
+      
+    } catch (error) {
+      logger.error('Error updating payment status:', error);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
