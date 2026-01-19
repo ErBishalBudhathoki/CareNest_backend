@@ -8,10 +8,9 @@ const {
   shareInvoice,
   deleteInvoice,
   createInvoice,
-  updatePaymentStatus
+  updatePaymentStatus,
+  getInvoiceStats
 } = require('../endpoints/invoice_management_endpoints');
-
-const router = express.Router();
 
 // Create a new invoice
 router.post('/api/invoices', createInvoice);
