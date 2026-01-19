@@ -7,9 +7,11 @@ const {
   getInvoiceDetails,
   shareInvoice,
   deleteInvoice,
-  getInvoiceStats,
-  createInvoice
+  createInvoice,
+  updatePaymentStatus
 } = require('../endpoints/invoice_management_endpoints');
+
+const router = express.Router();
 
 // Create a new invoice
 router.post('/api/invoices', createInvoice);
@@ -19,6 +21,9 @@ router.get('/api/invoices', getInvoicesList);
 
 // Get details of a specific invoice
 router.get('/api/invoices/:invoiceId', getInvoiceDetails);
+
+// Update payment status
+router.patch('/api/invoices/:invoiceId/payment-status', updatePaymentStatus);
 
 // Share an invoice
 router.post('/api/invoices/:invoiceId/share', shareInvoice);

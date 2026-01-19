@@ -273,6 +273,21 @@ const scheduleRoutes = require('./routes/schedule');
 app.use('/api/schedule', scheduleRoutes);
 console.log('Schedule routes loaded successfully');
 
+// Mount business routes
+const businessRoutes = require('./routes/business');
+app.use('/', businessRoutes);
+console.log('Business routes loaded successfully');
+
+// Mount organization routes
+const organizationRoutes = require('./routes/organization');
+app.use('/organization', organizationRoutes);
+console.log('Organization routes loaded successfully');
+
+// Mount client routes
+const clientRoutes = require('./routes/client');
+app.use('/', clientRoutes);
+console.log('Client routes loaded successfully');
+
 // Mount active timer endpoints directly to app
 app.post('/startTimerWithTracking', startTimerWithTracking);
 app.post('/stopTimerWithTracking', stopTimerWithTracking);
@@ -5357,6 +5372,7 @@ app.post('/setWorkedTime', async (req, res) => {
 
     // Create worked time record with specific shift details
     const workedTimeRecord = {
+      organizationId: assignedClient.organizationId, // Add Organization ID for analytics
       userEmail: userEmail,
       clientEmail: clientEmail,
       timeWorked: timeList,
