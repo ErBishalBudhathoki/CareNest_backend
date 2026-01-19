@@ -331,18 +331,35 @@ async function getOvertimeMetrics(req, res) {
           }
         },
 
-        // Group by User
+        // Group by User and Date to find daily spikes
         {
           $group: {
-            _id: '$userEmail',
-            totalHours: { $sum: '$hours' }
+            _id: {
+              email: '$userEmail',
+              date: '$shiftDate'
+            },
+            dailyHours: { $sum: '$hours' }
           }
         },
         
-        // Filter Overtime
+        // Aggregate back to User level with Daily details
+        {
+          $group: {
+            _id: '$_id.email',
+            totalHours: { $sum: '$dailyHours' },
+            dailyBreakdown: {
+              $push: {
+                date: '$_id.date',
+                hours: '$dailyHours'
+              }
+            }
+          }
+        },
+        
+        // Filter Overtime (Weekly > 40 OR Daily > 8 spike check)
         {
           $match: {
-            totalHours: { $gt: 40 }
+            totalHours: { $gt: 0 } // Get all active users to show heat map, not just overtime
           }
         },
         
@@ -362,7 +379,14 @@ async function getOvertimeMetrics(req, res) {
             employeeEmail: '$_id',
             employeeName: { $concat: ["$user.firstName", " ", "$user.lastName"] },
             totalHours: 1,
-            overtimeHours: { $subtract: ['$totalHours', 40] }
+            overtimeHours: { 
+              $cond: {
+                if: { $gt: ['$totalHours', 40] },
+                then: { $subtract: ['$totalHours', 40] },
+                else: 0
+              }
+            },
+            dailyBreakdown: 1
           }
         }
       ]).toArray();
