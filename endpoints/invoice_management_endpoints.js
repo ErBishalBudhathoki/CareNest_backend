@@ -24,6 +24,7 @@ async function getInvoicesList(req, res) {
       status,
       clientEmail,
       paymentStatus,
+      invoiceType,
       dateFrom,
       dateTo,
       sortBy = 'auditTrail.createdAt',
@@ -44,6 +45,7 @@ async function getInvoicesList(req, res) {
       status,
       clientEmail,
       paymentStatus,
+      invoiceType,
       dateFrom,
       dateTo,
       searchTerm
@@ -520,11 +522,55 @@ async function getInvoiceStats(req, res) {
   }
 }
 
+/**
+ * Update invoice payment status
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+async function updatePaymentStatus(req, res) {
+  try {
+    const { invoiceId } = req.params;
+    const { organizationId, status, notes, paidAmount, updatedBy } = req.body;
+
+    if (!invoiceId || !organizationId || !status) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invoice ID, Organization ID, and Status are required'
+      });
+    }
+
+    const result = await invoiceManagementService.updatePaymentStatus(
+      invoiceId,
+      organizationId,
+      status,
+      { notes, paidAmount, updatedBy }
+    );
+
+    if (!result.success) {
+      return res.status(result.error === 'Invoice not found' ? 404 : 500).json(result);
+    }
+
+    // Log action
+    logger.info(`Payment status updated for invoice ${invoiceId} to ${status}`);
+
+    res.json(result);
+
+  } catch (error) {
+    logger.error('Error updating payment status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update payment status',
+      details: error.message
+    });
+  }
+}
+
 module.exports = {
   getInvoicesList,
   getInvoiceDetails,
   shareInvoice,
   deleteInvoice,
   getInvoiceStats,
-  createInvoice
+  createInvoice,
+  updatePaymentStatus
 };

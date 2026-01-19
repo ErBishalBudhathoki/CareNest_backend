@@ -61,6 +61,10 @@ async function getFinancialMetrics(req, res) {
     const endDateTime = new Date(endDate);
     endDateTime.setHours(23, 59, 59, 999);
 
+    // Extract YYYY-MM-DD part for string comparison against workedTime.shiftDate
+    const startStr = startDate.includes('T') ? startDate.split('T')[0] : startDate;
+    const endStr = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+
     await databaseConfig.executeOperation(async (db) => {
       // 1. Revenue (from invoiceLineItems)
       const revenueData = await db.collection('invoiceLineItems').aggregate([
@@ -86,8 +90,7 @@ async function getFinancialMetrics(req, res) {
         // Filter by date range (shiftDate is string YYYY-MM-DD)
         {
           $match: {
-            organizationId: orgId,
-            shiftDate: { $gte: startDate, $lte: endDate }
+            shiftDate: { $gte: startStr, $lte: endStr }
           }
         },
         // Join with clientAssignments to check Organization
