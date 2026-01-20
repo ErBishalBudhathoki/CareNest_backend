@@ -43,4 +43,13 @@ router.post(
   earningsController.setPayRate
 );
 
+// Get Quarterly OTE for Super Cap
+// GET /api/earnings/quarterly-ote/:userEmail?date=YYYY-MM-DD
+router.get(
+  '/quarterly-ote/:userEmail',
+  authenticateUser,
+  requireSelfOrAdmin('userEmail'),
+  earningsController.getQuarterlyOTE
+);
+
 module.exports = router;

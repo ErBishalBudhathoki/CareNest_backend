@@ -11,7 +11,23 @@ class TripService {
   async getDbConnection() {
     const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
     await client.connect();
-    return { client, db: client.db(this.dbName) };
+    const db = client.db(this.dbName);
+    
+    // Ensure indexes
+    await this.ensureIndexes(db);
+    
+    return { client, db };
+  }
+
+  async ensureIndexes(db) {
+    try {
+       await db.collection("trips").createIndex({ userId: 1, date: -1 });
+       await db.collection("trips").createIndex({ organizationId: 1, date: -1 });
+       await db.collection("trips").createIndex({ status: 1 });
+       await db.collection("trips").createIndex({ isReimbursable: 1 });
+    } catch (e) {
+       // Ignore index exists errors
+    }
   }
 
   /**

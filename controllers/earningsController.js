@@ -63,7 +63,7 @@ class EarningsController {
   async setPayRate(req, res) {
       try {
           const { userEmail } = req.params;
-          const { rate, type, rates, classificationLevel, payPoint, stream, employmentType, activeAllowances } = req.body;
+          const { rate, type, rates, classificationLevel, payPoint, stream, employmentType, activeAllowances, dob } = req.body;
           
           if (!rate) {
                return res.status(400).json({ success: false, message: 'Rate is required' });
@@ -78,7 +78,8 @@ class EarningsController {
             payPoint,
             stream,
             employmentType,
-            activeAllowances
+            activeAllowances,
+            dob
           );
           if (success) {
               res.status(200).json({ success: true, message: 'Pay rate updated' });
@@ -89,6 +90,23 @@ class EarningsController {
           logger.error('Error setting pay rate', error);
           res.status(500).json({ success: false, message: error.message });
       }
+  }
+
+  async getQuarterlyOTE(req, res) {
+    try {
+      const { userEmail } = req.params;
+      const { date } = req.query;
+
+      if (!userEmail) {
+        return res.status(400).json({ success: false, message: 'User email is required' });
+      }
+
+      const data = await earningsService.getQuarterlyOTE(userEmail, date);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      logger.error('Error fetching quarterly OTE', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 }
 
