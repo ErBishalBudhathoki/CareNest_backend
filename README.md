@@ -32,6 +32,28 @@ This application supports environment-based configuration with automatic securit
 
 See [`ENVIRONMENT_CONFIGURATION.md`](./ENVIRONMENT_CONFIGURATION.md) for detailed information.
 
+## 🤖 Vertex AI Integration
+
+The backend uses Google Cloud Vertex AI (Gemini Flash 1.5) for intelligent features like schedule recommendations and conflict analysis.
+
+### Prerequisites
+1. **Google Cloud Project**: A project with the Vertex AI API enabled.
+2. **IAM Roles**: The service account (or user) running the code must have the `roles/aiplatform.user` role.
+3. **Environment Variables**:
+   - `GCP_PROJECT_ID`: Your Google Cloud Project ID.
+   - `GCP_LOCATION`: (Optional) Vertex AI region (default: `us-central1`).
+
+### Local Development Setup
+To run AI features locally, authenticate with Application Default Credentials (ADC):
+
+```bash
+gcloud auth application-default login
+```
+
+### Deployment
+- **Cloud Run / Functions**: Ensure the attached Service Account has `roles/aiplatform.user`.
+- **Render / AWS / Other**: Export a Service Account Key (JSON), and set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the path of this key file.
+
 ## Features
 
 ### Multi-Tenant Architecture
