@@ -5,7 +5,7 @@
  * All endpoints require proper authentication and organization-level access control.
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 const logger = require('./config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -15,7 +15,6 @@ const {
   getEntityAuditHistory,
   getOrganizationAuditLogs,
   getAuditStatistics,
-  cleanupOldAuditLogs,
   AUDIT_ACTIONS,
   AUDIT_ENTITIES
 } = require('./services/auditService');

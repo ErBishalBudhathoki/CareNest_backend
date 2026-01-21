@@ -187,12 +187,6 @@ class RequestService {
     if (filters.status) query.status = filters.status;
     if (filters.type) query.type = filters.type;
 
-    // Use aggregation to join with users collection to get user details
-    const pipeline = [
-      { $match: query },
-      { $sort: { createdAt: -1 } },
-    ];
-
     return await db.collection('requests').find(query).sort({ createdAt: -1 }).toArray();
   }
 
@@ -410,6 +404,84 @@ class RequestService {
     }
 
     return result.value;
+  }
+
+  async getLeaveForecast(userEmail, targetDate) {
+    const db = await this.connect();
+    
+    // 1. Get User Start Date
+    const user = await db.collection('login').findOne({ email: userEmail });
+    
+    // Default values
+    let startDate = new Date();
+    // Fallback: If no createdAt, assume start of current year
+    startDate.setMonth(0, 1); 
+    
+    if (user && user.createdAt) {
+       startDate = new Date(user.createdAt);
+    }
+    
+    const target = new Date(targetDate);
+    const now = new Date();
+    
+    // 2. Calculate Accrual
+    // Rule: 20 days per year = 1.66 days/month.
+    // Assuming 7.6 hours per day = 12.66 hours/month.
+    const ACCRUAL_RATE_HOURS_PER_MONTH = 12.66;
+    
+    // Calculate months difference
+    const getMonthsDiff = (d1, d2) => {
+        let months;
+        months = (d2.getFullYear() - d1.getFullYear()) * 12;
+        months -= d1.getMonth();
+        months += d2.getMonth();
+        return months <= 0 ? 0 : months;
+    };
+
+    const monthsWorked = getMonthsDiff(startDate, now);
+    const accruedToDate = monthsWorked * ACCRUAL_RATE_HOURS_PER_MONTH;
+    
+    // 3. Calculate Taken Leave (Approved TimeOff)
+    // Support both ID and Email matching
+    const userId = user ? user._id.toString() : userEmail;
+    
+    const takenRequests = await db.collection('requests').find({
+        $or: [
+          { userId: userId },
+          { createdBy: userEmail }
+        ],
+        type: 'TimeOff',
+        status: 'Approved'
+    }).toArray();
+    
+    let takenHours = 0;
+    takenRequests.forEach(req => {
+        if (req.details && req.details.startDate && req.details.endDate) {
+            const start = new Date(req.details.startDate);
+            const end = new Date(req.details.endDate);
+            // Simple duration in hours
+            // In production, this should account for working days/hours only
+            const diffMs = end - start;
+            const diffHours = diffMs / (1000 * 60 * 60);
+            
+            // Cap max hours per day to 7.6 or 8 if spanning multiple days
+            // For now, use raw hours but cap at 24h * days
+            takenHours += diffHours;
+        }
+    });
+    
+    // 4. Forecast
+    const monthsToTarget = getMonthsDiff(now, target);
+    const forecastAccrual = monthsToTarget * ACCRUAL_RATE_HOURS_PER_MONTH;
+    const currentBalance = accruedToDate - takenHours;
+    
+    return {
+        accrued: parseFloat(accruedToDate.toFixed(2)),
+        taken: parseFloat(takenHours.toFixed(2)),
+        balance: parseFloat(currentBalance.toFixed(2)),
+        forecast: parseFloat((currentBalance + forecastAccrual).toFixed(2)),
+        targetDate: target
+    };
   }
 }
 

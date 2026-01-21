@@ -7,7 +7,7 @@ const express = require('express');
 const router = express.Router();
 
 const {
-    processAllTimesheetReminders,
+    // processAllTimesheetReminders,
     getUsersWithIncompleteTimesheets,
     getOrganizationReminderSettings,
     updateOrganizationReminderSettings

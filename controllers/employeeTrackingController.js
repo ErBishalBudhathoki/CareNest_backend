@@ -41,7 +41,7 @@ class EmployeeTrackingController {
       logger.error('Employee tracking data fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId
+      organizationId: req.params.organizationId
     });
       
       // Handle specific error types

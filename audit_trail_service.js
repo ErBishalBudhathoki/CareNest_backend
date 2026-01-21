@@ -13,7 +13,7 @@
  * - Export functionality for compliance reporting
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 const logger = require('./config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });

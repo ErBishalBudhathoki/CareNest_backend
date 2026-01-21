@@ -164,20 +164,26 @@ class SchedulerService {
 
             // Check for overlapping shifts in the shifts collection
             const overlappingShifts = await db.collection('shifts').find({
-                $or: [
-                    { employeeId: new ObjectId(employeeId) },
-                    { employeeEmail: employeeEmail }
+                $and: [
+                    {
+                        $or: [
+                            { employeeId: new ObjectId(employeeId) },
+                            { employeeEmail: employeeEmail }
+                        ]
+                    },
+                    {
+                        $or: [
+                            // New shift starts during existing shift
+                            { startTime: { $lte: startTime }, endTime: { $gt: startTime } },
+                            // New shift ends during existing shift
+                            { startTime: { $lt: endTime }, endTime: { $gte: endTime } },
+                            // New shift completely contains existing shift
+                            { startTime: { $gte: startTime }, endTime: { $lte: endTime } }
+                        ]
+                    }
                 ],
                 status: { $nin: ['cancelled'] },
-                isActive: { $ne: false },
-                $or: [
-                    // New shift starts during existing shift
-                    { startTime: { $lte: startTime }, endTime: { $gt: startTime } },
-                    // New shift ends during existing shift
-                    { startTime: { $lt: endTime }, endTime: { $gte: endTime } },
-                    // New shift completely contains existing shift
-                    { startTime: { $gte: startTime }, endTime: { $lte: endTime } }
-                ]
+                isActive: { $ne: false }
             }).toArray();
 
             if (overlappingShifts.length > 0) {
@@ -551,7 +557,6 @@ class SchedulerService {
      */
     static async bulkCreateShifts(shiftsData) {
         try {
-            const db = await getDatabase();
             const results = {
                 created: [],
                 failed: [],

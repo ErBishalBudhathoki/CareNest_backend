@@ -1,3 +1,8 @@
+const express = require('express');
+const router = express.Router();
+const { MongoClient, ServerApiVersion } = require('mongodb');
+const uri = process.env.MONGODB_URI;
+
 /**
  * Employee Tracking API Endpoint
  * GET /getEmployeeTrackingData/:organizationId
@@ -8,9 +13,7 @@
  * - Employee assignments and client information
  */
 
-// Add this endpoint to server.js
-
-app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
+router.get('/:organizationId', async (req, res) => {
   let client;
   
   try {

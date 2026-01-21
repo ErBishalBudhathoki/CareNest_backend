@@ -69,7 +69,7 @@ class SecureErrorHandler {
    * @param {Object} res - Express response object
    * @param {Function} next - Express next function
    */
-  static errorHandler(err, req, res, next) {
+  static errorHandler(err, req, res, _next) {
     const sanitizedError = this.sanitizeError(err, `${req.method} ${req.path}`);
     
     // Log request context for debugging

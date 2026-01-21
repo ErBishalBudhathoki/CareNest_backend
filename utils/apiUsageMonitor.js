@@ -272,7 +272,7 @@ class ApiUsageMonitor {
       try {
         res.write(`event: ping\n`);
         res.write(`data: {"t":"${new Date().toISOString()}"}\n\n`);
-      } catch (_) {
+      } catch {
         // ignore
       }
     }, 20000);
@@ -291,7 +291,9 @@ class ApiUsageMonitor {
       this.clients.delete(res);
       try {
         res.end();
-      } catch (_) {}
+      } catch {
+        // ignore
+      }
     };
 
     return cleanup;
@@ -314,9 +316,11 @@ class ApiUsageMonitor {
     for (const res of this.clients.keys()) {
       try {
         res.write(data);
-      } catch (e) {
+      } catch {
         // Drop broken client
-        try { res.end(); } catch (_) {}
+        try { res.end(); } catch {
+          // ignore
+        }
         this.clients.delete(res);
       }
     }

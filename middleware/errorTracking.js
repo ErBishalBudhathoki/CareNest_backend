@@ -24,7 +24,7 @@ let errorMetrics = {
 /**
  * Enhanced error tracking middleware
  */
-const errorTrackingMiddleware = (err, req, res, next) => {
+const errorTrackingMiddleware = (err, req, res, _next) => {
   const errorId = Math.random().toString(36).substr(2, 9);
   const timestamp = new Date().toISOString();
   

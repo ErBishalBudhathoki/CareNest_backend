@@ -7,7 +7,7 @@
  * Global error handler middleware
  * Should be placed at the end of middleware stack
  */
-function errorHandler(err, req, res, next) {
+function errorHandler(err, req, res, _next) {
   console.error('Error occurred:', {
     message: err.message,
     stack: err.stack,

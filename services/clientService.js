@@ -18,6 +18,8 @@ class ClientService {
       clientState, 
       clientZip, 
       businessName,
+      preferences,
+      careNotes,
       organizationId,
       userEmail 
     } = clientData;
@@ -50,6 +52,8 @@ class ClientService {
         clientState,
         clientZip,
         businessName,
+        preferences: preferences || {}, // Default to empty object
+        careNotes: careNotes || "", // Default to empty string
         organizationId: organizationId || null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -414,7 +418,6 @@ class ClientService {
         breakList, 
         ndisItem, 
         highIntensityList, 
-        customPricing, 
         scheduleWithNdisItems 
       } = assignmentData;
       
@@ -433,15 +436,13 @@ class ClientService {
       if (typeof ndisItem === 'string') {
         try {
           parsedNdisItem = JSON.parse(ndisItem);
-        } catch (e) {
+        } catch {
           throw new Error('Invalid NDIS item format');
         }
       }
 
       // Extract customPricing from ndisItem if it exists
-      let extractedCustomPricing = customPricing;
       if (parsedNdisItem && parsedNdisItem.customPricing) {
-        extractedCustomPricing = parsedNdisItem.customPricing;
         delete parsedNdisItem.customPricing;
       }
 
@@ -453,7 +454,7 @@ class ClientService {
           if (typeof scheduleItem === 'string') {
             try {
               scheduleItem = JSON.parse(scheduleItem);
-            } catch (e) {
+            } catch {
               throw new Error(`Invalid schedule item format at index ${i}`);
             }
           }

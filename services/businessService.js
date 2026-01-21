@@ -1,4 +1,4 @@
-const { MongoClient, ObjectId } = require('mongodb');
+const { ObjectId } = require('mongodb');
 const { getDatabase } = require('../config/database');
 
 class BusinessService {

@@ -6,5 +6,6 @@ router.post('/create', requestController.createRequest);
 router.get('/organization/:organizationId', requestController.getRequests);
 router.patch('/:requestId/status', requestController.updateRequestStatus);
 router.post('/:requestId/claim', requestController.claimRequest);
+router.get('/forecast/:userEmail', requestController.getLeaveForecast);
 
 module.exports = router;

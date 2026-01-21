@@ -1,4 +1,4 @@
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const { getDatabase } = require('../config/database');
 const logger = require('../config/logger');
 
@@ -541,7 +541,6 @@ class AppointmentService {
       }
 
       let oldSchedule = getNormalizedSchedule(oldAssignment);
-      const initialLength = oldSchedule.length;
 
       // Helper for robust comparison
       const normalizeDate = (d) => {

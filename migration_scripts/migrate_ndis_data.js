@@ -48,7 +48,7 @@ async function migrateNdisData() {
         let needsUpdate = false;
         
         // Add pricing validation fields if missing
-        if (!item.hasOwnProperty('pricingValidation')) {
+        if (!Object.prototype.hasOwnProperty.call(item, 'pricingValidation')) {
           updates.pricingValidation = {
             lastValidated: new Date(),
             validationStatus: 'pending',
@@ -58,7 +58,7 @@ async function migrateNdisData() {
         }
         
         // Add enhanced metadata if missing
-        if (!item.hasOwnProperty('metadata')) {
+        if (!Object.prototype.hasOwnProperty.call(item, 'metadata')) {
           updates.metadata = {
             category: item.registrationGroup || 'Unknown',
             subcategory: item.supportCategory || 'Unknown',
@@ -71,7 +71,7 @@ async function migrateNdisData() {
         }
         
         // Add state-specific pricing structure if missing
-        if (!item.hasOwnProperty('enhancedPricing')) {
+        if (!Object.prototype.hasOwnProperty.call(item, 'enhancedPricing')) {
           const enhancedPricing = {
             basePrice: {
               standard: item.priceCaps?.standard || {},
@@ -91,7 +91,7 @@ async function migrateNdisData() {
         }
         
         // Add search optimization fields
-        if (!item.hasOwnProperty('searchOptimization')) {
+        if (!Object.prototype.hasOwnProperty.call(item, 'searchOptimization')) {
           updates.searchOptimization = {
             keywords: [
               item.itemName?.toLowerCase(),
@@ -107,7 +107,7 @@ async function migrateNdisData() {
         }
         
         // Add compliance tracking
-        if (!item.hasOwnProperty('compliance')) {
+        if (!Object.prototype.hasOwnProperty.call(item, 'compliance')) {
           updates.compliance = {
             ndisCompliant: true,
             lastComplianceCheck: new Date(),

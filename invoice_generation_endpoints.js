@@ -6,7 +6,6 @@
 
 const InvoiceGenerationService = require('./services/invoiceGenerationService');
 const { createAuditLogEndpoint } = require('./audit_trail_endpoints');
-const { validateInvoiceLineItems: validateLineItemsWithPricing } = require('./price_validation_endpoints');
 const logger = require('./config/logger');
 
 /**
@@ -813,7 +812,6 @@ async function getInvoiceValidationReport(req, res) {
       clientEmail, 
       startDate, 
       endDate,
-      includeExpenses = true,
       defaultState = 'NSW',
       defaultProviderType = 'standard'
     } = req.body;

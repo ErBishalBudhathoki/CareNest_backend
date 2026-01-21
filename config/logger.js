@@ -60,7 +60,7 @@ const fs = require('fs');
 if (!fs.existsSync(logsDir)) {
   try {
     fs.mkdirSync(logsDir, { recursive: true });
-  } catch (error) {
+  } catch {
     // Fallback to local logs directory if /var/log/backend is not writable
     const localLogsDir = path.join(__dirname, '../logs');
     if (!fs.existsSync(localLogsDir)) {

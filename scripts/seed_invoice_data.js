@@ -1,4 +1,4 @@
-const { MongoClient, ObjectId } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const path = require('path');
 const fs = require('fs');
 
@@ -108,7 +108,7 @@ async function seed() {
                 break: '30'
             }));
 
-            const assignmentResult = await db.collection('clientAssignments').updateOne(
+            await db.collection('clientAssignments').updateOne(
                 {
                     userEmail: pair.user,
                     clientEmail: pair.client,

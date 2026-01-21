@@ -8,8 +8,9 @@ class AuthController {
    * Check if email exists in the system
    */
   async checkEmail(req, res) {
+    let email;
     try {
-      const { email } = req.params;
+      email = req.params.email;
       
       if (!email) {
         return res.status(400).json({ error: 'Email is required' });
@@ -54,7 +55,7 @@ class AuthController {
       logger.error('Error getting client details', {
         error: error.message,
         stack: error.stack,
-        email
+        email: req.params.email
       });
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -123,7 +124,7 @@ class AuthController {
       logger.error('Error during signup', {
         error: error.message,
         stack: error.stack,
-        email: req.body.email
+        email: req.params.email
       });
       res.status(500).json({ error: 'Internal server error' });
     }

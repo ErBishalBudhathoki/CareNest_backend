@@ -107,17 +107,7 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
 
             if (!userEmail) continue;
 
-            // 2. Get scheduled shifts for this user in the week
-            const scheduledShifts = await db.collection('clientAssignments').find({
-                userEmail: userEmail,
-                organizationId: organizationId,
-                isActive: true,
-                'schedule.date': {
-                    $gte: weekStart.toISOString().split('T')[0],
-                    $lte: weekEnd.toISOString().split('T')[0]
-                }
-            }).toArray();
-
+            // 2. Get scheduled shifts for this user in the week (via shiftsWithDateRange)
             // Also check schedules stored differently
             const shiftsWithDateRange = await db.collection('clientAssignments').find({
                 userEmail: userEmail,

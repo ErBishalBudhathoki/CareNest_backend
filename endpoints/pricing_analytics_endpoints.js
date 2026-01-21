@@ -11,7 +11,6 @@
 
 const { MongoClient } = require('mongodb');
 const logger = require('../config/logger');
-const { createAuditLog } = require('../audit_trail_endpoints');
 
 /**
  * Get comprehensive pricing analytics
@@ -196,7 +195,7 @@ async function getPricingComplianceReport(req, res) {
 /**
  * Calculate comprehensive pricing metrics
  */
-function calculatePricingMetrics(customPricing, invoiceItems, ndisPricing) {
+function calculatePricingMetrics(customPricing, invoiceItems) {
   const totalItems = invoiceItems.length;
   const customPricedItems = invoiceItems.filter(item => item.pricingSource === 'custom');
   const standardPricedItems = invoiceItems.filter(item => item.pricingSource === 'standard');

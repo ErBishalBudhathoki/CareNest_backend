@@ -15,11 +15,9 @@ process.on('uncaughtException', (error) => {
 });
 
 const express = require("express");
-const iconv = require("iconv-lite");
 const fs = require("fs");
 const csv = require("csv-parser");
 const https = require("https");
-const multer = require("multer");
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
@@ -48,7 +46,7 @@ if (fs.existsSync(firebaseTemplatePath)) {
   console.warn('Firebase Admin SDK template file not found. Skipping configuration generation.');
 }
 
-const { admin, messaging } = require('./firebase-admin-config'); // Initialize Firebase Admin SDK
+const { messaging } = require('./firebase-admin-config'); // Initialize Firebase Admin SDK
 console.log('Firebase Admin SDK loaded successfully');
 const logger = require('./config/logger'); // Import structured logger
 console.log('Logger loaded successfully');
@@ -128,8 +126,7 @@ const {
   getInvoicesList,
   getInvoiceDetails,
   shareInvoice,
-  deleteInvoice,
-  getInvoiceStats
+  deleteInvoice
 } = require('./endpoints/invoice_management_endpoints');
 console.log('Invoice management endpoints loaded successfully');
 const {
@@ -165,7 +162,6 @@ console.log('Pricing analytics endpoints loaded successfully');
 // General Settings endpoints
 const { updateGeneralSettings, createOrUpdateGeneralSettings } = require('./settings_endpoints');
 const { authenticateUser } = require('./middleware/auth');
-const { requireAdmin, requireOrganizationMatch } = require('./middleware/rbac');
 console.log('General settings endpoints loaded successfully');
 const {
   getClientActivityAnalytics,
@@ -313,7 +309,7 @@ const filesDownloadHandler = async (req, res) => {
   let target;
   try {
     target = new URL(rawUrl);
-  } catch (error) {
+  } catch {
     return res.status(400).json({
       success: false,
       message: 'Invalid url parameter'
@@ -338,7 +334,7 @@ const filesDownloadHandler = async (req, res) => {
           ? process.env.R2_PUBLIC_DOMAIN
           : `https://${process.env.R2_PUBLIC_DOMAIN}`
       ).hostname.toLowerCase();
-    } catch (_) {
+    } catch {
       r2PublicHost = '';
     }
   }
@@ -361,7 +357,7 @@ const filesDownloadHandler = async (req, res) => {
     });
   }
 
-  const safeBasename = path.basename(target.pathname || '').replace(/[^\w.\-]/g, '_');
+  const safeBasename = path.basename(target.pathname || '').replace(/[^\w.-]/g, '_');
   const filename = safeBasename || 'download';
 
   try {
@@ -715,17 +711,16 @@ app.post('/addUpdateInvoicingEmailDetail', async (req, res) => {
       updatedAt: new Date()
     };
 
-    let result;
     if (existingDetails) {
       // Update existing record
-      result = await db.collection("invoicingEmailDetails").updateOne(
+      await db.collection("invoicingEmailDetails").updateOne(
         { userEmail: userEmail },
         { $set: invoicingEmailData }
       );
     } else {
       // Create new record
       invoicingEmailData.createdAt = new Date();
-      result = await db.collection("invoicingEmailDetails").insertOne(invoicingEmailData);
+      await db.collection("invoicingEmailDetails").insertOne(invoicingEmailData);
     }
 
     res.status(200).json({
@@ -778,10 +773,9 @@ app.post('/invoicingEmailDetailKey', async (req, res) => {
       updatedAt: new Date()
     };
 
-    let result;
     if (existingKey) {
       // Update existing key
-      result = await db.collection("invoicingEmailKeys").updateOne(
+      await db.collection("invoicingEmailKeys").updateOne(
         { userEmail: userEmail },
         { $set: keyData }
       );
@@ -789,7 +783,7 @@ app.post('/invoicingEmailDetailKey', async (req, res) => {
     else {
       // Create new key record
       keyData.createdAt = new Date();
-      result = await db.collection("invoicingEmailKeys").insertOne(keyData);
+      await db.collection("invoicingEmailKeys").insertOne(keyData);
     }
 
     res.status(200).json({
@@ -2213,7 +2207,8 @@ app.post('/sendNotification', async (req, res) => {
 
 
 
-var PORT = process.env.PORT || 8080;
+// PORT definition moved to server startup block
+
 
 // Secure GET endpoint for line items
 app.get("/getLineItems/", async (req, res) => {
@@ -2263,12 +2258,8 @@ app.get("/getLineItems/", async (req, res) => {
 
 // Start the server
 // Server configuration
-const serverOptions = {
-  poolsize: 100,
-  socketOptions: {
-    socketTimeoutMS: 6000000,
-  },
-};
+// serverOptions removed (unused)
+
 
 // Test MongoDB connection
 try {
@@ -2280,7 +2271,7 @@ try {
       return;
     }
     var dbo = db.db("Invoice");
-    dbo.collection("login").findOne({}, function (err, result) {
+    dbo.collection("login").findOne({}, function (err, _result) {
       if (err) {
         console.error('MongoDB collection test failed:', err);
         db.close();
@@ -2331,7 +2322,7 @@ app.use((req, res, next) => {
           responseBody = JSON.parse(body);
         }
         console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE BODY:`, JSON.stringify(responseBody, null, 2));
-      } catch (e) {
+      } catch {
         console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE BODY: ${body}`);
       }
     }
@@ -2350,7 +2341,7 @@ app.use((req, res, next) => {
 
   // Override end
   res.end = function (chunk) {
-    const duration = Date.now() - start;
+    // const duration = Date.now() - start;
     // console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE: ${res.statusCode} (${duration}ms)`);
     if (chunk && typeof chunk !== 'function') {
       // console.log(`[${new Date().toISOString()}] [${requestId}] RESPONSE BODY: ${chunk}`);
@@ -2488,13 +2479,16 @@ function generateEncryptionKey() {
  * @param {string} b - Second hex string
  * @returns {string} XOR result
  */
-function xorHex(a, b) {
-  let result = '';
-  for (let i = 0; i < a.length; i += 2) {
-    result += (parseInt(a.substr(i, 2), 16) ^ parseInt(b.substr(i, 2), 16)).toString(16).padStart(2, '0');
-  }
-  return result;
-}
+// xorHex function removed (unused)
+    /*
+    function xorHex(a, b) {
+      let result = '';
+      for (let i = 0; i < a.length; i += 2) {
+        result += (parseInt(a.substr(i, 2), 16) ^ parseInt(b.substr(i, 2), 16)).toString(16).padStart(2, '0');
+      }
+      return result;
+    }
+    */
 
 /**
  * Encrypt OTP with timestamp
@@ -2929,7 +2923,7 @@ app.get("/organization/:organizationId", async function (req, res) {
       if (/^[0-9a-fA-F]{24}$/.test(organizationId)) {
         organization = await db.collection("organizations").findOne({ _id: new ObjectId(organizationId) });
       }
-    } catch (_) { }
+    } catch { /* ignore */ }
     if (!organization) {
       organization = await db.collection("organizations").findOne({ code: organizationId });
     }
@@ -3646,7 +3640,7 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
 
   try {
     let photoUrl;
-    let filename;
+    // let filename;
 
     if (isR2Configured) {
       // For R2, req.file.location is populated by multer-s3
@@ -3658,10 +3652,10 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
       } else {
         photoUrl = req.file.location;
       }
-      filename = req.file.key;
+      // filename = req.file.key;
     } else {
       // Local fallback
-      const fs = require('fs');
+      // const fs = require('fs');
       // For local storage, we still might need to save as base64 if we don't want to serve files
       // BUT user asked to avoid blob. So we should serve files.
       // However, current local fallback in config/storage.js saves to disk.
@@ -4331,7 +4325,7 @@ app.post('/assignClientToUser', async (req, res) => {
     }
 
     if (clientNdisItem) {
-      const clientUpdateResult = await db.collection("clients").updateOne(
+      await db.collection("clients").updateOne(
         { clientEmail: clientEmail },
         {
           $set: {
@@ -4356,7 +4350,7 @@ app.post('/assignClientToUser', async (req, res) => {
         organizationId = user.organizationId;
 
         // Update the client record with the organizationId
-        const orgIdUpdateResult = await db.collection("clients").updateOne(
+        await db.collection("clients").updateOne(
           { _id: clientExists._id },
           {
             $set: {
@@ -4452,8 +4446,8 @@ app.post('/assignClientToUser', async (req, res) => {
 
       // Update existing schedules and add new ones
       const combinedSchedules = [...existingSchedules];
-      let updatedCount = 0;
-      let addedCount = 0;
+      // let updatedCount = 0;
+      // let addedCount = 0;
 
       newSchedules.forEach(newSchedule => {
         // Check for time conflicts with existing schedules on the same date
@@ -4467,12 +4461,12 @@ app.post('/assignClientToUser', async (req, res) => {
           // Update existing schedule with exact same time
           // console.log(`Updating existing schedule for date: ${newSchedule.date} at ${newSchedule.startTime}-${newSchedule.endTime}`);
           combinedSchedules[conflictingScheduleIndex] = newSchedule;
-          updatedCount++;
+          // updatedCount++;
         } else {
           // Add new schedule (allows multiple schedules on same date with different times)
           // console.log(`Adding new schedule for date: ${newSchedule.date} at ${newSchedule.startTime}-${newSchedule.endTime}`);
           combinedSchedules.push(newSchedule);
-          addedCount++;
+          // addedCount++;
         }
       });
 
@@ -5239,9 +5233,8 @@ app.post('/updatePassword', async (req, res) => {
 // const { startTimerWithTracking, stopTimerWithTracking, getActiveTimers } = require('./active_timers_endpoints');
 
 // Legacy timer variables (kept for backward compatibility)
-let timerInterval;
-let timerRunning = false;
-let startTime;
+// Removed unused variables: timerInterval, timerRunning, startTime
+
 
 /**
  * Start timer (legacy endpoint - redirects to new implementation)

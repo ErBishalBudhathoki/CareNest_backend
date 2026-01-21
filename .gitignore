@@ -93,6 +93,7 @@ issues.md
 superPrompt.xml
 refactor-plan.json
 ai_technical_reference.json
+eslint_report.txt
 
 # Build artifacts
 dist/

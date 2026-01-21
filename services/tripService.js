@@ -1,7 +1,4 @@
-const { MongoClient, ObjectId } = require('mongodb');
-const OrganizationService = require('./organizationService');
-const logger = require('../utils/logger'); // Assuming logger exists, if not I'll remove it later or check first.
-// Actually I'll skip logger for now to avoid errors if it doesn't exist, or use console.error
+const { MongoClient, ObjectId } = require("mongodb");
 
 class TripService {
   constructor() {
@@ -25,7 +22,7 @@ class TripService {
        await db.collection("trips").createIndex({ organizationId: 1, date: -1 });
        await db.collection("trips").createIndex({ status: 1 });
        await db.collection("trips").createIndex({ isReimbursable: 1 });
-    } catch (e) {
+    } catch {
        // Ignore index exists errors
     }
   }

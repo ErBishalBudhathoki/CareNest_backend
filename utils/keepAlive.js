@@ -135,7 +135,7 @@ class KeepAliveService {
               uptime: Math.round(healthData.uptime / 60) + ' minutes',
               timestamp: new Date().toISOString()
             });
-          } catch (parseError) {
+          } catch {
             logger.info('Keep-alive ping successful (non-JSON response)', {
               statusCode: res.statusCode,
               timestamp: new Date().toISOString()

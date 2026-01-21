@@ -106,7 +106,7 @@ async function resolvePricePrompt(req, res) {
     }
 
     // Resolve the price prompt
-    const result = await service.resolvePricePrompt(promptId, resolution);
+    await service.resolvePricePrompt(promptId, resolution);
     
     // Create audit log
     await createAuditLog({
@@ -213,7 +213,7 @@ async function cancelPricePrompt(req, res) {
     }
 
     // Cancel the price prompt
-    const result = await service.cancelPricePrompt(promptId);
+    await service.cancelPricePrompt(promptId);
     
     // Create audit log
     await createAuditLog({
