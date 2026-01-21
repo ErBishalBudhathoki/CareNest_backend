@@ -265,8 +265,7 @@ app.use('/api/trips', tripRoutes);
 app.use('/api/reminders', expenseReminderRoutes);
 
 // Mount schedule routes (Automated Scheduling Engine)
-const scheduleRoutes = require('./routes/schedule');
-app.use('/api/schedule', scheduleRoutes);
+
 console.log('Schedule routes loaded successfully');
 
 // Mount business routes
