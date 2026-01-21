@@ -13,7 +13,7 @@
  * - Export functionality for compliance reporting
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 const logger = require('../config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -141,11 +141,11 @@ async function createAuditLog(auditData) {
     logger.error('Audit log creation failed', {
       error: error.message,
       stack: error.stack,
-      action,
-      entityType,
-      entityId,
-      userEmail,
-      organizationId
+      action: auditData.action,
+      entityType: auditData.entityType,
+      entityId: auditData.entityId,
+      userEmail: auditData.userEmail,
+      organizationId: auditData.organizationId
     });
     throw error;
   } finally {

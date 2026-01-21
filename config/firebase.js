@@ -56,12 +56,12 @@ class FirebaseConfig {
    * @returns {Promise<string>} Message ID
    */
   async sendNotification(token, data = {}, notification = null) {
-    try {
-      const message = {
-        token,
-        data
-      };
+    const message = {
+      token,
+      data
+    };
 
+    try {
       if (notification) {
         message.notification = notification;
       }
@@ -89,8 +89,9 @@ class FirebaseConfig {
    * @returns {Promise<Object>} Batch response
    */
   async sendMulticastNotification(tokens, data = {}, notification = null) {
+    let message;
     try {
-      const message = {
+      message = {
         tokens,
         data
       };

@@ -38,13 +38,13 @@ router.post('/api/price-validation/validate', async (req, res) => {
     logger.error('Price validation failed', {
       error: error.message,
       stack: error.stack,
-      supportItemNumber,
-      price,
-      organizationId,
-      clientId,
-      serviceDate,
-      location,
-      duration
+      supportItemNumber: req.body.supportItemNumber,
+      price: req.body.price,
+      organizationId: req.body.organizationId,
+      clientId: req.body.clientId,
+      serviceDate: req.body.serviceDate,
+      location: req.body.location,
+      duration: req.body.duration
     });
     res.status(500).json({ error: 'Failed to validate price' });
   }
@@ -60,7 +60,7 @@ router.post('/api/price-validation/validate-batch', async (req, res) => {
     logger.error('Batch price validation failed', {
       error: error.message,
       stack: error.stack,
-      itemCount: items?.length
+      itemCount: req.body.items?.length
     });
     res.status(500).json({ error: 'Failed to validate prices in batch' });
   }
@@ -82,9 +82,9 @@ router.get('/api/price-validation/caps/:supportItemNumber', async (req, res) => 
     logger.error('Price caps fetch failed', {
       error: error.message,
       stack: error.stack,
-      supportItemNumber,
-      location,
-      serviceDate
+      supportItemNumber: req.params.supportItemNumber,
+      location: req.query.location,
+      serviceDate: req.query.serviceDate
     });
     res.status(500).json({ error: 'Failed to fetch price caps' });
   }
@@ -106,9 +106,9 @@ router.get('/api/price-validation/quote-required/:supportItemNumber', async (req
     logger.error('Quote requirement check failed', {
       error: error.message,
       stack: error.stack,
-      supportItemNumber,
-      price,
-      location
+      supportItemNumber: req.params.supportItemNumber,
+      price: req.query.price,
+      location: req.query.location
     });
     res.status(500).json({ error: 'Failed to check quote requirement' });
   }
@@ -124,7 +124,7 @@ router.post('/api/price-validation/validate-invoice', async (req, res) => {
     logger.error('Invoice validation failed', {
       error: error.message,
       stack: error.stack,
-      invoiceData: invoiceData ? 'provided' : 'missing'
+      invoiceData: req.body.invoiceData ? 'provided' : 'missing'
     });
     res.status(500).json({ error: 'Failed to validate invoice' });
   }
@@ -146,9 +146,9 @@ router.get('/api/price-validation/stats', async (req, res) => {
     logger.error('Price validation stats fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      startDate,
-      endDate
+      organizationId: req.query.organizationId,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
     });
     res.status(500).json({ error: 'Failed to fetch price validation stats' });
   }

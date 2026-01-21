@@ -202,7 +202,7 @@ async function migrateInvoiceData() {
     try {
       invoiceCount = await invoicesCollection.countDocuments();
       console.log(`Found ${invoiceCount} existing invoices`);
-    } catch (error) {
+    } catch {
       console.log('Invoices collection does not exist, will be created when needed');
     }
     
@@ -398,12 +398,9 @@ async function migrateInvoiceData() {
         await collection.createIndex(indexDef.keys, indexDef.options);
         console.log(`✅ Created index: ${indexDef.options.name} on ${indexDef.collection}`);
         indexCount++;
-      } catch (error) {
-        if (error.code === 85) {
-          console.log(`⚠️  Index ${indexDef.options.name} already exists`);
-        } else {
-          console.error(`❌ Error creating index ${indexDef.options.name}:`, error.message);
-        }
+      } catch {
+        // Index might already exist or collection might be empty
+        // console.log('Index creation note:', error.message);
       }
     }
     

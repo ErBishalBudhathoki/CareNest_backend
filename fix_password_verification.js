@@ -1,5 +1,4 @@
 const { MongoClient } = require('mongodb');
-const crypto = require('crypto');
 const argon2 = require('argon2');
 
 // Load environment variables

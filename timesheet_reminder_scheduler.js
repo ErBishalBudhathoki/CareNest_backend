@@ -7,7 +7,7 @@ const cron = require('node-cron');
 const {
     processAllTimesheetReminders,
     getOrganizationsWithRemindersEnabled,
-    DEFAULT_REMINDER_CONFIG
+    // DEFAULT_REMINDER_CONFIG
 } = require('./services/timesheetReminderService');
 const { createAuditLog, AUDIT_ACTIONS, AUDIT_ENTITIES } = require('./services/auditService');
 const path = require('path');

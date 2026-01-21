@@ -2,9 +2,9 @@ const jwt = require('jsonwebtoken');
 let rateLimit;
 try {
   // Use express-rate-limit if available
-  // eslint-disable-next-line global-require
+   
   rateLimit = require('express-rate-limit');
-} catch (e) {
+} catch {
   // Fallback no-op limiter to avoid runtime crashes if dependency isn't installed
   rateLimit = function () {
     return (req, res, next) => next();

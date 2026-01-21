@@ -84,7 +84,7 @@ async function migrateExistingPricing() {
           }
         }
       }
-    } catch (error) {
+    } catch {
       console.log('No existing invoice/lineItem data found, proceeding with empty migration');
     }
     
@@ -103,7 +103,7 @@ async function migrateExistingPricing() {
         }
         console.log(`Loaded ${supportItems.size} NDIS support items`);
       }
-    } catch (error) {
+    } catch {
       console.log('No NDIS support items found, proceeding without validation');
     }
     

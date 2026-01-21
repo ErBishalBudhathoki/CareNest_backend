@@ -4,9 +4,8 @@
  * Task 2.1: Enhanced Invoice Generation Backend
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const { priceValidationService } = require('./price_validation_service');
-const axios = require('axios');
 const uri = process.env.MONGODB_URI;
 
 class InvoiceGenerationService {
@@ -358,111 +357,6 @@ class InvoiceGenerationService {
      return errors;
    }
    
-   /**
-    * Get pricing for a specific NDIS item
-    * This method looks up pre-configured pricing from the pricing collection
-    */
-   async getPricingForItem(ndisItemNumber, organizationId, clientId, state = 'NSW', providerType = 'standard') {
-     try {
-       // First try to find organization-specific pricing
-       let pricing = await this.db.collection('pricing').findOne({
-         ndisItemNumber: ndisItemNumber,
-         organizationId: organizationId,
-         isActive: true,
-         $or: [
-           { state: state },
-           { state: { $exists: false } }, // Global pricing
-           { state: null }
-         ]
-       });
-       
-       if (pricing) {
-         return {
-           price: pricing.unitPrice || pricing.price,
-           source: 'organization-specific',
-           pricingId: pricing._id,
-           state: pricing.state || 'global',
-           providerType: pricing.providerType || 'standard'
-         };
-       }
-       
-       // If no organization-specific pricing, try client-specific pricing
-       // Convert clientId to string for consistent querying
-       let clientIdForQuery;
-       if (typeof clientId === 'string') {
-         clientIdForQuery = clientId;
-       } else if (clientId && clientId._id) {
-         clientIdForQuery = clientId._id.toString();
-       } else if (clientId && clientId.toString) {
-         clientIdForQuery = clientId.toString();
-       } else {
-         clientIdForQuery = clientId;
-       }
-       
-       pricing = await this.db.collection('pricing').findOne({
-         ndisItemNumber: ndisItemNumber,
-         clientId: clientIdForQuery,
-         isActive: true,
-         $or: [
-           { state: state },
-           { state: { $exists: false } },
-           { state: null }
-         ]
-       });
-       
-       if (pricing) {
-         return {
-           price: pricing.unitPrice || pricing.price,
-           source: 'client-specific',
-           pricingId: pricing._id,
-           state: pricing.state || 'global',
-           providerType: pricing.providerType || 'standard'
-         };
-       }
-       
-       // Finally, try to find default/global pricing
-       pricing = await this.db.collection('pricing').findOne({
-         ndisItemNumber: ndisItemNumber,
-         isActive: true,
-         $and: [
-           { organizationId: { $exists: false } },
-           { clientId: { $exists: false } }
-         ],
-         $or: [
-           { state: state },
-           { state: { $exists: false } },
-           { state: null }
-         ]
-       });
-       
-       if (pricing) {
-         return {
-           price: pricing.unitPrice || pricing.price,
-           source: 'default',
-           pricingId: pricing._id,
-           state: pricing.state || 'global',
-           providerType: pricing.providerType || 'standard'
-         };
-       }
-       
-       // If no pricing found, try to get NDIS standard pricing
-       const ndisStandardPricing = await this.getNdisStandardPricing(ndisItemNumber, state);
-       if (ndisStandardPricing) {
-         return {
-           price: ndisStandardPricing.price,
-           source: 'ndis-standard',
-           state: state,
-           providerType: 'standard'
-         };
-       }
-       
-       return null;
-       
-     } catch (error) {
-       console.error(`Error getting pricing for item ${ndisItemNumber}:`, error);
-       return null;
-     }
-   }
    
    /**
     * Get NDIS standard pricing for an item
@@ -655,7 +549,7 @@ class InvoiceGenerationService {
   /**
    * Create line item from schedule data
    */
-  async createLineItemFromSchedule(scheduleItem, assignment, client, workedTimeData) {
+  async createLineItemFromSchedule(scheduleItem, assignment, client) {
     try {
       // Get NDIS item information
       const ndisItem = scheduleItem.ndisItem || assignment.ndisItem;

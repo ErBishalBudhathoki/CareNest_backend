@@ -50,7 +50,7 @@ function rewriteUrlOrPath(rawUrlOrPath, newBaseUrl) {
   let baseUri;
   try {
     baseUri = new URL(base);
-  } catch (_) {
+  } catch {
     return { value: cleaned, changed: false };
   }
 
@@ -64,7 +64,7 @@ function rewriteUrlOrPath(rawUrlOrPath, newBaseUrl) {
       uri.hostname = baseUri.hostname;
       uri.port = baseUri.port;
       return { value: uri.toString(), changed: uri.toString() !== cleaned };
-    } catch (_) {
+    } catch {
       return { value: cleaned, changed: false };
     }
   }
@@ -74,7 +74,7 @@ function rewriteUrlOrPath(rawUrlOrPath, newBaseUrl) {
   try {
     const resolved = new URL(relative, baseUri);
     return { value: resolved.toString(), changed: resolved.toString() !== cleaned };
-  } catch (_) {
+  } catch {
     return { value: cleaned, changed: false };
   }
 }

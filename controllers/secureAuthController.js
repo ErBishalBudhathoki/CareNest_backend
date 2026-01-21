@@ -1,4 +1,3 @@
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { createLogger } = require('../utils/logger');
@@ -762,7 +761,7 @@ class SecureAuthController {
         });
       } else {
         // Generate password reset OTP
-        const otpResult = await generateOTP(emailValidation.sanitized, 'password_reset');
+        await generateOTP(emailValidation.sanitized, 'password_reset');
         
         logger.info('Password reset OTP generated', {
           email: emailValidation.sanitized,

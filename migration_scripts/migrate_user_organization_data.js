@@ -159,7 +159,7 @@ async function migrateUserOrganizationData() {
           needsUpdate = true;
         }
         
-        if (!org.hasOwnProperty('isActive')) {
+        if (!Object.prototype.hasOwnProperty.call(org, 'isActive')) {
           updates.isActive = true;
           needsUpdate = true;
         }
@@ -310,7 +310,7 @@ async function migrateUserOrganizationData() {
             needsUpdate = true;
           }
           
-          if (!user.hasOwnProperty('isActive')) {
+          if (!Object.prototype.hasOwnProperty.call(user, 'isActive')) {
             updates.isActive = true;
             needsUpdate = true;
           }

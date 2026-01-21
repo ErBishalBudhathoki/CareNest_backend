@@ -16,7 +16,7 @@ const resetAll = args.includes('--all');
 
 // Admin credentials (should be stored securely in production)
 const adminEmail = 'test@tester.com';
-const adminPassword = '111111';
+// const adminPassword = '111111';
 
 // Base URL from environment or default
 const baseUrl = process.env.BASE_URL || 'http://localhost:8080';

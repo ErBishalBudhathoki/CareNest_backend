@@ -223,7 +223,7 @@ async function migrateClientData() {
           }
           
           // Ensure proper status and timestamps
-          if (!clientDoc.hasOwnProperty('isActive')) {
+          if (!Object.prototype.hasOwnProperty.call(clientDoc, 'isActive')) {
             updates.isActive = true;
             needsUpdate = true;
           }

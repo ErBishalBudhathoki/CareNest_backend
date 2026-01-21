@@ -112,8 +112,8 @@ router.get('/custom-price-organization/:ndisItemNumber', async (req, res) => {
     logger.error('Organization custom price fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      ndisItemNumber
+      organizationId: req.headers['organization-id'],
+      ndisItemNumber: req.params.ndisItemNumber
     });
     res.status(500).json({
       success: false,
@@ -167,8 +167,8 @@ router.get('/custom-price-client/:ndisItemNumber/:clientId', async (req, res) =>
     logger.error('Client custom price fetch failed', {
       error: error.message,
       stack: error.stack,
-      clientId,
-      ndisItemNumber
+      clientId: req.params.clientId,
+      ndisItemNumber: req.params.ndisItemNumber
     });
     res.status(500).json({
       success: false,
@@ -218,8 +218,8 @@ router.post('/save-custom-price-organization', async (req, res) => {
     logger.error('Organization custom price save failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      ndisItemNumber
+      organizationId: req.headers['organization-id'],
+      ndisItemNumber: req.body.ndisItemNumber
     });
     res.status(500).json({
       success: false,
@@ -270,8 +270,8 @@ router.post('/save-custom-price-client', async (req, res) => {
     logger.error('Client custom price save failed', {
       error: error.message,
       stack: error.stack,
-      clientId,
-      ndisItemNumber
+      clientId: req.body.clientId,
+      ndisItemNumber: req.body.ndisItemNumber
     });
     res.status(500).json({
       success: false,

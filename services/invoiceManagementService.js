@@ -5,7 +5,7 @@
  */
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { InvoiceStatus, PaymentStatus, DeliveryStatus } = require('../models/invoiceSchema');
+const { InvoiceStatus, PaymentStatus } = require('../models/invoiceSchema');
 const logger = require('../config/logger');
 const crypto = require('crypto');
 
