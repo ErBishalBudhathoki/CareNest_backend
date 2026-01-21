@@ -10,6 +10,7 @@ const { ObjectId } = require('mongodb');
 const logger = require('../config/logger');
 const ShiftSchema = require('../models/Shift');
 const RosterTemplateSchema = require('../models/RosterTemplate');
+const aiSchedulerService = require('./aiSchedulerService');
 
 /**
  * Scoring weights for employee matching algorithm
@@ -127,12 +128,25 @@ class SchedulerService {
                 });
             }
 
-            // 4. Sort by total score (descending)
-            recommendations.sort((a, b) => b.matchScore - a.matchScore);
+            // 4. Enhance recommendations with AI
+            // We only send top 10 candidates to AI to save tokens and latency
+            const topCandidates = recommendations
+                .sort((a, b) => b.matchScore - a.matchScore)
+                .slice(0, 10);
+            
+            const remainingCandidates = recommendations
+                .sort((a, b) => b.matchScore - a.matchScore)
+                .slice(10);
+
+            // Get AI reasoning and re-ranking
+            const aiEnhancedTop = await aiSchedulerService.getAIRecommendations(shiftDetails, topCandidates);
+
+            // Combine back
+            const finalRecommendations = [...aiEnhancedTop, ...remainingCandidates];
 
             return {
                 success: true,
-                recommendations: recommendations,
+                recommendations: finalRecommendations,
                 totalCandidates: employees.length,
                 availableCandidates: recommendations.length
             };
