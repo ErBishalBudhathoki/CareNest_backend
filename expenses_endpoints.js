@@ -9,8 +9,6 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { createAuditLog, AUDIT_ACTIONS, AUDIT_ENTITIES } = require('./services/auditService');
 const logger = require('./config/logger');
-const { v4: uuidv4 } = require('uuid');
-const { createAuditLogEndpoint } = require('./audit_trail_endpoints');
 
 const uri = process.env.MONGODB_URI;
 
@@ -20,10 +18,10 @@ const uri = process.env.MONGODB_URI;
  */
 async function createExpense(req, res) {
   let client;
+  let organizationId, userEmail;
   
   try {
     const {
-      organizationId,
       clientId,
       expenseDate,
       amount,
@@ -40,9 +38,12 @@ async function createExpense(req, res) {
       photoDescription,
       isReimbursable = true,
       requiresApproval = false,
-      userEmail,
       notes
     } = req.body;
+    
+    // Extract organizationId and userEmail from request body
+    organizationId = req.body.organizationId;
+    userEmail = req.body.userEmail;
 
     logger.debug('Expense creation request received', {
       receiptUrl,
@@ -197,16 +198,10 @@ async function createExpense(req, res) {
  */
 async function getOrganizationExpenses(req, res) {
   let client;
+  let organizationId;
   
   try {
-    const { organizationId } = req.params;
-    logger.debug('Getting organization expenses', {
-      organizationId,
-      organizationIdType: typeof organizationId,
-      page,
-      limit,
-      search: search || 'none'
-    });
+    organizationId = req.params.organizationId;
     
     const { 
       clientId,
@@ -418,9 +413,10 @@ async function getOrganizationExpenses(req, res) {
  */
 async function getExpenseById(req, res) {
   let client;
+  let expenseId;
   
   try {
-    const { expenseId } = req.params;
+    expenseId = req.params.expenseId;
     
     if (!ObjectId.isValid(expenseId)) {
       return res.status(400).json({
@@ -485,9 +481,13 @@ async function getExpenseById(req, res) {
  */
 async function updateExpense(req, res) {
   let client;
+  let expenseId;
+  let userEmail;
   
   try {
-    const { expenseId } = req.params;
+    expenseId = req.params.expenseId;
+    userEmail = req.body.userEmail;
+    
     const {
       expenseDate,
       amount,
@@ -505,7 +505,6 @@ async function updateExpense(req, res) {
       isReimbursable,
       requiresApproval,
       notes,
-      userEmail,
       updateReason
     } = req.body;
 
@@ -751,10 +750,13 @@ async function updateExpense(req, res) {
  */
 async function deleteExpense(req, res) {
   let client;
+  let expenseId;
+  let userEmail;
   
   try {
-    const { expenseId } = req.params;
-    const { userEmail, deleteReason } = req.body;
+    expenseId = req.params.expenseId;
+    userEmail = req.body.userEmail;
+    const { deleteReason } = req.body;
 
     if (!ObjectId.isValid(expenseId)) {
       return res.status(400).json({
@@ -871,10 +873,13 @@ async function deleteExpense(req, res) {
  */
 async function updateExpenseApproval(req, res) {
   let client;
+  let expenseId;
+  let userEmail;
   
   try {
-    const { expenseId } = req.params;
-    const { approvalStatus, userEmail, approvalNotes } = req.body;
+    expenseId = req.params.expenseId;
+    userEmail = req.body.userEmail;
+    const { approvalStatus, approvalNotes } = req.body;
 
     if (!ObjectId.isValid(expenseId)) {
       return res.status(400).json({
@@ -1047,9 +1052,14 @@ async function getExpenseCategories(req, res) {
  */
 async function bulkImportExpenses(req, res) {
   let client;
+  let organizationId, userEmail;
+  let expenses = [];
   
   try {
-    const { organizationId, expenses, userEmail, importNotes } = req.body;
+    organizationId = req.body.organizationId;
+    userEmail = req.body.userEmail;
+    expenses = req.body.expenses;
+    const importNotes = req.body.importNotes;
 
     if (!organizationId || !expenses || !Array.isArray(expenses) || !userEmail) {
       return res.status(400).json({

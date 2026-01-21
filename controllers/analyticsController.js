@@ -43,7 +43,7 @@ const parseDurationExpression = {
  */
 async function getFinancialMetrics(req, res) {
   try {
-    const { organizationId } = req.query; // Expecting organizationId in query or params? Usually params based on other endpoints
+    // Expecting organizationId in query or params? Usually params based on other endpoints
     // business_intelligence_endpoints.js uses params for orgId. 
     // But user prompt said: Input: Date Range. 
     // I'll check req.params and req.query.

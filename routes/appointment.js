@@ -32,9 +32,7 @@ router.delete('/removeClientAssignment', AppointmentController.removeClientAssig
 // ============================================================================
 
 // Legacy timer variables (kept for backward compatibility)
-let timerInterval;
-let timerRunning = false;
-let startTime;
+// Removed unused variables: timerInterval, timerRunning, startTime
 
 /**
  * Start timer (legacy endpoint - redirects to new implementation)

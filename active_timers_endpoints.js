@@ -68,7 +68,7 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
       ? await db.collection('fcmTokens').find({
           organizationId: organizationId,
           userEmail: { $in: adminEmails },
-          fcmToken: { $exists: true, $ne: null, $ne: '' }
+          fcmToken: { $exists: true, $nin: [null, ''] }
         }).project({ fcmToken: 1 }).toArray()
       : [];
 
@@ -196,7 +196,7 @@ async function startTimerWithTracking(req, res) {
       return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, clientEmail, organizationId' });
     }
 
-    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1, tls: true, family: 4 });
+    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
     const db = client.db('Invoice');
 
     const existingTimer = await db.collection('activeTimers').findOne({ userEmail });
@@ -218,7 +218,7 @@ async function startTimerWithTracking(req, res) {
     // Primary: Get FCM token from login collection
     const userDoc = await db.collection('login').findOne({ 
       email: userEmail,
-      fcmToken: { $exists: true, $ne: null, $ne: '' }
+      fcmToken: { $exists: true, $nin: [null, ''] }
     });
     
     let userTokens = [];
@@ -230,7 +230,7 @@ async function startTimerWithTracking(req, res) {
       const userTokenDocs = await db.collection('fcmTokens').find({
         organizationId: organizationId,
         userEmail: userEmail,
-        fcmToken: { $exists: true, $ne: null, $ne: '' }
+        fcmToken: { $exists: true, $nin: [null, ''] }
       }).project({ fcmToken: 1 }).toArray();
       userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
       if (userTokens.length > 0) {
@@ -311,7 +311,7 @@ async function stopTimerWithTracking(req, res) {
       return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, organizationId' });
     }
 
-    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1, tls: true, family: 4 });
+    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
     const db = client.db('Invoice');
 
     logger.info('Looking for active timer', { userEmail });
@@ -363,7 +363,7 @@ async function stopTimerWithTracking(req, res) {
     // Primary: Get FCM token from login collection
     const userDoc = await db.collection('login').findOne({ 
       email: userEmail,
-      fcmToken: { $exists: true, $ne: null, $ne: '' }
+      fcmToken: { $exists: true, $nin: [null, ''] }
     });
     
     let userTokens = [];
@@ -375,7 +375,7 @@ async function stopTimerWithTracking(req, res) {
       const userTokenDocs = await db.collection('fcmTokens').find({
         organizationId: organizationId,
         userEmail: userEmail,
-        fcmToken: { $exists: true, $ne: null, $ne: '' }
+        fcmToken: { $exists: true, $nin: [null, ''] }
       }).project({ fcmToken: 1 }).toArray();
       userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
       if (userTokens.length > 0) {
@@ -475,7 +475,7 @@ async function getActiveTimers(req, res) {
   let client;
   try {
     const { organizationId } = req.params;
-    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1, tls: true, family: 4 });
+    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
     const db = client.db('Invoice');
     const activeTimers = await db.collection('activeTimers').find({ organizationId }).toArray();
     res.status(200).json({ success: true, activeTimers, count: activeTimers.length });

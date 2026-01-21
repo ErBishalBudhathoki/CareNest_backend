@@ -411,7 +411,7 @@ class PricingService {
         throw new Error('Pricing record not found');
       }
 
-      const result = await db.collection('customPricing').updateOne(
+      await db.collection('customPricing').updateOne(
         { _id: new ObjectId(pricingId) },
         {
           $set: {
@@ -488,7 +488,7 @@ class PricingService {
             stateUsed = String(clientDoc.clientState).toUpperCase();
             stateSource = 'client';
           }
-        } catch (e) {
+        } catch {
           // Keep fallback on errors; include no sensitive error surfaces
           stateUsed = 'NSW';
           stateSource = 'fallback';
@@ -676,7 +676,7 @@ class PricingService {
             stateUsed = String(clientDoc.clientState).toUpperCase();
             stateSource = 'client';
           }
-        } catch (e) {
+        } catch {
           stateUsed = 'NSW';
           stateSource = 'fallback';
         }
@@ -1047,7 +1047,7 @@ class PricingService {
               stateSource = 'client';
             }
           }
-        } catch (e) {
+        } catch {
           stateUsed = 'NSW';
           stateSource = 'fallback';
         }

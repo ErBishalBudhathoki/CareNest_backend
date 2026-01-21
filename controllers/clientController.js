@@ -271,9 +271,7 @@ class ClientController {
         startTimeList, 
         endTimeList, 
         breakList, 
-        ndisItem, 
         highIntensityList, 
-        customPricing, 
         scheduleWithNdisItems 
       } = req.body;
       

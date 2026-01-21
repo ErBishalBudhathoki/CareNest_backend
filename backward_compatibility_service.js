@@ -16,10 +16,10 @@ class BackwardCompatibilityService {
 
   async connect() {
     if (!this.client) {
-      this.client = await MongoClient.connect(uri, { tls: true, family: 4, 
-        serverApi: ServerApiVersion.v1,
-        tls: true,
+      this.client = await MongoClient.connect(uri, { 
+        tls: true, 
         family: 4,
+        serverApi: ServerApiVersion.v1
       });
       this.db = this.client.db('Invoice');
     }
@@ -299,14 +299,15 @@ class BackwardCompatibilityService {
    * Batch process existing invoices to ensure compatibility
    */
   async migrateLegacyInvoices(options = {}) {
+    let batchSize = 100;
+    let dryRun = false;
+    
     try {
       await this.connect();
       
-      const {
-        batchSize = 100,
-        dryRun = false,
-        skipAlreadyMigrated = true
-      } = options;
+      batchSize = options.batchSize || 100;
+      dryRun = options.dryRun || false;
+      const skipAlreadyMigrated = options.skipAlreadyMigrated !== undefined ? options.skipAlreadyMigrated : true;
 
       const migrationStats = {
         totalProcessed: 0,

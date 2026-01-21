@@ -8,7 +8,6 @@
  * - Security API call logging and analysis
  */
 
-const { MongoClient } = require('mongodb');
 const logger = require('../config/logger');
 const { apiUsageMonitor } = require('../utils/apiUsageMonitor');
 const { getAuthBlockedIPs, unblockAuthIP, getFailedAttemptsSnapshot, getRateLimitConfigs } = require('../middleware/auth');
@@ -240,6 +239,7 @@ function calculateApiUsageMetrics(apiUsageData) {
 /**
  * Calculate API usage trends over time
  */
+/*
 async function calculateApiUsageTrends(db, organizationId, startDate, endDate) {
   const pipeline = [
     {
@@ -294,10 +294,12 @@ async function calculateApiUsageTrends(db, organizationId, startDate, endDate) {
     }
   };
 }
+*/
 
 /**
  * Get endpoint-specific usage patterns
  */
+/*
 async function getEndpointUsagePatterns(db, organizationId, startDate, endDate) {
   const pipeline = [
     {
@@ -356,10 +358,12 @@ async function getEndpointUsagePatterns(db, organizationId, startDate, endDate) 
                  pattern.totalResponseTime / Math.max(pattern.count, 1) < 500 ? 'average' : 'poor'
   }));
 }
+*/
 
 /**
  * Get user-specific usage patterns
  */
+/*
 async function getUserUsagePatterns(db, organizationId, startDate, endDate) {
   const pipeline = [
     {
@@ -412,6 +416,7 @@ async function getUserUsagePatterns(db, organizationId, startDate, endDate) {
     activityLevel: pattern.count > 1000 ? 'high' : pattern.count > 100 ? 'medium' : 'low'
   }));
 }
+*/
 
 /**
  * Server-Sent Events (SSE) endpoint for real-time API usage streaming
@@ -442,7 +447,7 @@ async function streamApiUsageEvents(req, res) {
     // Cleanup on disconnect
     req.on('close', () => {
       cleanup();
-      try { res.end(); } catch (_) {}
+      try { res.end(); } catch { /* ignore */ }
     });
   } catch (error) {
     console.error('Error in streamApiUsageEvents (live):', error);
@@ -500,53 +505,37 @@ function getEndpointUsagePatternsFromHistory(data) {
     if (d.statusCode >= 200 && d.statusCode < 300) s.successCount += 1;
     if (d.statusCode >= 400) s.errorCount += 1;
   }
-  return Array.from(stats.entries()).sort((a,b)=>b[1].count - a[1].count).map(([endpoint, s]) => ({
+  return Array.from(stats.entries()).map(([endpoint, s]) => ({
     endpoint,
     totalCalls: s.count,
-    avgResponseTime: s.count ? s.totalResponseTime / s.count : 0,
-    successRate: s.count ? (s.successCount / s.count) * 100 : 0,
-    errorRate: s.count ? (s.errorCount / s.count) * 100 : 0,
-    performance: (s.count ? s.totalResponseTime / s.count : 0) < 100 ? 'good' : (s.count ? s.totalResponseTime / s.count : 0) < 500 ? 'average' : 'poor'
-  }));
+    avgResponseTime: s.totalResponseTime / Math.max(s.count, 1),
+    successRate: (s.successCount / Math.max(s.count, 1)) * 100,
+    errorRate: (s.errorCount / Math.max(s.count, 1)) * 100,
+    performance: (s.totalResponseTime / Math.max(s.count, 1)) < 100 ? 'good' : 
+                 (s.totalResponseTime / Math.max(s.count, 1)) < 500 ? 'average' : 'poor'
+  })).sort((a,b) => b.totalCalls - a.totalCalls);
 }
 
 // Helper: user patterns from in-memory history
 function getUserUsagePatternsFromHistory(data) {
   const stats = new Map();
   for (const d of data || []) {
-    const uid = d.userId || 'anonymous';
-    let s = stats.get(uid);
-    if (!s) { 
-      s = { 
-        userId: uid,
-        userEmail: d.userEmail || null,
-        count: 0, 
-        totalResponseTime: 0, 
-        successCount: 0, 
-        endpoints: new Set(), 
-        lastActivity: null 
-      }; 
-      stats.set(uid, s); 
-    }
-    // Update email if available and not already set
-    if (d.userEmail && !s.userEmail) {
-      s.userEmail = d.userEmail;
-    }
+    const key = d.userId || 'anonymous';
+    let s = stats.get(key);
+    if (!s) { s = { count: 0, totalResponseTime: 0, successCount: 0, endpoints: new Set(), lastActivity: 0 }; stats.set(key, s); }
     s.count += 1;
     s.totalResponseTime += d.responseTime || 0;
-    if (d.statusCode >= 200 && d.statusCode < 300) s.successCount += 1;
     if (d.endpoint) s.endpoints.add(d.endpoint);
-    const ts = d.timestamp instanceof Date ? d.timestamp : new Date(d.timestamp);
-    if (!s.lastActivity || ts > s.lastActivity) s.lastActivity = ts;
+    if (d.timestamp > s.lastActivity) s.lastActivity = d.timestamp;
+    if (d.statusCode >= 200 && d.statusCode < 300) s.successCount += 1;
   }
-  return Array.from(stats.values()).sort((a,b)=>b.count - a.count).map((s) => ({
-    userId: s.userId,
-    userEmail: s.userEmail,
+  return Array.from(stats.entries()).map(([userId, s]) => ({
+    userId,
     totalCalls: s.count,
-    avgResponseTime: s.count ? s.totalResponseTime / s.count : 0,
-    successRate: s.count ? (s.successCount / s.count) * 100 : 0,
+    avgResponseTime: s.totalResponseTime / Math.max(s.count, 1),
+    successRate: (s.successCount / Math.max(s.count, 1)) * 100,
     endpointsUsed: s.endpoints.size,
     lastActivity: s.lastActivity,
     activityLevel: s.count > 1000 ? 'high' : s.count > 100 ? 'medium' : 'low'
-  }));
+  })).sort((a,b) => b.totalCalls - a.totalCalls);
 }

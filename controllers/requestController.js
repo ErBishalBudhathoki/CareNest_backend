@@ -88,6 +88,32 @@ class RequestController {
       });
     }
   }
+
+  async getLeaveForecast(req, res) {
+    try {
+      const { userEmail } = req.params;
+      const { targetDate } = req.query;
+      
+      if (!userEmail || !targetDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing userEmail or targetDate'
+        });
+      }
+
+      const forecast = await requestService.getLeaveForecast(userEmail, targetDate);
+      res.status(200).json({
+        success: true,
+        data: forecast
+      });
+    } catch (error) {
+      logger.error('Error fetching leave forecast', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching leave forecast'
+      });
+    }
+  }
 }
 
 module.exports = new RequestController();

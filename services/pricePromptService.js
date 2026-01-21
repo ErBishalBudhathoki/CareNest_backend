@@ -73,8 +73,8 @@ class PricePromptService {
       logger.error('Price prompt creation failed', {
         error: error.message,
         stack: error.stack,
-        ndisItemNumber: prompt.ndisItemNumber,
-        organizationId: prompt.organizationId
+        ndisItemNumber: promptData.ndisItemNumber,
+        organizationId: promptData.organizationId
       });
       throw error;
     }

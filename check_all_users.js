@@ -1,6 +1,5 @@
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
-const crypto = require('crypto');
 
 async function checkAllUsers() {
   try {
