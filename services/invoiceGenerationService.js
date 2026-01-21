@@ -7,7 +7,6 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { priceValidationService } = require('./priceValidationService');
 const TripService = require('./tripService');
-const axios = require('axios');
 const logger = require('../config/logger');
 const uri = process.env.MONGODB_URI;
 
@@ -522,8 +521,7 @@ class InvoiceGenerationService {
           const lineItem = await this.createLineItemFromSchedule(
             scheduleItem,
             assignment,
-            client,
-            workedTimeData
+            client
           );
           
           if (lineItem) {
@@ -575,7 +573,7 @@ class InvoiceGenerationService {
    *   - mmmRating, mmmMultiplier
    * - Or a prompt-enabled item (pricingStatus: 'missing') when base price is not configured.
    */
-  async createLineItemFromSchedule(scheduleItem, assignment, client, workedTimeData) {
+  async createLineItemFromSchedule(scheduleItem, assignment, client) {
     try {
       // Get NDIS item information
       const ndisItem = scheduleItem.ndisItem || assignment.ndisItem;
@@ -760,7 +758,7 @@ class InvoiceGenerationService {
       logger.error('Error creating line item from schedule', {
       error: error.message,
       stack: error.stack,
-      scheduleData: schedule
+      scheduleData: scheduleItem
     });
       return null;
     }
@@ -789,13 +787,6 @@ class InvoiceGenerationService {
       
       // Get NDIS item details
       const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
-      // Resolve base cap for target item (MMM applied later during validation)
-      try {
-        const baseCap = priceValidationService.getPriceCap(ndisItem, state, providerType);
-        itemPriceCap = typeof baseCap === 'number' ? baseCap : null;
-      } catch (capErr) {
-        logger.warn('Price cap lookup failed; proceeding without cap clamp', { ndisItemNumber, state, providerType, error: capErr.message });
-      }
       
       if (!ndisItem) {
         logger.warn('NDIS item not found', {
@@ -951,7 +942,7 @@ class InvoiceGenerationService {
       logger.error('Error creating line item from worked time', {
       error: error.message,
       stack: error.stack,
-      workedTimeData: workedTime
+      workedTimeData: workEntry
     });
       return null;
     }
@@ -988,8 +979,8 @@ class InvoiceGenerationService {
       logger.error('Error fetching worked time data', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      clientId,
+      userEmail,
+      clientEmail,
       startDate,
       endDate
     });

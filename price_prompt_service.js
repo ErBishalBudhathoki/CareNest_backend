@@ -132,8 +132,9 @@ class PricePromptService {
    * Save resolved price as custom pricing
    */
   async saveAsCustomPricing(promptId, resolution) {
+    let prompt = null;
     try {
-      const prompt = await this.db.collection('pricePrompts').findOne({
+      prompt = await this.db.collection('pricePrompts').findOne({
         _id: new ObjectId(promptId)
       });
 

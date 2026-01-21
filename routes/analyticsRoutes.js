@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const analyticsController = require('../controllers/analyticsController');
 const { authenticateUser } = require('../middleware/auth');
-const { requireOrganizationMatch } = require('../middleware/rbac');
+// const { requireOrganizationMatch } = require('../middleware/rbac');
 
 /**
  * @route GET /api/analytics/financials

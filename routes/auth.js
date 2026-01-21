@@ -1,7 +1,7 @@
 const express = require('express');
 const SecureAuthController = require('../controllers/secureAuthController');
 const { authenticateUser, rateLimitMiddleware } = require('../middleware/auth');
-const InputValidator = require('../utils/inputValidator');
+// const InputValidator = require('../utils/inputValidator');
 const SecureErrorHandler = require('../utils/errorHandler');
 const { createLogger } = require('../utils/logger');
 const { securityMonitor } = require('../utils/securityMonitor');
@@ -455,7 +455,7 @@ router.get('/health', (req, res) => {
 });
 
 // Error handling middleware for this router
-router.use((error, req, res, next) => {
+router.use((error, req, res, _next) => {
   logger.error('Auth router error', {
     error: error.message,
     stack: error.stack,

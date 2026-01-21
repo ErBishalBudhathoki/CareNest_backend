@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const { ObjectId } = require('mongodb');
 const logger = require('../config/logger');
 const {
   createExpense,
@@ -62,13 +61,13 @@ router.get('/api/expenses/organization/:organizationId', async (req, res) => {
     logger.error('Organization expenses fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      page,
-      limit,
-      status,
-      category,
-      startDate,
-      endDate
+      organizationId: req.params.organizationId,
+      page: req.query.page,
+      limit: req.query.limit,
+      status: req.query.status,
+      category: req.query.category,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
     });
     res.status(500).json({ error: 'Failed to fetch organization expenses' });
   }
@@ -86,10 +85,10 @@ router.get('/api/expenses/:expenseId', async (req, res) => {
     
     res.json(expense);
   } catch (error) {
-    logger.error('Expense fetch failed', {
+    logger.error('Expense deletion failed', {
       error: error.message,
       stack: error.stack,
-      expenseId
+      expenseId: req.params.expenseId
     });
     res.status(500).json({ error: 'Failed to fetch expense' });
   }
@@ -105,7 +104,7 @@ router.put('/api/expenses/:expenseId', async (req, res) => {
     logger.error('Expense update failed', {
       error: error.message,
       stack: error.stack,
-      expenseId,
+      expenseId: req.params.expenseId,
       updateData: req.body
     });
     res.status(500).json({ error: 'Failed to update expense' });
@@ -122,7 +121,7 @@ router.delete('/api/expenses/:expenseId', async (req, res) => {
     logger.error('Expense deletion failed', {
       error: error.message,
       stack: error.stack,
-      expenseId
+      expenseId: req.params.expenseId
     });
     res.status(500).json({ error: 'Failed to delete expense' });
   }
@@ -145,9 +144,9 @@ router.put('/api/expenses/:expenseId/approval', async (req, res) => {
     logger.error('Expense approval update failed', {
       error: error.message,
       stack: error.stack,
-      expenseId,
-      status,
-      approvedBy
+      expenseId: req.params.expenseId,
+      status: req.body.status,
+      approvedBy: req.body.approvedBy
     });
     res.status(500).json({ error: 'Failed to update expense approval' });
   }
@@ -163,8 +162,8 @@ router.post('/api/expenses/bulk-import', async (req, res) => {
     logger.error('Bulk expense import failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      expenseCount: expenses?.length
+      organizationId: req.body.organizationId,
+      expenseCount: req.body.expenses?.length
     });
     res.status(500).json({ error: 'Failed to bulk import expenses' });
   }

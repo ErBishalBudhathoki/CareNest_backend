@@ -21,7 +21,7 @@ class AppointmentController {
         });
       }
       
-      const appointments = await AppointmentService.loadAppointments(email);
+      const appointments = await appointmentService.loadAppointments(email);
       
       res.status(200).json({
         success: true,
@@ -56,7 +56,7 @@ class AppointmentController {
         });
       }
       
-      const appointmentDetails = await AppointmentService.loadAppointmentDetails(userEmail, clientEmail);
+      const appointmentDetails = await appointmentService.loadAppointmentDetails(userEmail, clientEmail);
       
       res.status(200).json({
         success: true,
@@ -98,7 +98,7 @@ class AppointmentController {
         });
       }
       
-      const assignments = await AppointmentService.getOrganizationAssignments(organizationId);
+      const assignments = await appointmentService.getOrganizationAssignments(organizationId);
       
       res.status(200).json({
         success: true,
@@ -132,7 +132,7 @@ class AppointmentController {
         });
       }
       
-      const result = await AppointmentService.removeClientAssignment(userEmail, clientEmail);
+      const result = await appointmentService.removeClientAssignment(userEmail, clientEmail);
       
       res.status(200).json(result);
     } catch (error) {
@@ -176,7 +176,7 @@ class AppointmentController {
         shiftIndex
       };
       
-      const result = await AppointmentService.setWorkedTime(workedTimeData);
+      const result = await appointmentService.setWorkedTime(workedTimeData);
       
       res.status(200).json(result);
     } catch (error) {

@@ -2,9 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { createLogger } = require('../utils/logger');
-const SecureErrorHandler = require('../utils/errorHandler');
-const InputValidator = require('../utils/inputValidator');
-const { generateOTP, verifyOTP, hashPassword } = require('../utils/cryptoHelpers');
+const { hashPassword } = require('../utils/cryptoHelpers');
 const securityMonitor = require('../utils/securityMonitor');
 
 const logger = createLogger('SecureAuthService');
@@ -135,7 +133,7 @@ class SecureAuthService {
         lockUntil: null
       };
       
-      const result = await usersCollection.insertOne(newUser);
+      await usersCollection.insertOne(newUser);
       
       logger.info('User created successfully', {
         userId: newUser.userId,
@@ -143,7 +141,8 @@ class SecureAuthService {
       });
       
       // Return user without password
-      const { password, ...userWithoutPassword } = newUser;
+      const userWithoutPassword = { ...newUser };
+      delete userWithoutPassword.password;
       return userWithoutPassword;
     } catch (error) {
       logger.error('Error creating user', {
@@ -283,7 +282,10 @@ class SecureAuthService {
       });
       
       // Return user without password
-      const { password: userPassword, loginAttempts, lockUntil, ...userWithoutPassword } = user;
+      const userWithoutPassword = { ...user };
+      delete userWithoutPassword.password;
+      delete userWithoutPassword.loginAttempts;
+      delete userWithoutPassword.lockUntil;
       return userWithoutPassword;
     } catch (error) {
       logger.error('Error authenticating user', {

@@ -38,12 +38,12 @@ router.post('/api/price-prompts/create', async (req, res) => {
     logger.error('Price prompt creation failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      supportItemNumber,
-      clientId,
-      serviceDate,
-      requestedBy,
-      priority
+      organizationId: req.body.organizationId,
+      supportItemNumber: req.body.supportItemNumber,
+      clientId: req.body.clientId,
+      serviceDate: req.body.serviceDate,
+      requestedBy: req.body.requestedBy,
+      priority: req.body.priority
     });
     res.status(500).json({ error: 'Failed to create price prompt' });
   }
@@ -72,10 +72,10 @@ router.post('/api/price-prompts/:promptId/resolve', async (req, res) => {
     logger.error('Price prompt resolution failed', {
       error: error.message,
       stack: error.stack,
-      promptId,
-      price,
-      resolvedBy,
-      createCustomPricing
+      promptId: req.params.promptId,
+      price: req.body.price,
+      resolvedBy: req.body.resolvedBy,
+      createCustomPricing: req.body.createCustomPricing
     });
     res.status(500).json({ error: 'Failed to resolve price prompt' });
   }
@@ -106,12 +106,12 @@ router.get('/api/price-prompts/pending/:organizationId', async (req, res) => {
     logger.error('Pending price prompts fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      priority,
-      supportItemNumber,
-      clientId,
-      page,
-      limit
+      organizationId: req.params.organizationId,
+      priority: req.query.priority,
+      supportItemNumber: req.query.supportItemNumber,
+      clientId: req.query.clientId,
+      page: req.query.page,
+      limit: req.query.limit
     });
     res.status(500).json({ error: 'Failed to fetch pending price prompts' });
   }
@@ -133,9 +133,9 @@ router.delete('/api/price-prompts/:promptId', async (req, res) => {
     logger.error('Price prompt cancellation failed', {
       error: error.message,
       stack: error.stack,
-      promptId,
-      cancelledBy,
-      reason
+      promptId: req.params.promptId,
+      cancelledBy: req.body.cancelledBy,
+      reason: req.body.reason
     });
     res.status(500).json({ error: 'Failed to cancel price prompt' });
   }
@@ -167,12 +167,12 @@ router.post('/api/price-prompts/generate-invoice', async (req, res) => {
     logger.error('Invoice generation with prompt handling failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      clientId,
-      startDate,
-      endDate,
-      requestedBy,
-      autoCreatePrompts
+      organizationId: req.body.organizationId,
+      clientId: req.body.clientId,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      requestedBy: req.body.requestedBy,
+      autoCreatePrompts: req.body.autoCreatePrompts
     });
     res.status(500).json({ error: 'Failed to generate invoice with prompt handling' });
   }
@@ -193,8 +193,8 @@ router.post('/api/price-prompts/complete-invoice/:invoiceId', async (req, res) =
     logger.error('Invoice generation completion failed', {
       error: error.message,
       stack: error.stack,
-      invoiceId,
-      completedBy
+      invoiceId: req.params.invoiceId,
+      completedBy: req.body.completedBy
     });
     res.status(500).json({ error: 'Failed to complete invoice generation' });
   }

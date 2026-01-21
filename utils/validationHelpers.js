@@ -29,8 +29,15 @@ function isValidPhone(phone) {
   // Remove all non-digit characters
   const cleanPhone = phone.replace(/\D/g, '');
   
-  // Australian phone numbers: 10 digits starting with 04 for mobile, or 8-10 digits for landline
-  return /^(04\d{8}|[2-9]\d{7,9})$/.test(cleanPhone);
+  const phoneRegex = /^(\+?61|0)4\d{8}$/;
+  if (!phoneRegex.test(cleanPhone)) {
+    return {
+      isValid: false,
+      message: 'Invalid Australian mobile number format'
+    };
+  }
+  
+  return { isValid: true };
 }
 
 /**
@@ -175,7 +182,7 @@ function validatePassword(password) {
     hasUppercase: /[A-Z]/.test(password),
     hasLowercase: /[a-z]/.test(password),
     hasNumber: /\d/.test(password),
-    hasSpecialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
+    hasSpecialChar: new RegExp('[!@#$%^&*()_+\\-=\\[\\]{};\':"\\\\|,.<>/?]').test(password)
   };
   
   const isValid = Object.values(requirements).every(req => req);

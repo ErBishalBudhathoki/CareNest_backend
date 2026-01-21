@@ -36,10 +36,10 @@ async function fileExists(filePath) {
   try {
     await stat(filePath);
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
-}
+};
 
 /**
  * Get file size in bytes

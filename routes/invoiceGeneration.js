@@ -38,12 +38,12 @@ router.post('/api/invoice-generation/line-items', async (req, res) => {
     logger.error('Invoice line items generation failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      clientId,
-      startDate,
-      endDate,
-      includeExpenses,
-      validatePrices
+      organizationId: req.body.organizationId,
+      clientId: req.body.clientId,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      includeExpenses: req.body.includeExpenses,
+      validatePrices: req.body.validatePrices
     });
     res.status(500).json({ error: 'Failed to generate invoice line items' });
   }
@@ -73,11 +73,11 @@ router.post('/api/invoice-generation/bulk', async (req, res) => {
     logger.error('Bulk invoices generation failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      clientIds,
-      startDate,
-      endDate,
-      options
+      organizationId: req.body.organizationId,
+      clientIds: req.body.clientIds,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      options: req.body.options
     });
     res.status(500).json({ error: 'Failed to generate bulk invoices' });
   }
@@ -93,7 +93,7 @@ router.post('/api/invoice-generation/validate', async (req, res) => {
     logger.error('Invoice line items validation failed', {
       error: error.message,
       stack: error.stack,
-      lineItemsCount: invoiceLineItems?.length
+      lineItemsCount: req.body.invoiceLineItems?.length
     });
     res.status(500).json({ error: 'Failed to validate invoice line items' });
   }
@@ -123,11 +123,11 @@ router.post('/api/invoice-generation/validate-price', async (req, res) => {
     logger.error('Real-time price validation failed', {
       error: error.message,
       stack: error.stack,
-      supportItemNumber,
-      price,
-      organizationId,
-      clientId,
-      serviceDate
+      supportItemNumber: req.body.supportItemNumber,
+      price: req.body.price,
+      organizationId: req.body.organizationId,
+      clientId: req.body.clientId,
+      serviceDate: req.body.serviceDate
     });
     res.status(500).json({ error: 'Failed to validate price in real-time' });
   }
@@ -149,9 +149,9 @@ router.get('/api/invoice-generation/validation-report/:organizationId', async (r
     logger.error('Invoice validation report fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      startDate,
-      endDate
+      organizationId: req.params.organizationId,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
     });
     res.status(500).json({ error: 'Failed to fetch invoice validation report' });
   }
@@ -181,11 +181,11 @@ router.post('/api/invoice-generation/preview', async (req, res) => {
     logger.error('Invoice preview generation failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      clientId,
-      startDate,
-      endDate,
-      includeExpenses
+      organizationId: req.body.organizationId,
+      clientId: req.body.clientId,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      includeExpenses: req.body.includeExpenses
     });
     res.status(500).json({ error: 'Failed to generate invoice preview' });
   }
@@ -280,9 +280,9 @@ router.get('/assigned-client-data', async (req, res) => {
     logger.error('Assigned client data fetch failed', {
       error: error.message,
       stack: error.stack,
-      organizationId,
-      startDate,
-      endDate
+      organizationId: req.query.organizationId,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
     });
     res.status(500).json({ error: 'Failed to fetch assigned client data' });
   }

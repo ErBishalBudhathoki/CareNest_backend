@@ -7,8 +7,8 @@ const logger = createLogger('InputValidator');
  */
 class InputValidator {
   // Common regex patterns
-  static EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  static PHONE_REGEX = /^[\+]?[1-9]?\d{1,14}$/;
+  static EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  static PHONE_REGEX = /^[+]?[1-9]?\d{1,14}$/;
   static OBJECTID_REGEX = /^[0-9a-fA-F]{24}$/;
   static ALPHANUMERIC_REGEX = /^[a-zA-Z0-9]+$/;
   static NAME_REGEX = /^[a-zA-Z\s'-]{2,50}$/;
