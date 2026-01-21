@@ -1,0 +1,27 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: carenest-backend
+  labels:
+    cloud.googleapis.com/location: us-central1
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+    spec:
+      serviceAccountName: carenest-backend-sa # Ensure this SA has roles/aiplatform.user
+      containers:
+        - image: gcr.io/YOUR_PROJECT_ID/carenest-backend:latest
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: GCP_PROJECT_ID
+              value: "YOUR_PROJECT_ID" # Replace with actual Project ID
+            - name: GCP_LOCATION
+              value: "us-central1"
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"

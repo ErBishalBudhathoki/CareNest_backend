@@ -59,6 +59,8 @@ jobs:
           echo "R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }}" >> .env
           echo "ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}" >> .env
           echo "APP_PASSWORD=${{ secrets.APP_PASSWORD }}" >> .env
+          echo "GCP_PROJECT_ID=${{ secrets.PROD_FIREBASE_PROJECT_ID }}" >> .env
+          echo "GCP_LOCATION=australia-southeast1" >> .env
 
       - name: Deploy to Firebase
         run: npx firebase-tools deploy --only functions,hosting --non-interactive --project "${{ secrets.PROD_FIREBASE_PROJECT_ID }}" --force
