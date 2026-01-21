@@ -6600,6 +6600,9 @@ app.post('/api/expenses/bulk-import', async (req, res) => {
   }
 });
 
+const scheduleRoutes = require('./routes/schedule');
+app.use('/api/schedule', scheduleRoutes);
+
 // ===== PRICE VALIDATION API ENDPOINTS =====
 
 /**
