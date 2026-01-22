@@ -48,10 +48,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
-          # Read the generated service-account.json from the previous step
-          # We use a shell command to cat the file content as the input
-        env:
-          GCP_SA_KEY_FILE: service-account.json
 
       - name: Authenticate gcloud
         run: |
