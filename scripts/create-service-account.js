@@ -4,15 +4,22 @@ const path = require('path');
 function formatPrivateKey(key) {
   if (!key) return undefined;
   
-  if (key.startsWith('"') && key.endsWith('"')) {
-    key = key.slice(1, -1);
+  key = key.trim();
+
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+
+  while (key.includes('\\\\n')) {
+    key = key.replace(/\\\\n/g, '\\n');
   }
 
   if (key.includes('\\n')) {
-     key = key.replace(/\\n/g, '\n');
+    key = key.replace(/\\n/g, '\n');
   }
 
   key = key.replace(/\r\n/g, '\n');
+  key = key.replace(/\\r/g, '');
 
   return key;
 }
@@ -24,8 +31,9 @@ if (!privateKey) {
   process.exit(1);
 }
 
-if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-  console.error('Error: FIREBASE_PRIVATE_KEY does not appear to be a valid PEM key (missing header).');
+if (!privateKey.includes('-----BEGIN PRIVATE KEY-----') || !privateKey.includes('-----END PRIVATE KEY-----')) {
+  console.error('Error: FIREBASE_PRIVATE_KEY is not a valid PEM key. Ensure it includes the BEGIN/END lines.');
+  process.exit(1);
 }
 
 const serviceAccount = {
