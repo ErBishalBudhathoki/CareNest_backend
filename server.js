@@ -7041,6 +7041,20 @@ if (process.env.SERVERLESS === 'true') {
   // Ensure PORT is available for server startup
   const PORT = process.env.PORT || 8080;
 
+  // Initialize Event Subscribers
+  require('./subscribers/ShiftSubscriber');
+  console.log('📬 Event Subscribers initialized');
+
+  // Initialize Job Workers
+  try {
+    const QueueManager = require('./core/QueueManager');
+    const processInvoiceJob = require('./workers/InvoiceWorker');
+    QueueManager.registerWorker('invoice-generation', processInvoiceJob);
+    console.log('👷 Job Workers initialized');
+  } catch (err) {
+    console.error('Failed to initialize workers', err);
+  }
+
   // Start server with Firebase verification
   console.log(`🚀 Starting ${environmentConfig.getConfig().app.name}...`);
   console.log(`🌍 Environment: ${environmentConfig.getEnvironment()}`);

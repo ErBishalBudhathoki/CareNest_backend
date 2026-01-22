@@ -1,15 +1,7 @@
 const jwt = require('jsonwebtoken');
-let rateLimit;
-try {
-  // Use express-rate-limit if available
-   
-  rateLimit = require('express-rate-limit');
-} catch {
-  // Fallback no-op limiter to avoid runtime crashes if dependency isn't installed
-  rateLimit = function () {
-    return (req, res, next) => next();
-  };
-}
+const rateLimit = require('express-rate-limit');
+const { RedisStore } = require('rate-limit-redis');
+const redis = require('../config/redis');
 const { createLogger } = require('../utils/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
@@ -504,6 +496,9 @@ function rateLimitMiddleware(type) {
   const config = configs[type] || configs.default;
 
   return rateLimit({
+    store: new RedisStore({
+      sendCommand: (...args) => redis.call(...args),
+    }),
     windowMs: config.windowMs,
     max: config.max,
     message: {

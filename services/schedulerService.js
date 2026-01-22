@@ -8,6 +8,7 @@
 const { getDatabase } = require('../config/database');
 const { ObjectId } = require('mongodb');
 const logger = require('../config/logger');
+const EventBus = require('../core/EventBus');
 const ShiftSchema = require('../models/Shift');
 const RosterTemplateSchema = require('../models/RosterTemplate');
 const aiSchedulerService = require('./aiSchedulerService');
@@ -843,6 +844,9 @@ class SchedulerService {
                     code: 404
                 };
             }
+
+            // Event: Shift Cancelled
+            EventBus.publish('shift.cancelled', { shiftId, shift: result });
 
             return {
                 success: true,
