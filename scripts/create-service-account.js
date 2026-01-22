@@ -4,29 +4,20 @@ const path = require('path');
 function formatPrivateKey(key) {
   if (!key) return undefined;
   
-  // Remove any surrounding quotes (common copy-paste error)
   if (key.startsWith('"') && key.endsWith('"')) {
     key = key.slice(1, -1);
   }
 
-  // Debug: Log the first few chars to check what we're receiving (Safe to log header)
-  // console.log('DEBUG: Raw key start:', JSON.stringify(key.substring(0, 50)));
-  
-  // Replace double escaped newlines (\\n) with single escaped newlines (\n)
-  // Sometimes CI/CD pipelines double-escape them.
-  // We do this loop to ensure we catch all levels of escaping if necessary, 
-  // but typically one pass of replace all \\n with \n is enough for standard literal strings.
-  // However, if the input is ALREADY a real newline, we don't want to break it.
-  
-  // If the key contains literal "\n" characters (2 chars), replace them with actual newline (1 char)
   if (key.includes('\\n')) {
      key = key.replace(/\\n/g, '\n');
   }
 
+  key = key.replace(/\r\n/g, '\n');
+
   return key;
 }
 
-const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+let privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
 if (!privateKey) {
   console.error('Error: FIREBASE_PRIVATE_KEY environment variable is missing or empty.');
@@ -35,7 +26,6 @@ if (!privateKey) {
 
 if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
   console.error('Error: FIREBASE_PRIVATE_KEY does not appear to be a valid PEM key (missing header).');
-  // Don't exit, just warn, in case it's a weird format but valid for gcloud
 }
 
 const serviceAccount = {
