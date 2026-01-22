@@ -44,6 +44,50 @@ const envCheck = {
 
 safeLog('Environment Variables Check:', envCheck);
 
+function formatPrivateKey(key) {
+  if (!key) return undefined;
+  
+  // 1. Initial Cleanup
+  key = key.trim();
+  
+  // Remove surrounding quotes if present
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+
+  // Handle escaped newlines (common in JSON/Env vars)
+  // Replace \\n with \n
+  while (key.includes('\\\\n')) {
+    key = key.replace(/\\\\n/g, '\\n');
+  }
+  // Replace \n with actual newline
+  if (key.includes('\\n')) {
+    key = key.replace(/\\n/g, '\n');
+  }
+  // Normalize Windows newlines
+  key = key.replace(/\r\n/g, '\n');
+  key = key.replace(/\\r/g, '');
+
+  // 2. Aggressive Reformatting
+  const beginTag = '-----BEGIN PRIVATE KEY-----';
+  const endTag = '-----END PRIVATE KEY-----';
+  
+  if (key.includes(beginTag) && key.includes(endTag)) {
+    // Extract body
+    let body = key;
+    body = body.replace(beginTag, '');
+    body = body.replace(endTag, '');
+    
+    // Strip all whitespace (spaces, tabs, newlines)
+    body = body.replace(/\s+/g, '');
+    
+    // Reconstruct
+    return `${beginTag}\n${body}\n${endTag}`;
+  }
+
+  return key;
+}
+
 // Initialize Firebase Admin SDK
 try {
   if (process.env.FIREBASE_PRIVATE_KEY) {
@@ -52,7 +96,7 @@ try {
       "type": "service_account",
       "project_id": process.env.FIREBASE_PROJECT_ID,
       "private_key_id": process.env.FIREBASE_PRIVATE_KEY_ID,
-      "private_key": process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      "private_key": formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY),
       "client_email": process.env.FIREBASE_CLIENT_EMAIL,
       "client_id": process.env.FIREBASE_CLIENT_ID,
       "auth_uri": process.env.FIREBASE_AUTH_URI || "https://accounts.google.com/o/oauth2/auth",
