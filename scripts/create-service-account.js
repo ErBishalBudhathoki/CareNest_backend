@@ -3,10 +3,10 @@ const path = require('path');
 
 function formatPrivateKey(key) {
   if (!key) return undefined;
-  
+
   // 1. Initial Cleanup
   key = key.trim();
-  
+
   // Remove surrounding quotes if present
   if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
     key = key.slice(1, -1).trim();
@@ -31,21 +31,24 @@ function formatPrivateKey(key) {
   // - Space-separated keys
   // - Keys with mixed newlines/spaces
   // - Keys with broken headers
-  
+
   const beginTag = '-----BEGIN PRIVATE KEY-----';
   const endTag = '-----END PRIVATE KEY-----';
-  
+
   if (key.includes(beginTag) && key.includes(endTag)) {
     // Extract body
     let body = key;
     body = body.replace(beginTag, '');
     body = body.replace(endTag, '');
-    
+
     // Strip all whitespace (spaces, tabs, newlines)
     body = body.replace(/\s+/g, '');
-    
-    // Reconstruct
-    return `${beginTag}\n${body}\n${endTag}`;
+
+    // Split into 64-character lines (PEM standard)
+    const lines = body.match(/.{1,64}/g) || [];
+
+    // Reconstruct with proper line breaks
+    return `${beginTag}\n${lines.join('\n')}\n${endTag}`;
   }
 
   return key;
