@@ -44,6 +44,69 @@ jobs:
           FIREBASE_CLIENT_ID: ${{ secrets.PROD_FIREBASE_CLIENT_ID }}
           FIREBASE_CLIENT_CERT_URL: ${{ secrets.PROD_FIREBASE_CLIENT_CERT_URL }}
 
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.PROD_FIREBASE_PROJECT_ID }}
+          # We manually authenticate below using the generated file
+
+      - name: Authenticate gcloud
+        run: |
+          gcloud auth activate-service-account --key-file=service-account.json
+          gcloud config set project ${{ secrets.PROD_FIREBASE_PROJECT_ID }}
+
+      - name: Enable Required APIs
+        run: |
+          gcloud services enable redis.googleapis.com vpcaccess.googleapis.com
+
+      - name: Provision/Verify Redis & VPC Connector
+        id: infra
+        run: |
+          # Set variables for Production
+          REGION="australia-southeast1"
+          REDIS_INSTANCE="invoice-redis-prod"
+          VPC_CONNECTOR="invoice-vpc-prod"
+          NETWORK="default"
+
+          # 1. Create/Verify VPC Access Connector (Production)
+          # Note: Using a different IP range than dev to avoid potential conflicts if networks are peered, 
+          # though they are likely separate projects. 
+          # Assuming separate projects/networks, 10.8.0.0/28 is fine.
+          if ! gcloud compute networks vpc-access connectors describe $VPC_CONNECTOR --region=$REGION --quiet > /dev/null 2>&1; then
+            echo "Creating Production VPC Connector..."
+            gcloud compute networks vpc-access connectors create $VPC_CONNECTOR \
+              --region=$REGION \
+              --network=$NETWORK \
+              --range="10.8.0.0/28" \
+              --min-instances=2 \
+              --max-instances=5 \
+              --machine-type=e2-standard-4
+          else
+            echo "Production VPC Connector exists."
+          fi
+
+          # 2. Create/Verify Redis Instance (Production: Standard HA)
+          if ! gcloud redis instances describe $REDIS_INSTANCE --region=$REGION --quiet > /dev/null 2>&1; then
+            echo "Creating Production Redis Instance (Standard HA)..."
+            gcloud redis instances create $REDIS_INSTANCE \
+              --size=5 \
+              --region=$REGION \
+              --tier=STANDARD_HA \
+              --redis-version=redis_6_x \
+              --network=$NETWORK \
+              --connect-mode=DIRECT_PEERING
+          else
+            echo "Production Redis Instance exists."
+          fi
+
+          # 3. Retrieve Redis Details
+          REDIS_HOST=$(gcloud redis instances describe $REDIS_INSTANCE --region=$REGION --format="value(host)")
+          REDIS_PORT=$(gcloud redis instances describe $REDIS_INSTANCE --region=$REGION --format="value(port)")
+          
+          echo "REDIS_HOST=$REDIS_HOST" >> $GITHUB_OUTPUT
+          echo "REDIS_PORT=$REDIS_PORT" >> $GITHUB_OUTPUT
+          echo "VPC_CONNECTOR=$VPC_CONNECTOR" >> $GITHUB_OUTPUT
+
       - name: Create .env file
         run: |
           echo "NODE_ENV=production" >> .env
@@ -61,6 +124,26 @@ jobs:
           echo "APP_PASSWORD=${{ secrets.APP_PASSWORD }}" >> .env
           echo "GCP_PROJECT_ID=${{ secrets.PROD_FIREBASE_PROJECT_ID }}" >> .env
           echo "GCP_LOCATION=australia-southeast1" >> .env
+          
+          # Redis Configuration (Automated)
+          echo "REDIS_HOST=${{ steps.infra.outputs.REDIS_HOST }}" >> .env
+          echo "REDIS_PORT=${{ steps.infra.outputs.REDIS_PORT }}" >> .env
+          echo "REDIS_PASSWORD=${{ secrets.PROD_REDIS_PASSWORD }}" >> .env
+
+      - name: Update firebase.json with VPC Connector
+        run: |
+          # Inject VPC connector settings into firebase.json for production
+          VPC_CONNECTOR="projects/${{ secrets.PROD_FIREBASE_PROJECT_ID }}/locations/australia-southeast1/connectors/${{ steps.infra.outputs.VPC_CONNECTOR }}"
+          
+          node -e "
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('firebase.json'));
+            if (!config.functions) config.functions = {};
+            const target = Array.isArray(config.functions) ? config.functions[0] : config.functions;
+            target.vpcConnector = '${VPC_CONNECTOR}';
+            target.vpcConnectorEgressSettings = 'PRIVATE_RANGES_ONLY';
+            fs.writeFileSync('firebase.json', JSON.stringify(config, null, 2));
+          "
 
       - name: Deploy to Firebase
         run: npx firebase-tools deploy --only functions,hosting --non-interactive --project "${{ secrets.PROD_FIREBASE_PROJECT_ID }}" --force
