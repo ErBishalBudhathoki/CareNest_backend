@@ -4,44 +4,48 @@ const path = require('path');
 function formatPrivateKey(key) {
   if (!key) return undefined;
   
+  // 1. Initial Cleanup
   key = key.trim();
-
+  
+  // Remove surrounding quotes if present
   if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
     key = key.slice(1, -1).trim();
   }
 
+  // Handle escaped newlines (common in JSON/Env vars)
+  // Replace \\n with \n
   while (key.includes('\\\\n')) {
     key = key.replace(/\\\\n/g, '\\n');
   }
-
+  // Replace \n with actual newline
   if (key.includes('\\n')) {
     key = key.replace(/\\n/g, '\n');
   }
-
+  // Normalize Windows newlines
   key = key.replace(/\r\n/g, '\n');
   key = key.replace(/\\r/g, '');
 
-  // Fix for keys pasted with spaces instead of newlines
+  // 2. Aggressive Reformatting
+  // This approach extracts the body, strips ALL whitespace from it, and reconstructs the key.
+  // It handles:
+  // - Space-separated keys
+  // - Keys with mixed newlines/spaces
+  // - Keys with broken headers
+  
   const beginTag = '-----BEGIN PRIVATE KEY-----';
   const endTag = '-----END PRIVATE KEY-----';
   
-  if (key.includes(beginTag) && key.includes(endTag) && !key.includes('\n')) {
-    console.warn('Warning: Private key appears to be space-separated. Attempting to format...');
-    key = key.replace(beginTag, beginTag + '\n');
-    key = key.replace(endTag, '\n' + endTag);
+  if (key.includes(beginTag) && key.includes(endTag)) {
+    // Extract body
+    let body = key;
+    body = body.replace(beginTag, '');
+    body = body.replace(endTag, '');
     
-    // Attempt to remove spaces from the body
-    const parts = key.split(beginTag + '\n');
-    if (parts.length > 1) {
-      const bodyAndEnd = parts[1];
-      const bodyParts = bodyAndEnd.split('\n' + endTag);
-      if (bodyParts.length > 0) {
-        let body = bodyParts[0];
-        // Remove all spaces in the body
-        body = body.replace(/ /g, '');
-        key = beginTag + '\n' + body + '\n' + endTag;
-      }
-    }
+    // Strip all whitespace (spaces, tabs, newlines)
+    body = body.replace(/\s+/g, '');
+    
+    // Reconstruct
+    return `${beginTag}\n${body}\n${endTag}`;
   }
 
   return key;
