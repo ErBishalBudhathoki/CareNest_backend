@@ -1,8 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Formats a private key from environment variable to proper PEM format.
+ * Handles various escape patterns that can occur when passing keys through
+ * GitHub Actions secrets and environment variables.
+ */
 function formatPrivateKey(key) {
   if (!key) return undefined;
+
+  console.log('[DEBUG] Private key length before processing:', key.length);
 
   // 1. Initial Cleanup
   key = key.trim();
@@ -10,50 +17,71 @@ function formatPrivateKey(key) {
   // Remove surrounding quotes if present
   if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
     key = key.slice(1, -1).trim();
+    console.log('[DEBUG] Removed surrounding quotes');
   }
 
-  // Handle escaped newlines (common in JSON/Env vars)
-  // Replace \\n with \n
-  while (key.includes('\\\\n')) {
-    key = key.replace(/\\\\n/g, '\\n');
+  // 2. Handle various newline escape patterns
+  // Pattern: literal backslash + n (most common in GitHub secrets)
+  // In JS regex, we need to match the actual characters \ and n
+  const literalBackslashN = /\\n/g;
+  if (literalBackslashN.test(key)) {
+    console.log('[DEBUG] Found literal \\n patterns, replacing with actual newlines');
+    key = key.replace(literalBackslashN, '\n');
   }
-  // Replace \n with actual newline
-  if (key.includes('\\n')) {
-    key = key.replace(/\\n/g, '\n');
+
+  // Pattern: double backslash + n (double-escaped)
+  const doubleBackslashN = /\\\\n/g;
+  if (doubleBackslashN.test(key)) {
+    console.log('[DEBUG] Found double-escaped \\\\n patterns, replacing');
+    key = key.replace(doubleBackslashN, '\n');
   }
+
   // Normalize Windows newlines
   key = key.replace(/\r\n/g, '\n');
-  key = key.replace(/\\r/g, '');
+  key = key.replace(/\r/g, '');
 
-  // 2. Aggressive Reformatting
-  // This approach extracts the body, strips ALL whitespace from it, and reconstructs the key.
-  // It handles:
-  // - Space-separated keys
-  // - Keys with mixed newlines/spaces
-  // - Keys with broken headers
-
+  // 3. PEM Key Reconstruction
   const beginTag = '-----BEGIN PRIVATE KEY-----';
   const endTag = '-----END PRIVATE KEY-----';
 
-  if (key.includes(beginTag) && key.includes(endTag)) {
-    // Extract body
-    let body = key;
-    body = body.replace(beginTag, '');
-    body = body.replace(endTag, '');
+  console.log('[DEBUG] Key contains BEGIN tag:', key.includes(beginTag));
+  console.log('[DEBUG] Key contains END tag:', key.includes(endTag));
 
-    // Strip all whitespace (spaces, tabs, newlines)
+  if (key.includes(beginTag) && key.includes(endTag)) {
+    // Extract the body between the tags
+    const beginIndex = key.indexOf(beginTag) + beginTag.length;
+    const endIndex = key.indexOf(endTag);
+    let body = key.substring(beginIndex, endIndex);
+
+    // Strip all whitespace from body (spaces, tabs, newlines)
     body = body.replace(/\s+/g, '');
 
-    // Split into 64-character lines (PEM standard)
+    console.log('[DEBUG] Extracted body length:', body.length);
+
+    // Validate body is base64
+    if (!/^[A-Za-z0-9+/=]+$/.test(body)) {
+      console.error('[ERROR] Key body contains invalid characters (not base64)');
+      console.error('[DEBUG] First 50 chars of body:', body.substring(0, 50));
+    }
+
+    // Split into 64-character lines (PEM standard format)
     const lines = body.match(/.{1,64}/g) || [];
 
-    // Reconstruct with proper line breaks
-    return `${beginTag}\n${lines.join('\n')}\n${endTag}`;
+    console.log('[DEBUG] Split into', lines.length, 'lines of 64 chars');
+
+    // Reconstruct the properly formatted PEM key
+    const formattedKey = `${beginTag}\n${lines.join('\n')}\n${endTag}\n`;
+
+    console.log('[DEBUG] Final formatted key length:', formattedKey.length);
+    return formattedKey;
   }
 
+  // If we couldn't find the tags, return as-is (will fail validation later)
+  console.log('[DEBUG] Could not find PEM tags, returning key as-is');
   return key;
 }
 
+// Process the private key
 let privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
 if (!privateKey) {
@@ -66,6 +94,7 @@ if (!privateKey.includes('-----BEGIN PRIVATE KEY-----') || !privateKey.includes(
   process.exit(1);
 }
 
+// Build the service account object
 const serviceAccount = {
   type: "service_account",
   project_id: process.env.FIREBASE_PROJECT_ID,
@@ -79,6 +108,11 @@ const serviceAccount = {
   client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL
 };
 
+// Write the service account JSON file
 const outputPath = path.join(__dirname, '..', 'service-account.json');
 fs.writeFileSync(outputPath, JSON.stringify(serviceAccount, null, 2));
 console.log(`Created service-account.json at ${outputPath}`);
+
+// Verify the output file exists and has content
+const stats = fs.statSync(outputPath);
+console.log(`[DEBUG] Output file size: ${stats.size} bytes`);
