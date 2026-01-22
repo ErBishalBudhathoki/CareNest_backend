@@ -22,7 +22,6 @@ function formatPrivateKey(key) {
 
   // 2. Handle various newline escape patterns
   // Pattern: literal backslash + n (most common in GitHub secrets)
-  // In JS regex, we need to match the actual characters \ and n
   const literalBackslashN = /\\n/g;
   if (literalBackslashN.test(key)) {
     console.log('[DEBUG] Found literal \\n patterns, replacing with actual newlines');
@@ -110,9 +109,28 @@ const serviceAccount = {
 
 // Write the service account JSON file
 const outputPath = path.join(__dirname, '..', 'service-account.json');
-fs.writeFileSync(outputPath, JSON.stringify(serviceAccount, null, 2));
+const jsonContent = JSON.stringify(serviceAccount, null, 2);
+fs.writeFileSync(outputPath, jsonContent);
 console.log(`Created service-account.json at ${outputPath}`);
 
 // Verify the output file exists and has content
 const stats = fs.statSync(outputPath);
 console.log(`[DEBUG] Output file size: ${stats.size} bytes`);
+
+// Debug: Show the structure of the JSON (without revealing sensitive data)
+console.log('[DEBUG] JSON structure check:');
+console.log('  - type:', serviceAccount.type);
+console.log('  - project_id length:', serviceAccount.project_id ? serviceAccount.project_id.length : 0);
+console.log('  - private_key starts with:', privateKey.substring(0, 27));
+console.log('  - private_key ends with:', privateKey.substring(privateKey.length - 26));
+console.log('  - private_key newline count:', (privateKey.match(/\n/g) || []).length);
+
+// Additional debug: Check the JSON file content for proper escaping
+const writtenContent = fs.readFileSync(outputPath, 'utf8');
+const privateKeyInJson = writtenContent.match(/"private_key":\s*"([^"]+)"/);
+if (privateKeyInJson) {
+  const escapedKey = privateKeyInJson[1];
+  console.log('[DEBUG] private_key in JSON starts with:', escapedKey.substring(0, 40));
+  console.log('[DEBUG] private_key in JSON contains \\n escapes:', escapedKey.includes('\\n'));
+  console.log('[DEBUG] private_key in JSON escape count:', (escapedKey.match(/\\n/g) || []).length);
+}
