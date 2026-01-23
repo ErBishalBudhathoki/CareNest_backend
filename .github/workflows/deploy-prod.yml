@@ -44,16 +44,7 @@ jobs:
           FIREBASE_CLIENT_ID: ${{ secrets.PROD_FIREBASE_CLIENT_ID }}
           FIREBASE_CLIENT_CERT_URL: ${{ secrets.PROD_FIREBASE_CLIENT_CERT_URL }}
 
-      - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ secrets.PROD_FIREBASE_PROJECT_ID }}
-          # We manually authenticate below using the generated file
 
-      - name: Authenticate gcloud
-        run: |
-          gcloud auth activate-service-account --key-file=service-account.json
-          gcloud config set project ${{ secrets.PROD_FIREBASE_PROJECT_ID }}
 
       - name: Create .env file
         run: |
