@@ -37,6 +37,7 @@ invoice/
 | `database.js` | MongoDB connection config | Backend Team | ✅ Active |
 | `firebase.js` | Firebase Admin SDK config | Backend Team | ✅ Active |
 | `multer.js` | File upload configuration | Backend Team | ✅ Active |
+| `redis.js` | Redis connection (Cloud/Local) | Backend Team | ✅ Active |
 
 #### Controllers (`/backend/controllers/`)
 | File | Purpose | Owner | Features |
@@ -57,6 +58,8 @@ invoice/
 |------|---------|-------|------------|
 | `invoiceGenerationService.js` | Invoice generation logic | Backend Team | High |
 | `pricingService.js` | Custom pricing service | Backend Team | High |
+| `cacheService.js` | Redis caching service | Backend Team | Medium |
+| `schedulerService.js` | Shift scheduling (Event Emitter) | Backend Team | Medium |
 | `auditService.js` | Audit trail service | Backend Team | Medium |
 | `authService.js` | Authentication service | Backend Team | Medium |
 | `expenseService.js` | Expense management | Backend Team | Medium |
@@ -72,6 +75,22 @@ invoice/
 | `supportItemsService.js` | Support items | Backend Team | Low |
 | `appointmentService.js` | Appointment operations | Backend Team | Low |
 | `pricePromptService.js` | Price prompts | Backend Team | Low |
+
+#### Core Architecture (`/backend/core/`)
+| File | Purpose | Owner | Status |
+|------|---------|-------|--------|
+| `EventBus.js` | Event Bus (Redis/Local) | Backend Team | ✅ Active |
+| `QueueManager.js` | BullMQ Job Queue Wrapper | Backend Team | ✅ Active |
+
+#### Subscribers (`/backend/subscribers/`)
+| File | Purpose | Owner | Events Listened |
+|------|---------|-------|-----------------|
+| `ShiftSubscriber.js` | Handles shift events | Backend Team | `shift.completed` |
+
+#### Workers (`/backend/workers/`)
+| File | Purpose | Owner | Queue |
+|------|---------|-------|-------|
+| `InvoiceWorker.js` | Background invoice processing | Backend Team | `invoice-generation` |
 
 #### Routes (`/backend/routes/`) - **Not Currently Used**
 | File | Purpose | Status | Notes |
@@ -148,7 +167,7 @@ invoice/
 | `api/` | API documentation | Backend Team | 🚧 In Progress |
 | `architecture/` | Architecture diagrams | Architecture Team | ✅ Complete |
 | `sequence_flows/` | Sequence diagrams | Architecture Team | ✅ Complete |
-| `development/` | Development guides | DevOps Team | 📋 Planned |
+| `development/` | Event-driven arch & guides | Backend Team | ✅ Active |
 | `operations/` | Operational runbooks | DevOps Team | 📋 Planned |
 | `tracking/` | Project tracking | Project Management | 📋 Planned |
 
@@ -290,6 +309,7 @@ invoice/
 | `README.md` | Project overview | Documentation Team | ✅ Complete |
 | `TECHNICAL_DOCUMENTATION.md` | Technical specs | Documentation Team | ✅ Complete |
 | `DEVELOPER_GUIDE.md` | Development guide | Documentation Team | ✅ Complete |
+| `docs/development/event_driven_architecture.md` | Event-Driven Architecture | Backend Team | ✅ Complete |
 
 #### Feature Documentation
 | File | Purpose | Owner | Status |
@@ -353,6 +373,8 @@ invoice/
 | File | Purpose | Owner | Status |
 |------|---------|-------|--------|
 | `.github/workflows/flutter_ci.yml` | GitHub Actions CI | DevOps Team | ✅ Active |
+| `.github/workflows/deploy-dev.yml` | Dev Deployment (Firebase/Redis Cloud) | DevOps Team | ✅ Active |
+| `.github/workflows/deploy-prod.yml` | Prod Deployment (Firebase/Redis Cloud) | DevOps Team | ✅ Active |
 | `.gitignore` | Git ignore rules | DevOps Team | ✅ Active |
 | `.cursorrules` | Cursor IDE rules | Development Team | ✅ Active |
 
