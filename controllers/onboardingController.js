@@ -1,5 +1,6 @@
 const OnboardingService = require('../services/onboardingService');
 const logger = require('../config/logger');
+const { ObjectId } = require('mongodb');
 
 class OnboardingController {
 
@@ -138,6 +139,10 @@ class OnboardingController {
                 return res.status(400).json({ success: false, message: 'Organization ID not found for user' });
             }
 
+            if (!ObjectId.isValid(organizationId)) {
+                return res.status(400).json({ success: false, message: 'Invalid Organization ID format' });
+            }
+
             // Ensure user is admin (this check should also be in middleware/RBAC)
             
             const records = await OnboardingService.getPendingOnboardings(organizationId);
@@ -165,6 +170,10 @@ class OnboardingController {
             const { docId } = req.params;
             const { status, reason } = req.body; // status: 'verified' | 'rejected'
 
+            if (!ObjectId.isValid(docId)) {
+                return res.status(400).json({ success: false, message: 'Invalid Document ID format' });
+            }
+
             if (!['verified', 'rejected'].includes(status)) {
                 return res.status(400).json({ success: false, message: 'Invalid status' });
             }
@@ -181,6 +190,10 @@ class OnboardingController {
         try {
             const { userId: adminId } = req.user;
             const { userId } = req.params;
+
+            if (!ObjectId.isValid(userId)) {
+                return res.status(400).json({ success: false, message: 'Invalid User ID format' });
+            }
 
             const result = await OnboardingService.finalizeOnboarding(userId, adminId);
             
