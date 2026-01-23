@@ -164,12 +164,12 @@ class OnboardingService {
      */
     static async getPendingOnboardings(organizationId) {
         const db = getDatabase();
-        // Join with users collection to get names
+        // Join with login collection to get names
         return await db.collection('onboarding_records').aggregate([
             { $match: { organizationId: new ObjectId(organizationId) } },
             {
                 $lookup: {
-                    from: 'users',
+                    from: 'login',
                     localField: 'userId',
                     foreignField: '_id',
                     as: 'user'
@@ -240,7 +240,7 @@ class OnboardingService {
 
         // Send welcome email
         try {
-            const user = await db.collection('users').findOne({ _id: new ObjectId(userId) });
+            const user = await db.collection('login').findOne({ _id: new ObjectId(userId) });
             if (user && user.email) {
                 const name = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Employee';
                 await emailService.sendOnboardingWelcomeEmail(user.email, name);
@@ -275,7 +275,7 @@ class OnboardingService {
             },
             {
                 $lookup: {
-                    from: 'users',
+                    from: 'login',
                     localField: 'userId',
                     foreignField: '_id',
                     as: 'user'
