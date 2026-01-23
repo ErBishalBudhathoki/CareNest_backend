@@ -88,17 +88,47 @@ const invoiceSchema = {
   
   // Payment tracking
   payment: {
-    status: 'String', // 'pending', 'partial', 'paid', 'overdue', 'cancelled'
-    method: 'String', // 'bank_transfer', 'credit_card', 'cash', 'cheque'
+    status: 'String', // 'pending', 'partial', 'paid', 'overdue', 'cancelled', 'credited'
+    method: 'String', // 'bank_transfer', 'credit_card', 'cash', 'cheque', 'stripe', 'paypal'
     paidAmount: 'Number',
-    paidDate: 'Date',
-    transactionReference: 'String',
+    balanceDue: 'Number', // Remaining amount to be paid
+    paidDate: 'Date', // Date of full payment
+    transactionReference: 'String', // Latest transaction reference
     paymentNotes: 'String',
     remindersSent: 'Number',
     lastReminderDate: 'Date',
     writeOffAmount: 'Number',
-    writeOffReason: 'String'
+    writeOffReason: 'String',
+    // Partial payment history
+    transactions: [{
+      date: 'Date',
+      amount: 'Number',
+      method: 'String',
+      reference: 'String',
+      status: 'String', // 'success', 'failed', 'pending'
+      notes: 'String'
+    }]
   },
+  
+  // Recurring Billing Configuration
+  recurrence: {
+    isRecurring: 'Boolean',
+    frequency: 'String', // 'weekly', 'fortnightly', 'monthly', 'quarterly', 'annually'
+    startDate: 'Date',
+    nextDate: 'Date', // Next scheduled generation date
+    endDate: 'Date',
+    parentInvoiceId: 'ObjectId', // Reference to the original recurring template invoice
+    lastGeneratedDate: 'Date'
+  },
+  
+  // Credit Notes linked to this invoice
+  creditNotes: [{
+    creditNoteId: 'ObjectId',
+    creditNoteNumber: 'String',
+    amount: 'Number',
+    appliedDate: 'Date',
+    reason: 'String'
+  }],
   
   // Workflow status
   workflow: {
