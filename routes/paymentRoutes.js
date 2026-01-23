@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const paymentController = require('../controllers/paymentController');
-const { verifyToken } = require('../middleware/auth');
+const { authenticateUser } = require('../middleware/auth');
 
 // Payment Routes
-router.post('/create-intent', verifyToken, paymentController.createPaymentIntent);
-router.post('/record', verifyToken, paymentController.recordPayment);
+router.post('/create-intent', authenticateUser, paymentController.createPaymentIntent);
+router.post('/record', authenticateUser, paymentController.recordPayment);
 
 // Credit Note Routes
-router.post('/credit-note', verifyToken, paymentController.createCreditNote);
-router.post('/credit-note/apply', verifyToken, paymentController.applyCreditNote);
+router.post('/credit-note', authenticateUser, paymentController.createCreditNote);
+router.post('/credit-note/apply', authenticateUser, paymentController.applyCreditNote);
 
 module.exports = router;
