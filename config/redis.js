@@ -21,11 +21,36 @@ if (typeof redisConfig === 'string') {
 }
 
 redis.on('connect', () => {
-  logger.info('Redis connected successfully');
+  // Mask password in connection details log
+  const maskedConfig = typeof redisConfig === 'string'
+    ? redisConfig.replace(/:([^@]+)@/, ':****@')
+    : { ...redisConfig, password: '****' };
+
+  logger.info('Redis connection established', {
+    config: maskedConfig,
+    status: 'connected'
+  });
+});
+
+redis.on('ready', () => {
+  logger.info('Redis client is ready to accept commands');
 });
 
 redis.on('error', (err) => {
-  logger.error('Redis connection error:', err);
+  logger.error('Redis connection error', {
+    error: err.message,
+    stack: err.stack
+  });
+});
+
+redis.on('close', () => {
+  logger.warn('Redis connection closed');
+});
+
+redis.on('reconnecting', (time) => {
+  logger.warn('Redis reconnecting...', {
+    delay: time
+  });
 });
 
 module.exports = redis;
