@@ -297,6 +297,15 @@ app.get('/getActiveTimers/:organizationId', getActiveTimers);
 const configRoutes = require('./routes/config');
 app.use('/api/config', configRoutes);
 
+// Mount payment routes
+const paymentRoutes = require('./routes/paymentRoutes');
+app.use('/api/payments', paymentRoutes);
+console.log('Payment routes loaded successfully');
+
+// Initialize Cron Scheduler
+const scheduler = require('./cron/scheduler');
+scheduler.start();
+
 // Authentication test endpoint
 const authTestEndpoint = require('./auth_test_endpoint');
 app.use('/auth-test', authTestEndpoint);
