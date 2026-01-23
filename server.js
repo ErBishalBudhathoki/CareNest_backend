@@ -6607,9 +6607,6 @@ app.post('/api/expenses/bulk-import', async (req, res) => {
 const scheduleRoutes = require('./routes/schedule');
 app.use('/api/schedule', scheduleRoutes);
 
-const onboardingRoutes = require('./routes/onboarding');
-app.use('/api/onboarding', onboardingRoutes);
-
 // ===== PRICE VALIDATION API ENDPOINTS =====
 
 /**

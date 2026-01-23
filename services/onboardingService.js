@@ -216,7 +216,7 @@ class OnboardingService {
     /**
      * Finalize onboarding
      */
-    static async finalizeOnboarding(userId, adminId) {
+    static async finalizeOnboarding(userId, _adminId) {
         const db = getDatabase();
         
         // Calculate probation end date (e.g., 3 months from now)
@@ -283,8 +283,6 @@ class OnboardingService {
             },
             { $unwind: '$user' }
         ]).toArray();
-
-        const notifications = [];
 
         for (const record of records) {
             const daysRemaining = Math.ceil((new Date(record.probation.endDate) - today) / (1000 * 60 * 60 * 24));
