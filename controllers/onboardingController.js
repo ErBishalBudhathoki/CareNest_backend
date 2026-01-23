@@ -5,7 +5,7 @@ class OnboardingController {
 
     static async getStatus(req, res) {
         try {
-            const { id: userId, organizationId } = req.user;
+            const { userId, organizationId } = req.user;
             const status = await OnboardingService.getOnboardingStatus(userId, organizationId);
             res.json({ success: true, data: status });
         } catch (error) {
@@ -16,7 +16,7 @@ class OnboardingController {
 
     static async updateStep(req, res) {
         try {
-            const { id: userId } = req.user;
+            const { userId } = req.user;
             const { stepName } = req.params;
             const stepData = req.body;
 
@@ -70,7 +70,7 @@ class OnboardingController {
 
     static async uploadDocument(req, res) {
         try {
-            const { id: userId, organizationId } = req.user;
+            const { userId, organizationId } = req.user;
             const { type, fileUrl, expiryDate, documentNumber } = req.body;
 
             if (!type || !fileUrl) {
@@ -95,7 +95,7 @@ class OnboardingController {
 
     static async getDocuments(req, res) {
         try {
-            const { id: userId } = req.user;
+            const { userId } = req.user;
             const docs = await OnboardingService.getUserDocuments(userId);
             res.json({ success: true, data: docs });
         } catch (error) {
@@ -106,7 +106,7 @@ class OnboardingController {
 
     static async deleteDocument(req, res) {
         try {
-            const { id: userId } = req.user;
+            const { userId } = req.user;
             const { docId } = req.params;
 
             await OnboardingService.deleteDocument(docId, userId);
@@ -119,7 +119,7 @@ class OnboardingController {
 
     static async submitOnboarding(req, res) {
         try {
-            const { id: userId } = req.user;
+            const { userId } = req.user;
             const result = await OnboardingService.submitOnboarding(userId);
             res.json({ success: true, data: result });
         } catch (error) {
@@ -133,6 +133,11 @@ class OnboardingController {
     static async getPendingOnboardings(req, res) {
         try {
             const { organizationId } = req.user;
+            
+            if (!organizationId) {
+                return res.status(400).json({ success: false, message: 'Organization ID not found for user' });
+            }
+
             // Ensure user is admin (this check should also be in middleware/RBAC)
             
             const records = await OnboardingService.getPendingOnboardings(organizationId);
@@ -156,7 +161,7 @@ class OnboardingController {
 
     static async verifyDocument(req, res) {
         try {
-            const { id: adminId } = req.user;
+            const { userId: adminId } = req.user;
             const { docId } = req.params;
             const { status, reason } = req.body; // status: 'verified' | 'rejected'
 
@@ -174,7 +179,7 @@ class OnboardingController {
 
     static async finalizeOnboarding(req, res) {
         try {
-            const { id: adminId } = req.user;
+            const { userId: adminId } = req.user;
             const { userId } = req.params;
 
             const result = await OnboardingService.finalizeOnboarding(userId, adminId);
