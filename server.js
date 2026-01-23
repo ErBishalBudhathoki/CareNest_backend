@@ -203,6 +203,8 @@ console.log('Earnings routes loaded successfully');
 console.log('Timesheet reminder routes loaded successfully');
 const expenseReminderRoutes = require('./routes/expenseReminderRoutes');
 console.log('Expense reminder routes loaded successfully');
+const onboardingRoutes = require('./routes/onboarding');
+console.log('Onboarding routes loaded successfully');
 const uri = process.env.MONGODB_URI;
 
 // Security middleware - must be first
@@ -257,6 +259,9 @@ app.use('/api/reminders', timesheetReminderRoutes);
 
 // Mount earnings routes
 app.use('/api/earnings', earningsRoutes);
+
+// Mount onboarding routes
+app.use('/api/onboarding', onboardingRoutes);
 
 // Mount trip routes
 app.use('/api/trips', tripRoutes);
@@ -6601,6 +6606,9 @@ app.post('/api/expenses/bulk-import', async (req, res) => {
 
 const scheduleRoutes = require('./routes/schedule');
 app.use('/api/schedule', scheduleRoutes);
+
+const onboardingRoutes = require('./routes/onboarding');
+app.use('/api/onboarding', onboardingRoutes);
 
 // ===== PRICE VALIDATION API ENDPOINTS =====
 
