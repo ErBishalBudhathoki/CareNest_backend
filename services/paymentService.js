@@ -1,13 +1,21 @@
 const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { PaymentStatus } = require('../models/invoiceSchema');
 const { CreditNoteStatus } = require('../models/CreditNote');
 const auditService = require('./auditService');
+
+// Conditionally load Stripe
+let stripe;
+if (process.env.STRIPE_SECRET_KEY) {
+  stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+}
 
 class PaymentService {
   constructor() {
     this.uri = process.env.MONGODB_URI;
     this.stripeEnabled = !!process.env.STRIPE_SECRET_KEY;
+    if (!this.stripeEnabled) {
+      console.warn('WARNING: STRIPE_SECRET_KEY is not set. Payment processing will be disabled.');
+    }
   }
 
   async getDb() {
