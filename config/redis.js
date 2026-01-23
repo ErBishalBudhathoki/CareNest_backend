@@ -1,7 +1,7 @@
 const Redis = require('ioredis');
 const logger = require('./logger');
 
-const redisConfig = {
+const redisConfig = process.env.REDIS_URL || {
   host: process.env.REDIS_HOST || 'localhost',
   port: process.env.REDIS_PORT || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
@@ -11,7 +11,14 @@ const redisConfig = {
   }
 };
 
-const redis = new Redis(redisConfig);
+// If using a URL string, ioredis handles parsing automatically
+// If REDIS_URL starts with rediss://, it implies TLS
+let redis;
+if (typeof redisConfig === 'string') {
+  redis = new Redis(redisConfig);
+} else {
+  redis = new Redis(redisConfig);
+}
 
 redis.on('connect', () => {
   logger.info('Redis connected successfully');
