@@ -198,7 +198,8 @@ const InvoiceStatus = {
   PAID: 'paid',
   OVERDUE: 'overdue',
   CANCELLED: 'cancelled',
-  DELETED: 'deleted'
+  DELETED: 'deleted',
+  DISPUTED: 'disputed'
 };
 
 /**

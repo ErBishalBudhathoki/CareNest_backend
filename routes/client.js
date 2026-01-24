@@ -3,6 +3,12 @@ const clientController = require('../controllers/clientController');
 const router = express.Router();
 
 /**
+ * Activate client account (Admin only)
+ * POST /activate
+ */
+router.post('/activate', clientController.activateClient);
+
+/**
  * Add client with organization context
  * POST /addClient
  */
@@ -19,6 +25,12 @@ router.get('/clients/:organizationId', clientController.getClients);
  * GET /getClients
  */
 router.get('/getClients', clientController.getClients);
+
+/**
+ * Update client care notes
+ * POST /updateCareNotes/:clientId
+ */
+router.post('/updateCareNotes/:clientId', clientController.updateCareNotes);
 
 /**
  * Get multiple clients by email list
