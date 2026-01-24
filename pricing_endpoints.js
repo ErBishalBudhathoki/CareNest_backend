@@ -4,20 +4,23 @@
  * Supports multi-tenant pricing with NDIS compliance and approval workflows
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
+const ObjectId = mongoose.Types.ObjectId;
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { createAuditLog, AUDIT_ACTIONS, AUDIT_ENTITIES } = require('./services/auditService');
 
-const uri = process.env.MONGODB_URI;
+// Models
+const CustomPricing = require('./models/CustomPricing');
+const User = require('./models/User');
+const SupportItem = require('./models/SupportItem');
+const PricingSettings = require('./models/PricingSettings');
 
 /**
  * Create a new custom pricing record
  * POST /api/pricing/create
  */
 async function createCustomPricing(req, res) {
-  let client;
-  
   try {
     const {
       organizationId,
@@ -57,13 +60,8 @@ async function createCustomPricing(req, res) {
       });
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: organizationId
     });
@@ -88,7 +86,7 @@ async function createCustomPricing(req, res) {
       existingQuery.clientSpecific = false;
     }
 
-    const existingPricing = await db.collection('customPricing').findOne(existingQuery);
+    const existingPricing = await CustomPricing.findOne(existingQuery);
     
     if (existingPricing) {
       return res.status(409).json({
@@ -99,24 +97,21 @@ async function createCustomPricing(req, res) {
 
     // Create pricing document
     const pricingDoc = {
-      _id: new ObjectId(),
-      organizationId: organizationId,
-      supportItemNumber: supportItemNumber,
-      supportItemName: supportItemName,
-      pricingType: pricingType,
+      organizationId,
+      supportItemNumber,
+      supportItemName,
+      pricingType,
       customPrice: pricingType === 'fixed' ? customPrice : null,
       multiplier: pricingType === 'multiplier' ? multiplier : null,
       clientId: clientSpecific ? clientId : null,
-      clientSpecific: clientSpecific,
-      ndisCompliant: ndisCompliant,
-      exceedsNdisCap: exceedsNdisCap,
+      clientSpecific,
+      ndisCompliant,
+      exceedsNdisCap,
       approvalStatus: exceedsNdisCap ? 'pending' : 'approved',
       effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
       expiryDate: expiryDate ? new Date(expiryDate) : null,
       createdBy: userEmail,
-      createdAt: new Date(),
       updatedBy: userEmail,
-      updatedAt: new Date(),
       isActive: true,
       version: 1,
       auditTrail: [{
@@ -127,14 +122,14 @@ async function createCustomPricing(req, res) {
       }]
     };
 
-    const result = await db.collection('customPricing').insertOne(pricingDoc);
+    const newPricing = await CustomPricing.create(pricingDoc);
 
     // Create audit log for pricing creation
     try {
       await createAuditLog({
         action: AUDIT_ACTIONS.CREATE,
         entityType: AUDIT_ENTITIES.PRICING,
-        entityId: result.insertedId.toString(),
+        entityId: newPricing._id.toString(),
         userEmail,
         organizationId,
         newValues: pricingDoc,
@@ -155,7 +150,7 @@ async function createCustomPricing(req, res) {
     res.status(201).json({
       statusCode: 201,
       message: 'Custom pricing created successfully',
-      pricingId: result.insertedId.toString(),
+      pricingId: newPricing._id.toString(),
       approvalRequired: exceedsNdisCap
     });
 
@@ -165,10 +160,6 @@ async function createCustomPricing(req, res) {
       statusCode: 500,
       message: 'Error creating custom pricing'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -177,8 +168,6 @@ async function createCustomPricing(req, res) {
  * GET /api/pricing/organization/:organizationId
  */
 async function getOrganizationPricing(req, res) {
-  let client;
-  
   try {
     const { organizationId } = req.params;
     const { 
@@ -190,11 +179,6 @@ async function getOrganizationPricing(req, res) {
       limit = 50,
       search
     } = req.query;
-
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     // Build query
     const query = { organizationId: organizationId };
@@ -226,15 +210,14 @@ async function getOrganizationPricing(req, res) {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
     // Get total count
-    const totalCount = await db.collection('customPricing').countDocuments(query);
+    const totalCount = await CustomPricing.countDocuments(query);
     
     // Get pricing records
-    const pricingRecords = await db.collection('customPricing')
-      .find(query)
+    const pricingRecords = await CustomPricing.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .toArray();
+      .lean();
 
     res.status(200).json({
       statusCode: 200,
@@ -254,10 +237,6 @@ async function getOrganizationPricing(req, res) {
       statusCode: 500,
       message: 'Error retrieving pricing records'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -266,8 +245,6 @@ async function getOrganizationPricing(req, res) {
  * GET /api/pricing/:pricingId
  */
 async function getPricingById(req, res) {
-  let client;
-  
   try {
     const { pricingId } = req.params;
     
@@ -278,14 +255,7 @@ async function getPricingById(req, res) {
       });
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
-    const pricingRecord = await db.collection('customPricing').findOne({
-      _id: new ObjectId(pricingId)
-    });
+    const pricingRecord = await CustomPricing.findById(pricingId).lean();
 
     if (!pricingRecord) {
       return res.status(404).json({
@@ -305,10 +275,6 @@ async function getPricingById(req, res) {
       statusCode: 500,
       message: 'Error retrieving pricing record'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -317,8 +283,6 @@ async function getPricingById(req, res) {
  * PUT /api/pricing/:pricingId
  */
 async function updateCustomPricing(req, res) {
-  let client;
-  
   try {
     const { pricingId } = req.params;
     const {
@@ -350,15 +314,8 @@ async function updateCustomPricing(req, res) {
       });
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Get existing record
-    const existingRecord = await db.collection('customPricing').findOne({
-      _id: new ObjectId(pricingId)
-    });
+    const existingRecord = await CustomPricing.findById(pricingId).lean();
 
     if (!existingRecord) {
       return res.status(404).json({
@@ -368,7 +325,7 @@ async function updateCustomPricing(req, res) {
     }
 
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: existingRecord.organizationId
     });
@@ -383,7 +340,6 @@ async function updateCustomPricing(req, res) {
     // Build update object
     const updateDoc = {
       updatedBy: userEmail,
-      updatedAt: new Date(),
       version: existingRecord.version + 1
     };
 
@@ -454,12 +410,13 @@ async function updateCustomPricing(req, res) {
       reason: updateReason || 'No reason provided'
     };
 
-    // Perform update: keep $set and $push operators separate
-    // IMPORTANT: Do NOT include a `$push` key inside the $set payload.
-    // MongoDB forbids field names beginning with `$` in documents.
-    const result = await db.collection('customPricing').updateOne(
-      { _id: new ObjectId(pricingId) },
-      { $set: updateDoc, $push: { auditTrail: auditEntry } }
+    // Perform update
+    const result = await CustomPricing.updateOne(
+      { _id: pricingId },
+      { 
+        $set: updateDoc,
+        $push: { auditTrail: auditEntry }
+      }
     );
 
     if (result.matchedCount === 0) {
@@ -499,7 +456,6 @@ async function updateCustomPricing(req, res) {
     });
 
   } catch (error) {
-    // Improve error logging to aid diagnosis of 500s in production
     console.error('Error updating custom pricing', {
       pricingId: req?.params?.pricingId,
       userEmail: req?.body?.userEmail,
@@ -512,10 +468,6 @@ async function updateCustomPricing(req, res) {
       statusCode: 500,
       message: 'Error updating pricing record'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -524,8 +476,6 @@ async function updateCustomPricing(req, res) {
  * DELETE /api/pricing/:pricingId
  */
 async function deleteCustomPricing(req, res) {
-  let client;
-  
   try {
     const { pricingId } = req.params;
     const { userEmail, deleteReason } = req.body;
@@ -544,15 +494,8 @@ async function deleteCustomPricing(req, res) {
       });
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Get existing record
-    const existingRecord = await db.collection('customPricing').findOne({
-      _id: new ObjectId(pricingId)
-    });
+    const existingRecord = await CustomPricing.findById(pricingId).lean();
 
     if (!existingRecord) {
       return res.status(404).json({
@@ -562,7 +505,7 @@ async function deleteCustomPricing(req, res) {
     }
 
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: existingRecord.organizationId
     });
@@ -583,15 +526,14 @@ async function deleteCustomPricing(req, res) {
       reason: deleteReason || 'No reason provided'
     };
 
-    const result = await db.collection('customPricing').updateOne(
-      { _id: new ObjectId(pricingId) },
+    const result = await CustomPricing.updateOne(
+      { _id: pricingId },
       {
         $set: {
           isActive: false,
           deletedBy: userEmail,
           deletedAt: new Date(),
           updatedBy: userEmail,
-          updatedAt: new Date(),
           version: existingRecord.version + 1
         },
         $push: {
@@ -639,10 +581,6 @@ async function deleteCustomPricing(req, res) {
       statusCode: 500,
       message: 'Error deleting pricing record'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -651,8 +589,6 @@ async function deleteCustomPricing(req, res) {
  * PUT /api/pricing/:pricingId/approval
  */
 async function updatePricingApproval(req, res) {
-  let client;
-  
   try {
     const { pricingId } = req.params;
     const { approvalStatus, userEmail, approvalNotes } = req.body;
@@ -678,15 +614,8 @@ async function updatePricingApproval(req, res) {
       });
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Get existing record
-    const existingRecord = await db.collection('customPricing').findOne({
-      _id: new ObjectId(pricingId)
-    });
+    const existingRecord = await CustomPricing.findById(pricingId).lean();
 
     if (!existingRecord) {
       return res.status(404).json({
@@ -696,7 +625,7 @@ async function updatePricingApproval(req, res) {
     }
 
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: existingRecord.organizationId
     });
@@ -725,12 +654,11 @@ async function updatePricingApproval(req, res) {
       rejectedAt: approvalStatus === 'rejected' ? new Date() : existingRecord.rejectedAt,
       approvalNotes: approvalNotes,
       updatedBy: userEmail,
-      updatedAt: new Date(),
       version: existingRecord.version + 1
     };
 
-    const result = await db.collection('customPricing').updateOne(
-      { _id: new ObjectId(pricingId) },
+    const result = await CustomPricing.updateOne(
+      { _id: pricingId },
       {
         $set: updateDoc,
         $push: {
@@ -781,10 +709,6 @@ async function updatePricingApproval(req, res) {
       statusCode: 500,
       message: 'Error updating approval status'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -793,8 +717,6 @@ async function updatePricingApproval(req, res) {
  * GET /api/pricing/lookup/:organizationId/:supportItemNumber
  */
 async function getPricingLookup(req, res) {
-  let client;
-  
   try {
     const { organizationId, supportItemNumber } = req.params;
     const { clientId } = req.query;
@@ -805,11 +727,6 @@ async function getPricingLookup(req, res) {
       clientId,
       timestamp: new Date().toISOString()
     });
-
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     const currentDate = new Date();
     
@@ -851,8 +768,7 @@ async function getPricingLookup(req, res) {
     
     // Try each query in priority order
     for (const query of queries) {
-      pricingRecord = await db.collection('customPricing')
-        .findOne(query, { sort: { effectiveDate: -1 } });
+      pricingRecord = await CustomPricing.findOne(query).sort({ effectiveDate: -1 }).lean();
       
       if (pricingRecord) {
         break;
@@ -862,9 +778,9 @@ async function getPricingLookup(req, res) {
     if (!pricingRecord) {
       console.log('❌ No custom pricing found, falling back to NDIS default');
       // Fallback to NDIS default pricing
-      const ndisItem = await db.collection('supportItems').findOne({
+      const ndisItem = await SupportItem.findOne({
         supportItemNumber: supportItemNumber
-      });
+      }).lean();
       
       if (ndisItem) {
         // Get price from priceCaps structure (default to NSW standard pricing)
@@ -934,10 +850,6 @@ async function getPricingLookup(req, res) {
       statusCode: 500,
       message: 'Error retrieving pricing information'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -947,8 +859,6 @@ async function getPricingLookup(req, res) {
  * Body: { organizationId, supportItemNumbers: [], clientId? }
  */
 async function getBulkPricingLookup(req, res) {
-  let client;
-  
   try {
     const { organizationId, supportItemNumbers, clientId } = req.body;
     
@@ -978,18 +888,14 @@ async function getBulkPricingLookup(req, res) {
       timestamp: new Date().toISOString()
     });
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Fetch organization-level pricing settings (fallback base rate)
     let fallbackBaseRate = null;
     try {
-      const settingsDoc = await db.collection('pricingSettings').findOne({
+      const settingsDoc = await PricingSettings.findOne({
         organizationId: organizationId,
         isActive: true
-      });
+      }).lean();
+      
       if (settingsDoc && typeof settingsDoc.fallbackBaseRate === 'number') {
         fallbackBaseRate = settingsDoc.fallbackBaseRate;
         console.log('⚙️ Using configured fallback base rate:', fallbackBaseRate);
@@ -1051,9 +957,7 @@ async function getBulkPricingLookup(req, res) {
     });
     
     // Execute custom pricing lookup
-    const customPricingResults = await db.collection('customPricing')
-      .aggregate(customPricingPipeline)
-      .toArray();
+    const customPricingResults = await CustomPricing.aggregate(customPricingPipeline);
     
     // Map custom pricing results
     const customPricingMap = {};
@@ -1082,9 +986,9 @@ async function getBulkPricingLookup(req, res) {
     let priceCapsData = {};
     
     // Get supportItems data for all requested items to include price caps
-    const allNdisItems = await db.collection('supportItems')
-      .find({ supportItemNumber: { $in: supportItemNumbers } })
-      .toArray();
+    const allNdisItems = await SupportItem.find({ 
+      supportItemNumber: { $in: supportItemNumbers } 
+    }).lean();
     
     allNdisItems.forEach(item => {
       // Store price caps data for all items
@@ -1182,10 +1086,6 @@ async function getBulkPricingLookup(req, res) {
       statusCode: 500,
       message: 'Error retrieving bulk pricing information'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -1194,8 +1094,6 @@ async function getBulkPricingLookup(req, res) {
  * POST /api/pricing/bulk-import
  */
 async function bulkImportPricing(req, res) {
-  let client;
-  
   try {
     const { organizationId, pricingRecords, userEmail, importNotes } = req.body;
 
@@ -1206,13 +1104,8 @@ async function bulkImportPricing(req, res) {
       });
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: organizationId
     });
@@ -1268,7 +1161,7 @@ async function bulkImportPricing(req, res) {
         }
         
         // Check if custom pricing already exists
-        const existingCustomPricing = await db.collection('customPricing').findOne(duplicateCheckQuery);
+        const existingCustomPricing = await CustomPricing.findOne(duplicateCheckQuery);
         
         if (existingCustomPricing) {
           // Check if the price is different
@@ -1286,7 +1179,6 @@ async function bulkImportPricing(req, res) {
                     customPrice: record.pricingType === 'fixed' ? record.customPrice : null,
                     multiplier: record.pricingType === 'multiplier' ? record.multiplier : null,
                     updatedBy: userEmail,
-                    updatedAt: new Date(),
                     version: (existingCustomPricing.version || 1) + 1
                   },
                   $push: {
@@ -1311,7 +1203,6 @@ async function bulkImportPricing(req, res) {
         }
 
         const pricingDoc = {
-          _id: new ObjectId(),
           organizationId: organizationId,
           supportItemNumber: record.supportItemNumber,
           supportItemName: record.supportItemName,
@@ -1326,9 +1217,7 @@ async function bulkImportPricing(req, res) {
           effectiveDate: record.effectiveDate ? new Date(record.effectiveDate) : new Date(),
           expiryDate: record.expiryDate ? new Date(record.expiryDate) : null,
           createdBy: userEmail,
-          createdAt: new Date(),
           updatedBy: userEmail,
-          updatedAt: new Date(),
           isActive: true,
           version: 1,
           auditTrail: [{
@@ -1359,12 +1248,12 @@ async function bulkImportPricing(req, res) {
 
     // Execute bulk operations
     if (bulkOps.length > 0) {
-      await db.collection('customPricing').bulkWrite(bulkOps, { ordered: false });
+      await CustomPricing.bulkWrite(bulkOps, { ordered: false });
     }
     
     // Execute update operations
     if (updateOps.length > 0) {
-      await db.collection('customPricing').bulkWrite(updateOps, { ordered: false });
+      await CustomPricing.bulkWrite(updateOps, { ordered: false });
     }
 
     res.status(200).json({
@@ -1379,10 +1268,6 @@ async function bulkImportPricing(req, res) {
       statusCode: 500,
       message: 'Error performing bulk import'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -1391,7 +1276,6 @@ async function bulkImportPricing(req, res) {
  * GET /api/pricing/fallback-base-rate/:organizationId
  */
 async function getFallbackBaseRate(req, res) {
-  let client;
   try {
     const { organizationId } = req.params;
     if (!organizationId) {
@@ -1401,14 +1285,10 @@ async function getFallbackBaseRate(req, res) {
       });
     }
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
-    const settingsDoc = await db.collection('pricingSettings').findOne({
+    const settingsDoc = await PricingSettings.findOne({
       organizationId,
       isActive: true
-    });
+    }).lean();
 
     if (!settingsDoc || typeof settingsDoc.fallbackBaseRate !== 'number') {
       return res.status(404).json({
@@ -1433,10 +1313,6 @@ async function getFallbackBaseRate(req, res) {
       statusCode: 500,
       message: 'Error retrieving fallback base rate'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -1446,7 +1322,6 @@ async function getFallbackBaseRate(req, res) {
  * Body: { fallbackBaseRate, userEmail }
  */
 async function setFallbackBaseRate(req, res) {
-  let client;
   try {
     const { organizationId } = req.params;
     const { fallbackBaseRate, userEmail } = req.body;
@@ -1466,12 +1341,8 @@ async function setFallbackBaseRate(req, res) {
       });
     }
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId
     });
@@ -1482,20 +1353,19 @@ async function setFallbackBaseRate(req, res) {
       });
     }
 
-    const existing = await db.collection('pricingSettings').findOne({
+    const existing = await PricingSettings.findOne({
       organizationId,
       isActive: true
     });
 
     let resultDoc;
     if (existing) {
-      await db.collection('pricingSettings').updateOne(
+      await PricingSettings.updateOne(
         { _id: existing._id },
         {
           $set: {
             fallbackBaseRate: numericRate,
             updatedBy: userEmail,
-            updatedAt: new Date(),
             version: (existing.version || 1) + 1
           },
           $push: {
@@ -1508,16 +1378,13 @@ async function setFallbackBaseRate(req, res) {
           }
         }
       );
-      resultDoc = await db.collection('pricingSettings').findOne({ _id: existing._id });
+      resultDoc = await PricingSettings.findById(existing._id).lean();
     } else {
       const settingsDoc = {
-        _id: new ObjectId(),
         organizationId,
         fallbackBaseRate: numericRate,
         createdBy: userEmail,
-        createdAt: new Date(),
         updatedBy: userEmail,
-        updatedAt: new Date(),
         isActive: true,
         version: 1,
         auditTrail: [{
@@ -1527,8 +1394,8 @@ async function setFallbackBaseRate(req, res) {
           changes: `fallbackBaseRate set to ${numericRate}`
         }]
       };
-      await db.collection('pricingSettings').insertOne(settingsDoc);
-      resultDoc = settingsDoc;
+      const newSettings = await PricingSettings.create(settingsDoc);
+      resultDoc = newSettings.toObject();
     }
 
     // Audit log entry
@@ -1564,10 +1431,6 @@ async function setFallbackBaseRate(req, res) {
       statusCode: 500,
       message: 'Error updating fallback base rate'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 

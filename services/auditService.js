@@ -13,12 +13,10 @@
  * - Export functionality for compliance reporting
  */
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 const logger = require('../config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
-
-const uri = process.env.MONGODB_URI;
+const AuditLog = require('../models/AuditLog');
 
 /**
  * Audit action types for categorizing different operations
@@ -64,8 +62,6 @@ const AUDIT_ENTITIES = {
  * @returns {Promise<Object>} The created audit log entry
  */
 async function createAuditLog(auditData) {
-  let client;
-  
   try {
     const {
       action,
@@ -94,11 +90,6 @@ async function createAuditLog(auditData) {
       throw new Error(`Invalid entity type: ${entityType}`);
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Create audit log entry
     const auditEntry = {
       action,
@@ -115,12 +106,11 @@ async function createAuditLog(auditData) {
         ipAddress: metadata.ipAddress || null,
         userAgent: metadata.userAgent || null,
         sessionId: metadata.sessionId || null
-      },
-      createdAt: new Date()
+      }
     };
 
     // Insert audit log
-    const result = await db.collection('auditLogs').insertOne(auditEntry);
+    const result = await AuditLog.create(auditEntry);
     
     logger.info('Audit log created', {
       action,
@@ -128,13 +118,13 @@ async function createAuditLog(auditData) {
       entityId,
       userEmail,
       organizationId,
-      auditId: result.insertedId
+      auditId: result._id
     });
     
     return {
       success: true,
-      auditId: result.insertedId,
-      auditEntry
+      auditId: result._id,
+      auditEntry: result
     };
 
   } catch (error) {
@@ -148,10 +138,6 @@ async function createAuditLog(auditData) {
       organizationId: auditData.organizationId
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -164,8 +150,6 @@ async function createAuditLog(auditData) {
  * @returns {Promise<Array>} Array of audit log entries
  */
 async function getEntityAuditHistory(entityType, entityId, organizationId, options = {}) {
-  let client;
-  
   try {
     const {
       limit = 50,
@@ -176,11 +160,6 @@ async function getEntityAuditHistory(entityType, entityId, organizationId, optio
       startDate = null,
       endDate = null
     } = options;
-
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     // Build query
     const query = {
@@ -202,15 +181,13 @@ async function getEntityAuditHistory(entityType, entityId, organizationId, optio
     }
 
     // Execute query
-    const auditLogs = await db.collection('auditLogs')
-      .find(query)
+    const auditLogs = await AuditLog.find(query)
       .sort({ [sortBy]: sortOrder })
       .skip(skip)
-      .limit(limit)
-      .toArray();
+      .limit(limit);
 
     // Get total count for pagination
-    const totalCount = await db.collection('auditLogs').countDocuments(query);
+    const totalCount = await AuditLog.countDocuments(query);
 
     return {
       success: true,
@@ -232,10 +209,6 @@ async function getEntityAuditHistory(entityType, entityId, organizationId, optio
       organizationId
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -246,8 +219,6 @@ async function getEntityAuditHistory(entityType, entityId, organizationId, optio
  * @returns {Promise<Array>} Array of audit log entries
  */
 async function getOrganizationAuditLogs(organizationId, options = {}) {
-  let client;
-  
   try {
     const {
       limit = 100,
@@ -260,11 +231,6 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
       startDate = null,
       endDate = null
     } = options;
-
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     // Build query
     const query = { organizationId };
@@ -289,15 +255,13 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
     }
 
     // Execute query
-    const auditLogs = await db.collection('auditLogs')
-      .find(query)
+    const auditLogs = await AuditLog.find(query)
       .sort({ [sortBy]: sortOrder })
       .skip(skip)
-      .limit(limit)
-      .toArray();
+      .limit(limit);
 
     // Get total count for pagination
-    const totalCount = await db.collection('auditLogs').countDocuments(query);
+    const totalCount = await AuditLog.countDocuments(query);
 
     return {
       success: true,
@@ -317,10 +281,6 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
       organizationId
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -331,18 +291,11 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
  * @returns {Promise<Object>} Audit statistics
  */
 async function getAuditStatistics(organizationId, options = {}) {
-  let client;
-  
   try {
     const {
       startDate = null,
       endDate = null
     } = options;
-
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     // Build base query
     const baseQuery = { organizationId };
@@ -354,7 +307,7 @@ async function getAuditStatistics(organizationId, options = {}) {
     }
 
     // Get statistics using aggregation
-    const stats = await db.collection('auditLogs').aggregate([
+    const stats = await AuditLog.aggregate([
       { $match: baseQuery },
       {
         $group: {
@@ -371,10 +324,10 @@ async function getAuditStatistics(organizationId, options = {}) {
           }
         }
       }
-    ]).toArray();
+    ]);
 
     // Get action counts
-    const actionCounts = await db.collection('auditLogs').aggregate([
+    const actionCounts = await AuditLog.aggregate([
       { $match: baseQuery },
       {
         $group: {
@@ -382,10 +335,10 @@ async function getAuditStatistics(organizationId, options = {}) {
           count: { $sum: 1 }
         }
       }
-    ]).toArray();
+    ]);
 
     // Get entity type counts
-    const entityCounts = await db.collection('auditLogs').aggregate([
+    const entityCounts = await AuditLog.aggregate([
       { $match: baseQuery },
       {
         $group: {
@@ -393,10 +346,10 @@ async function getAuditStatistics(organizationId, options = {}) {
           count: { $sum: 1 }
         }
       }
-    ]).toArray();
+    ]);
 
     // Get user activity counts
-    const userActivity = await db.collection('auditLogs').aggregate([
+    const userActivity = await AuditLog.aggregate([
       { $match: baseQuery },
       {
         $group: {
@@ -407,7 +360,7 @@ async function getAuditStatistics(organizationId, options = {}) {
       },
       { $sort: { count: -1 } },
       { $limit: 10 }
-    ]).toArray();
+    ]);
 
     const result = stats[0] || { totalActions: 0, usersByEmail: [] };
 
@@ -435,10 +388,6 @@ async function getAuditStatistics(organizationId, options = {}) {
       organizationId
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -448,20 +397,13 @@ async function getAuditStatistics(organizationId, options = {}) {
  * @returns {Promise<Object>} Cleanup result
  */
 async function cleanupOldAuditLogs(retentionDays = 365) {
-  let client;
-  
   try {
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Calculate cutoff date
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
     // Delete old audit logs
-    const result = await db.collection('auditLogs').deleteMany({
+    const result = await AuditLog.deleteMany({
       timestamp: { $lt: cutoffDate }
     });
 
@@ -484,10 +426,6 @@ async function cleanupOldAuditLogs(retentionDays = 365) {
       retentionDays
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 

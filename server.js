@@ -25,7 +25,6 @@ const axios = require('axios');
 const cors = require("cors");
 const helmet = require("helmet");
 const serverless = require("serverless-http");
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const DB_NAME = process.env.DB_NAME || 'Invoice';
 const app = express(); // Initialize express app early
 
@@ -146,16 +145,7 @@ const {
   completeInvoiceGeneration
 } = require('./price_prompt_endpoints');
 console.log('Price prompt endpoints loaded successfully');
-const {
-  processLegacyInvoice,
-  validateLegacyCompatibility,
-  transformLegacyInvoice,
-  migrateLegacyInvoicesBatch,
-  getLegacyDataStats,
-  mapLegacyItemToNdis,
-  checkInvoiceCompatibility
-} = require('./backward_compatibility_endpoints');
-console.log('Backward compatibility endpoints loaded successfully');
+
 const { loggingMiddleware } = require('./middleware/logging');
 console.log('Logging middleware loaded successfully');
 const { errorTrackingMiddleware } = require('./middleware/errorTracking');

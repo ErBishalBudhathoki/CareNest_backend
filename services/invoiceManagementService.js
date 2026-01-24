@@ -4,46 +4,22 @@
  * Supports listing, viewing, sharing, and deleting invoices
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { InvoiceStatus, PaymentStatus } = require('../models/invoiceSchema');
+const mongoose = require('mongoose');
+const { Invoice, InvoiceStatus, PaymentStatus } = require('../models/Invoice');
+const Organization = require('../models/Organization');
+const Client = require('../models/Client');
+const AuditTrail = require('../models/AuditTrail');
+const InvoiceLineItem = require('../models/InvoiceLineItem');
 const logger = require('../config/logger');
 const crypto = require('crypto');
 
 class InvoiceManagementService {
-  constructor() {
-    this.client = null;
-    this.db = null;
-    this.uri = process.env.MONGODB_URI;
-  }
-
-  async connect() {
-    if (!this.client) {
-      this.client = await MongoClient.connect(this.uri, {
-        serverApi: ServerApiVersion.v1
-      });
-      this.db = this.client.db('Invoice');
-    }
-  }
-
-  async disconnect() {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-      this.db = null;
-    }
-  }
-
+  
   /**
    * Get paginated list of invoices for an organization
-   * @param {string} organizationId - Organization identifier
-   * @param {Object} filters - Filter options
-   * @param {Object} pagination - Pagination options
-   * @returns {Object} Paginated invoice list
    */
   async getInvoicesList(organizationId, filters = {}, pagination = {}) {
     try {
-      await this.connect();
-      
       const {
         status,
         clientEmail,
@@ -98,19 +74,16 @@ class InvoiceManagementService {
         ];
       }
       
-      const invoicesCollection = this.db.collection('invoices');
-      
       // Get total count
-      const totalCount = await invoicesCollection.countDocuments(query);
+      const totalCount = await Invoice.countDocuments(query);
       
       // Get paginated results
       const skip = (page - 1) * limit;
-      const invoices = await invoicesCollection
-        .find(query)
+      const invoices = await Invoice.find(query)
         .sort({ [sortBy]: sortOrder })
         .skip(skip)
         .limit(limit)
-        .project({
+        .select({
           invoiceNumber: 1,
           clientEmail: 1,
           clientName: 1,
@@ -126,8 +99,7 @@ class InvoiceManagementService {
           'auditTrail.updatedAt': 1,
           'metadata.priority': 1,
           'metadata.tags': 1
-        })
-        .toArray();
+        });
       
       const totalPages = Math.ceil(totalCount / limit);
       
@@ -157,18 +129,11 @@ class InvoiceManagementService {
 
   /**
    * Get detailed view of a specific invoice
-   * @param {string} invoiceId - Invoice ID
-   * @param {string} organizationId - Organization identifier
-   * @returns {Object} Invoice details
    */
   async getInvoiceDetails(invoiceId, organizationId) {
     try {
-      await this.connect();
-      
-      const invoicesCollection = this.db.collection('invoices');
-      
-      const invoice = await invoicesCollection.findOne({
-        _id: new ObjectId(invoiceId),
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
         organizationId,
         'deletion.isDeleted': { $ne: true }
       });
@@ -200,15 +165,9 @@ class InvoiceManagementService {
 
   /**
    * Share an invoice with external parties
-   * @param {string} invoiceId - Invoice ID
-   * @param {string} organizationId - Organization identifier
-   * @param {Object} shareOptions - Sharing configuration
-   * @returns {Object} Share result with token
    */
   async shareInvoice(invoiceId, organizationId, shareOptions = {}) {
     try {
-      await this.connect();
-      
       const {
         sharedWith = [],
         permissions = 'view',
@@ -216,11 +175,9 @@ class InvoiceManagementService {
         sharedBy
       } = shareOptions;
       
-      const invoicesCollection = this.db.collection('invoices');
-      
       // Verify invoice exists and belongs to organization
-      const invoice = await invoicesCollection.findOne({
-        _id: new ObjectId(invoiceId),
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
         organizationId,
         'deletion.isDeleted': { $ne: true }
       });
@@ -246,8 +203,8 @@ class InvoiceManagementService {
         lastAccessed: null
       };
       
-      await invoicesCollection.updateOne(
-        { _id: new ObjectId(invoiceId) },
+      await Invoice.updateOne(
+        { _id: invoiceId },
         {
           $set: {
             'sharing.isShared': true,
@@ -294,19 +251,12 @@ class InvoiceManagementService {
 
   /**
    * Get invoice PDF data
-   * @param {string} invoiceId - Invoice ID
-   * @param {string} organizationId - Organization identifier
-   * @returns {Object} PDF data result
    */
   async getInvoicePdf(invoiceId, organizationId) {
     try {
-      await this.connect();
-      
-      const invoicesCollection = this.db.collection('invoices');
-      
       // Find the invoice
-      const invoice = await invoicesCollection.findOne({
-        _id: new ObjectId(invoiceId),
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
         organizationId,
         'deletion.isDeleted': { $ne: true }
       });
@@ -327,7 +277,7 @@ class InvoiceManagementService {
         };
       }
       
-      // Return PDF metadata - frontend will handle file reading from device storage
+      // Return PDF metadata
       return {
         success: true,
         data: {
@@ -350,26 +300,18 @@ class InvoiceManagementService {
 
   /**
    * Soft delete an invoice
-   * @param {string} invoiceId - Invoice ID
-   * @param {string} organizationId - Organization identifier
-   * @param {Object} deleteOptions - Deletion configuration
-   * @returns {Object} Deletion result
    */
   async deleteInvoice(invoiceId, organizationId, deleteOptions = {}) {
     try {
-      await this.connect();
-      
       const {
         deletedBy,
         deletionReason = 'User requested deletion',
         permanentDelete = false
       } = deleteOptions;
       
-      const invoicesCollection = this.db.collection('invoices');
-      
       // Verify invoice exists and belongs to organization
-      const invoice = await invoicesCollection.findOne({
-        _id: new ObjectId(invoiceId),
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
         organizationId,
         'deletion.isDeleted': { $ne: true }
       });
@@ -395,7 +337,7 @@ class InvoiceManagementService {
       
       if (permanentDelete) {
         // Permanent deletion (admin only)
-        await invoicesCollection.deleteOne({ _id: new ObjectId(invoiceId) });
+        await Invoice.deleteOne({ _id: invoiceId });
         
         // Log permanent deletion
         await this.logInvoiceAccess(invoiceId, organizationId, 'permanent_delete', {
@@ -412,8 +354,8 @@ class InvoiceManagementService {
         };
       } else {
         // Soft deletion
-        await invoicesCollection.updateOne(
-          { _id: new ObjectId(invoiceId) },
+        await Invoice.updateOne(
+          { _id: invoiceId },
           {
             $set: {
               'deletion.isDeleted': true,
@@ -457,22 +399,16 @@ class InvoiceManagementService {
 
   /**
    * Get invoice statistics for an organization
-   * @param {string} organizationId - Organization identifier
-   * @returns {Object} Invoice statistics
    */
   async getInvoiceStats(organizationId) {
     try {
-      await this.connect();
-      
-      const invoicesCollection = this.db.collection('invoices');
-      
       const baseQuery = {
         organizationId,
         'deletion.isDeleted': { $ne: true }
       };
       
       // Aggregate statistics
-      const stats = await invoicesCollection.aggregate([
+      const stats = await Invoice.aggregate([
         { $match: baseQuery },
         {
           $group: {
@@ -508,10 +444,10 @@ class InvoiceManagementService {
             }
           }
         }
-      ]).toArray();
+      ]);
       
       // Status breakdown
-      const statusBreakdown = await invoicesCollection.aggregate([
+      const statusBreakdown = await Invoice.aggregate([
         { $match: baseQuery },
         {
           $group: {
@@ -520,13 +456,13 @@ class InvoiceManagementService {
             totalAmount: { $sum: '$financialSummary.totalAmount' }
           }
         }
-      ]).toArray();
+      ]);
       
       // Recent activity (last 30 days)
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
-      const recentActivity = await invoicesCollection.countDocuments({
+      const recentActivity = await Invoice.countDocuments({
         ...baseQuery,
         'auditTrail.createdAt': { $gte: thirtyDaysAgo }
       });
@@ -561,29 +497,19 @@ class InvoiceManagementService {
 
   /**
    * Create a new invoice
-   * @param {Object} invoiceData - Invoice data according to schema
-   * @returns {Object} Creation result
    */
   async createInvoice(invoiceData) {
     try {
-      await this.connect();
+      // Create new invoice document
+      const newInvoice = new Invoice(invoiceData);
+      const result = await newInvoice.save();
       
-      const invoicesCollection = this.db.collection('invoices');
-      
-      // Insert the invoice
-      const result = await invoicesCollection.insertOne(invoiceData);
-      
-      if (result.insertedId) {
-        // Retrieve the created invoice
-        const createdInvoice = await invoicesCollection.findOne({ _id: result.insertedId });
-        
+      if (result) {
         // --- POPULATE ANALYTICS DATA (invoiceLineItems) ---
         if (invoiceData.lineItems && invoiceData.lineItems.length > 0) {
-          const lineItemsCollection = this.db.collection('invoiceLineItems');
-          
           const analyticsItems = invoiceData.lineItems.map(item => ({
             ...item,
-            invoiceId: result.insertedId,
+            invoiceId: result._id,
             invoiceNumber: invoiceData.invoiceNumber,
             organizationId: invoiceData.organizationId,
             clientEmail: invoiceData.clientEmail,
@@ -596,13 +522,13 @@ class InvoiceManagementService {
             employeeId: item.employeeId || null // Ensure employeeId exists for utilization
           }));
 
-          await lineItemsCollection.insertMany(analyticsItems);
+          await InvoiceLineItem.insertMany(analyticsItems);
           logger.info(`Inserted ${analyticsItems.length} line items for analytics`);
         }
         // --------------------------------------------------
         
         logger.info('Invoice created in database', {
-          invoiceId: result.insertedId,
+          invoiceId: result._id,
           invoiceNumber: invoiceData.invoiceNumber,
           organizationId: invoiceData.organizationId,
           clientEmail: invoiceData.clientEmail
@@ -610,7 +536,7 @@ class InvoiceManagementService {
         
         return {
           success: true,
-          data: createdInvoice
+          data: result
         };
       } else {
         return {
@@ -630,15 +556,9 @@ class InvoiceManagementService {
 
   /**
    * Generate unique invoice number for organization
-   * @param {string} organizationId - Organization identifier
-   * @returns {string} Unique invoice number
    */
   async generateInvoiceNumber(organizationId) {
     try {
-      await this.connect();
-      
-      const invoicesCollection = this.db.collection('invoices');
-      
       // Get current year and month
       const now = new Date();
       const year = now.getFullYear();
@@ -648,16 +568,16 @@ class InvoiceManagementService {
       const prefix = `${organizationId.toUpperCase()}-${year}-${month}-`;
       
       // Find the highest existing invoice number for this prefix
-      const lastInvoice = await invoicesCollection.findOne(
+      const lastInvoice = await Invoice.findOne(
         {
           organizationId,
           invoiceNumber: { $regex: `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` }
         },
+        null,
         {
-          sort: { invoiceNumber: -1 },
-          projection: { invoiceNumber: 1 }
+          sort: { invoiceNumber: -1 }
         }
-      );
+      ).select('invoiceNumber');
       
       let nextNumber = 1;
       if (lastInvoice && lastInvoice.invoiceNumber) {
@@ -683,14 +603,10 @@ class InvoiceManagementService {
 
   /**
    * Log invoice access for audit trail
-   * @param {string} invoiceId - Invoice ID
-   * @param {string} organizationId - Organization identifier
-   * @param {string} action - Action performed
-   * @param {Object} metadata - Additional metadata
    */
   async logInvoiceAccess(invoiceId, organizationId, action, metadata = {}) {
     try {
-      const auditEntry = {
+      await AuditTrail.create({
         timestamp: new Date(),
         invoiceId,
         organizationId,
@@ -698,12 +614,7 @@ class InvoiceManagementService {
         metadata,
         userAgent: metadata.userAgent || 'system',
         ipAddress: metadata.ipAddress || 'unknown'
-      };
-      
-      // Log to audit collection if it exists
-      const auditCollection = this.db.collection('audit_trail');
-      await auditCollection.insertOne(auditEntry);
-      
+      });
     } catch (error) {
       logger.error('Error logging invoice access:', error);
       // Don't throw error as this is non-critical
@@ -712,21 +623,11 @@ class InvoiceManagementService {
 
   /**
    * Update invoice payment status
-   * @param {string} invoiceId - Invoice ID
-   * @param {string} organizationId - Organization identifier
-   * @param {string} status - New payment status
-   * @param {Object} paymentDetails - Additional payment details
-   * @returns {Object} Update result
    */
   async updatePaymentStatus(invoiceId, organizationId, status, paymentDetails = {}) {
     try {
-      await this.connect();
-      
-      const invoicesCollection = this.db.collection('invoices');
-      
-      // Verify invoice exists
-      const invoice = await invoicesCollection.findOne({
-        _id: new ObjectId(invoiceId),
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
         organizationId,
         'deletion.isDeleted': { $ne: true }
       });
@@ -756,8 +657,8 @@ class InvoiceManagementService {
         updateData['payment.paidAmount'] = (invoice.payment?.paidAmount || 0) + paymentDetails.paidAmount;
       }
 
-      await invoicesCollection.updateOne(
-        { _id: new ObjectId(invoiceId) },
+      await Invoice.updateOne(
+        { _id: invoiceId },
         { 
           $set: updateData,
           $push: {
@@ -792,17 +693,9 @@ class InvoiceManagementService {
 
   /**
    * Get business statistics for an organization
-   * @param {string} organizationId - Organization identifier
-   * @returns {Object} Business statistics including active businesses, clients, invoices, and revenue
    */
   async getBusinessStatistics(organizationId) {
     try {
-      await this.connect();
-      
-      const invoicesCollection = this.db.collection('invoices');
-      const organizationsCollection = this.db.collection('organizations');
-      const clientsCollection = this.db.collection('clients');
-      
       // Base query for organization
       const orgQuery = { organizationId };
       const activeInvoiceQuery = { 
@@ -811,19 +704,19 @@ class InvoiceManagementService {
       };
       
       // Get active businesses count (organizations)
-      const activeBusinesses = await organizationsCollection.countDocuments({
-        _id: new ObjectId(organizationId),
+      const activeBusinesses = await Organization.countDocuments({
+        _id: organizationId,
         isActive: { $ne: false }
       });
       
       // Get total clients count
-      const totalClients = await clientsCollection.countDocuments(orgQuery);
+      const totalClients = await Client.countDocuments(orgQuery);
       
       // Get total invoices count
-      const totalInvoices = await invoicesCollection.countDocuments(activeInvoiceQuery);
+      const totalInvoices = await Invoice.countDocuments(activeInvoiceQuery);
       
       // Calculate total revenue from all invoices
-      const revenueAggregation = await invoicesCollection.aggregate([
+      const revenueAggregation = await Invoice.aggregate([
         { $match: activeInvoiceQuery },
         {
           $group: {
@@ -839,7 +732,7 @@ class InvoiceManagementService {
             }
           }
         }
-      ]).toArray();
+      ]);
       
       const totalRevenue = revenueAggregation.length > 0 ? revenueAggregation[0].totalRevenue : 0;
       
@@ -847,7 +740,7 @@ class InvoiceManagementService {
       const formattedRevenue = this.formatCurrency(totalRevenue);
       
       // Get invoice status breakdown
-      const statusAggregation = await invoicesCollection.aggregate([
+      const statusAggregation = await Invoice.aggregate([
         { $match: activeInvoiceQuery },
         {
           $group: {
@@ -855,7 +748,7 @@ class InvoiceManagementService {
             count: { $sum: 1 }
           }
         }
-      ]).toArray();
+      ]);
 
       const statsByStatus = statusAggregation.reduce((acc, curr) => {
         // Handle case where status might be missing or null
@@ -907,8 +800,6 @@ class InvoiceManagementService {
 
   /**
    * Format currency value for display
-   * @param {number} amount - Amount to format
-   * @returns {string} Formatted currency string
    */
   formatCurrency(amount) {
     if (amount >= 1000000) {
@@ -921,4 +812,4 @@ class InvoiceManagementService {
   }
 }
 
-module.exports = { InvoiceManagementService };
+module.exports = { InvoiceManagementService: new InvoiceManagementService() };

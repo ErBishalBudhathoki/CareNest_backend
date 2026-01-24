@@ -1,38 +1,13 @@
-const { MongoClient, ObjectId } = require("mongodb");
+const mongoose = require('mongoose');
+const Trip = require('../models/Trip');
+const User = require('../models/User');
+const Organization = require('../models/Organization');
 
 class TripService {
-  constructor() {
-    this.dbName = "Invoice";
-  }
-
-  async getDbConnection() {
-    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
-    await client.connect();
-    const db = client.db(this.dbName);
-    
-    // Ensure indexes
-    await this.ensureIndexes(db);
-    
-    return { client, db };
-  }
-
-  async ensureIndexes(db) {
-    try {
-       await db.collection("trips").createIndex({ userId: 1, date: -1 });
-       await db.collection("trips").createIndex({ organizationId: 1, date: -1 });
-       await db.collection("trips").createIndex({ status: 1 });
-       await db.collection("trips").createIndex({ isReimbursable: 1 });
-    } catch {
-       // Ignore index exists errors
-    }
-  }
-
   /**
    * Create a new trip
    */
   async createTrip(tripData) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const { 
         organizationId, 
@@ -76,18 +51,16 @@ class TripService {
         adminApprovalStatus: 'PENDING',
         isReimbursable,
         isBillable,
-        createdAt: new Date(),
-        updatedAt: new Date()
       };
 
-      const result = await db.collection("trips").insertOne(tripDoc);
+      const newTrip = await Trip.create(tripDoc);
       
       return {
-        tripId: result.insertedId.toString(),
-        ...tripDoc
+        tripId: newTrip._id.toString(),
+        ...newTrip.toObject()
       };
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -95,17 +68,15 @@ class TripService {
    * Get all trips (Admin)
    */
   async getAllTrips(filters = {}) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const query = {};
       
       if (filters.organizationId) {
-        query.organizationId = filters.organizationId;
+        query.organizationId = new mongoose.Types.ObjectId(filters.organizationId);
       }
 
       if (filters.userId) {
-        query.userId = filters.userId;
+        query.userId = new mongoose.Types.ObjectId(filters.userId);
       }
 
       if (filters.startDate && filters.endDate) {
@@ -119,29 +90,27 @@ class TripService {
         query.status = filters.status;
       }
 
-      const trips = await db.collection("trips")
-        .aggregate([
-          { $match: query },
-          { $sort: { date: -1 } },
-          // Join with users to get employee name
-          {
-            $lookup: {
-              from: "users",
-              let: { userId: "$userId" },
-              pipeline: [
-                { $match: { $expr: { $eq: ["$_id", { $toObjectId: "$$userId" }] } } },
-                { $project: { firstName: 1, lastName: 1, email: 1 } }
-              ],
-              as: "employee"
-            }
-          },
-          { $unwind: { path: "$employee", preserveNullAndEmptyArrays: true } }
-        ])
-        .toArray();
+      const trips = await Trip.aggregate([
+        { $match: query },
+        { $sort: { date: -1 } },
+        // Join with users to get employee name
+        {
+          $lookup: {
+            from: "users",
+            localField: "userId",
+            foreignField: "_id",
+            pipeline: [
+              { $project: { firstName: 1, lastName: 1, email: 1 } }
+            ],
+            as: "employee"
+          }
+        },
+        { $unwind: { path: "$employee", preserveNullAndEmptyArrays: true } }
+      ]);
         
       return trips;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -149,8 +118,6 @@ class TripService {
    * Update trip details (Admin)
    */
   async updateTripDetails(tripId, updateData, adminId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const { distance, clientId, status, tripType } = updateData;
       
@@ -187,14 +154,14 @@ class TripService {
         }
       }
 
-      const result = await db.collection("trips").updateOne(
-        { _id: new ObjectId(tripId) },
+      const result = await Trip.updateOne(
+        { _id: tripId },
         { $set: updateFields }
       );
 
       return result.modifiedCount > 0;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -202,15 +169,13 @@ class TripService {
    * Approve or Reject a trip
    */
   async updateTripStatus(tripId, status, adminId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       if (!['APPROVED', 'REJECTED'].includes(status)) {
         throw new Error('Invalid status');
       }
 
-      const result = await db.collection("trips").updateOne(
-        { _id: new ObjectId(tripId) },
+      const result = await Trip.updateOne(
+        { _id: tripId },
         { 
           $set: { 
             status: status,
@@ -222,8 +187,8 @@ class TripService {
       );
 
       return result.modifiedCount > 0;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -231,8 +196,6 @@ class TripService {
    * Get trips for an employee
    */
   async getTripsByEmployee(userId, filters = {}) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const query = { userId: userId };
       
@@ -247,10 +210,10 @@ class TripService {
         query.status = filters.status;
       }
 
-      const trips = await db.collection("trips").find(query).sort({ date: -1 }).toArray();
+      const trips = await Trip.find(query).sort({ date: -1 });
       return trips;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -258,8 +221,6 @@ class TripService {
    * Get billable trips for a client in a date range
    */
   async getBillableTrips(clientId, startDate, endDate) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const query = {
         clientId: clientId,
@@ -271,10 +232,10 @@ class TripService {
         }
       };
 
-      const trips = await db.collection("trips").find(query).sort({ date: 1 }).toArray();
+      const trips = await Trip.find(query).sort({ date: 1 });
       return trips;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -282,8 +243,6 @@ class TripService {
    * Get reimbursable trips for an employee in a date range
    */
   async getReimbursableTrips(userId, startDate, endDate) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const query = {
         userId: userId,
@@ -295,25 +254,24 @@ class TripService {
         }
       };
 
-      const trips = await db.collection("trips").find(query).sort({ date: 1 }).toArray();
+      const trips = await Trip.find(query).sort({ date: 1 });
       return trips;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
+
   /**
    * Calculate Employee Reimbursements (Aggregation)
    * Rule: Approved trips (BETWEEN_CLIENTS or WITH_CLIENT) * Organization Reimbursement Rate
    */
   async calculateReimbursement(organizationId, startDate, endDate) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const pipeline = [
         // 1. Match relevant trips
         {
           $match: {
-            organizationId: organizationId,
+            organizationId: new mongoose.Types.ObjectId(organizationId),
             status: 'APPROVED',
             tripType: { $in: ['BETWEEN_CLIENTS', 'WITH_CLIENT'] },
             date: {
@@ -334,49 +292,81 @@ class TripService {
         {
           $lookup: {
             from: "organizations",
-            let: { orgId: { $toObjectId: organizationId } }, // Ensure ObjectId type matching
-            pipeline: [
-              { $match: { $expr: { $eq: ["$_id", "$$orgId"] } } },
+            localField: "organizationId", // Note: organizationId is not available in group stage _id, so we need to be careful.
+            // Actually, we are matching by organizationId first, so all docs belong to that org.
+            // But after $group, we lose the organizationId field unless we keep it.
+            // Let's re-structure the pipeline to look up organization *before* grouping or use a separate query.
+            // Or better, since we know organizationId, we can just fetch the rate separately.
+            // But to stick to aggregation:
+             pipeline: [
+              { $match: { _id: new mongoose.Types.ObjectId(organizationId) } },
               { $project: { reimbursementRate: 1 } }
             ],
             as: "organization"
           }
         },
-        { $unwind: "$organization" },
-        // 4. Lookup User to get details
+        // Wait, looking up organization based on the input param is easier if we just fetch the org first.
+        // But let's try to fix the pipeline.
+        // The original pipeline used $lookup with 'let' and 'pipeline' which is powerful.
+        // Mongoose aggregate also supports this.
+      ];
+
+      // Re-implementing the original logic but with Mongoose models
+      // We can fetch the organization rate first to simplify the aggregation
+      const org = await Organization.findById(organizationId, 'reimbursementRate');
+      const rate = org ? (org.reimbursementRate || 0) : 0;
+
+      const tripsAggregation = await Trip.aggregate([
+        {
+          $match: {
+            organizationId: new mongoose.Types.ObjectId(organizationId),
+            status: 'APPROVED',
+            tripType: { $in: ['BETWEEN_CLIENTS', 'WITH_CLIENT'] },
+            date: {
+              $gte: new Date(startDate),
+              $lte: new Date(endDate)
+            }
+          }
+        },
+        {
+          $group: {
+            _id: "$userId",
+            totalDistance: { $sum: "$distance" },
+            tripCount: { $sum: 1 }
+          }
+        },
         {
           $lookup: {
             from: "users",
-            let: { userId: "$_id" },
+            localField: "_id",
+            foreignField: "_id",
             pipeline: [
-              { $match: { $expr: { $eq: ["$_id", { $toObjectId: "$$userId" }] } } },
               { $project: { firstName: 1, lastName: 1, email: 1 } }
             ],
             as: "employee"
           }
         },
         { $unwind: "$employee" },
-        // 5. Calculate Total Amount
         {
           $project: {
             employeeId: "$_id",
             employeeName: { $concat: ["$employee.firstName", " ", "$employee.lastName"] },
             totalDistance: 1,
             tripCount: 1,
-            rateApplied: { $ifNull: ["$organization.reimbursementRate", 0] },
+            rateApplied: { $literal: rate },
             totalReimbursement: { 
               $multiply: [
                 "$totalDistance", 
-                { $ifNull: ["$organization.reimbursementRate", 0] }
+                rate
               ] 
             }
           }
         }
-      ];
+      ]);
 
-      return await db.collection("trips").aggregate(pipeline).toArray();
-    } finally {
-      await client.close();
+      return tripsAggregation;
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -385,14 +375,15 @@ class TripService {
    * Rule: Approved trips (WITH_CLIENT only) * Organization Client Billing Rate
    */
   async calculateClientBilling(organizationId, startDate, endDate) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
+      // Fetch organization rate first
+      const org = await Organization.findById(organizationId, 'clientBillingRate');
+      const rate = org ? (org.clientBillingRate || 0) : 0;
+
       const pipeline = [
-        // 1. Match relevant trips
         {
           $match: {
-            organizationId: organizationId,
+            organizationId: new mongoose.Types.ObjectId(organizationId),
             status: 'APPROVED',
             tripType: 'WITH_CLIENT',
             date: {
@@ -401,7 +392,6 @@ class TripService {
             }
           }
         },
-        // 2. Group by Client
         {
           $group: {
             _id: "$clientId",
@@ -409,42 +399,36 @@ class TripService {
             tripCount: { $sum: 1 }
           }
         },
-        // 3. Lookup Organization to get rate
+        // Lookup Client details
         {
-          $lookup: {
-            from: "organizations",
-            let: { orgId: { $toObjectId: organizationId } },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$_id", "$$orgId"] } } },
-              { $project: { clientBillingRate: 1 } }
-            ],
-            as: "organization"
-          }
+           $lookup: {
+             from: "clients",
+             localField: "_id",
+             foreignField: "_id",
+             as: "client"
+           }
         },
-        { $unwind: "$organization" },
-        // 4. Lookup Client details (assuming clients collection exists)
-        // If clientId is just a string name, this might fail, but assuming ID reference pattern
-        // For robustness, if clientId is not an ObjectId, we might just project it as name.
-        // Let's assume it's a name or ID string. We'll project it directly.
+        // We might want to unwind if we want client details, but the original just projected ID.
+        // Let's assume we want to return what the original did.
         {
           $project: {
             clientId: "$_id",
             totalDistance: 1,
             tripCount: 1,
-            rateApplied: { $ifNull: ["$organization.clientBillingRate", 0] },
+            rateApplied: { $literal: rate },
             totalBill: { 
               $multiply: [
                 "$totalDistance", 
-                { $ifNull: ["$organization.clientBillingRate", 0] }
+                rate
               ] 
             }
           }
         }
       ];
 
-      return await db.collection("trips").aggregate(pipeline).toArray();
-    } finally {
-      await client.close();
+      return await Trip.aggregate(pipeline);
+    } catch (error) {
+      throw error;
     }
   }
 }

@@ -1,19 +1,9 @@
-const { ObjectId } = require('mongodb');
-const { getDatabase } = require('../config/database');
+const Invoice = require('../models/Invoice');
+const ClientAssignment = require('../models/ClientAssignment');
 const requestService = require('./requestService');
 const auditService = require('./auditService');
 
 class ClientPortalService {
-  constructor() {
-    this.db = null;
-  }
-
-  async getDb() {
-    if (!this.db) {
-      this.db = await getDatabase();
-    }
-    return this.db;
-  }
 
   /**
    * Get invoices for a client
@@ -22,7 +12,6 @@ class ClientPortalService {
    * @param {Object} query - Pagination/Filter params
    */
   async getInvoices(clientId, clientEmail, { page = 1, limit = 10, status }) {
-    const db = await this.getDb();
     const skip = (page - 1) * limit;
 
     const matchQuery = {
@@ -43,14 +32,12 @@ class ClientPortalService {
       }
     }
 
-    const invoices = await db.collection('invoices')
-      .find(matchQuery)
+    const invoices = await Invoice.find(matchQuery)
       .sort({ 'financialSummary.dueDate': -1 }) // Show latest due first
       .skip(skip)
-      .limit(parseInt(limit))
-      .toArray();
+      .limit(parseInt(limit));
 
-    const total = await db.collection('invoices').countDocuments(matchQuery);
+    const total = await Invoice.countDocuments(matchQuery);
 
     return {
       invoices,
@@ -67,10 +54,8 @@ class ClientPortalService {
    * Get single invoice detail
    */
   async getInvoiceDetail(invoiceId, clientId, clientEmail) {
-    const db = await this.getDb();
-    
-    const invoice = await db.collection('invoices').findOne({
-      _id: new ObjectId(invoiceId),
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
       $or: [
         { clientId: clientId.toString() },
         { clientEmail: clientEmail }
@@ -88,18 +73,16 @@ class ClientPortalService {
    * Approve invoice
    */
   async approveInvoice(invoiceId, userId, userEmail) {
-    const db = await this.getDb();
-    
     // Check permissions implicitly by query
-    const invoice = await db.collection('invoices').findOne({
-        _id: new ObjectId(invoiceId),
+    const invoice = await Invoice.findOne({
+        _id: invoiceId,
         'clientEmail': userEmail // Basic check, better to use clientId from auth
     });
 
     if (!invoice) throw new Error('Invoice not found');
 
-    const result = await db.collection('invoices').updateOne(
-      { _id: new ObjectId(invoiceId) },
+    const result = await Invoice.updateOne(
+      { _id: invoiceId },
       {
         $set: {
           'workflow.status': 'approved',
@@ -124,16 +107,14 @@ class ClientPortalService {
    * Dispute invoice
    */
   async disputeInvoice(invoiceId, userId, userEmail, reason) {
-    const db = await this.getDb();
-
-    const result = await db.collection('invoices').updateOne(
-      { _id: new ObjectId(invoiceId) },
+    const result = await Invoice.updateOne(
+      { _id: invoiceId },
       {
         $set: {
-          'workflow.status': 'disputed', // Ensure 'disputed' is in schema enums
+          'workflow.status': 'disputed', 
           'workflow.rejectionReason': reason,
           'workflow.nextAction': 'admin_review',
-          'payment.status': 'pending' // Reset if it was something else?
+          'payment.status': 'pending'
         }
       }
     );
@@ -152,16 +133,14 @@ class ClientPortalService {
    * Get upcoming appointments
    */
   async getAppointments(clientEmail) {
-    const db = await this.getDb();
-    
     // Query clientAssignments
     // Structure: { clientEmail: '...', schedule: [{ date, startTime... }] }
-    const assignments = await db.collection('clientAssignments').aggregate([
+    const assignments = await ClientAssignment.aggregate([
         { $match: { clientEmail: clientEmail, isActive: true } },
         { $unwind: '$schedule' },
         { $match: { 'schedule.date': { $gte: new Date().toISOString().split('T')[0] } } }, // Upcoming
         { $sort: { 'schedule.date': 1 } }
-    ]).toArray();
+    ]);
 
     return assignments.map(a => ({
         ...a.schedule,

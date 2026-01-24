@@ -1,7 +1,7 @@
-const { getDatabase } = require('../config/database');
-const { ObjectId } = require('mongodb');
-const OnboardingRecordSchema = require('../models/OnboardingRecord');
-const EmployeeDocumentSchema = require('../models/EmployeeDocument');
+const mongoose = require('mongoose');
+const OnboardingRecord = require('../models/OnboardingRecord');
+const EmployeeDocument = require('../models/EmployeeDocument');
+const User = require('../models/User'); // Maps to 'login' collection
 const logger = require('../config/logger');
 const emailService = require('./emailService');
 
@@ -11,19 +11,15 @@ class OnboardingService {
      * Get or create onboarding status for a user
      */
     static async getOnboardingStatus(userId, organizationId) {
-        const db = await getDatabase();
-        const collection = db.collection('onboarding_records');
-
-        let record = await collection.findOne({ userId: new ObjectId(userId) });
+        let record = await OnboardingRecord.findOne({ userId });
 
         if (!record) {
             // Create initial record if it doesn't exist
-            const initialRecord = OnboardingRecordSchema.createInitialRecord(
-                new ObjectId(userId),
-                new ObjectId(organizationId)
+            record = OnboardingRecord.createInitialRecord(
+                userId,
+                organizationId
             );
-            await collection.insertOne(initialRecord);
-            record = initialRecord;
+            await record.save();
         }
 
         return record;
@@ -33,9 +29,6 @@ class OnboardingService {
      * Update a specific onboarding step
      */
     static async updateStep(userId, stepName, data, currentStep) {
-        const db = await getDatabase();
-        const collection = db.collection('onboarding_records');
-
         const updateField = `steps.${stepName}`;
         const updateData = {
             [`${updateField}.status`]: 'completed',
@@ -50,36 +43,32 @@ class OnboardingService {
             updateData.currentStep = currentStep;
         }
 
-        const result = await collection.findOneAndUpdate(
-            { userId: new ObjectId(userId) },
+        const result = await OnboardingRecord.findOneAndUpdate(
+            { userId },
             { $set: updateData },
-            { returnDocument: 'after' }
+            { new: true } // returnDocument: 'after' equivalent
         );
 
-        return result.value || result; // handle different mongodb driver versions
+        return result;
     }
 
     /**
      * Save a document record
      */
     static async saveDocument(docData) {
-        const db = await getDatabase();
-        const docCollection = db.collection('employee_documents');
-        const onboardingCollection = db.collection('onboarding_records');
-
-        const document = EmployeeDocumentSchema.create({
+        const document = new EmployeeDocument({
             ...docData,
-            userId: new ObjectId(docData.userId),
-            organizationId: new ObjectId(docData.organizationId)
+            userId: docData.userId,
+            organizationId: docData.organizationId
         });
 
-        await docCollection.insertOne(document);
+        await document.save();
 
         // Update document count in onboarding record
-        const count = await docCollection.countDocuments({ userId: new ObjectId(docData.userId) });
+        const count = await EmployeeDocument.countDocuments({ userId: docData.userId });
 
-        await onboardingCollection.updateOne(
-            { userId: new ObjectId(docData.userId) },
+        await OnboardingRecord.updateOne(
+            { userId: docData.userId },
             {
                 $set: {
                     'steps.documents.count': count,
@@ -95,24 +84,17 @@ class OnboardingService {
      * Get all documents for a user
      */
     static async getUserDocuments(userId) {
-        const db = await getDatabase();
-        return await db.collection('employee_documents')
-            .find({ userId: new ObjectId(userId) })
-            .toArray();
+        return await EmployeeDocument.find({ userId });
     }
 
     /**
      * Delete a document
      */
     static async deleteDocument(docId, userId) {
-        const db = await getDatabase();
-        const docCollection = db.collection('employee_documents');
-        const onboardingCollection = db.collection('onboarding_records');
-
         // Ensure the document belongs to the user
-        const result = await docCollection.deleteOne({
-            _id: new ObjectId(docId),
-            userId: new ObjectId(userId)
+        const result = await EmployeeDocument.deleteOne({
+            _id: docId,
+            userId: userId
         });
 
         if (result.deletedCount === 0) {
@@ -120,10 +102,10 @@ class OnboardingService {
         }
 
         // Update document count
-        const count = await docCollection.countDocuments({ userId: new ObjectId(userId) });
+        const count = await EmployeeDocument.countDocuments({ userId });
 
-        await onboardingCollection.updateOne(
-            { userId: new ObjectId(userId) },
+        await OnboardingRecord.updateOne(
+            { userId },
             {
                 $set: {
                     'steps.documents.count': count,
@@ -139,22 +121,19 @@ class OnboardingService {
      * Submit onboarding for review
      */
     static async submitOnboarding(userId) {
-        const db = await getDatabase();
-        const result = await db.collection('onboarding_records').findOneAndUpdate(
-            { userId: new ObjectId(userId) },
+        const result = await OnboardingRecord.findOneAndUpdate(
+            { userId },
             {
                 $set: {
                     status: 'submitted',
                     updatedAt: new Date()
                 }
             },
-            { returnDocument: 'after' }
+            { new: true }
         );
 
-        // Optionally send email to admin (logic to find admin needed)
-        // For now we skip admin email to avoid complexity of finding org admins
-
-        return result.value || result;
+        // Optionally send email to admin
+        return result;
     }
 
     // --- Admin Methods ---
@@ -163,13 +142,13 @@ class OnboardingService {
      * Get all pending onboardings for an organization
      */
     static async getPendingOnboardings(organizationId) {
-        const db = await getDatabase();
-        // Join with login collection to get names
-        return await db.collection('onboarding_records').aggregate([
-            { $match: { organizationId: new ObjectId(organizationId) } },
+        // Join with login collection (User model) to get names
+        // Using aggregation to mimic original behavior
+        return await OnboardingRecord.aggregate([
+            { $match: { organizationId: organizationId } }, // Ensure organizationId is string as per model
             {
                 $lookup: {
-                    from: 'login',
+                    from: 'login', // User collection name
                     localField: 'userId',
                     foreignField: '_id',
                     as: 'user'
@@ -190,26 +169,25 @@ class OnboardingService {
                     updatedAt: 1
                 }
             }
-        ]).toArray();
+        ]);
     }
 
     /**
      * Verify a document
      */
     static async verifyDocument(docId, status, reason, adminId) {
-        const db = await getDatabase();
         const updateData = {
             status,
             verifiedAt: new Date(),
-            verifiedBy: new ObjectId(adminId)
+            verifiedBy: adminId
         };
 
         if (reason) updateData.rejectionReason = reason;
 
-        return await db.collection('employee_documents').findOneAndUpdate(
-            { _id: new ObjectId(docId) },
+        return await EmployeeDocument.findOneAndUpdate(
+            { _id: docId },
             { $set: updateData },
-            { returnDocument: 'after' }
+            { new: true }
         );
     }
 
@@ -217,15 +195,13 @@ class OnboardingService {
      * Finalize onboarding
      */
     static async finalizeOnboarding(userId, _adminId) {
-        const db = await getDatabase();
-
         // Calculate probation end date (e.g., 3 months from now)
         const startDate = new Date();
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + 3);
 
-        const result = await db.collection('onboarding_records').findOneAndUpdate(
-            { userId: new ObjectId(userId) },
+        const result = await OnboardingRecord.findOneAndUpdate(
+            { userId },
             {
                 $set: {
                     status: 'completed',
@@ -235,12 +211,12 @@ class OnboardingService {
                     'probation.status': 'active'
                 }
             },
-            { returnDocument: 'after' }
+            { new: true }
         );
 
         // Send welcome email
         try {
-            const user = await db.collection('login').findOne({ _id: new ObjectId(userId) });
+            const user = await User.findById(userId);
             if (user && user.email) {
                 const name = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Employee';
                 await emailService.sendOnboardingWelcomeEmail(user.email, name);
@@ -249,7 +225,7 @@ class OnboardingService {
             logger.error('Failed to send welcome email', error);
         }
 
-        return result.value || result;
+        return result;
     }
 
     /**
@@ -257,13 +233,12 @@ class OnboardingService {
      * Should be called by a scheduler
      */
     static async checkProbationPeriods() {
-        const db = await getDatabase();
         const today = new Date();
         const sevenDaysFromNow = new Date();
         sevenDaysFromNow.setDate(today.getDate() + 7);
 
         // Find active probations ending within next 7 days
-        const records = await db.collection('onboarding_records').aggregate([
+        const records = await OnboardingRecord.aggregate([
             {
                 $match: {
                     'probation.status': 'active',
@@ -282,19 +257,15 @@ class OnboardingService {
                 }
             },
             { $unwind: '$user' }
-        ]).toArray();
+        ]);
 
         for (const record of records) {
             const daysRemaining = Math.ceil((new Date(record.probation.endDate) - today) / (1000 * 60 * 60 * 24));
             const employeeName = `${record.user.firstName} ${record.user.lastName || ''}`;
 
-            // In a real app, we'd find the manager/admin for this organization
-            // For now, we'll log it or mock sending to a generic admin email if available
-            // notifications.push({ employeeName, daysRemaining, organizationId: record.organizationId });
-
             logger.info(`Probation Reminder: ${employeeName}'s probation ends in ${daysRemaining} days.`);
-
-            // Mock email to organization admin (skipping actual lookup for brevity)
+            
+            // Mock email to organization admin
             // await emailService.sendProbationReminder('admin@example.com', employeeName, daysRemaining);
         }
 

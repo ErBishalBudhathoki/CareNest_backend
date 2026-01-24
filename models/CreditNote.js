@@ -1,59 +1,4 @@
-/**
- * Credit Note Schema Definition
- * Represents a refund or credit issued to a client
- */
-
-const creditNoteSchema = {
-  _id: 'ObjectId',
-  creditNoteNumber: 'String', // Unique identifier (e.g., CN-2023-001)
-  organizationId: 'String',
-  
-  // Linked Invoice (Optional - can be general credit)
-  originalInvoiceId: 'ObjectId',
-  originalInvoiceNumber: 'String',
-  
-  // Client details
-  clientId: 'String',
-  clientEmail: 'String',
-  clientName: 'String',
-  
-  // Financials
-  amount: 'Number',
-  currency: 'String', // Default: 'AUD'
-  reason: 'String', // Reason for credit (e.g., 'Overcharge', 'Service Cancellation')
-  
-  // Status
-  status: 'String', // 'draft', 'issued', 'applied', 'refunded', 'void'
-  
-  // Usage tracking
-  balanceRemaining: 'Number', // Amount not yet applied to other invoices or refunded
-  
-  // Application history
-  applications: [{
-    invoiceId: 'ObjectId',
-    invoiceNumber: 'String',
-    amountApplied: 'Number',
-    date: 'Date'
-  }],
-  
-  // Refund history (if money returned)
-  refunds: [{
-    amount: 'Number',
-    date: 'Date',
-    method: 'String', // 'bank_transfer', 'stripe', etc.
-    reference: 'String'
-  }],
-  
-  // Dates
-  issueDate: 'Date',
-  expiryDate: 'Date', // Optional
-  
-  // Metadata
-  createdBy: 'String',
-  createdAt: 'Date',
-  updatedAt: 'Date',
-  notes: 'String'
-};
+const mongoose = require('mongoose');
 
 const CreditNoteStatus = {
   DRAFT: 'draft',
@@ -64,7 +9,68 @@ const CreditNoteStatus = {
   VOID: 'void'
 };
 
+const applicationSchema = new mongoose.Schema({
+  invoiceId: mongoose.Schema.Types.ObjectId,
+  invoiceNumber: String,
+  amountApplied: Number,
+  date: Date
+}, { _id: false });
+
+const refundSchema = new mongoose.Schema({
+  amount: Number,
+  date: Date,
+  method: String, // 'bank_transfer', 'stripe', etc.
+  reference: String
+}, { _id: false });
+
+const creditNoteSchema = new mongoose.Schema({
+  creditNoteNumber: { type: String, required: true, unique: true }, // e.g., CN-2023-001
+  organizationId: { type: String, required: true, index: true },
+  
+  // Linked Invoice (Optional - can be general credit)
+  originalInvoiceId: mongoose.Schema.Types.ObjectId,
+  originalInvoiceNumber: String,
+  
+  // Client details
+  clientId: String,
+  clientEmail: String,
+  clientName: String,
+  
+  // Financials
+  amount: { type: Number, required: true },
+  currency: { type: String, default: 'AUD' },
+  reason: String, // Reason for credit
+  
+  // Status
+  status: { 
+    type: String, 
+    enum: Object.values(CreditNoteStatus),
+    default: CreditNoteStatus.DRAFT,
+    index: true
+  },
+  
+  // Usage tracking
+  balanceRemaining: { type: Number, required: true }, // Amount not yet applied
+  
+  // Application history
+  applications: [applicationSchema],
+  
+  // Refund history (if money returned)
+  refunds: [refundSchema],
+  
+  // Dates
+  issueDate: Date,
+  expiryDate: Date,
+  
+  // Metadata
+  createdBy: String,
+  notes: String
+}, {
+  timestamps: true,
+  collection: 'creditNotes'
+});
+
 module.exports = {
-  creditNoteSchema,
+  CreditNote: mongoose.model('CreditNote', creditNoteSchema),
   CreditNoteStatus
 };

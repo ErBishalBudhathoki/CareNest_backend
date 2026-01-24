@@ -4,13 +4,12 @@
  * Provides comprehensive price validation for custom pricing and invoice generation
  */
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const mongoose = require('mongoose');
 const path = require('path');
 const logger = require('../config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { mmmService } = require('./mmmService');
-
-const uri = process.env.MONGODB_URI;
+const SupportItem = require('../models/SupportItem');
 
 /**
  * Validation result structure
@@ -28,33 +27,6 @@ const uri = process.env.MONGODB_URI;
  * Price Validation Service Class
  */
 class PriceValidationService {
-  constructor() {
-    this.client = null;
-    this.db = null;
-  }
-
-  /**
-   * Initialize database connection
-   */
-  async connect() {
-    if (!this.client) {
-      this.client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-      await this.client.connect();
-      this.db = this.client.db('Invoice');
-    }
-  }
-
-  /**
-   * Close database connection
-   */
-  async disconnect() {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-      this.db = null;
-    }
-  }
-
   /**
    * Validate a single price against NDIS caps
    * @param {string} supportItemNumber - NDIS support item number
@@ -73,8 +45,6 @@ class PriceValidationService {
     options = {}
   ) {
     try {
-      await this.connect();
-
       // Input validation
       if (!supportItemNumber || typeof proposedPrice !== 'number' || proposedPrice < 0) {
         return {
@@ -108,7 +78,7 @@ class PriceValidationService {
       }
 
       // Find support item
-      const supportItem = await this.db.collection('supportItems').findOne({
+      const supportItem = await SupportItem.findOne({
         supportItemNumber: supportItemNumber
       });
 
@@ -334,12 +304,9 @@ class PriceValidationService {
    */
   async getPriceCaps(supportItemNumber) {
     try {
-      await this.connect();
-      
-      const supportItem = await this.db.collection('supportItems').findOne(
-        { supportItemNumber },
-        { projection: { priceCaps: 1, supportItemName: 1, supportType: 1, quoteRequired: 1 } }
-      );
+      const supportItem = await SupportItem.findOne(
+        { supportItemNumber }
+      ).select('priceCaps supportItemName supportType quoteRequired');
       
       return supportItem;
     } catch (error) {
@@ -359,12 +326,9 @@ class PriceValidationService {
    */
   async requiresQuote(supportItemNumber) {
     try {
-      await this.connect();
-      
-      const supportItem = await this.db.collection('supportItems').findOne(
-        { supportItemNumber },
-        { projection: { quoteRequired: 1, supportType: 1 } }
-      );
+      const supportItem = await SupportItem.findOne(
+        { supportItemNumber }
+      ).select('quoteRequired supportType');
       
       if (!supportItem) return false;
       

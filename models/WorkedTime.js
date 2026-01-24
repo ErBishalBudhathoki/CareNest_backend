@@ -1,69 +1,51 @@
-
 const mongoose = require('mongoose');
 
 const workedTimeSchema = new mongoose.Schema({
   userEmail: {
     type: String,
     required: true,
-    lowercase: true,
-    trim: true
+    index: true
   },
   clientEmail: {
     type: String,
     required: true,
-    lowercase: true,
-    trim: true
+    index: true
   },
-  shiftDate: {
-    type: Date,
+  date: {
+    type: Date
+  },
+  // Fields used in timesheetReminderService query
+  shiftDate: String, // YYYY-MM-DD
+  workDate: Date,
+  isActive: { type: Boolean, default: true },
+  
+  timeWorked: {
+    type: String, // Stored as string in original service logic (parseFloat used later)
     required: true
   },
-  startTime: {
-    type: Date,
-    required: true
-  },
-  endTime: {
-    type: Date,
-    required: true
-  },
-  totalSeconds: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  notes: {
+  providerType: {
     type: String,
-    trim: true,
-    maxlength: 1000
+    default: 'standard'
   },
-  servicesProvided: [{
+  serviceLocationPostcode: {
     type: String,
-    enum: ['personal_care', 'medication', 'meal_prep', 'housekeeping', 'companionship', 'transportation']
-  }],
-  status: {
+    default: null
+  },
+  postcode: {
     type: String,
-    enum: ['completed', 'cancelled', 'no_show'],
-    default: 'completed'
+    default: null
   },
-  assignedClientId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ClientAssignment'
-  },
-  shiftIndex: {
-    type: Number,
-    default: 0
-  },
-  isActive: {
-    type: Boolean,
-    default: true
+  state: {
+    type: String,
+    default: 'NSW'
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  collection: 'worked_times'
 });
 
-// Indexes
-workedTimeSchema.index({ userEmail: 1, clientEmail: 1 });
-workedTimeSchema.index({ shiftDate: -1 });
-workedTimeSchema.index({ startTime: -1 });
+// Compound index for efficient range queries
+workedTimeSchema.index({ userEmail: 1, clientEmail: 1, date: 1 });
+workedTimeSchema.index({ userEmail: 1, isActive: 1 });
 
 module.exports = mongoose.model('WorkedTime', workedTimeSchema);

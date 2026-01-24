@@ -15,39 +15,11 @@
  * locations for pricing purposes.
  */
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const MmmLocation = require('../models/MmmLocation');
+const MmmOverride = require('../models/MmmOverride');
 const logger = require('../config/logger');
 
-const uri = process.env.MONGODB_URI;
-
 class MmmService {
-  constructor() {
-    this.client = null;
-    this.db = null;
-  }
-
-  /**
-   * Initialize database connection
-   */
-  async connect() {
-    if (!this.client) {
-      this.client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-      await this.client.connect();
-      this.db = this.client.db('Invoice');
-    }
-  }
-
-  /**
-   * Close database connection
-   */
-  async disconnect() {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-      this.db = null;
-    }
-  }
-
   /**
    * Normalize a postcode to a 4-digit numeric string.
    * @param {string|number} postcode
@@ -72,10 +44,8 @@ class MmmService {
     if (!normalized) return null;
 
     try {
-      await this.connect();
-
       // 1) Check overrides (Isolated Towns Modification or org-specific policies)
-      const override = await this.db.collection('mmmOverrides').findOne({ postcode: normalized });
+      const override = await MmmOverride.findOne({ postcode: normalized });
       if (override && typeof override.mmm === 'number') {
         return {
           mmm: override.mmm,
@@ -85,7 +55,7 @@ class MmmService {
       }
 
       // 2) Fallback to canonical MMM locations mapping
-      const record = await this.db.collection('mmmLocations').findOne({ postcode: normalized });
+      const record = await MmmLocation.findOne({ postcode: normalized });
       if (record && typeof record.mmm === 'number') {
         return {
           mmm: record.mmm,
