@@ -20,6 +20,9 @@ class ClientService {
       businessName,
       preferences,
       careNotes,
+      emergencyContact,
+      medicalConditions,
+      riskAssessment,
       organizationId,
       userEmail 
     } = clientData;
@@ -54,6 +57,9 @@ class ClientService {
         businessName,
         preferences: preferences || {}, // Default to empty object
         careNotes: careNotes || "", // Default to empty string
+        emergencyContact: emergencyContact || {},
+        medicalConditions: medicalConditions || [],
+        riskAssessment: riskAssessment || {},
         organizationId: organizationId || null,
         createdAt: new Date(),
         updatedAt: new Date(),

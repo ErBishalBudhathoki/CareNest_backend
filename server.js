@@ -29,6 +29,14 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const DB_NAME = process.env.DB_NAME || 'Invoice';
 const app = express(); // Initialize express app early
 
+// Connect to MongoDB with Mongoose
+const connectMongoose = require('./config/mongoose');
+connectMongoose();
+
+// Start Notification Scheduler
+const notificationScheduler = require('./cron/notificationScheduler');
+notificationScheduler.start();
+
 // Firebase Admin SDK Configuration Generation
 // fs and path are already imported at the top of server.js
 // const fs = require('fs');
@@ -189,6 +197,12 @@ console.log('Security dashboard routes loaded successfully');
 const apiUsageRoutes = require('./routes/apiUsageRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 console.log('API usage routes loaded successfully');
+const aiTimingRoutes = require('./routes/aiTimingRoutes');
+const calendarRoutes = require('./routes/calendarRoutes');
+const snoozeRoutes = require('./routes/snoozeRoutes');
+const voiceRoutes = require('./routes/voiceRoutes');
+const teamRoutes = require('./routes/teamRoutes');
+const emergencyRoutes = require('./routes/emergencyRoutes');
 const bankDetailsRoutes = require('./routes/bankDetails');
 console.log('Bank details routes loaded successfully');
 const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
@@ -197,6 +211,8 @@ const requestRoutes = require('./routes/request');
 console.log('Request routes loaded successfully');
 const tripRoutes = require('./routes/tripRoutes');
 console.log('Trip routes loaded successfully');
+const payrollRoutes = require('./routes/payrollRoutes');
+console.log('Payroll routes loaded successfully');
 const timesheetReminderRoutes = require('./routes/timesheetReminderRoutes');
 const earningsRoutes = require('./routes/earningsRoutes');
 console.log('Earnings routes loaded successfully');
@@ -260,6 +276,9 @@ app.use('/api/reminders', timesheetReminderRoutes);
 // Mount earnings routes
 app.use('/api/earnings', earningsRoutes);
 
+// Mount payroll routes
+app.use('/api/payroll', payrollRoutes);
+
 // Mount onboarding routes
 app.use('/api/onboarding', onboardingRoutes);
 
@@ -288,6 +307,11 @@ const clientRoutes = require('./routes/client');
 app.use('/', clientRoutes);
 console.log('Client routes loaded successfully');
 
+// Mount worked time routes (Visit History)
+const workedTimeRoutes = require('./routes/workedTimeRoutes');
+app.use('/api/worked-time', workedTimeRoutes);
+console.log('Worked time routes loaded successfully');
+
 // Mount active timer endpoints directly to app
 app.post('/startTimerWithTracking', startTimerWithTracking);
 app.post('/stopTimerWithTracking', stopTimerWithTracking);
@@ -296,6 +320,16 @@ app.get('/getActiveTimers/:organizationId', getActiveTimers);
 // Mount config routes
 const configRoutes = require('./routes/config');
 app.use('/api/config', configRoutes);
+
+// Mount Client Portal routes
+const clientPortalRoutes = require('./routes/clientPortalRoutes');
+app.use('/api/client-portal', clientPortalRoutes);
+console.log('Client Portal routes loaded successfully');
+
+// Mount Timesheet routes
+const timesheetRoutes = require('./routes/timesheetRoutes');
+app.use('/api/timesheets', timesheetRoutes);
+console.log('Timesheet routes loaded successfully');
 
 // Mount payment routes
 const paymentRoutes = require('./routes/paymentRoutes');
@@ -452,6 +486,20 @@ app.use('/', adminInvoiceProfileRoutes);
 // Mount training and compliance routes
 const trainingComplianceRoutes = require('./routes/trainingComplianceRoutes');
 app.use('/api', trainingComplianceRoutes);
+
+// Mount notification routes
+const notificationRoutes = require('./routes/notificationRoutes');
+app.use('/api/notifications', notificationRoutes);
+
+// Mount geofence routes
+const geofenceRoutes = require('./routes/geofenceRoutes');
+app.use('/api/geofence', geofenceRoutes);
+app.use('/api/notifications/ai-timing', aiTimingRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/snooze', snoozeRoutes);
+app.use('/api/voice', voiceRoutes);
+app.use('/api/teams', teamRoutes);
+app.use('/api/emergency', emergencyRoutes);
 
 
 // Configure multer to handle file uploads
