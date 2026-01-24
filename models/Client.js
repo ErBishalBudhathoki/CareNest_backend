@@ -2,83 +2,82 @@
 const mongoose = require('mongoose');
 
 const clientSchema = new mongoose.Schema({
-  email: {
+  clientEmail: {
     type: String,
     required: true,
     unique: true,
     lowercase: true,
     trim: true
   },
-  firstName: {
+  clientFirstName: {
     type: String,
     required: true,
     trim: true
   },
-  lastName: {
+  clientLastName: {
     type: String,
     required: true,
     trim: true
   },
-  phone: {
+  clientPhone: {
     type: String,
     required: true,
     trim: true
   },
-  address: {
+  clientAddress: {
     type: String,
     required: true,
     trim: true
   },
-  city: {
+  clientCity: {
     type: String,
     required: true,
     trim: true
   },
-  state: {
+  clientState: {
     type: String,
     required: true,
     trim: true
   },
-  zipCode: {
+  clientZip: {
     type: String,
     required: true,
+    trim: true
+  },
+  businessName: {
+    type: String,
     trim: true
   },
   preferences: {
-    communicationStyle: {
-      type: String,
-      enum: ['verbal', 'written', 'both'],
-      default: 'verbal'
-    },
-    dietaryNeeds: [{
-      type: String,
-      trim: true
-    }],
-    specialRequirements: {
-      type: String,
-      trim: true
-    },
-    languages: [{
-      type: String,
-      trim: true
-    }],
-    preferredTimes: [{
-      type: String,
-      enum: ['morning', 'afternoon', 'evening']
-    }]
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
   },
   careNotes: {
     type: String,
-    trim: true
+    trim: true,
+    default: ""
   },
   emergencyContact: {
-    name: String,
-    phone: String,
-    relationship: String
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  medicalConditions: {
+    type: [String],
+    default: []
+  },
+  riskAssessment: {
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
   },
   organizationId: {
     type: String,
     ref: 'Organization'
+  },
+  ndisItem: {
+    type: Object
   },
   isActive: {
     type: Boolean,
@@ -89,8 +88,8 @@ const clientSchema = new mongoose.Schema({
 });
 
 // Indexes
-clientSchema.index({ email: 1 });
-clientSchema.index({ lastName: 1, firstName: 1 });
+clientSchema.index({ clientEmail: 1 });
+clientSchema.index({ clientLastName: 1, clientFirstName: 1 });
 clientSchema.index({ organizationId: 1 });
 
 module.exports = mongoose.model('Client', clientSchema);

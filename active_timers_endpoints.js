@@ -3,12 +3,14 @@
  * These endpoints handle database-backed timer tracking for employee monitoring
  */
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
-const { messaging } = require('./firebase-admin-config'); // Correctly imports your initialized Firebase Admin
+const mongoose = require('mongoose');
+const ActiveTimer = require('./models/ActiveTimer');
+const WorkedTime = require('./models/WorkedTime');
+const User = require('./models/User');
+const FcmToken = require('./models/FcmToken');
+const { messaging } = require('./firebase-admin-config');
 const logger = require('./config/logger');
 require('dotenv').config();
-
-const uri = process.env.MONGODB_URI;
 
 /**
  * ===========================================================================
@@ -18,7 +20,7 @@ const uri = process.env.MONGODB_URI;
  * It encapsulates all the logic for finding users, getting tokens, building the
  * message, and sending the notification.
  */
-async function sendAdminNotification(db, organizationId, title, body, data) {
+async function sendAdminNotification(organizationId, title, body, data) {
   logger.info('Admin notification flow started', {
     type: data.type,
     organizationId,
@@ -27,7 +29,7 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
 
   try {
     // Primary: Get admins with FCM tokens directly from login collection
-    const adminUsers = await db.collection('login').find({
+    const adminUsers = await User.find({
       organizationId: organizationId,
       isActive: { $ne: false },
       $or: [
@@ -35,7 +37,7 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
         { roles: { $elemMatch: { $regex: /^admin$/i } } },
         { jobRole: { $regex: /^admin$/i } },
       ],
-    }).project({ email: 1, fcmToken: 1, role: 1, roles: 1, jobRole: 1 }).toArray();
+    }).select('email fcmToken role roles jobRole').lean();
 
     if (adminUsers.length === 0) {
       logger.warn('No active admin users found for organization', {
@@ -65,11 +67,11 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
     logger.info(`Found ${validTokens.length} FCM tokens in login collection for admins`);
 
     const tokenDocs = adminEmails.length > 0
-      ? await db.collection('fcmTokens').find({
+      ? await FcmToken.find({
           organizationId: organizationId,
           userEmail: { $in: adminEmails },
           fcmToken: { $exists: true, $nin: [null, ''] }
-        }).project({ fcmToken: 1 }).toArray()
+        }).select('fcmToken').lean()
       : [];
 
     const tokenDocTokens = tokenDocs.map(doc => doc.fcmToken).filter(Boolean);
@@ -148,10 +150,10 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
       });
       
       if (tokensToRemove.length > 0) {
-        await db.collection('fcmTokens').deleteMany(
+        await FcmToken.deleteMany(
           { organizationId: organizationId, fcmToken: { $in: tokensToRemove } }
         );
-        await db.collection('login').updateMany(
+        await User.updateMany(
           { fcmToken: { $in: tokensToRemove } },
           { $unset: { fcmToken: "" } }
         );
@@ -189,37 +191,34 @@ async function sendAdminNotification(db, organizationId, title, body, data) {
  * POST /startTimerWithTracking
  */
 async function startTimerWithTracking(req, res) {
-  let client;
   try {
     const { userEmail, clientEmail, organizationId } = req.body;
     if (!userEmail || !clientEmail || !organizationId) {
       return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, clientEmail, organizationId' });
     }
 
-    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
-    const db = client.db('Invoice');
-
-    const existingTimer = await db.collection('activeTimers').findOne({ userEmail });
+    const existingTimer = await ActiveTimer.findOne({ userEmail });
     if (existingTimer) {
       return res.status(409).json({ success: false, message: 'User already has an active timer running.' });
     }
 
     const timerData = { userEmail, clientEmail, organizationId, startTime: new Date() };
-    const result = await db.collection('activeTimers').insertOne(timerData);
+    const newTimer = await ActiveTimer.create(timerData);
+    
     logger.info('Timer started successfully', {
       userEmail,
       clientEmail,
       organizationId,
-      timerId: result.insertedId
+      timerId: newTimer._id
     });
 
     // --- NOTIFICATION LOGIC ---
     // 1. Notify the employee who started the timer.
     // Primary: Get FCM token from login collection
-    const userDoc = await db.collection('login').findOne({ 
+    const userDoc = await User.findOne({ 
       email: userEmail,
       fcmToken: { $exists: true, $nin: [null, ''] }
-    });
+    }).lean();
     
     let userTokens = [];
     if (userDoc && userDoc.fcmToken) {
@@ -227,11 +226,11 @@ async function startTimerWithTracking(req, res) {
       logger.info(`Found FCM token in login collection for ${userEmail}`);
     } else {
       // Fallback: Check fcmTokens collection
-      const userTokenDocs = await db.collection('fcmTokens').find({
+      const userTokenDocs = await FcmToken.find({
         organizationId: organizationId,
         userEmail: userEmail,
         fcmToken: { $exists: true, $nin: [null, ''] }
-      }).project({ fcmToken: 1 }).toArray();
+      }).select('fcmToken').lean();
       userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
       if (userTokens.length > 0) {
         logger.info(`Found FCM token in fcmTokens collection for ${userEmail}`);
@@ -274,7 +273,6 @@ async function startTimerWithTracking(req, res) {
 
     // 2. Notify ONLY the admins of the organization.
     await sendAdminNotification(
-      db,
       organizationId,
       '👤 Employee Started Shift',
       `${userEmail} started working with client ${clientEmail}`,
@@ -285,7 +283,7 @@ async function startTimerWithTracking(req, res) {
       }
     );
 
-    res.status(200).json({ success: true, message: 'Timer started successfully', timerId: result.insertedId });
+    res.status(200).json({ success: true, message: 'Timer started successfully', timerId: newTimer._id });
 
   } catch (error) {
     logger.error('Error starting timer', {
@@ -294,8 +292,6 @@ async function startTimerWithTracking(req, res) {
       timerData: req.body
     });
     res.status(500).json({ success: false, message: 'Internal server error while starting timer' });
-  } finally {
-    if (client) await client.close();
   }
 }
 
@@ -304,18 +300,15 @@ async function startTimerWithTracking(req, res) {
  * POST /stopTimerWithTracking
  */
 async function stopTimerWithTracking(req, res) {
-  let client;
   try {
     const { userEmail, organizationId } = req.body;
     if (!userEmail || !organizationId) {
       return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, organizationId' });
     }
 
-    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
-    const db = client.db('Invoice');
-
     logger.info('Looking for active timer', { userEmail });
-    const activeTimer = await db.collection('activeTimers').findOneAndDelete({ userEmail });
+    const activeTimer = await ActiveTimer.findOneAndDelete({ userEmail });
+    
     logger.info('Active timer query result', {
       userEmail,
       timerFound: !!activeTimer
@@ -340,16 +333,17 @@ async function stopTimerWithTracking(req, res) {
     const seconds = totalSeconds % 60;
     const formattedTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-    await db.collection('workedTime').insertOne({
+    await WorkedTime.create({
       userEmail,
       clientEmail: timerDoc.clientEmail,
       organizationId,
       startTime,
       endTime: stopTime,
-      timeWorked: formattedTime,
+      timeWorked: totalSeconds,
       totalSeconds,
       createdAt: new Date(),
     });
+    
     logger.info('Timer stopped and worked time recorded', {
       userEmail,
       clientEmail: timerDoc.clientEmail,
@@ -361,10 +355,10 @@ async function stopTimerWithTracking(req, res) {
     // --- NOTIFICATION LOGIC ---
     // 1. Notify the employee who stopped the timer.
     // Primary: Get FCM token from login collection
-    const userDoc = await db.collection('login').findOne({ 
+    const userDoc = await User.findOne({ 
       email: userEmail,
       fcmToken: { $exists: true, $nin: [null, ''] }
-    });
+    }).lean();
     
     let userTokens = [];
     if (userDoc && userDoc.fcmToken) {
@@ -372,11 +366,11 @@ async function stopTimerWithTracking(req, res) {
       logger.info(`Found FCM token in login collection for ${userEmail}`);
     } else {
       // Fallback: Check fcmTokens collection
-      const userTokenDocs = await db.collection('fcmTokens').find({
+      const userTokenDocs = await FcmToken.find({
         organizationId: organizationId,
         userEmail: userEmail,
         fcmToken: { $exists: true, $nin: [null, ''] }
-      }).project({ fcmToken: 1 }).toArray();
+      }).select('fcmToken').lean();
       userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
       if (userTokens.length > 0) {
         logger.info(`Found FCM token in fcmTokens collection for ${userEmail}`);
@@ -423,10 +417,10 @@ async function stopTimerWithTracking(req, res) {
             }
           });
           if (tokensToRemove.length > 0) {
-            await db.collection('fcmTokens').deleteMany(
+            await FcmToken.deleteMany(
               { organizationId: organizationId, fcmToken: { $in: tokensToRemove } }
             );
-            await db.collection('login').updateMany(
+            await User.updateMany(
               { fcmToken: { $in: tokensToRemove } },
               { $unset: { fcmToken: "" } }
             );
@@ -441,7 +435,6 @@ async function stopTimerWithTracking(req, res) {
 
     // 2. Notify ONLY the admins of the organization.
     await sendAdminNotification(
-      db,
       organizationId,
       '👤 Employee Ended Shift',
       `${userEmail} finished working with client ${timerDoc.clientEmail}. Duration: ${formattedTime}`,
@@ -453,7 +446,7 @@ async function stopTimerWithTracking(req, res) {
       }
     );
 
-    res.status(200).json({ success: true, message: 'Timer stopped successfully', timeWorked: formattedTime });
+    res.status(200).json({ success: true, message: 'Timer stopped successfully', timeWorked: formattedTime, totalSeconds });
 
   } catch (error) {
     logger.error('Error stopping timer', {
@@ -462,8 +455,6 @@ async function stopTimerWithTracking(req, res) {
       timerId: req.params.timerId
     });
     res.status(500).json({ success: false, message: 'Internal server error while stopping timer' });
-  } finally {
-    if (client) await client.close();
   }
 }
 
@@ -472,12 +463,9 @@ async function stopTimerWithTracking(req, res) {
  * GET /getActiveTimers/:organizationId
  */
 async function getActiveTimers(req, res) {
-  let client;
   try {
     const { organizationId } = req.params;
-    client = await MongoClient.connect(uri, { tls: true, family: 4,  serverApi: ServerApiVersion.v1 });
-    const db = client.db('Invoice');
-    const activeTimers = await db.collection('activeTimers').find({ organizationId }).toArray();
+    const activeTimers = await ActiveTimer.find({ organizationId }).lean();
     res.status(200).json({ success: true, activeTimers, count: activeTimers.length });
   } catch (error) {
     logger.error('Error getting active timers', {
@@ -486,8 +474,6 @@ async function getActiveTimers(req, res) {
       organizationId: req.params.organizationId
     });
     res.status(500).json({ success: false, message: 'Internal server error while getting active timers' });
-  } finally {
-    if (client) await client.close();
   }
 }
 

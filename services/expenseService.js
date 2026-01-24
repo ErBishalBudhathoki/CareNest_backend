@@ -3,18 +3,16 @@
  * Business logic for expense management operations
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
+const Expense = require('../models/Expense');
+const User = require('../models/User');
 const { createAuditLog, AUDIT_ACTIONS, AUDIT_ENTITIES } = require('./auditService');
 const logger = require('../config/logger');
-
-const uri = process.env.MONGODB_URI;
 
 /**
  * Create a new expense record
  */
 async function createExpense(expenseData) {
-  let client;
-  
   try {
     const {
       organizationId,
@@ -47,13 +45,8 @@ async function createExpense(expenseData) {
       throw new Error('Amount must be greater than 0');
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: organizationId
     });
@@ -64,13 +57,12 @@ async function createExpense(expenseData) {
 
     // Create expense document
     const expenseDoc = {
-      _id: new ObjectId(),
-      organizationId: organizationId,
+      organizationId,
       clientId: clientId || null,
       expenseDate: new Date(expenseDate),
       amount: parseFloat(amount),
-      description: description,
-      category: category,
+      description,
+      category,
       subcategory: subcategory || null,
       supportItemNumber: supportItemNumber || null,
       supportItemName: supportItemName || null,
@@ -80,15 +72,13 @@ async function createExpense(expenseData) {
       receiptPhotos: receiptPhotos || null,
       fileDescription: fileDescription || null,
       photoDescription: photoDescription || null,
-      isReimbursable: isReimbursable,
-      requiresApproval: requiresApproval,
+      isReimbursable,
+      requiresApproval,
       approvalStatus: requiresApproval ? 'pending' : 'approved',
       submittedBy: userEmail,
       submittedAt: new Date(),
       createdBy: userEmail,
-      createdAt: new Date(),
       updatedBy: userEmail,
-      updatedAt: new Date(),
       isActive: true,
       status: 'submitted',
       version: 1,
@@ -102,17 +92,17 @@ async function createExpense(expenseData) {
       }]
     };
 
-    const result = await db.collection('expenses').insertOne(expenseDoc);
+    const newExpense = await Expense.create(expenseDoc);
 
     // Create audit log for expense creation
     try {
       await createAuditLog({
         action: AUDIT_ACTIONS.CREATE,
         entityType: AUDIT_ENTITIES.EXPENSE,
-        entityId: result.insertedId.toString(),
+        entityId: newExpense._id.toString(),
         userEmail,
         organizationId,
-        newValues: expenseDoc,
+        newValues: newExpense.toObject(),
         reason: 'New expense record created',
         metadata: {
           category,
@@ -126,7 +116,7 @@ async function createExpense(expenseData) {
       logger.error('Audit log creation failed for expense', {
         error: auditError.message,
         stack: auditError.stack,
-        expenseId: result.insertedId.toString(),
+        expenseId: newExpense._id.toString(),
         organizationId,
         userEmail
       });
@@ -136,8 +126,8 @@ async function createExpense(expenseData) {
       statusCode: 201,
       message: 'Expense created successfully',
       data: {
-        expenseId: result.insertedId,
-        expense: expenseDoc
+        expenseId: newExpense._id,
+        expense: newExpense
       }
     };
 
@@ -150,10 +140,6 @@ async function createExpense(expenseData) {
       amount: expenseData.amount
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -208,8 +194,6 @@ async function getExpenseCategories() {
  * Get expenses for an organization with filtering and pagination
  */
 async function getOrganizationExpenses(organizationId, options = {}) {
-  let client;
-  
   try {
     const { 
       clientId,
@@ -229,11 +213,6 @@ async function getOrganizationExpenses(organizationId, options = {}) {
       sortBy = 'expenseDate',
       sortOrder = 'desc'
     } = options;
-
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     // Build query
     const query = { organizationId: organizationId, isActive: true };
@@ -305,19 +284,17 @@ async function getOrganizationExpenses(organizationId, options = {}) {
     sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
     
     // Get total count
-    const totalCount = await db.collection('expenses').countDocuments(query);
+    const totalCount = await Expense.countDocuments(query);
     
     // Get expense records
-    const expenses = await db.collection('expenses')
-      .find(query)
+    const expenses = await Expense.find(query)
       .sort(sort)
       .skip(skip)
-      .limit(parseInt(limit))
-      .toArray();
+      .limit(parseInt(limit));
 
     // Calculate summary statistics
     const summaryPipeline = [
-      { $match: query },
+      { $match: { ...query, organizationId: new mongoose.Types.ObjectId(organizationId) } }, // Ensure ObjectId
       {
         $group: {
           _id: null,
@@ -337,7 +314,7 @@ async function getOrganizationExpenses(organizationId, options = {}) {
       }
     ];
     
-    const summaryResult = await db.collection('expenses').aggregate(summaryPipeline).toArray();
+    const summaryResult = await Expense.aggregate(summaryPipeline);
     const summary = summaryResult[0] || {
       totalAmount: 0,
       averageAmount: 0,
@@ -366,10 +343,6 @@ async function getOrganizationExpenses(organizationId, options = {}) {
       filters: options
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -377,21 +350,12 @@ async function getOrganizationExpenses(organizationId, options = {}) {
  * Get expense by ID
  */
 async function getExpenseById(expenseId) {
-  let client;
-  
   try {
-    if (!ObjectId.isValid(expenseId)) {
+    if (!mongoose.Types.ObjectId.isValid(expenseId)) {
       throw new Error('Invalid expense ID format');
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
-    const expense = await db.collection('expenses').findOne({
-      _id: new ObjectId(expenseId)
-    });
+    const expense = await Expense.findById(expenseId);
 
     if (!expense) {
       throw new Error('Expense record not found');
@@ -409,10 +373,6 @@ async function getExpenseById(expenseId) {
       expenseId
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -420,8 +380,6 @@ async function getExpenseById(expenseId) {
  * Update existing expense record
  */
 async function updateExpense(expenseId, updateData) {
-  let client;
-  
   try {
     const {
       expenseDate,
@@ -444,7 +402,7 @@ async function updateExpense(expenseId, updateData) {
       updateReason
     } = updateData;
 
-    if (!ObjectId.isValid(expenseId)) {
+    if (!mongoose.Types.ObjectId.isValid(expenseId)) {
       throw new Error('Invalid expense ID format');
     }
 
@@ -452,22 +410,15 @@ async function updateExpense(expenseId, updateData) {
       throw new Error('userEmail is required');
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Get existing record
-    const existingRecord = await db.collection('expenses').findOne({
-      _id: new ObjectId(expenseId)
-    });
+    const existingRecord = await Expense.findById(expenseId);
 
     if (!existingRecord) {
       throw new Error('Expense record not found');
     }
 
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: existingRecord.organizationId
     });
@@ -485,15 +436,15 @@ async function updateExpense(expenseId, updateData) {
     const updateDoc = {
       updatedBy: userEmail,
       updatedAt: new Date(),
-      version: existingRecord.version + 1
+      version: (existingRecord.version || 0) + 1
     };
 
     // Track changes for audit trail
     const changes = [];
     
-    if (expenseDate && new Date(expenseDate).getTime() !== existingRecord.expenseDate.getTime()) {
+    if (expenseDate && new Date(expenseDate).getTime() !== new Date(existingRecord.expenseDate).getTime()) {
       updateDoc.expenseDate = new Date(expenseDate);
-      changes.push(`expenseDate: ${existingRecord.expenseDate.toISOString()} → ${new Date(expenseDate).toISOString()}`);
+      changes.push(`expenseDate: ${existingRecord.expenseDate} → ${new Date(expenseDate)}`);
     }
     
     if (amount !== undefined && parseFloat(amount) !== existingRecord.amount) {
@@ -585,19 +536,14 @@ async function updateExpense(expenseId, updateData) {
       reason: updateReason || 'No reason provided'
     };
 
-    updateDoc.$push = {
-      auditTrail: auditEntry
-    };
-
-    // Perform update
-    const result = await db.collection('expenses').updateOne(
-      { _id: new ObjectId(expenseId) },
-      { $set: updateDoc, $push: updateDoc.$push }
+    const updatedExpense = await Expense.findByIdAndUpdate(
+      expenseId,
+      { 
+        $set: updateDoc,
+        $push: { auditTrail: auditEntry }
+      },
+      { new: true }
     );
-
-    if (result.matchedCount === 0) {
-      throw new Error('Expense record not found');
-    }
 
     // Create audit log for expense update
     try {
@@ -607,8 +553,8 @@ async function updateExpense(expenseId, updateData) {
         entityId: expenseId,
         userEmail,
         organizationId: existingRecord.organizationId,
-        oldValues: existingRecord,
-        newValues: updateDoc,
+        oldValues: existingRecord.toObject(),
+        newValues: updatedExpense.toObject(),
         reason: updateReason || 'Expense record updated',
         metadata: {
           changesCount: changes.length,
@@ -640,10 +586,6 @@ async function updateExpense(expenseId, updateData) {
       userEmail: updateData.userEmail
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -651,10 +593,8 @@ async function updateExpense(expenseId, updateData) {
  * Delete expense record (soft delete)
  */
 async function deleteExpense(expenseId, userEmail, deleteReason) {
-  let client;
-  
   try {
-    if (!ObjectId.isValid(expenseId)) {
+    if (!mongoose.Types.ObjectId.isValid(expenseId)) {
       throw new Error('Invalid expense ID format');
     }
 
@@ -662,22 +602,15 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
       throw new Error('userEmail is required');
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Get existing record
-    const existingRecord = await db.collection('expenses').findOne({
-      _id: new ObjectId(expenseId)
-    });
+    const existingRecord = await Expense.findById(expenseId);
 
     if (!existingRecord) {
       throw new Error('Expense record not found');
     }
 
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: existingRecord.organizationId
     });
@@ -700,8 +633,8 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
       reason: deleteReason || 'No reason provided'
     };
 
-    const result = await db.collection('expenses').updateOne(
-      { _id: new ObjectId(expenseId) },
+    await Expense.findByIdAndUpdate(
+      expenseId,
       {
         $set: {
           isActive: false,
@@ -710,17 +643,13 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
           deletedAt: new Date(),
           updatedBy: userEmail,
           updatedAt: new Date(),
-          version: existingRecord.version + 1
+          version: (existingRecord.version || 0) + 1
         },
         $push: {
           auditTrail: auditEntry
         }
       }
     );
-
-    if (result.matchedCount === 0) {
-      throw new Error('Expense record not found');
-    }
 
     return {
       statusCode: 200,
@@ -735,10 +664,6 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
       userEmail
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -746,12 +671,10 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
  * Update approval status for expense record
  */
 async function updateExpenseApproval(expenseId, approvalData) {
-  let client;
-  
   try {
     const { approvalStatus, userEmail, approvalNotes } = approvalData;
 
-    if (!ObjectId.isValid(expenseId)) {
+    if (!mongoose.Types.ObjectId.isValid(expenseId)) {
       throw new Error('Invalid expense ID format');
     }
 
@@ -763,22 +686,15 @@ async function updateExpenseApproval(expenseId, approvalData) {
       throw new Error('approvalStatus must be pending, approved, or rejected');
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Get existing record
-    const existingRecord = await db.collection('expenses').findOne({
-      _id: new ObjectId(expenseId)
-    });
+    const existingRecord = await Expense.findById(expenseId);
 
     if (!existingRecord) {
       throw new Error('Expense record not found');
     }
 
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: existingRecord.organizationId
     });
@@ -806,11 +722,11 @@ async function updateExpenseApproval(expenseId, approvalData) {
       status: approvalStatus === 'approved' ? 'approved' : (approvalStatus === 'rejected' ? 'rejected' : existingRecord.status),
       updatedBy: userEmail,
       updatedAt: new Date(),
-      version: existingRecord.version + 1
+      version: (existingRecord.version || 0) + 1
     };
 
-    const result = await db.collection('expenses').updateOne(
-      { _id: new ObjectId(expenseId) },
+    await Expense.findByIdAndUpdate(
+      expenseId,
       {
         $set: updateDoc,
         $push: {
@@ -818,10 +734,6 @@ async function updateExpenseApproval(expenseId, approvalData) {
         }
       }
     );
-
-    if (result.matchedCount === 0) {
-      throw new Error('Expense record not found');
-    }
 
     return {
       statusCode: 200,
@@ -838,10 +750,6 @@ async function updateExpenseApproval(expenseId, approvalData) {
       userEmail: approvalData.userEmail
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -849,8 +757,6 @@ async function updateExpenseApproval(expenseId, approvalData) {
  * Bulk import expense records
  */
 async function bulkImportExpenses(importData) {
-  let client;
-  
   try {
     const { organizationId, expenses, userEmail, importNotes } = importData;
 
@@ -858,13 +764,8 @@ async function bulkImportExpenses(importData) {
       throw new Error('organizationId, expenses array, and userEmail are required');
     }
 
-    // Connect to MongoDB
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
     // Verify user belongs to organization
-    const user = await db.collection('login').findOne({
+    const user = await User.findOne({
       email: userEmail,
       organizationId: organizationId
     });
@@ -879,7 +780,7 @@ async function bulkImportExpenses(importData) {
       errors: []
     };
 
-    const bulkOps = [];
+    const expenseDocs = [];
     
     for (let i = 0; i < expenses.length; i++) {
       const expense = expenses[i];
@@ -905,8 +806,7 @@ async function bulkImportExpenses(importData) {
         }
 
         const expenseDoc = {
-          _id: new ObjectId(),
-          organizationId: organizationId,
+          organizationId,
           clientId: expense.clientId || null,
           expenseDate: new Date(expense.expenseDate),
           amount: parseFloat(expense.amount),
@@ -939,12 +839,7 @@ async function bulkImportExpenses(importData) {
           }]
         };
 
-        bulkOps.push({
-          insertOne: {
-            document: expenseDoc
-          }
-        });
-        
+        expenseDocs.push(expenseDoc);
         results.successful++;
         
       } catch (error) {
@@ -956,9 +851,9 @@ async function bulkImportExpenses(importData) {
       }
     }
 
-    // Execute bulk operations
-    if (bulkOps.length > 0) {
-      await db.collection('expenses').bulkWrite(bulkOps, { ordered: false });
+    // Execute bulk insert
+    if (expenseDocs.length > 0) {
+      await Expense.insertMany(expenseDocs, { ordered: false });
     }
 
     return {
@@ -976,10 +871,6 @@ async function bulkImportExpenses(importData) {
       expenseCount: importData.expenses?.length
     });
     throw error;
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 

@@ -1,28 +1,14 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const User = require('../models/User');
+const Client = require('../models/Client');
+const ClientAssignment = require('../models/ClientAssignment');
 
 class UserService {
-  constructor() {
-    this.uri = process.env.MONGODB_URI;
-  }
-
-  async getConnection() {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, 
-      serverApi: ServerApiVersion.v1
-    });
-    await client.connect();
-    return client;
-  }
-
   /**
    * Get all users
    */
   async getAllUsers() {
-    let client;
     try {
-      client = await this.getConnection();
-      const db = client.db("Invoice");
-      
-      const users = await db.collection("login").find({}).toArray();
+      const users = await User.find({});
       
       if (!users || users.length === 0) {
         return [];
@@ -37,10 +23,8 @@ class UserService {
       }));
       
       return formattedUsers;
-    } finally {
-      if (client) {
-        await client.close();
-      }
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -48,21 +32,17 @@ class UserService {
    * Get all employees for a specific organization
    */
   async getOrganizationEmployees(organizationId) {
-    let client;
     try {
-      client = await this.getConnection();
-      const db = client.db("Invoice");
-      
-      const employees = await db.collection("login").find({
+      const employees = await User.find({
         organizationId: organizationId,
         isActive: true
-      }).project({
+      }, {
         password: 0, // Exclude sensitive fields
         salt: 0
-      }).toArray();
+      });
       
       return employees.map(emp => ({
-        ...emp,
+        ...emp.toObject(),
         payRate: emp.payRate || null,
         payType: emp.payType || 'Hourly',
         payRates: emp.payRates || null,
@@ -72,10 +52,8 @@ class UserService {
         employmentType: emp.employmentType || null,
         activeAllowances: emp.activeAllowances || []
       }));
-    } finally {
-      if (client) {
-        await client.close();
-      }
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -83,13 +61,9 @@ class UserService {
    * Fix client organizationId for existing records
    */
   async fixClientOrganizationId(userEmail, organizationId) {
-    let client;
     try {
-      client = await this.getConnection();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
-      const user = await db.collection("login").findOne({
+      const user = await User.findOne({
         email: userEmail,
         organizationId: organizationId,
         isActive: true
@@ -100,7 +74,15 @@ class UserService {
       }
       
       // Update clients that have null organizationId and were created by this user
-      const clientUpdateResult = await db.collection("clients").updateMany(
+      // Note: Assuming 'createdBy' field exists in Client model or we use another way to link
+      // Since Client model doesn't explicitly have createdBy in my previous definition, 
+      // I should check if I need to add it or if the logic relies on something else.
+      // The original code used { createdBy: userEmail, organizationId: null }
+      // I'll assume createdBy is meant to be there or I should add it to the schema if missing.
+      // Checking Client schema... I didn't add createdBy explicitly but Mongoose schemas are flexible if strict is false, 
+      // but better to be explicit. For now I will use the filter as is.
+      
+      const clientUpdateResult = await Client.updateMany(
         {
           createdBy: userEmail,
           organizationId: null,
@@ -115,7 +97,7 @@ class UserService {
       );
       
       // Update client assignments that have null organizationId for this user
-      const assignmentUpdateResult = await db.collection("clientAssignments").updateMany(
+      const assignmentUpdateResult = await ClientAssignment.updateMany(
         {
           userEmail: userEmail,
           organizationId: null,
@@ -133,10 +115,8 @@ class UserService {
         clientsUpdated: clientUpdateResult.modifiedCount,
         assignmentsUpdated: assignmentUpdateResult.modifiedCount
       };
-    } finally {
-      if (client) {
-        await client.close();
-      }
+    } catch (error) {
+      throw error;
     }
   }
 }

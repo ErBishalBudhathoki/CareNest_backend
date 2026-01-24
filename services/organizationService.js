@@ -1,25 +1,17 @@
-const { MongoClient, ObjectId } = require('mongodb');
+const Organization = require('../models/Organization');
+const User = require('../models/User');
+const Business = require('../models/Business');
+const Client = require('../models/Client');
 const { generateOrganizationCode } = require('../utils/cryptoHelpers');
 
 class OrganizationService {
-  constructor() {
-    this.dbName = "Invoice";
-  }
-
-  async getDbConnection() {
-    const client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
-    await client.connect();
-    return { client, db: client.db(this.dbName) };
-  }
-
+  
   async createOrganization(organizationData) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
       const { organizationName, ownerEmail, ownerFirstName, ownerLastName } = organizationData;
       
       // Check if organization name already exists
-      const existingOrg = await db.collection("organizations").findOne({ 
+      const existingOrg = await Organization.findOne({ 
         name: { $regex: new RegExp(`^${organizationName}$`, 'i') } 
       });
       
@@ -33,17 +25,16 @@ class OrganizationService {
       
       while (codeExists) {
         organizationCode = generateOrganizationCode();
-        const existingCode = await db.collection("organizations").findOne({ code: organizationCode });
+        const existingCode = await Organization.findOne({ code: organizationCode });
         codeExists = !!existingCode;
       }
       
       // Create organization document
       const organizationDoc = {
-        _id: new ObjectId(),
         name: organizationName,
         code: organizationCode,
+        organizationCode: organizationCode, // Ensure compatibility with schema
         ownerEmail: ownerEmail,
-        createdAt: new Date(),
         isActive: true,
         settings: {
           allowEmployeeInvites: true,
@@ -55,24 +46,23 @@ class OrganizationService {
       if (ownerFirstName) organizationDoc.ownerFirstName = ownerFirstName;
       if (ownerLastName) organizationDoc.ownerLastName = ownerLastName;
       
-      const result = await db.collection("organizations").insertOne(organizationDoc);
+      const newOrganization = new Organization(organizationDoc);
+      const savedOrganization = await newOrganization.save();
       
       return {
-        organizationId: result.insertedId.toString(),
+        organizationId: savedOrganization._id.toString(),
         organizationCode: organizationCode,
         organizationName: organizationName
       };
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async verifyOrganizationCode(organizationCode) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const organization = await db.collection("organizations").findOne({ 
-        code: organizationCode,
+      const organization = await Organization.findOne({ 
+        organizationCode: organizationCode,
         isActive: true 
       });
       
@@ -85,18 +75,14 @@ class OrganizationService {
         organizationName: organization.name,
         ownerEmail: organization.ownerEmail
       };
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getOrganizationById(organizationId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const organization = await db.collection("organizations").findOne({ 
-        _id: new ObjectId(organizationId) 
-      });
+      const organization = await Organization.findById(organizationId);
       
       if (!organization) {
         return null;
@@ -106,7 +92,7 @@ class OrganizationService {
         id: organization._id.toString(),
         name: organization.name,
         tradingName: organization.tradingName,
-        code: organization.code,
+        code: organization.organizationCode,
         ownerEmail: organization.ownerEmail,
         createdAt: organization.createdAt,
         settings: organization.settings,
@@ -118,93 +104,77 @@ class OrganizationService {
         logoUrl: organization.logoUrl,
         isActive: organization.isActive
       };
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async updateOrganizationDetails(organizationId, updates) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const result = await db.collection("organizations").updateOne(
-        { _id: new ObjectId(organizationId) },
+      const result = await Organization.updateOne(
+        { _id: organizationId },
         { $set: updates }
       );
       
       return result.modifiedCount > 0;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getOrganizationMembers(organizationId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const members = await db.collection("login").find({ 
+      const members = await User.find({ 
         organizationId: organizationId 
-      }).project({ 
-        password: 0, 
-        salt: 0 
-      }).toArray();
+      }, '-password -salt'); // Exclude sensitive fields
       
       return members;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getOrganizationBusinesses(organizationId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const businesses = await db.collection("businesses").find({ 
+      const businesses = await Business.find({ 
         organizationId: organizationId,
         isActive: true 
-      }).toArray();
+      });
       
       return businesses;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getOrganizationClients(organizationId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const clients = await db.collection("clients").find({ 
+      const clients = await Client.find({ 
         organizationId: organizationId,
         isActive: true 
-      }).toArray();
+      });
       
       return clients;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getOrganizationEmployees(organizationId) {
-    const { client, db } = await this.getDbConnection();
-    
     try {
-      const employees = await db.collection("login").find({ 
+      const employees = await User.find({ 
         organizationId: organizationId,
         isActive: true 
-      }).project({ 
-        password: 0, 
-        salt: 0 
-      }).toArray();
+      }, '-password -salt');
       
       return employees.map(emp => ({
-        ...emp,
+        ...emp.toObject(),
         payRate: emp.payRate || null,
         payType: emp.payType || 'Hourly',
         payRates: emp.payRates || null
       }));
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 }

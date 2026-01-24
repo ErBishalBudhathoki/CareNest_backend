@@ -4,43 +4,26 @@
  * Task 2.1: Enhanced Invoice Generation Backend
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
+const ClientAssignment = require('../models/ClientAssignment');
+const Client = require('../models/Client');
+const WorkedTime = require('../models/WorkedTime');
+const Expense = require('../models/Expense');
+const CustomPricing = require('../models/CustomPricing');
+const PricingSettings = require('../models/PricingSettings');
+const SupportItem = require('../models/SupportItem');
+const Organization = require('../models/Organization');
 const { priceValidationService } = require('./priceValidationService');
 const TripService = require('./tripService');
 const logger = require('../config/logger');
-const uri = process.env.MONGODB_URI;
 
 class InvoiceGenerationService {
-  constructor() {
-    this.client = null;
-    this.db = null;
-  }
-
-  async connect() {
-    if (!this.client) {
-      this.client = await MongoClient.connect(uri, {
-        serverApi: ServerApiVersion.v1
-      });
-      this.db = this.client.db('Invoice');
-    }
-  }
-
-  async disconnect() {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-      this.db = null;
-    }
-  }
-
   /**
    * Generate bulk invoices for multiple clients with pre-configured pricing
    * Task 2.5: Add bulk invoice generation with pre-configured pricing
    */
   async generateBulkInvoices(bulkGenerationParams) {
     try {
-      await this.connect();
-      
       const {
         organizationId,
         userEmail,
@@ -173,7 +156,7 @@ class InvoiceGenerationService {
       } = options;
       
       // Get client assignment data
-      const assignment = await this.db.collection('clientAssignments').findOne({
+      const assignment = await ClientAssignment.findOne({
         userEmail: userEmail,
         clientEmail: clientEmail,
         isActive: true
@@ -188,7 +171,7 @@ class InvoiceGenerationService {
       }
       
       // Get client data
-      const client = await this.db.collection('clients').findOne({
+      const client = await Client.findOne({
         clientEmail: clientEmail,
         isActive: true
       });
@@ -385,10 +368,8 @@ class InvoiceGenerationService {
    */
   async generateInvoiceLineItems(userEmail, clientEmail, startDate, endDate) {
     try {
-      await this.connect();
-
       // Get client assignment data
-      const assignment = await this.db.collection('clientAssignments').findOne({
+      const assignment = await ClientAssignment.findOne({
         userEmail: userEmail,
         clientEmail: clientEmail,
         isActive: true
@@ -399,7 +380,7 @@ class InvoiceGenerationService {
       }
 
       // Get client details for additional context
-      const client = await this.db.collection('clients').findOne({
+      const client = await Client.findOne({
         clientEmail: clientEmail,
         isActive: true
       });
@@ -965,14 +946,14 @@ class InvoiceGenerationService {
         });
       }
 
-      const workedTimeData = await this.db.collection('workedTime').find({
+      const workedTimeData = await WorkedTime.find({
         userEmail: userEmail,
         clientEmail: clientEmail,
         date: {
           $gte: isNaN(start.getTime()) ? startDate : start,
           $lte: isNaN(end.getTime()) ? endDate : end
         }
-      }).toArray();
+      });
 
       return workedTimeData || [];
     } catch (error) {
@@ -1006,26 +987,13 @@ class InvoiceGenerationService {
       endDateType: typeof endDate
     });
       
-      // Keep clientId as string since it's stored as string in the database
-      let clientIdForQuery;
-      if (typeof clientId === 'string') {
-        clientIdForQuery = clientId;
-      } else if (clientId && clientId._id) {
-        clientIdForQuery = clientId._id.toString();
-      } else if (clientId && clientId.toString) {
-        clientIdForQuery = clientId.toString();
-      } else {
-        clientIdForQuery = clientId;
-      }
-      
-      logger.debug('Using clientId for query', {
-      clientIdForQuery,
-      clientIdForQueryType: typeof clientIdForQuery
-    });
+      // Keep clientId as string if it's stored as string, or ObjectId if model uses ObjectId
+      // Since we migrated to Mongoose models, clientId in Expense model is ObjectId.
+      // We should cast it if it's a string.
       
       const query = {
-        organizationId: organizationId,
-        clientId: clientIdForQuery,
+        organizationId: new mongoose.Types.ObjectId(organizationId),
+        clientId: new mongoose.Types.ObjectId(clientId),
         expenseDate: {
           $gte: new Date(startDate),
           $lte: new Date(endDate)
@@ -1035,38 +1003,9 @@ class InvoiceGenerationService {
         isReimbursable: true // Only include reimbursable expenses in invoices
       };
       
-      logger.debug('MongoDB query details', {
-      query,
-      clientIdForQuery
-    });
-      
-      // Test query without clientId first to see if other filters work
-      const testQuery = {
-        organizationId: organizationId,
-        expenseDate: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate)
-        },
-        approvalStatus: 'approved',
-        isActive: true,
-        isReimbursable: true
-      };
-      
-      const testExpenses = await this.db.collection('expenses').find(testQuery).toArray();
-      logger.debug('Test query without clientId results', {
-         testExpensesCount: testExpenses.length,
-         sampleExpenseClientId: testExpenses.length > 0 ? testExpenses[0].clientId : null,
-         sampleExpenseClientIdType: testExpenses.length > 0 ? typeof testExpenses[0].clientId : null
-       });
-      
       // Query for approved expenses within the date range
-      const expenses = await this.db.collection('expenses').find(query).toArray();
+      const expenses = await Expense.find(query);
       
-      logger.debug('Approved expenses found', {
-         expensesCount: expenses.length,
-         sampleExpense: expenses.length > 0 ? expenses[0] : null
-       });
-
       // Return raw expense data with formatted fields for invoice display
       const formattedExpenses = expenses.map(expense => ({
         _id: expense._id,
@@ -1207,26 +1146,14 @@ class InvoiceGenerationService {
    */
   async getPricingForItem(ndisItemNumber, organizationId, clientId, state = 'NSW', providerType = 'standard', servicePostcode = null) {
     try {
-      // Convert clientId to string to match how it's stored in customPricing collection
-      let clientIdForQuery;
-      if (typeof clientId === 'string') {
-        clientIdForQuery = clientId;
-      } else if (clientId && clientId._id) {
-        clientIdForQuery = clientId._id.toString();
-      } else if (clientId && clientId.toString) {
-        clientIdForQuery = clientId.toString();
-      } else {
-        clientIdForQuery = clientId;
-      }
-
       // Resolve MMM-aware price cap for the requested item (for validation metadata only; never used for Rate)
       let itemPriceCap = null;
 
       // 1. Check for client-specific pricing
-      const clientPricing = await this.db.collection('customPricing').findOne({
+      const clientPricing = await CustomPricing.findOne({
         supportItemNumber: ndisItemNumber,
-        organizationId: organizationId,
-        clientId: clientIdForQuery,
+        organizationId: new mongoose.Types.ObjectId(organizationId),
+        clientId: new mongoose.Types.ObjectId(clientId),
         isActive: true,
         approvalStatus: 'approved'
       });
@@ -1238,7 +1165,8 @@ class InvoiceGenerationService {
           clientPricing.customPrice,
           state,
           providerType,
-          servicePostcode
+          new Date(),
+          { servicePostcode }
         );
 
         return {
@@ -1256,9 +1184,9 @@ class InvoiceGenerationService {
       }
 
       // 2. Check for organization custom pricing
-      const orgPricing = await this.db.collection('customPricing').findOne({
+      const orgPricing = await CustomPricing.findOne({
         supportItemNumber: ndisItemNumber,
-        organizationId: organizationId,
+        organizationId: new mongoose.Types.ObjectId(organizationId),
         clientId: { $exists: false },
         isActive: true,
         approvalStatus: 'approved'
@@ -1270,7 +1198,8 @@ class InvoiceGenerationService {
           orgPricing.customPrice,
           state,
           providerType,
-          servicePostcode
+          new Date(),
+          { servicePostcode }
         );
 
         return {
@@ -1288,8 +1217,8 @@ class InvoiceGenerationService {
       }
 
       // 3. Check for organization fallback base rate from pricingSettings
-      const pricingSettings = await this.db.collection('pricingSettings').findOne({
-        organizationId: organizationId,
+      const pricingSettings = await PricingSettings.findOne({
+        organizationId: new mongoose.Types.ObjectId(organizationId),
         isActive: true
       });
 
@@ -1306,7 +1235,8 @@ class InvoiceGenerationService {
           fallbackRate,
           state,
           providerType,
-          servicePostcode
+          new Date(),
+          { servicePostcode }
         );
 
         const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
@@ -1388,7 +1318,7 @@ class InvoiceGenerationService {
    */
   async getNdisItemDetails(itemNumber) {
     try {
-      const ndisItem = await this.db.collection('supportItems').findOne({
+      const ndisItem = await SupportItem.findOne({
         supportItemNumber: itemNumber
       });
       
@@ -1405,15 +1335,6 @@ class InvoiceGenerationService {
 
   /**
    * Parse time string to minutes from midnight
-   *
-   * Supported formats:
-   * - "6:00 AM", "12:30 pm"
-   * - "18:45" (24-hour)
-   * - "6 AM", "3 pm"
-   * - "6" (hour only)
-   * - Embedded time in a string (e.g., "6:00 AM NSW")
-   *
-   * Returns minutes from midnight; falls back to 0 on unrecognized input.
    */
   parseTime(timeStr) {
     // Robustly handle formats like:
@@ -1486,13 +1407,6 @@ class InvoiceGenerationService {
 
   /**
    * Parse break field to minutes. Accepts numeric minutes, "HH:MM", or strings like "30 minutes".
-   *
-   * Examples:
-   * - "30" -> 30
-   * - "00:30" -> 30
-   * - "1:00" -> 60
-   * - "30 minutes" -> 30
-   * - null/undefined/invalid -> 0
    */
   parseBreakMinutes(breakStr) {
     try {
@@ -1605,10 +1519,6 @@ class InvoiceGenerationService {
 
   /**
    * Validate invoice line items for NDIS compliance and pricing issues
-   */
-  /**
-   * Enhanced invoice line items validation using integrated price validation service
-   * Combines basic validation with comprehensive NDIS price validation
    */
   async validateInvoiceLineItems(lineItems, options = {}) {
     try {
@@ -1896,11 +1806,7 @@ class InvoiceGenerationService {
         rate = client.billingSettings.mileageRate;
       } else {
         // Check Org default
-        // We might not want to fetch org every time. 
-        // Ideally pass org object or fetch once.
-        // For now, let's fetch efficiently or assume passed param is enough if we had org object.
-        // But we only have ID.
-        const org = await this.db.collection('organizations').findOne({ _id: new ObjectId(organizationId) });
+        const org = await Organization.findById(organizationId);
         rate = org?.settings?.mileage?.defaultBillingRate || 0;
       }
 
@@ -1937,4 +1843,4 @@ class InvoiceGenerationService {
   }
 }
 
-module.exports = InvoiceGenerationService;
+module.exports = new InvoiceGenerationService();

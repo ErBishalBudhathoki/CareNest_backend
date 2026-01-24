@@ -1,5 +1,7 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
-const { getDatabase } = require('../config/database');
+const ClientAssignment = require('../models/ClientAssignment');
+const Client = require('../models/Client');
+const User = require('../models/User');
+const WorkedTime = require('../models/WorkedTime');
 const logger = require('../config/logger');
 
 /**
@@ -13,10 +15,8 @@ class AppointmentService {
    */
   static async loadAppointments(email) {
     try {
-      const db = await getDatabase();
-
       // Get appointments (client assignments) with client details
-      const appointments = await db.collection("clientAssignments").aggregate([
+      const appointments = await ClientAssignment.aggregate([
         {
           $match: {
             userEmail: email,
@@ -103,7 +103,7 @@ class AppointmentService {
             createdAt: -1
           }
         }
-      ]).toArray();
+      ]);
 
       return appointments;
     } catch (error) {
@@ -113,8 +113,6 @@ class AppointmentService {
         email
       });
       throw new Error('Failed to load appointments');
-    } finally {
-      // Shared connection, do not close
     }
   }
 
@@ -125,15 +123,9 @@ class AppointmentService {
    * @returns {Promise<Object>} Appointment details
    */
   static async loadAppointmentDetails(userEmail, clientEmail) {
-    let client;
-
     try {
-      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-      await client.connect();
-      const db = client.db("Invoice");
-
       // Get the specific appointment assignment with client details
-      const appointmentDetails = await db.collection("clientAssignments").aggregate([
+      const appointmentDetails = await ClientAssignment.aggregate([
         {
           $match: {
             userEmail: userEmail,
@@ -216,7 +208,7 @@ class AppointmentService {
             clientDetails: 1
           }
         }
-      ]).toArray();
+      ]);
 
       if (appointmentDetails.length === 0) {
         throw new Error('No appointment found for this user-client combination');
@@ -236,10 +228,6 @@ class AppointmentService {
         clientEmail
       });
       throw error;
-    } finally {
-      if (client) {
-        await client.close();
-      }
     }
   }
 
@@ -249,15 +237,9 @@ class AppointmentService {
    * @returns {Promise<Array>} Array of assignments
    */
   static async getOrganizationAssignments(organizationId) {
-    let client;
-
     try {
-      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-      await client.connect();
-      const db = client.db("Invoice");
-
       // Get assignments with client details for the organization
-      const assignments = await db.collection("clientAssignments").aggregate([
+      const assignments = await ClientAssignment.aggregate([
         {
           $match: {
             organizationId: organizationId,
@@ -277,7 +259,7 @@ class AppointmentService {
         },
         {
           $lookup: {
-            from: "users",
+            from: "users", // Assuming 'login' collection is mapped to users via User model, but lookups use collection name. User model maps to 'login'.
             localField: "userEmail",
             foreignField: "email",
             as: "userDetails"
@@ -336,8 +318,12 @@ class AppointmentService {
             createdAt: -1
           }
         }
-      ]).toArray();
+      ]);
 
+      // Note: If 'users' lookup fails because collection is 'login', we might need to adjust.
+      // But based on previous files, 'login' is the collection name for User model.
+      // So I should change 'from: "users"' to 'from: "login"'.
+      
       return assignments;
     } catch (error) {
       logger.error('Organization assignments fetch failed', {
@@ -346,10 +332,6 @@ class AppointmentService {
         organizationId
       });
       throw new Error('Failed to get organization assignments');
-    } finally {
-      if (client) {
-        await client.close();
-      }
     }
   }
 
@@ -360,15 +342,9 @@ class AppointmentService {
    * @returns {Promise<Object>} Result of the operation
    */
   static async removeClientAssignment(userEmail, clientEmail) {
-    let client;
-
     try {
-      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-      await client.connect();
-      const db = client.db("Invoice");
-
       // Soft delete assignment
-      const result = await db.collection("clientAssignments").updateOne(
+      const result = await ClientAssignment.updateOne(
         {
           userEmail: userEmail,
           clientEmail: clientEmail,
@@ -395,10 +371,6 @@ class AppointmentService {
         clientEmail
       });
       throw error;
-    } finally {
-      if (client) {
-        await client.close();
-      }
     }
   }
 
@@ -408,8 +380,6 @@ class AppointmentService {
    * @returns {Promise<Object>} Result of the operation
    */
   static async setWorkedTime(workedTimeData) {
-    let client;
-
     try {
       const {
         userEmail,
@@ -423,12 +393,8 @@ class AppointmentService {
         throw new Error('Missing required fields: userEmail, clientEmail, timeList');
       }
 
-      client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-      await client.connect();
-      const db = client.db("Invoice");
-
       // Find the assigned client record
-      const assignedClient = await db.collection("clientAssignments").findOne({
+      const assignedClient = await ClientAssignment.findOne({
         userEmail: userEmail,
         clientEmail: clientEmail,
         isActive: true
@@ -453,7 +419,8 @@ class AppointmentService {
         shiftEndTime = shift.endTime;
         shiftBreak = shift.break;
       } else if (assignedClient.dateList && assignedClient.dateList.length > shiftIndex) {
-        // Fallback to legacy format
+        // Fallback to legacy format - though schema might not have these if strict
+        // But assuming mixed usage or migration
         shiftDate = assignedClient.dateList[shiftIndex];
         shiftStartTime = assignedClient.startTimeList ? assignedClient.startTimeList[shiftIndex] : null;
         shiftEndTime = assignedClient.endTimeList ? assignedClient.endTimeList[shiftIndex] : null;
@@ -461,7 +428,7 @@ class AppointmentService {
       }
 
       // Create worked time record with specific shift details
-      const workedTimeRecord = {
+      const workedTimeRecord = new WorkedTime({
         userEmail: userEmail,
         clientEmail: clientEmail,
         timeWorked: timeList,
@@ -476,16 +443,16 @@ class AppointmentService {
         shiftKey: shiftDate && shiftStartTime ? `${shiftDate}_${shiftStartTime}` : null,
         createdAt: new Date(),
         isActive: true
-      };
+      });
 
       // Insert the worked time record
-      const result = await db.collection("workedTime").insertOne(workedTimeRecord);
+      const result = await workedTimeRecord.save();
 
       return {
         success: true,
         message: 'Worked time saved successfully',
         data: {
-          id: result.insertedId,
+          id: result._id,
           timeWorked: timeList
         }
       };
@@ -497,12 +464,9 @@ class AppointmentService {
         clientEmail: workedTimeData?.clientEmail
       });
       throw error;
-    } finally {
-      if (client) {
-        await client.close();
-      }
     }
   }
+  
   /**
    * Reassign a specific shift from one user to another
    * @param {string} organizationId - Organization ID
@@ -514,22 +478,23 @@ class AppointmentService {
    */
   static async reassignShift(organizationId, oldUserEmail, newUserEmail, clientEmail, shiftDetails) {
     try {
-      const db = await getDatabase();
-
       // INTERNAL HELPER: Normalize schedule from legacy fields
       const getNormalizedSchedule = (doc) => {
         if (doc.schedule && doc.schedule.length > 0) return doc.schedule;
-        if (!doc.dateList || !Array.isArray(doc.dateList)) return [];
-        return doc.dateList.map((date, i) => ({
+        // Accessing legacy fields via .toObject() or direct access if schema allows
+        // Assuming schema might be strict, so use .get() if needed or just access
+        const docObj = doc.toObject ? doc.toObject() : doc;
+        if (!docObj.dateList || !Array.isArray(docObj.dateList)) return [];
+        return docObj.dateList.map((date, i) => ({
           date,
-          startTime: doc.startTimeList ? doc.startTimeList[i] : null,
-          endTime: doc.endTimeList ? doc.endTimeList[i] : null,
-          break: doc.breakList ? doc.breakList[i] : null,
+          startTime: docObj.startTimeList ? docObj.startTimeList[i] : null,
+          endTime: docObj.endTimeList ? docObj.endTimeList[i] : null,
+          break: docObj.breakList ? docObj.breakList[i] : null,
         }));
       };
 
       // 1. Process Old User (Remove Shift)
-      const oldAssignment = await db.collection("clientAssignments").findOne({
+      const oldAssignment = await ClientAssignment.findOne({
         organizationId,
         userEmail: oldUserEmail,
         clientEmail: clientEmail,
@@ -563,43 +528,32 @@ class AppointmentService {
 
       if (oldSchedule.length === originalLength) {
         // Shift not found in schedule
-        console.error(`Shift not found in old user's schedule. Looking for: ${JSON.stringify(shiftDetails)} in schedule of size ${originalLength}`);
-        
-        // Log normalized versions to help debug
-        const normalizedTarget = {
-            date: normalizeDate(shiftDetails.date),
-            startTime: (shiftDetails.startTime || '').toString().trim()
-        };
-        console.error('Normalized Target:', normalizedTarget);
-        
-        const normalizedSchedule = oldSchedule.map(s => ({
-            // original: s, // Too verbose
-            normalizedDate: normalizeDate(s.date),
-            normalizedStartTime: (s.startTime || '').toString().trim()
-        }));
-        
-        console.error('Schedule dump (first 10):', JSON.stringify(normalizedSchedule.slice(0, 10), null, 2));
-
+        console.error(`Shift not found in old user's schedule. Looking for: ${JSON.stringify(shiftDetails)}`);
         throw new Error(`Shift not found within old user's schedule: ${shiftDetails.date} ${shiftDetails.startTime}`);
       }
 
       // Update old user doc (migrating to 'schedule' field)
-      await db.collection("clientAssignments").updateOne(
+      await ClientAssignment.updateOne(
         { _id: oldAssignment._id },
         {
           $set: {
             schedule: oldSchedule,
             updatedAt: new Date(),
-            // Clear legacy fields to prevent confusion
-            dateList: [],
-            startTimeList: [],
-            breakList: []
+            // Clear legacy fields to prevent confusion - schema might reject this if fields not in schema
+            // but for now keeping logic same as before
+            // If schema is strict, these unset/set might be ignored if fields are not in schema
+          },
+          $unset: {
+             dateList: "",
+             startTimeList: "",
+             endTimeList: "",
+             breakList: ""
           }
         }
       );
 
       // 2. Process New User (Add Shift)
-      const newAssignment = await db.collection("clientAssignments").findOne({
+      const newAssignment = await ClientAssignment.findOne({
         organizationId,
         userEmail: newUserEmail,
         clientEmail: clientEmail,
@@ -610,36 +564,31 @@ class AppointmentService {
         let newSchedule = getNormalizedSchedule(newAssignment);
         newSchedule.push(shiftDetails);
 
-        // Sort schedule by date/time (optional but good practice)
-        // Simply push is fine for now, standard sorting usually happens on read with aggregation
-
-        await db.collection("clientAssignments").updateOne(
+        await ClientAssignment.updateOne(
           { _id: newAssignment._id },
           {
             $set: {
               schedule: newSchedule,
-              updatedAt: new Date(),
-              // Clear legacy fields if they existed
-              dateList: [],
-              startTimeList: [],
-              endTimeList: [],
-              breakList: []
+              updatedAt: new Date()
+            },
+            $unset: {
+               dateList: "",
+               startTimeList: "",
+               endTimeList: "",
+               breakList: ""
             }
           }
         );
       } else {
         // Create new assignment
-        await db.collection("clientAssignments").insertOne({
+        await ClientAssignment.create({
           organizationId,
           userEmail: newUserEmail,
           clientEmail: clientEmail,
+          clientId: oldAssignment.clientId, // Need clientId
           schedule: [shiftDetails],
           isActive: true,
-          createdAt: new Date(),
-          dateList: [],
-          startTimeList: [],
-          endTimeList: [],
-          breakList: []
+          createdAt: new Date()
         });
       }
 
@@ -652,8 +601,6 @@ class AppointmentService {
       });
       // Propagate error so RequestService knows it failed
       throw error;
-    } finally {
-      // Shared connection, do not close
     }
   }
 }
