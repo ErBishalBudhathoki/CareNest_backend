@@ -24,6 +24,6 @@ const mmmOverrideSchema = new mongoose.Schema({
   timestamps: true
 });
 
-mmmOverrideSchema.index({ postcode: 1 });
+// Note: unique:true on postcode already creates an index
 
 module.exports = mongoose.model('MmmOverride', mmmOverrideSchema, 'mmmOverrides');
