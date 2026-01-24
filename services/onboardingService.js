@@ -1,4 +1,3 @@
-const mongoose = require('mongoose');
 const OnboardingRecord = require('../models/OnboardingRecord');
 const EmployeeDocument = require('../models/EmployeeDocument');
 const User = require('../models/User'); // Maps to 'login' collection

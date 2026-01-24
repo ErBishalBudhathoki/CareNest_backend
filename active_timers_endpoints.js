@@ -3,7 +3,6 @@
  * These endpoints handle database-backed timer tracking for employee monitoring
  */
 
-const mongoose = require('mongoose');
 const ActiveTimer = require('./models/ActiveTimer');
 const WorkedTime = require('./models/WorkedTime');
 const User = require('./models/User');

@@ -1,5 +1,3 @@
-const TimingPrediction = require('../models/TimingPrediction');
-const NotificationHistory = require('../models/NotificationHistory');
 
 class AiTimingService {
   /**

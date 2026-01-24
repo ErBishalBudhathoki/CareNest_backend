@@ -4,7 +4,7 @@ class CalendarService {
   /**
    * Sync events from an external provider (Mocked)
    */
-  async syncEvents(userId, provider, accessToken) {
+  async syncEvents(userId, _provider, _accessToken) {
     // Mock fetching from Google/Outlook
     const mockEvents = [
       {

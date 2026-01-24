@@ -1,6 +1,4 @@
-const mongoose = require('mongoose');
 const CustomPricing = require('../models/CustomPricing');
-const PricingSettings = require('../models/PricingSettings');
 const SupportItem = require('../models/SupportItem');
 const Client = require('../models/Client');
 const User = require('../models/User');
