@@ -1,4 +1,5 @@
-const { getDatabase } = require('../config/database');
+const User = require('../models/User');
+const WorkedTime = require('../models/WorkedTime');
 const logger = require('../config/logger');
 
 class TimesheetController {
@@ -14,7 +15,6 @@ class TimesheetController {
                 return res.status(400).json({ success: false, message: 'Missing required fields: startDate, endDate, organizationId' });
             }
 
-            const db = await getDatabase();
             const start = new Date(startDate);
             const end = new Date(endDate);
             // End date should be inclusive of the day (23:59:59)
@@ -23,7 +23,7 @@ class TimesheetController {
             logger.info(`Exporting payroll for Org: ${organizationId}, Range: ${start.toISOString()} - ${end.toISOString()}`);
 
             // 1. Fetch Users in Organization (to map email to name)
-            const users = await db.collection('users').find({ organizationId: organizationId }).toArray();
+            const users = await User.find({ organizationId: organizationId }).lean();
             const userMap = {};
             const userEmails = [];
             
@@ -37,10 +37,10 @@ class TimesheetController {
             }
 
             // 2. Fetch Worked Time
-            const workedTime = await db.collection('workedTime').find({
+            const workedTime = await WorkedTime.find({
                 userEmail: { $in: userEmails },
                 workDate: { $gte: start, $lte: end }
-            }).toArray();
+            }).lean();
 
             // 3. Aggregate Data
             const aggregated = {};
