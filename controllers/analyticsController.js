@@ -1,4 +1,4 @@
-const { databaseConfig } = require('../config/database');
+const connectDB = require('../config/mongoose');
 const logger = require('../config/logger');
 
 /**
@@ -65,7 +65,10 @@ async function getFinancialMetrics(req, res) {
     const startStr = startDate.includes('T') ? startDate.split('T')[0] : startDate;
     const endStr = endDate.includes('T') ? endDate.split('T')[0] : endDate;
 
-    await databaseConfig.executeOperation(async (db) => {
+    await connectDB();
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    
       // 1. Revenue (from invoiceLineItems)
       const revenueData = await db.collection('invoiceLineItems').aggregate([
         {
@@ -163,7 +166,6 @@ async function getFinancialMetrics(req, res) {
         }
       ]).toArray();
 
-      // 3. Merge Data
       const mergedData = {};
       
       // Initialize with revenue data
@@ -191,7 +193,6 @@ async function getFinancialMetrics(req, res) {
         success: true,
         data: result
       });
-    });
   } catch (error) {
     logger.error('Error in getFinancialMetrics', error);
     res.status(500).json({ success: false, message: 'Internal Server Error' });
@@ -211,7 +212,10 @@ async function getUtilizationMetrics(req, res) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });
     }
 
-    await databaseConfig.executeOperation(async (db) => {
+    await connectDB();
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+
       // Calculate total weeks in range for capacity
       const start = new Date(startDate);
     start.setHours(0, 0, 0, 0); // Start of day
@@ -281,7 +285,6 @@ async function getUtilizationMetrics(req, res) {
         success: true,
         data: result
       });
-    });
   } catch (error) {
     logger.error('Error in getUtilizationMetrics', error);
     res.status(500).json({ success: false, message: 'Internal Server Error' });
@@ -309,7 +312,10 @@ async function getOvertimeMetrics(req, res) {
     const startStr = weekStart;
     const endStr = end.toISOString().split('T')[0];
 
-    await databaseConfig.executeOperation(async (db) => {
+    await connectDB();
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+
       const overtimeData = await db.collection('workedTime').aggregate([
         {
           $match: {
@@ -423,7 +429,6 @@ async function getOvertimeMetrics(req, res) {
         success: true,
         data: overtimeData
       });
-    });
   } catch (error) {
     logger.error('Error in getOvertimeMetrics', error);
     res.status(500).json({ success: false, message: 'Internal Server Error' });
@@ -449,7 +454,10 @@ async function getReliabilityMetrics(req, res) {
     const startStr = startDate.includes('T') ? startDate.split('T')[0] : startDate;
     const endStr = endDate.includes('T') ? endDate.split('T')[0] : endDate;
 
-    await databaseConfig.executeOperation(async (db) => {
+    await connectDB();
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+
       // 1. Get All Scheduled Shifts in Range (Past dates only for reliability)
       const scheduledShifts = await db.collection('clientAssignments').aggregate([
         {
@@ -572,7 +580,6 @@ async function getReliabilityMetrics(req, res) {
         success: true,
         data: result
       });
-    });
   } catch (error) {
     logger.error('Error in getReliabilityMetrics', error);
     res.status(500).json({ success: false, message: 'Internal Server Error' });

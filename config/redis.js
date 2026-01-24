@@ -34,6 +34,20 @@ redis.on('connect', () => {
 
 redis.on('ready', () => {
   logger.info('Redis client is ready to accept commands');
+  
+  // Check maxmemory-policy
+  redis.config('GET', 'maxmemory-policy').then((result) => {
+    // result is usually array: ['maxmemory-policy', 'volatile-lru']
+    const policy = result[1];
+    if (policy === 'volatile-lru' || policy === 'allkeys-lru') {
+       logger.warn(`Redis maxmemory-policy is set to '${policy}'. It is recommended to use 'noeviction' to prevent job loss.`);
+       // Optionally try to set it if allowed (often not allowed in managed instances)
+       // redis.config('SET', 'maxmemory-policy', 'noeviction').catch(e => logger.warn('Could not set redis config:', e.message));
+    }
+  }).catch(err => {
+     // Ignore config get errors (e.g. if command renamed or restricted)
+     logger.debug('Could not check redis config', { error: err.message });
+  });
 });
 
 redis.on('error', (err) => {
