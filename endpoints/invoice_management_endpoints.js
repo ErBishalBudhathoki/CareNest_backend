@@ -4,11 +4,10 @@
  * Supports listing, viewing, sharing, and deleting invoices with organization-based access control
  */
 
-const { InvoiceManagementService } = require('../services/invoiceManagementService');
+const { InvoiceManagementService: invoiceManagementService } = require('../services/InvoiceManagementService');
 const logger = require('../config/logger');
 
-// Initialize service
-const invoiceManagementService = new InvoiceManagementService();
+// Service is already instantiated in the module export
 
 /**
  * Get paginated list of invoices for an organization
@@ -149,19 +148,19 @@ async function shareInvoice(req, res) {
 
     // Check if this is a PDF sharing request
     const isPdfRequest = req.path.includes('/share/pdf');
-    
+
     if (isPdfRequest) {
       // Handle PDF sharing request
       const result = await invoiceManagementService.getInvoicePdf(
         invoiceId,
         organizationId
       );
-      
+
       if (!result.success) {
         const statusCode = result.error.includes('not found') ? 404 : 500;
         return res.status(statusCode).json(result);
       }
-      
+
       // Return PDF data as base64
       return res.json({
         success: true,
@@ -283,7 +282,7 @@ async function createInvoice(req, res) {
     console.log('=== CREATE INVOICE REQUEST ===');
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     console.log('Request headers:', req.headers);
-    
+
     const {
       organizationId,
       clientId,
@@ -330,7 +329,7 @@ async function createInvoice(req, res) {
 
     // Use provided invoice number or generate a new one
     const invoiceNumber = providedInvoiceNumber || await invoiceManagementService.generateInvoiceNumber(organizationId);
-    
+
     console.log('=== INVOICE NUMBER HANDLING ===');
     console.log('Provided invoice number:', providedInvoiceNumber);
     console.log('Final invoice number:', invoiceNumber);
