@@ -88,6 +88,6 @@ const notificationSettingsSchema = new mongoose.Schema({
 });
 
 // Indexes
-notificationSettingsSchema.index({ userId: 1 });
+// notificationSettingsSchema.index({ userId: 1 });
 
 module.exports = mongoose.model('NotificationSetting', notificationSettingsSchema);
