@@ -4,7 +4,6 @@
  * Supports listing, viewing, sharing, and deleting invoices
  */
 
-const mongoose = require('mongoose');
 const { Invoice, InvoiceStatus, PaymentStatus } = require('../models/Invoice');
 const Organization = require('../models/Organization');
 const Client = require('../models/Client');
