@@ -316,7 +316,7 @@ async function getOvertimeMetrics(req, res) {
     const mongoose = require('mongoose');
     const db = mongoose.connection.db;
 
-      const overtimeData = await db.collection('workedTime').aggregate([
+      const overtimeData = await db.collection('worked_times').aggregate([
         {
           $match: {
             shiftDate: { $gte: startStr, $lte: endStr }
@@ -510,7 +510,7 @@ async function getReliabilityMetrics(req, res) {
       ]).toArray();
 
       // 2. Get All Worked Shifts in Range
-      const workedShifts = await db.collection('workedTime').aggregate([
+      const workedShifts = await db.collection('worked_times').aggregate([
         {
           $match: {
             shiftDate: { $gte: startStr, $lte: endStr }
