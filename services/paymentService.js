@@ -1,6 +1,6 @@
-const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
-const { PaymentStatus } = require('../models/invoiceSchema');
-const { CreditNoteStatus } = require('../models/CreditNote');
+const mongoose = require('mongoose');
+const { Invoice, PaymentStatus } = require('../models/Invoice');
+const { CreditNote, CreditNoteStatus } = require('../models/CreditNote');
 const auditService = require('./auditService');
 
 // Conditionally load Stripe
@@ -11,17 +11,10 @@ if (process.env.STRIPE_SECRET_KEY) {
 
 class PaymentService {
   constructor() {
-    this.uri = process.env.MONGODB_URI;
     this.stripeEnabled = !!process.env.STRIPE_SECRET_KEY;
     if (!this.stripeEnabled) {
       console.warn('WARNING: STRIPE_SECRET_KEY is not set. Payment processing will be disabled.');
     }
-  }
-
-  async getDb() {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-    await client.connect();
-    return { client, db: client.db("Invoice") };
   }
 
   /**
@@ -58,10 +51,8 @@ class PaymentService {
    * Record a payment (manual or Stripe success)
    */
   async recordPayment(invoiceId, paymentData, userEmail) {
-    const { client, db } = await this.getDb();
-    
     try {
-      const invoice = await db.collection("invoices").findOne({ _id: new ObjectId(invoiceId) });
+      const invoice = await Invoice.findById(invoiceId);
       if (!invoice) throw new Error('Invoice not found');
 
       const amount = Number(paymentData.amount);
@@ -83,19 +74,15 @@ class PaymentService {
         notes: paymentData.notes
       };
 
-      await db.collection("invoices").updateOne(
-        { _id: new ObjectId(invoiceId) },
-        {
-          $set: {
-            "payment.status": newStatus,
-            "payment.paidAmount": newPaidAmount,
-            "payment.balanceDue": balanceDue,
-            "payment.paidDate": newStatus === PaymentStatus.PAID ? new Date() : null,
-            "payment.lastReminderDate": null // Reset reminder
-          },
-          $push: { "payment.transactions": transaction }
-        }
-      );
+      // Update using Mongoose document
+      invoice.payment.status = newStatus;
+      invoice.payment.paidAmount = newPaidAmount;
+      invoice.payment.balanceDue = balanceDue;
+      invoice.payment.paidDate = newStatus === PaymentStatus.PAID ? new Date() : null;
+      invoice.payment.lastReminderDate = null; // Reset reminder
+      invoice.payment.transactions.push(transaction);
+
+      await invoice.save();
 
       if (userEmail) {
         await auditService.logAction({
@@ -107,8 +94,9 @@ class PaymentService {
       }
 
       return { success: true, newStatus, balanceDue };
-    } finally {
-      await client.close();
+    } catch (error) {
+      console.error('Error recording payment:', error);
+      throw error;
     }
   }
 
@@ -116,10 +104,8 @@ class PaymentService {
    * Create a Credit Note
    */
   async createCreditNote(creditNoteData, userEmail) {
-    const { client, db } = await this.getDb();
-    
     try {
-      const creditNote = {
+      const creditNote = new CreditNote({
         ...creditNoteData,
         organizationId: creditNoteData.organizationId,
         status: CreditNoteStatus.ISSUED,
@@ -128,18 +114,18 @@ class PaymentService {
         createdBy: userEmail,
         applications: [],
         refunds: []
-      };
+      });
 
-      const result = await db.collection("creditNotes").insertOne(creditNote);
+      const savedCreditNote = await creditNote.save();
       
       // If linked to an invoice, link it back
       if (creditNoteData.originalInvoiceId) {
-        await db.collection("invoices").updateOne(
-          { _id: new ObjectId(creditNoteData.originalInvoiceId) },
+        await Invoice.updateOne(
+          { _id: creditNoteData.originalInvoiceId },
           { 
             $push: { 
               creditNotes: {
-                creditNoteId: result.insertedId,
+                creditNoteId: savedCreditNote._id,
                 creditNoteNumber: creditNoteData.creditNoteNumber,
                 amount: creditNoteData.amount,
                 appliedDate: new Date(),
@@ -150,9 +136,10 @@ class PaymentService {
         );
       }
 
-      return { success: true, creditNoteId: result.insertedId };
-    } finally {
-      await client.close();
+      return { success: true, creditNoteId: savedCreditNote._id };
+    } catch (error) {
+      console.error('Error creating credit note:', error);
+      throw error;
     }
   }
 
@@ -160,11 +147,9 @@ class PaymentService {
    * Apply Credit Note to an Invoice
    */
   async applyCreditNote(creditNoteId, invoiceId, amountToApply, userEmail) {
-    const { client, db } = await this.getDb();
-    
     try {
-      const creditNote = await db.collection("creditNotes").findOne({ _id: new ObjectId(creditNoteId) });
-      const invoice = await db.collection("invoices").findOne({ _id: new ObjectId(invoiceId) });
+      const creditNote = await CreditNote.findById(creditNoteId);
+      const invoice = await Invoice.findById(invoiceId);
       
       if (!creditNote || !invoice) throw new Error('Credit Note or Invoice not found');
       if (creditNote.balanceRemaining < amountToApply) throw new Error('Insufficient credit balance');
@@ -183,28 +168,21 @@ class PaymentService {
       if (newBalance <= 0) newStatus = CreditNoteStatus.APPLIED;
       else newStatus = CreditNoteStatus.PARTIAL;
 
-      await db.collection("creditNotes").updateOne(
-        { _id: new ObjectId(creditNoteId) },
-        {
-          $set: { 
-            balanceRemaining: newBalance,
-            status: newStatus,
-            updatedAt: new Date()
-          },
-          $push: {
-            applications: {
-              invoiceId: new ObjectId(invoiceId),
-              invoiceNumber: invoice.invoiceNumber,
-              amountApplied: amountToApply,
-              date: new Date()
-            }
-          }
-        }
-      );
+      creditNote.balanceRemaining = newBalance;
+      creditNote.status = newStatus;
+      creditNote.applications.push({
+        invoiceId: invoice._id,
+        invoiceNumber: invoice.invoiceNumber,
+        amountApplied: amountToApply,
+        date: new Date()
+      });
+
+      await creditNote.save();
 
       return { success: true, remainingCredit: newBalance };
-    } finally {
-      await client.close();
+    } catch (error) {
+      console.error('Error applying credit note:', error);
+      throw error;
     }
   }
 }

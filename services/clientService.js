@@ -1,12 +1,12 @@
-const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
-const { processCustomPricing } = require('../utils/pricingHelpers');
+const mongoose = require('mongoose');
+const Client = require('../models/Client');
+const User = require('../models/User');
+const ClientAssignment = require('../models/ClientAssignment');
+const CustomPricing = require('../models/CustomPricing');
 const auditService = require('./auditService');
+const { processCustomPricing } = require('../utils/pricingHelpers');
 
 class ClientService {
-  constructor() {
-    this.uri = process.env.MONGODB_URI;
-  }
-
   async addClient(clientData) {
     const { 
       clientFirstName, 
@@ -27,14 +27,10 @@ class ClientService {
       userEmail 
     } = clientData;
 
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization (if organizationId provided)
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -61,47 +57,43 @@ class ClientService {
         medicalConditions: medicalConditions || [],
         riskAssessment: riskAssessment || {},
         organizationId: organizationId || null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
         isActive: true
       };
       
-      const result = await db.collection("clients").insertOne(clientDoc);
+      const result = await Client.create(clientDoc);
       
       // Log audit trail
       if (userEmail) {
         await auditService.logAction({
           userEmail,
           action: 'CLIENT_CREATED',
+          entityType: 'client',
+          entityId: result._id,
+          organizationId: organizationId || 'unknown',
           details: {
-            clientId: result.insertedId,
+            clientId: result._id,
             clientName: `${clientFirstName} ${clientLastName}`,
             organizationId
-          },
-          timestamp: new Date()
+          }
         });
       }
       
       return {
         success: true,
-        clientId: result.insertedId,
+        clientId: result._id,
         message: "Client added successfully"
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getClients(organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -116,27 +108,23 @@ class ClientService {
         query.organizationId = organizationId;
       }
       
-      const clients = await db.collection("clients").find(query).toArray();
+      const clients = await Client.find(query);
       
       return {
         success: true,
         clients
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getClientById(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -147,7 +135,7 @@ class ClientService {
       }
       
       const query = { 
-        _id: new ObjectId(clientId),
+        _id: clientId,
         isActive: true
       };
       
@@ -155,7 +143,7 @@ class ClientService {
         query.organizationId = organizationId;
       }
       
-      const clientDoc = await db.collection("clients").findOne(query);
+      const clientDoc = await Client.findOne(query);
       
       if (!clientDoc) {
         throw new Error('Client not found');
@@ -166,20 +154,16 @@ class ClientService {
         client: clientDoc
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async updateClient(clientId, updateData, organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -190,7 +174,7 @@ class ClientService {
       }
       
       const query = { 
-        _id: new ObjectId(clientId),
+        _id: clientId,
         isActive: true
       };
       
@@ -203,12 +187,13 @@ class ClientService {
         updatedAt: new Date()
       };
       
-      const result = await db.collection("clients").updateOne(
+      const result = await Client.findOneAndUpdate(
         query,
-        { $set: updateDoc }
+        { $set: updateDoc },
+        { new: true }
       );
       
-      if (result.matchedCount === 0) {
+      if (!result) {
         throw new Error('Client not found');
       }
       
@@ -217,12 +202,14 @@ class ClientService {
         await auditService.logAction({
           userEmail,
           action: 'CLIENT_UPDATED',
+          entityType: 'client',
+          entityId: clientId,
+          organizationId: organizationId || 'unknown',
           details: {
             clientId,
             organizationId,
             updatedFields: Object.keys(updateData)
-          },
-          timestamp: new Date()
+          }
         });
       }
       
@@ -231,20 +218,16 @@ class ClientService {
         message: "Client updated successfully"
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async deleteClient(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -255,7 +238,7 @@ class ClientService {
       }
       
       const query = { 
-        _id: new ObjectId(clientId),
+        _id: clientId,
         isActive: true
       };
       
@@ -263,7 +246,7 @@ class ClientService {
         query.organizationId = organizationId;
       }
       
-      const result = await db.collection("clients").updateOne(
+      const result = await Client.findOneAndUpdate(
         query,
         { 
           $set: { 
@@ -271,10 +254,11 @@ class ClientService {
             deletedAt: new Date(),
             updatedAt: new Date()
           }
-        }
+        },
+        { new: true }
       );
       
-      if (result.matchedCount === 0) {
+      if (!result) {
         throw new Error('Client not found');
       }
       
@@ -283,11 +267,13 @@ class ClientService {
         await auditService.logAction({
           userEmail,
           action: 'CLIENT_DELETED',
+          entityType: 'client',
+          entityId: clientId,
+          organizationId: organizationId || 'unknown',
           details: {
             clientId,
             organizationId
-          },
-          timestamp: new Date()
+          }
         });
       }
       
@@ -296,20 +282,16 @@ class ClientService {
         message: "Client deleted successfully"
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getClientPricing(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -320,7 +302,7 @@ class ClientService {
       }
       
       const query = { 
-        clientId: new ObjectId(clientId),
+        clientId: clientId,
         isActive: true
       };
       
@@ -328,27 +310,23 @@ class ClientService {
         query.organizationId = organizationId;
       }
       
-      const pricing = await db.collection("custom_pricing").find(query).toArray();
+      const pricing = await CustomPricing.find(query);
       
       return {
         success: true,
         pricing
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async updateClientPricing(clientId, pricingData, organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Verify user belongs to organization
       if (organizationId && userEmail) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           organizationId: organizationId 
         });
@@ -366,12 +344,14 @@ class ClientService {
         await auditService.logAction({
           userEmail,
           action: 'CLIENT_PRICING_UPDATED',
+          entityType: 'pricing',
+          entityId: clientId, // Using Client ID as the entity ID reference
+          organizationId: organizationId || 'unknown',
           details: {
             clientId,
             organizationId,
             pricingCount: processedPricing.length
-          },
-          timestamp: new Date()
+          }
         });
       }
       
@@ -381,40 +361,30 @@ class ClientService {
         pricing: processedPricing
       };
       
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getMultipleClients(emails) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-    
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       // Split emails if multiple are provided (comma-separated)
       const emailList = emails.split(',').map(email => email.trim());
       
       // Find clients with matching emails
-      const clients = await db.collection("clients").find({
+      const clients = await Client.find({
         clientEmail: { $in: emailList },
         isActive: true
-      }).toArray();
+      });
       
       return clients;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async assignClientToUser(assignmentData) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-    
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
       const { 
         userEmail, 
         clientEmail, 
@@ -428,7 +398,7 @@ class ClientService {
       } = assignmentData;
       
       // Verify client exists
-      const clientExists = await db.collection("clients").findOne({ 
+      const clientExists = await Client.findOne({ 
         clientEmail: clientEmail,
         isActive: true
       });
@@ -475,7 +445,7 @@ class ClientService {
       }
       
       if (clientNdisItem) {
-        await db.collection("clients").updateOne(
+        await Client.updateOne(
           { clientEmail: clientEmail },
           { 
             $set: {
@@ -488,7 +458,7 @@ class ClientService {
       // Get user's organizationId if client doesn't have one
       let organizationId = clientExists.organizationId;
       if (!organizationId) {
-        const user = await db.collection("login").findOne({ 
+        const user = await User.findOne({ 
           email: userEmail,
           isActive: true 
         });
@@ -496,7 +466,7 @@ class ClientService {
         if (user && user.organizationId) {
           organizationId = user.organizationId;
           
-          await db.collection("clients").updateOne(
+          await Client.updateOne(
             { _id: clientExists._id },
             { 
               $set: {
@@ -534,12 +504,11 @@ class ClientService {
         organizationId: organizationId,
         schedule: scheduleData,
         assignedNdisItemNumber: parsedNdisItem?.itemNumber || (parsedScheduleWithNdisItems.length > 0 ? parsedScheduleWithNdisItems[0].ndisItem?.itemNumber : null),
-        createdAt: new Date(),
         isActive: true
       };
 
       // Check if assignment already exists
-      const existingAssignment = await db.collection("clientAssignments").findOne({
+      const existingAssignment = await ClientAssignment.findOne({
         userEmail: userEmail,
         clientEmail: clientEmail,
         isActive: true
@@ -565,30 +534,27 @@ class ClientService {
           }
         });
 
-        const updateResult = await db.collection("clientAssignments").updateOne(
+        const updateResult = await ClientAssignment.findOneAndUpdate(
           { _id: existingAssignment._id },
           { 
             $set: {
               schedule: combinedSchedules,
               updatedAt: new Date()
             }
-          }
+          },
+          { new: true }
         );
         
-        if (updateResult.matchedCount === 0) {
+        if (!updateResult) {
           throw new Error('Assignment not found for update');
         }
         
         finalAssignmentId = existingAssignment._id;
       } else {
         // Create new assignment
-        const insertResult = await db.collection("clientAssignments").insertOne(newAssignmentData);
+        const insertResult = await ClientAssignment.create(newAssignmentData);
         
-        if (!insertResult.insertedId) {
-          throw new Error('Failed to create new assignment');
-        }
-        
-        finalAssignmentId = insertResult.insertedId;
+        finalAssignmentId = insertResult._id;
       }
       
       return {
@@ -596,19 +562,14 @@ class ClientService {
         message: existingAssignment ? 'Assignment updated successfully' : 'Assignment created successfully',
         assignmentId: finalAssignmentId
       };
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 
   async getUserAssignments(userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
-    
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-      
-      const assignments = await db.collection("clientAssignments").aggregate([
+      const assignments = await ClientAssignment.aggregate([
         {
           $match: {
             userEmail: userEmail,
@@ -626,11 +587,11 @@ class ClientService {
         {
           $unwind: "$clientDetails"
         }
-      ]).toArray();
+      ]);
       
       return assignments;
-    } finally {
-      await client.close();
+    } catch (error) {
+      throw error;
     }
   }
 }

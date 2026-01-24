@@ -1,11 +1,8 @@
-const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
+const WorkedTime = require('../models/WorkedTime');
+const Client = require('../models/Client');
 const logger = require('../config/logger');
 
 class WorkedTimeService {
-  constructor() {
-    this.uri = process.env.MONGODB_URI;
-  }
-
   /**
    * Get visit history for a specific client
    * @param {string} clientId - Client ID
@@ -14,14 +11,10 @@ class WorkedTimeService {
    * @returns {Promise<Array>} List of visits
    */
   async getVisitHistory(clientId, organizationId, userEmail) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-
       // Verify client belongs to organization
-      const clientDoc = await db.collection("clients").findOne({
-        _id: new ObjectId(clientId),
+      const clientDoc = await Client.findOne({
+        _id: clientId,
         organizationId: organizationId,
         isActive: true
       });
@@ -39,17 +32,17 @@ class WorkedTimeService {
         query.userEmail = userEmail;
       }
 
-      const visits = await db.collection("workedTime").find(query)
-        .sort({ createdAt: -1 })
-        .toArray();
+      const visits = await WorkedTime.find(query)
+        .sort({ createdAt: -1 });
 
       return {
         success: true,
         visits
       };
 
-    } finally {
-      await client.close();
+    } catch (error) {
+      logger.error('Error getting visit history:', error);
+      throw error;
     }
   }
 
@@ -59,12 +52,8 @@ class WorkedTimeService {
    * @param {number} limit - Number of visits to return
    */
   async getRecentVisits(userEmail, limit = 5) {
-    const client = new MongoClient(this.uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
     try {
-      await client.connect();
-      const db = client.db("Invoice");
-
-      const visits = await db.collection("workedTime").aggregate([
+      const visits = await WorkedTime.aggregate([
         {
           $match: {
             userEmail: userEmail,
@@ -104,15 +93,16 @@ class WorkedTimeService {
             }
           }
         }
-      ]).toArray();
+      ]);
 
       return {
         success: true,
         visits
       };
 
-    } finally {
-      await client.close();
+    } catch (error) {
+      logger.error('Error getting recent visits:', error);
+      throw error;
     }
   }
 }
