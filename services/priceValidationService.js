@@ -4,7 +4,6 @@
  * Provides comprehensive price validation for custom pricing and invoice generation
  */
 
-const mongoose = require('mongoose');
 const path = require('path');
 const logger = require('../config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });

@@ -5,7 +5,6 @@
  * @file backend/services/schedulerService.js
  */
 
-const mongoose = require('mongoose');
 const logger = require('../config/logger');
 const EventBus = require('../core/EventBus');
 const Shift = require('../models/Shift');

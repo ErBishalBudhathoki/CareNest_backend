@@ -1,4 +1,3 @@
-const logger = require('../config/logger');
 
 class AnomalyService {
     /**

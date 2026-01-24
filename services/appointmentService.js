@@ -1,6 +1,4 @@
 const ClientAssignment = require('../models/ClientAssignment');
-const Client = require('../models/Client');
-const User = require('../models/User');
 const WorkedTime = require('../models/WorkedTime');
 const logger = require('../config/logger');
 

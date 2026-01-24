@@ -3,7 +3,6 @@
  * Business logic for checking incomplete timesheets and sending reminders
  */
 
-const mongoose = require('mongoose');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 

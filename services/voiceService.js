@@ -27,7 +27,7 @@ class VoiceService {
     }
 
     // Save history
-    const command = await VoiceCommand.create({
+    await VoiceCommand.create({
       userId,
       commandText,
       language,

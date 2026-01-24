@@ -16,6 +16,7 @@ export default [
     rules: {
       "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
       "no-undef": "error",
+      "no-useless-catch": "off",
     },
   },
   {

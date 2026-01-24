@@ -1,5 +1,4 @@
 const SnoozeRule = require('../models/SnoozeRule');
-const NotificationHistory = require('../models/NotificationHistory');
 
 class SnoozeService {
   async createRule(userId, ruleData) {

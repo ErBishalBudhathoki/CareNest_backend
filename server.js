@@ -25,6 +25,7 @@ const axios = require('axios');
 const cors = require("cors");
 const helmet = require("helmet");
 const serverless = require("serverless-http");
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const DB_NAME = process.env.DB_NAME || 'Invoice';
 const app = express(); // Initialize express app early
 
@@ -6982,47 +6983,47 @@ app.post('/api/invoice/complete-generation', completeInvoiceGeneration);
  * POST /api/invoice/process-legacy
  * Body: { invoiceData, options? }
  */
-app.post('/api/invoice/process-legacy', processLegacyInvoice);
+// app.post('/api/invoice/process-legacy', processLegacyInvoice);
 
 /**
  * Validate legacy invoice compatibility
  * POST /api/invoice/validate-legacy
  * Body: { invoiceData }
  */
-app.post('/api/invoice/validate-legacy', validateLegacyCompatibility);
+// app.post('/api/invoice/validate-legacy', validateLegacyCompatibility);
 
 /**
  * Transform legacy invoice to modern format
  * POST /api/invoice/transform-legacy
  * Body: { invoiceData, preserveOriginal? }
  */
-app.post('/api/invoice/transform-legacy', transformLegacyInvoice);
+// app.post('/api/invoice/transform-legacy', transformLegacyInvoice);
 
 /**
  * Migrate legacy invoices in batch
  * POST /api/invoice/migrate-legacy-batch
  * Body: { batchSize?, dryRun?, skipAlreadyMigrated? }
  */
-app.post('/api/invoice/migrate-legacy-batch', migrateLegacyInvoicesBatch);
+// app.post('/api/invoice/migrate-legacy-batch', migrateLegacyInvoicesBatch);
 
 /**
  * Get legacy data statistics
  * GET /api/invoice/legacy-stats
  */
-app.get('/api/invoice/legacy-stats', getLegacyDataStats);
+// app.get('/api/invoice/legacy-stats', getLegacyDataStats);
 
 /**
  * Map legacy item to NDIS format
  * POST /api/invoice/map-legacy-item
  * Body: { legacyItem }
  */
-app.post('/api/invoice/map-legacy-item', mapLegacyItemToNdis);
+// app.post('/api/invoice/map-legacy-item', mapLegacyItemToNdis);
 
 /**
  * Check invoice backward compatibility
  * GET /api/invoice/:invoiceId/compatibility
  */
-app.get('/api/invoice/:invoiceId/compatibility', checkInvoiceCompatibility);
+// app.get('/api/invoice/:invoiceId/compatibility', checkInvoiceCompatibility);
 
 // ============================================================================
 // PRICING ANALYTICS API ENDPOINTS
