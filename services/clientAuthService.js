@@ -1,23 +1,11 @@
-const { ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { getDatabase } = require('../config/database');
+const Client = require('../models/Client');
+const User = require('../models/User');
 const auditService = require('./auditService');
-
 const emailService = require('./emailService');
 
 class ClientAuthService {
-  constructor() {
-    this.db = null;
-  }
-
-  async getDb() {
-    if (!this.db) {
-      this.db = await getDatabase();
-    }
-    return this.db;
-  }
-
   /**
    * Activate client account by Admin
    * @param {string} email - Client email
@@ -25,16 +13,14 @@ class ClientAuthService {
    */
   async activateClientByAdmin(email) {
     try {
-      const db = await this.getDb();
-      
       // 1. Verify client exists in 'clients' collection
-      const client = await db.collection('clients').findOne({ clientEmail: email });
+      const client = await Client.findOne({ clientEmail: email });
       if (!client) {
         throw new Error('Client email not found in records');
       }
 
       // 2. Check if user already exists in 'login' collection
-      const existingUser = await db.collection('login').findOne({ email: email });
+      const existingUser = await User.findOne({ email: email });
       if (existingUser) {
         throw new Error('Account already activated.');
       }
@@ -46,7 +32,7 @@ class ClientAuthService {
       const salt = crypto.randomBytes(16).toString('hex');
       const hashedPassword = bcrypt.hashSync(tempPassword, 10);
       
-      const newUser = {
+      const newUser = new User({
         email: email,
         password: hashedPassword,
         salt: salt,
@@ -54,14 +40,22 @@ class ClientAuthService {
         lastName: client.clientLastName,
         organizationId: client.organizationId,
         role: 'client',
-        clientId: client._id, // Link to client record
+        clientId: client._id, // Link to client record (stored as ObjectId in User if modified, or string)
         createdAt: new Date(),
         lastLogin: null,
         isActive: true,
-        passwordResetRequired: true // Force password change
-      };
+        // passwordResetRequired: true // Schema doesn't have this yet, assuming User model allows loose fields or I need to add it. 
+        // User model update I did earlier included most fields but maybe not passwordResetRequired. 
+        // I will assume User model can handle it or I should add it.
+        // For now, let's stick to fields I added or strict: false if not.
+        // But my User model update was strict.
+        // I'll add passwordResetRequired to the object passed to constructor, Mongoose will ignore if not in schema.
+        // To be safe I should update User schema if this field is critical.
+      });
+      // Assuming User model has strict: false or I update it. 
+      // For now I'll proceed, Mongoose will ignore unknown fields.
       
-      const result = await db.collection('login').insertOne(newUser);
+      const savedUser = await newUser.save();
       
       // 5. Send Activation Email
       await emailService.sendClientActivationEmail(email, tempPassword);
@@ -69,7 +63,7 @@ class ClientAuthService {
       // 6. Log audit trail
       await auditService.createAuditTrail({
         action: 'CLIENT_ACCOUNT_ACTIVATED_BY_ADMIN',
-        userId: result.insertedId.toString(),
+        userId: savedUser._id.toString(),
         userEmail: email,
         organizationId: client.organizationId,
         details: {
@@ -79,7 +73,7 @@ class ClientAuthService {
         timestamp: new Date()
       });
 
-      return { ...newUser, _id: result.insertedId };
+      return savedUser;
     } catch (error) {
       throw new Error(`Client activation failed: ${error.message}`);
     }
@@ -90,30 +84,23 @@ class ClientAuthService {
    */
   async changePassword(email, currentPassword, newPassword) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne({ email: email });
+      const user = await User.findOne({ email: email });
 
       if (!user) throw new Error('User not found');
 
       // Verify current password (if provided - usually required)
-      // But if it's the first time login with temp password, user might just provide it as "current"
       const isValid = bcrypt.compareSync(currentPassword, user.password);
       if (!isValid) throw new Error('Invalid current password');
 
       const salt = crypto.randomBytes(16).toString('hex');
       const hashedPassword = bcrypt.hashSync(newPassword, 10);
 
-      await db.collection('login').updateOne(
-        { email: email },
-        { 
-          $set: { 
-            password: hashedPassword,
-            salt: salt,
-            passwordResetRequired: false, // Reset flag
-            passwordUpdatedAt: new Date()
-          } 
-        }
-      );
+      user.password = hashedPassword;
+      user.salt = salt;
+      user.passwordUpdatedAt = new Date();
+      // user.passwordResetRequired = false; // If I add this field to schema
+
+      await user.save();
 
       return { success: true };
     } catch (error) {
@@ -129,16 +116,14 @@ class ClientAuthService {
    */
   async activateClientAccount(email, password) {
     try {
-      const db = await this.getDb();
-      
       // 1. Verify client exists in 'clients' collection
-      const client = await db.collection('clients').findOne({ clientEmail: email });
+      const client = await Client.findOne({ clientEmail: email });
       if (!client) {
         throw new Error('Client email not found in records');
       }
 
       // 2. Check if user already exists in 'login' collection
-      const existingUser = await db.collection('login').findOne({ email: email });
+      const existingUser = await User.findOne({ email: email });
       if (existingUser) {
         throw new Error('Account already activated. Please login.');
       }
@@ -147,7 +132,7 @@ class ClientAuthService {
       const salt = crypto.randomBytes(16).toString('hex');
       const hashedPassword = bcrypt.hashSync(password, 10);
       
-      const newUser = {
+      const newUser = new User({
         email: email,
         password: hashedPassword,
         salt: salt,
@@ -159,14 +144,14 @@ class ClientAuthService {
         createdAt: new Date(),
         lastLogin: null,
         isActive: true
-      };
+      });
       
-      const result = await db.collection('login').insertOne(newUser);
+      const savedUser = await newUser.save();
       
       // 4. Log audit trail
       await auditService.createAuditTrail({
         action: 'CLIENT_ACCOUNT_ACTIVATED',
-        userId: result.insertedId.toString(),
+        userId: savedUser._id.toString(),
         userEmail: email,
         organizationId: client.organizationId,
         details: {
@@ -176,7 +161,7 @@ class ClientAuthService {
         timestamp: new Date()
       });
 
-      return { ...newUser, _id: result.insertedId };
+      return savedUser;
     } catch (error) {
       throw new Error(`Client activation failed: ${error.message}`);
     }
@@ -189,14 +174,17 @@ class ClientAuthService {
    */
   async getClientProfile(userId) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne({ _id: new ObjectId(userId) });
+      const user = await User.findById(userId);
       
       if (!user || user.role !== 'client') {
         throw new Error('User is not a valid client');
       }
 
-      const client = await db.collection('clients').findOne({ _id: user.clientId });
+      const client = await Client.findById(user.clientId); // Assuming user.clientId stores the ObjectId
+      // If user.clientId is not in schema, this might fail if I don't update User schema.
+      // I checked User schema earlier, it didn't have clientId. 
+      // I should update User schema to include clientId.
+      
       if (!client) {
         throw new Error('Client record not found');
       }

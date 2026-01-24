@@ -1,36 +1,17 @@
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
+const CustomPricing = require('../models/CustomPricing');
+const PricingSettings = require('../models/PricingSettings');
+const SupportItem = require('../models/SupportItem');
+const Client = require('../models/Client');
+const User = require('../models/User');
 const auditService = require('./auditService');
-// Use the singleton instance for validation helpers
 const { priceValidationService } = require('./priceValidationService');
 
-const uri = process.env.MONGODB_URI;
-
 class PricingService {
-  constructor() {
-    this.client = null;
-  }
-
-  async connect() {
-    if (!this.client) {
-      this.client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-      await this.client.connect();
-    }
-    return this.client.db('Invoice');
-  }
-
-  async disconnect() {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-    }
-  }
-
   /**
    * Create custom pricing record
    */
   async createCustomPricing(pricingData, userEmail) {
-    const db = await this.connect();
-    
     try {
       const {
         organizationId,
@@ -61,14 +42,13 @@ class PricingService {
         duplicateCheckQuery.clientId = null;
       }
 
-      const existingPricing = await db.collection('customPricing').findOne(duplicateCheckQuery);
+      const existingPricing = await CustomPricing.findOne(duplicateCheckQuery);
       if (existingPricing) {
         throw new Error('Custom pricing already exists for this support item');
       }
 
       // Create pricing document
       const pricingDoc = {
-        _id: new ObjectId(),
         organizationId,
         supportItemNumber,
         supportItemName,
@@ -83,9 +63,7 @@ class PricingService {
         effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         createdBy: userEmail,
-        createdAt: new Date(),
         updatedBy: userEmail,
-        updatedAt: new Date(),
         isActive: true,
         version: 1,
         auditTrail: [{
@@ -97,16 +75,18 @@ class PricingService {
         }]
       };
 
-      const result = await db.collection('customPricing').insertOne(pricingDoc);
+      const result = await CustomPricing.create(pricingDoc);
       
       // Create audit log
       await auditService.createAuditLog({
         entityType: 'pricing',
-        entityId: result.insertedId.toString(),
-        action: 'create',
-        performedBy: userEmail,
+        entityId: result._id.toString(),
+        action: 'CREATE',
+        userEmail: userEmail,
         organizationId,
-        details: {
+        newValues: result.toObject(),
+        reason: 'Custom pricing created',
+        metadata: {
           supportItemNumber,
           supportItemName,
           pricingType,
@@ -115,9 +95,9 @@ class PricingService {
         }
       });
 
-      return { ...pricingDoc, _id: result.insertedId };
-    } finally {
-      await this.disconnect();
+      return result;
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -125,8 +105,6 @@ class PricingService {
    * Get organization pricing with pagination and filtering
    */
   async getOrganizationPricing(organizationId, options = {}) {
-    const db = await this.connect();
-    
     try {
       const {
         page = 1,
@@ -160,26 +138,24 @@ class PricingService {
       const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
       const [pricing, total] = await Promise.all([
-        db.collection('customPricing')
-          .find(query)
+        CustomPricing.find(query)
           .sort(sort)
           .skip(skip)
-          .limit(limit)
-          .toArray(),
-        db.collection('customPricing').countDocuments(query)
+          .limit(parseInt(limit)),
+        CustomPricing.countDocuments(query)
       ]);
 
       return {
         pricing,
         pagination: {
-          page,
-          limit,
+          page: parseInt(page),
+          limit: parseInt(limit),
           total,
           pages: Math.ceil(total / limit)
         }
       };
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -187,17 +163,15 @@ class PricingService {
    * Get pricing by ID
    */
   async getPricingById(pricingId) {
-    const db = await this.connect();
-    
     try {
-      const pricing = await db.collection('customPricing').findOne({
-        _id: new ObjectId(pricingId),
+      const pricing = await CustomPricing.findOne({
+        _id: pricingId,
         isActive: true
       });
 
       return pricing;
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -205,11 +179,9 @@ class PricingService {
    * Update custom pricing
    */
   async updateCustomPricing(pricingId, updateData, userEmail) {
-    const db = await this.connect();
-    
     try {
-      const existingPricing = await db.collection('customPricing').findOne({
-        _id: new ObjectId(pricingId),
+      const existingPricing = await CustomPricing.findOne({
+        _id: pricingId,
         isActive: true
       });
 
@@ -310,12 +282,13 @@ class PricingService {
         updateObj.$push = { auditTrail: auditTrailEntry };
       }
 
-      const result = await db.collection('customPricing').updateOne(
-        { _id: new ObjectId(pricingId) },
-        { $set: updateObj, ...(updateObj.$push && { $push: updateObj.$push }) }
+      const result = await CustomPricing.findOneAndUpdate(
+        { _id: pricingId },
+        { $set: updateObj, ...(updateObj.$push && { $push: updateObj.$push }) },
+        { new: true }
       );
 
-      if (result.modifiedCount === 0) {
+      if (!result) {
         throw new Error('No changes were made to the pricing record');
       }
 
@@ -323,18 +296,21 @@ class PricingService {
       await auditService.createAuditLog({
         entityType: 'pricing',
         entityId: pricingId,
-        action: 'update',
-        performedBy: userEmail,
+        action: 'UPDATE',
+        userEmail: userEmail,
         organizationId: existingPricing.organizationId,
-        details: {
+        oldValues: existingPricing.toObject(),
+        newValues: result.toObject(),
+        reason: 'Pricing update',
+        metadata: {
           changes: changes.join(', '),
           supportItemNumber: existingPricing.supportItemNumber
         }
       });
 
-      return await this.getPricingById(pricingId);
-    } finally {
-      await this.disconnect();
+      return result;
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -342,11 +318,9 @@ class PricingService {
    * Delete custom pricing (soft delete)
    */
   async deleteCustomPricing(pricingId, userEmail) {
-    const db = await this.connect();
-    
     try {
-      const existingPricing = await db.collection('customPricing').findOne({
-        _id: new ObjectId(pricingId),
+      const existingPricing = await CustomPricing.findOne({
+        _id: pricingId,
         isActive: true
       });
 
@@ -354,8 +328,8 @@ class PricingService {
         throw new Error('Pricing record not found');
       }
 
-      const result = await db.collection('customPricing').updateOne(
-        { _id: new ObjectId(pricingId) },
+      const result = await CustomPricing.updateOne(
+        { _id: pricingId },
         {
           $set: {
             isActive: false,
@@ -380,8 +354,8 @@ class PricingService {
       await auditService.createAuditLog({
         entityType: 'pricing',
         entityId: pricingId,
-        action: 'delete',
-        performedBy: userEmail,
+        action: 'DELETE',
+        userEmail: userEmail,
         organizationId: existingPricing.organizationId,
         details: {
           supportItemNumber: existingPricing.supportItemNumber,
@@ -390,8 +364,8 @@ class PricingService {
       });
 
       return result.modifiedCount > 0;
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -399,11 +373,9 @@ class PricingService {
    * Update pricing approval status
    */
   async updatePricingApproval(pricingId, approvalStatus, userEmail) {
-    const db = await this.connect();
-    
     try {
-      const existingPricing = await db.collection('customPricing').findOne({
-        _id: new ObjectId(pricingId),
+      const existingPricing = await CustomPricing.findOne({
+        _id: pricingId,
         isActive: true
       });
 
@@ -411,8 +383,8 @@ class PricingService {
         throw new Error('Pricing record not found');
       }
 
-      await db.collection('customPricing').updateOne(
-        { _id: new ObjectId(pricingId) },
+      const result = await CustomPricing.findOneAndUpdate(
+        { _id: pricingId },
         {
           $set: {
             approvalStatus,
@@ -428,15 +400,16 @@ class PricingService {
               reason: 'Approval status update'
             }
           }
-        }
+        },
+        { new: true }
       );
 
       // Create audit log
       await auditService.createAuditLog({
         entityType: 'pricing',
         entityId: pricingId,
-        action: 'approval_update',
-        performedBy: userEmail,
+        action: 'APPROVE', // Using APPROVE for both approve/reject/pending for simplicity or could be dynamic
+        userEmail: userEmail,
         organizationId: existingPricing.organizationId,
         details: {
           approvalStatus,
@@ -444,9 +417,9 @@ class PricingService {
         }
       });
 
-      return await this.getPricingById(pricingId);
-    } finally {
-      await this.disconnect();
+      return result;
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -454,8 +427,6 @@ class PricingService {
    * Get pricing lookup for a single item
    */
   async getPricingLookup(organizationId, supportItemNumber, clientId = null) {
-    const db = await this.connect();
-    
     try {
       const currentDate = new Date();
       let clientIdForQuery = null;
@@ -464,25 +435,19 @@ class PricingService {
       let providerTypeUsed = 'standard';
 
       // Pre-fetch support item for caps and metadata
-      const supportItemDoc = await db.collection('supportItems').findOne({
+      const supportItemDoc = await SupportItem.findOne({
         supportItemNumber
       });
 
       // Convert clientId to string for consistent querying
       if (clientId) {
-        if (typeof clientId === 'string') {
-          clientIdForQuery = clientId;
-        } else if (clientId._id) {
-          clientIdForQuery = clientId._id.toString();
-        } else {
-          clientIdForQuery = clientId.toString();
-        }
+        clientIdForQuery = clientId.toString();
 
         // Resolve client state for accurate cap selection
         try {
-          const clientDoc = await db.collection('clients').findOne(
-            { _id: new ObjectId(clientIdForQuery) },
-            { projection: { clientState: 1 } }
+          const clientDoc = await Client.findOne(
+            { _id: clientIdForQuery },
+            { clientState: 1 }
           );
           if (clientDoc && clientDoc.clientState) {
             stateUsed = String(clientDoc.clientState).toUpperCase();
@@ -497,7 +462,7 @@ class PricingService {
 
       // Priority 1: Client-specific pricing
       if (clientIdForQuery) {
-        const clientSpecificPricing = await db.collection('customPricing').findOne({
+        const clientSpecificPricing = await CustomPricing.findOne({
           organizationId,
           supportItemNumber,
           clientId: clientIdForQuery,
@@ -509,9 +474,7 @@ class PricingService {
             { expiryDate: null },
             { expiryDate: { $gte: currentDate } }
           ]
-        }, {
-          sort: { effectiveDate: -1 }
-        });
+        }).sort({ effectiveDate: -1 });
 
         if (clientSpecificPricing) {
           // Base price-only policy: do not clamp custom price to cap
@@ -526,7 +489,7 @@ class PricingService {
           );
 
           return {
-            ...clientSpecificPricing,
+            ...clientSpecificPricing.toObject(),
             price: originalPrice,
             source: 'client_specific',
             ndisCompliant: validation.isValid,
@@ -545,7 +508,7 @@ class PricingService {
       }
 
       // Priority 2: Organization-level pricing
-      const organizationPricing = await db.collection('customPricing').findOne({
+      const organizationPricing = await CustomPricing.findOne({
         organizationId,
         supportItemNumber,
         clientSpecific: false,
@@ -556,9 +519,7 @@ class PricingService {
           { expiryDate: null },
           { expiryDate: { $gte: currentDate } }
         ]
-      }, {
-        sort: { effectiveDate: -1 }
-      });
+      }).sort({ effectiveDate: -1 });
 
       if (organizationPricing) {
         // Base price-only policy: do not clamp custom price to cap
@@ -573,7 +534,7 @@ class PricingService {
         );
 
         return {
-          ...organizationPricing,
+          ...organizationPricing.toObject(),
           price: originalPrice,
           source: 'organization',
           ndisCompliant: validation.isValid,
@@ -641,8 +602,8 @@ class PricingService {
       }
 
       return null;
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -650,27 +611,19 @@ class PricingService {
    * Get bulk pricing lookup for multiple items
    */
   async getBulkPricingLookup(organizationId, supportItemNumbers, clientId = null) {
-    const db = await this.connect();
-    
     try {
       let clientIdForQuery = null;
       let stateUsed = 'NSW';
       let stateSource = 'fallback';
       let providerTypeUsed = 'standard';
       if (clientId) {
-        if (typeof clientId === 'string') {
-          clientIdForQuery = clientId;
-        } else if (clientId._id) {
-          clientIdForQuery = clientId._id.toString();
-        } else {
-          clientIdForQuery = clientId.toString();
-        }
+        clientIdForQuery = clientId.toString();
 
         // Resolve state from client when possible
         try {
-          const clientDoc = await db.collection('clients').findOne(
-            { _id: new ObjectId(clientIdForQuery) },
-            { projection: { clientState: 1 } }
+          const clientDoc = await Client.findOne(
+            { _id: clientIdForQuery },
+            { clientState: 1 }
           );
           if (clientDoc && clientDoc.clientState) {
             stateUsed = String(clientDoc.clientState).toUpperCase();
@@ -726,9 +679,7 @@ class PricingService {
         }
       ];
 
-      const customPricingResults = await db.collection('customPricing')
-        .aggregate(customPricingPipeline)
-        .toArray();
+      const customPricingResults = await CustomPricing.aggregate(customPricingPipeline);
 
       // Map custom pricing results
       const customPricingMap = {};
@@ -750,9 +701,7 @@ class PricingService {
       let ndisDefaultPricing = {};
       let priceCapsData = {};
 
-      const allNdisItems = await db.collection('supportItems')
-        .find({ supportItemNumber: { $in: supportItemNumbers } })
-        .toArray();
+      const allNdisItems = await SupportItem.find({ supportItemNumber: { $in: supportItemNumbers } });
 
       allNdisItems.forEach(item => {
         priceCapsData[item.supportItemNumber] = {
@@ -872,8 +821,8 @@ class PricingService {
           notFoundItems: supportItemNumbers.length - Object.keys(customPricingMap).length - Object.keys(ndisDefaultPricing).length
         }
       };
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -881,8 +830,6 @@ class PricingService {
    * Bulk import pricing records
    */
   async bulkImportPricing(organizationId, pricingRecords, userEmail, importNotes = null) {
-    const db = await this.connect();
-    
     try {
       const results = {
         successful: 0,
@@ -924,7 +871,7 @@ class PricingService {
             duplicateCheckQuery.clientId = null;
           }
 
-          const existingCustomPricing = await db.collection('customPricing').findOne(duplicateCheckQuery);
+          const existingCustomPricing = await CustomPricing.findOne(duplicateCheckQuery);
 
           if (existingCustomPricing) {
             const newPrice = record.pricingType === 'fixed' ? record.customPrice : record.multiplier;
@@ -962,7 +909,6 @@ class PricingService {
 
           // Create new pricing record
           const pricingDoc = {
-            _id: new ObjectId(),
             organizationId,
             supportItemNumber: record.supportItemNumber,
             supportItemName: record.supportItemName,
@@ -977,9 +923,7 @@ class PricingService {
             effectiveDate: record.effectiveDate ? new Date(record.effectiveDate) : new Date(),
             expiryDate: record.expiryDate ? new Date(record.expiryDate) : null,
             createdBy: userEmail,
-            createdAt: new Date(),
             updatedBy: userEmail,
-            updatedAt: new Date(),
             isActive: true,
             version: 1,
             auditTrail: [{
@@ -1009,16 +953,16 @@ class PricingService {
 
       // Execute bulk operations
       if (bulkOps.length > 0) {
-        await db.collection('customPricing').bulkWrite(bulkOps, { ordered: false });
+        await CustomPricing.bulkWrite(bulkOps, { ordered: false });
       }
 
       if (updateOps.length > 0) {
-        await db.collection('customPricing').bulkWrite(updateOps, { ordered: false });
+        await CustomPricing.bulkWrite(updateOps, { ordered: false });
       }
 
       return results;
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -1027,7 +971,6 @@ class PricingService {
    * Does NOT consider custom pricing; returns null for price and surfaces caps for validation metadata.
    */
   async getStandardPrice(supportItemNumber, clientId = null) {
-    const db = await this.connect();
     try {
       let stateUsed = 'NSW';
       let stateSource = 'fallback';
@@ -1036,11 +979,11 @@ class PricingService {
       // Resolve state from client when possible
       if (clientId) {
         try {
-          const clientIdStr = typeof clientId === 'string' ? clientId : clientId?.toString();
+          const clientIdStr = clientId.toString();
           if (clientIdStr) {
-            const clientDoc = await db.collection('clients').findOne(
-              { _id: new ObjectId(clientIdStr) },
-              { projection: { clientState: 1 } }
+            const clientDoc = await Client.findOne(
+              { _id: clientIdStr },
+              { clientState: 1 }
             );
             if (clientDoc && clientDoc.clientState) {
               stateUsed = String(clientDoc.clientState).toUpperCase();
@@ -1053,7 +996,7 @@ class PricingService {
         }
       }
 
-      const supportItemDoc = await db.collection('supportItems').findOne({ supportItemNumber });
+      const supportItemDoc = await SupportItem.findOne({ supportItemNumber });
       if (!supportItemDoc) {
         return {
           supportItemNumber,
@@ -1079,25 +1022,23 @@ class PricingService {
         priceCaps: supportItemDoc.priceCaps,
         metadata: { stateUsed, stateSource, providerTypeUsed }
       };
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
   /**
    * Validate user authorization for organization
    */
   async validateUserAuthorization(userEmail, organizationId) {
-    const db = await this.connect();
-    
     try {
-      const user = await db.collection('login').findOne({
+      const user = await User.findOne({
         email: userEmail,
         organizationId
       });
 
       return !!user;
-    } finally {
-      await this.disconnect();
+    } catch (error) {
+      throw error;
     }
   }
 }

@@ -2,18 +2,12 @@ const cron = require('node-cron');
 const NotificationService = require('../services/notificationService');
 const NotificationSetting = require('../models/NotificationSetting');
 const NotificationHistory = require('../models/NotificationHistory');
-const Shift = require('../models/Shift'); // Assuming this exists
+const Shift = require('../models/Shift');
+const Expense = require('../models/Expense');
+const User = require('../models/User');
 const logger = require('../utils/logger').createLogger('NotificationScheduler');
-const { MongoClient } = require('mongodb');
 const QueueManager = require('../core/QueueManager');
 const { QUEUE_NAME } = require('../workers/notificationWorker');
-
-// Helper to get raw db connection for legacy collections
-async function getDb() {
-  const client = new MongoClient(process.env.MONGODB_URI);
-  await client.connect();
-  return { client, db: client.db(process.env.DB_NAME || 'Invoice') };
-}
 
 class NotificationScheduler {
   start() {
@@ -42,14 +36,17 @@ class NotificationScheduler {
       const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
       // Find shifts starting in the next 24 hours
-      // Using Shift model if it works, or raw query
       const shifts = await Shift.find({
         startTime: { $gte: now, $lte: next24Hours },
-        status: 'published' // Assuming status field
+        status: 'published'
       }).lean();
 
       for (const shift of shifts) {
-        const settings = await NotificationService.getSettings(shift.userId);
+        // userId might be stored as employeeId in Shift model
+        const userId = shift.employeeId || shift.userId;
+        if (!userId) continue;
+
+        const settings = await NotificationService.getSettings(userId);
         if (!settings || !settings.shiftReminders.enabled) continue;
 
         const timeUntilShift = (new Date(shift.startTime) - now) / (1000 * 60 * 60); // in hours
@@ -59,14 +56,14 @@ class NotificationScheduler {
           if (Math.abs(timeUntilShift - timing) < 0.25) { 
             // Check if already sent
             const alreadySent = await NotificationHistory.findOne({
-              userId: shift.userId,
+              userId: userId,
               type: 'shift',
               'data.shiftId': shift._id,
               'data.timing': timing
             });
 
             if (!alreadySent) {
-              await this.sendNotification(shift.userId, {
+              await this.sendNotification(userId, {
                 type: 'shift',
                 title: 'Upcoming Shift Reminder',
                 body: `You have a shift starting in ${timing} hour(s).`,
@@ -82,24 +79,22 @@ class NotificationScheduler {
   }
 
   async processExpenseReminders() {
-    let client, db;
     try {
       logger.info('Processing expense reminders...');
-      ({ client, db } = await getDb());
       
       // Find expenses without receipts created > 24 hours ago (simplified)
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-      const pendingExpenses = await db.collection('expenses').find({
+      const pendingExpenses = await Expense.find({
         receiptUrl: null,
         createdAt: { $lte: oneDayAgo },
         status: { $ne: 'cancelled' }
-      }).toArray();
+      }).lean();
 
       for (const expense of pendingExpenses) {
         // Get user from expense (submittedBy is email, need userId)
-        const user = await db.collection('users').findOne({ email: expense.submittedBy });
+        const user = await User.findOne({ email: expense.submittedBy }).lean();
         if (!user) continue;
 
         const settings = await NotificationService.getSettings(user._id);
@@ -125,8 +120,6 @@ class NotificationScheduler {
       }
     } catch (error) {
       logger.error('Error processing expense reminders', { error: error.message });
-    } finally {
-      if (client) await client.close();
     }
   }
 

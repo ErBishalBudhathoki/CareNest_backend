@@ -3,12 +3,16 @@
  * Business logic for checking incomplete timesheets and sending reminders
  */
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const uri = process.env.MONGODB_URI;
-const DB_NAME = 'Invoice';
+const Organization = require('../models/Organization');
+const User = require('../models/User');
+const ClientAssignment = require('../models/ClientAssignment');
+const WorkedTime = require('../models/WorkedTime');
+const FcmToken = require('../models/FcmToken');
+const ReminderLog = require('../models/ReminderLog');
 
 /**
  * Default reminder configuration
@@ -26,24 +30,11 @@ const DEFAULT_REMINDER_CONFIG = {
  * @returns {Promise<Array>} List of organizations with their reminder settings
  */
 async function getOrganizationsWithRemindersEnabled() {
-    let client;
-
     try {
-        client = new MongoClient(uri, {
-            serverApi: {
-                version: ServerApiVersion.v1,
-                strict: true,
-                deprecationErrors: true,
-            }
-        });
-
-        await client.connect();
-        const db = client.db(DB_NAME);
-
         // Get organizations that have reminders enabled (or use default if not set)
-        const organizations = await db.collection('organizationsData').find({
+        const organizations = await Organization.find({
             isActive: { $ne: false }
-        }).toArray();
+        });
 
         // Filter to only those with reminders enabled (default is enabled)
         const enabledOrgs = organizations.filter(org => {
@@ -60,10 +51,6 @@ async function getOrganizationsWithRemindersEnabled() {
     } catch (error) {
         console.error('Error getting organizations with reminders:', error);
         return [];
-    } finally {
-        if (client) {
-            await client.close();
-        }
     }
 }
 
@@ -75,25 +62,15 @@ async function getOrganizationsWithRemindersEnabled() {
  * @returns {Promise<Array>} Users with incomplete timesheets
  */
 async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekEnd) {
-    let client;
-
     try {
-        client = new MongoClient(uri, {
-            serverApi: {
-                version: ServerApiVersion.v1,
-                strict: true,
-                deprecationErrors: true,
-            }
-        });
-
-        await client.connect();
-        const db = client.db(DB_NAME);
-
         // 1. Get all active employees in this organization
-        const employees = await db.collection('employeeData').find({
+        // Using User model (standardized)
+        const employees = await User.find({
             organizationId: organizationId,
-            isActive: { $ne: false }
-        }).toArray();
+            isActive: { $ne: false },
+            // Optional: filter by role if needed, e.g., role: 'user' or 'employee'
+            // For now, assuming all active users in org are employees/users
+        });
 
         if (employees.length === 0) {
             console.log(`No active employees found for organization ${organizationId}`);
@@ -109,11 +86,11 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
 
             // 2. Get scheduled shifts for this user in the week (via shiftsWithDateRange)
             // Also check schedules stored differently
-            const shiftsWithDateRange = await db.collection('clientAssignments').find({
+            const shiftsWithDateRange = await ClientAssignment.find({
                 userEmail: userEmail,
                 organizationId: organizationId,
                 isActive: true
-            }).toArray();
+            });
 
             // Count total scheduled shifts for the week
             let scheduledShiftCount = 0;
@@ -132,7 +109,7 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
             }
 
             // 3. Get actual worked time entries for this user in the week
-            const workedTimeEntries = await db.collection('workedTime').find({
+            const workedTimeEntries = await WorkedTime.find({
                 userEmail: userEmail,
                 isActive: true,
                 $or: [
@@ -149,7 +126,7 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
                         }
                     }
                 ]
-            }).toArray();
+            });
 
             const workedEntryCount = workedTimeEntries.length;
 
@@ -160,7 +137,7 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
             if (scheduledShiftCount > 0 && workedEntryCount < scheduledShiftCount) {
                 usersWithIncompleteTimesheets.push({
                     userEmail: userEmail,
-                    employeeName: employee.name || employee.firstName || userEmail.split('@')[0],
+                    employeeName: `${employee.firstName} ${employee.lastName}`.trim() || userEmail.split('@')[0],
                     scheduledShifts: scheduledShiftCount,
                     completedShifts: workedEntryCount,
                     missingEntries: scheduledShiftCount - workedEntryCount
@@ -173,10 +150,6 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
     } catch (error) {
         console.error('Error getting users with incomplete timesheets:', error);
         throw error;
-    } finally {
-        if (client) {
-            await client.close();
-        }
     }
 }
 
@@ -188,22 +161,9 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
  * @returns {Promise<object>} Result of notification send
  */
 async function sendTimesheetReminder(userEmail, organizationId, details) {
-    let client;
-
     try {
-        client = new MongoClient(uri, {
-            serverApi: {
-                version: ServerApiVersion.v1,
-                strict: true,
-                deprecationErrors: true,
-            }
-        });
-
-        await client.connect();
-        const db = client.db(DB_NAME);
-
         // Get FCM token for user
-        const tokenDoc = await db.collection('fcmTokens').findOne({ userEmail: userEmail });
+        const tokenDoc = await FcmToken.findOne({ userEmail: userEmail });
 
         if (!tokenDoc || !tokenDoc.fcmToken) {
             console.log(`No FCM token found for user ${userEmail}`);
@@ -262,7 +222,7 @@ async function sendTimesheetReminder(userEmail, organizationId, details) {
         console.log(`Timesheet reminder sent to ${userEmail}: ${response}`);
 
         // Log the reminder in a tracking collection
-        await db.collection('reminderLogs').insertOne({
+        await ReminderLog.create({
             type: 'timesheet_reminder',
             userEmail: userEmail,
             organizationId: organizationId,
@@ -276,10 +236,6 @@ async function sendTimesheetReminder(userEmail, organizationId, details) {
     } catch (error) {
         console.error(`Error sending timesheet reminder to ${userEmail}:`, error);
         return { success: false, error: error.message };
-    } finally {
-        if (client) {
-            await client.close();
-        }
     }
 }
 
@@ -381,23 +337,8 @@ async function processAllTimesheetReminders() {
  * @returns {Promise<object>} Reminder configuration
  */
 async function getOrganizationReminderSettings(organizationId) {
-    let client;
-
     try {
-        client = new MongoClient(uri, {
-            serverApi: {
-                version: ServerApiVersion.v1,
-                strict: true,
-                deprecationErrors: true,
-            }
-        });
-
-        await client.connect();
-        const db = client.db(DB_NAME);
-
-        const org = await db.collection('organizationsData').findOne({
-            _id: new ObjectId(organizationId)
-        });
+        const org = await Organization.findById(organizationId);
 
         if (!org) {
             return DEFAULT_REMINDER_CONFIG;
@@ -408,10 +349,6 @@ async function getOrganizationReminderSettings(organizationId) {
     } catch (error) {
         console.error('Error getting organization reminder settings:', error);
         return DEFAULT_REMINDER_CONFIG;
-    } finally {
-        if (client) {
-            await client.close();
-        }
     }
 }
 
@@ -422,22 +359,9 @@ async function getOrganizationReminderSettings(organizationId) {
  * @returns {Promise<object>} Update result
  */
 async function updateOrganizationReminderSettings(organizationId, settings) {
-    let client;
-
     try {
-        client = new MongoClient(uri, {
-            serverApi: {
-                version: ServerApiVersion.v1,
-                strict: true,
-                deprecationErrors: true,
-            }
-        });
-
-        await client.connect();
-        const db = client.db(DB_NAME);
-
-        const result = await db.collection('organizationsData').updateOne(
-            { _id: new ObjectId(organizationId) },
+        const result = await Organization.updateOne(
+            { _id: organizationId },
             {
                 $set: {
                     timesheetReminders: {
@@ -457,10 +381,6 @@ async function updateOrganizationReminderSettings(organizationId, settings) {
     } catch (error) {
         console.error('Error updating organization reminder settings:', error);
         return { success: false, error: error.message };
-    } finally {
-        if (client) {
-            await client.close();
-        }
     }
 }
 

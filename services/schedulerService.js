@@ -5,12 +5,15 @@
  * @file backend/services/schedulerService.js
  */
 
-const { getDatabase } = require('../config/database');
-const { ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
 const logger = require('../config/logger');
 const EventBus = require('../core/EventBus');
-const ShiftSchema = require('../models/Shift');
-const RosterTemplateSchema = require('../models/RosterTemplate');
+const Shift = require('../models/Shift');
+const RosterTemplate = require('../models/RosterTemplate');
+const User = require('../models/User');
+const Client = require('../models/Client');
+const ActiveTimer = require('../models/ActiveTimer');
+const ClientAssignment = require('../models/ClientAssignment');
 const aiSchedulerService = require('./aiSchedulerService');
 
 /**
@@ -43,7 +46,6 @@ class SchedulerService {
      */
     static async findBestMatch(shiftDetails) {
         try {
-            const db = await getDatabase();
             const {
                 organizationId,
                 startTime,
@@ -54,11 +56,11 @@ class SchedulerService {
             } = shiftDetails;
 
             // 1. Get all active employees in the organization
-            const employees = await db.collection('users').find({
+            const employees = await User.find({
                 organizationId: organizationId,
-                isActive: { $ne: false },
+                isActive: true,
                 role: { $in: ['employee', 'user', 'Employee', 'User'] }
-            }).toArray();
+            });
 
             if (employees.length === 0) {
                 return { success: true, recommendations: [], message: 'No employees found in organization' };
@@ -67,7 +69,7 @@ class SchedulerService {
             // 2. Get client location if not provided
             let clientLocation = location;
             if (!clientLocation && clientEmail) {
-                const client = await db.collection('clients').findOne({ clientEmail });
+                const client = await Client.findOne({ clientEmail });
                 if (client && client.location) {
                     clientLocation = client.location;
                 }
@@ -78,7 +80,7 @@ class SchedulerService {
 
             for (const employee of employees) {
                 const employeeId = employee._id.toString();
-                const employeeEmail = employee.email || employee.userEmail;
+                const employeeEmail = employee.email;
 
                 // 3a. Check availability (no conflicts)
                 const availabilityResult = await this.checkEmployeeAvailability(
@@ -174,15 +176,14 @@ class SchedulerService {
      */
     static async checkEmployeeAvailability(employeeId, employeeEmail, startTime, endTime) {
         try {
-            const db = await getDatabase();
             const conflicts = [];
 
             // Check for overlapping shifts in the shifts collection
-            const overlappingShifts = await db.collection('shifts').find({
+            const overlappingShifts = await Shift.find({
                 $and: [
                     {
                         $or: [
-                            { employeeId: new ObjectId(employeeId) },
+                            { employeeId: employeeId },
                             { employeeEmail: employeeEmail }
                         ]
                     },
@@ -199,7 +200,7 @@ class SchedulerService {
                 ],
                 status: { $nin: ['cancelled'] },
                 isActive: { $ne: false }
-            }).toArray();
+            });
 
             if (overlappingShifts.length > 0) {
                 conflicts.push(...overlappingShifts.map(s => ({
@@ -211,7 +212,7 @@ class SchedulerService {
             }
 
             // Check for active timers
-            const activeTimer = await db.collection('activeTimers').findOne({
+            const activeTimer = await ActiveTimer.findOne({
                 userEmail: employeeEmail,
                 startTime: { $lte: endTime }
             });
@@ -262,14 +263,13 @@ class SchedulerService {
      */
     static async checkAssignmentConflicts(employeeEmail, startTime, endTime) {
         try {
-            const db = await getDatabase();
             const conflicts = [];
 
             // Get all active assignments for this employee
-            const assignments = await db.collection('clientAssignments').find({
+            const assignments = await ClientAssignment.find({
                 userEmail: employeeEmail,
                 isActive: true
-            }).toArray();
+            });
 
             // Format the proposed shift date for comparison
             const proposedDate = startTime.toISOString().split('T')[0];
@@ -346,7 +346,6 @@ class SchedulerService {
      */
     static async detectConflicts(employeeId, employeeEmail, startTime, endTime, excludeShiftId = null) {
         try {
-            const db = await getDatabase();
             const conflicts = [];
 
             // Build query for overlapping shifts
@@ -365,7 +364,7 @@ class SchedulerService {
             // Filter by employee
             if (employeeId) {
                 shiftQuery.$or = [
-                    { employeeId: new ObjectId(employeeId) },
+                    { employeeId: employeeId },
                     { employeeEmail: employeeEmail }
                 ];
             } else if (employeeEmail) {
@@ -374,10 +373,10 @@ class SchedulerService {
 
             // Exclude current shift if updating
             if (excludeShiftId) {
-                shiftQuery._id = { $ne: new ObjectId(excludeShiftId) };
+                shiftQuery._id = { $ne: excludeShiftId };
             }
 
-            const overlappingShifts = await db.collection('shifts').find(shiftQuery).toArray();
+            const overlappingShifts = await Shift.find(shiftQuery);
 
             for (const shift of overlappingShifts) {
                 conflicts.push({
@@ -511,18 +510,6 @@ class SchedulerService {
      */
     static async createShift(shiftData) {
         try {
-            const db = await getDatabase();
-
-            // Validate shift data
-            const validation = ShiftSchema.validate(shiftData);
-            if (!validation.isValid) {
-                return {
-                    success: false,
-                    error: validation.errors.join(', '),
-                    code: 400
-                };
-            }
-
             // Check for conflicts if employee is assigned
             if (shiftData.employeeId || shiftData.employeeEmail) {
                 const conflictCheck = await this.detectConflicts(
@@ -542,15 +529,14 @@ class SchedulerService {
                 }
             }
 
-            // Normalize and insert
-            const normalizedShift = ShiftSchema.normalize(shiftData);
-            const result = await db.collection('shifts').insertOne(normalizedShift);
+            const newShift = new Shift(shiftData);
+            const savedShift = await newShift.save();
 
             return {
                 success: true,
                 data: {
-                    id: result.insertedId.toString(),
-                    ...normalizedShift
+                    id: savedShift._id.toString(),
+                    ...savedShift.toObject()
                 },
                 message: 'Shift created successfully'
             };
@@ -625,11 +611,9 @@ class SchedulerService {
      */
     static async deployRosterTemplate(templateId, startDate, endDate, createdBy) {
         try {
-            const db = await getDatabase();
-
             // Get template
-            const template = await db.collection('rosterTemplates').findOne({
-                _id: new ObjectId(templateId),
+            const template = await RosterTemplate.findOne({
+                _id: templateId,
                 isActive: true
             });
 
@@ -641,8 +625,10 @@ class SchedulerService {
                 };
             }
 
-            // Generate shift dates
-            const shiftDates = RosterTemplateSchema.generateShiftDates(
+            // Generate shift dates (Method should be available on model if static, or helper)
+            // RosterTemplateSchema here likely refers to the Mongoose model if it has static methods
+            // If generateShiftDates is a static method on the schema/model:
+            const shiftDates = RosterTemplate.generateShiftDates(
                 template,
                 new Date(startDate),
                 new Date(endDate)
@@ -695,8 +681,6 @@ class SchedulerService {
      */
     static async getShifts(organizationId, filters = {}) {
         try {
-            const db = await getDatabase();
-
             const query = {
                 organizationId: organizationId,
                 isActive: { $ne: false }
@@ -719,10 +703,7 @@ class SchedulerService {
                 query.clientEmail = filters.clientEmail;
             }
 
-            const shifts = await db.collection('shifts')
-                .find(query)
-                .sort({ startTime: 1 })
-                .toArray();
+            const shifts = await Shift.find(query).sort({ startTime: 1 });
 
             return {
                 success: true,
@@ -748,13 +729,9 @@ class SchedulerService {
      */
     static async updateShift(shiftId, updateData) {
         try {
-            const db = await getDatabase();
-
             // Check conflicts if changing employee or time
             if (updateData.employeeEmail || updateData.startTime || updateData.endTime) {
-                const existingShift = await db.collection('shifts').findOne({
-                    _id: new ObjectId(shiftId)
-                });
+                const existingShift = await Shift.findById(shiftId);
 
                 if (existingShift) {
                     const employeeEmail = updateData.employeeEmail || existingShift.employeeEmail;
@@ -786,10 +763,10 @@ class SchedulerService {
             // Apply update
             updateData.updatedAt = new Date();
 
-            const result = await db.collection('shifts').findOneAndUpdate(
-                { _id: new ObjectId(shiftId) },
+            const result = await Shift.findOneAndUpdate(
+                { _id: shiftId },
                 { $set: updateData },
-                { returnDocument: 'after' }
+                { new: true }
             );
 
             if (!result) {
@@ -823,10 +800,8 @@ class SchedulerService {
      */
     static async deleteShift(shiftId) {
         try {
-            const db = await getDatabase();
-
-            const result = await db.collection('shifts').findOneAndUpdate(
-                { _id: new ObjectId(shiftId) },
+            const result = await Shift.findOneAndUpdate(
+                { _id: shiftId },
                 {
                     $set: {
                         status: 'cancelled',
@@ -834,7 +809,7 @@ class SchedulerService {
                         updatedAt: new Date()
                     }
                 },
-                { returnDocument: 'after' }
+                { new: true }
             );
 
             if (!result) {

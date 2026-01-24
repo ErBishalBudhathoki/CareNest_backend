@@ -1,21 +1,11 @@
-const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { getDatabase } = require('../config/database');
+const User = require('../models/User');
+const Client = require('../models/Client');
+const Organization = require('../models/Organization');
 const auditService = require('./auditService');
 
 class AuthService {
-  constructor() {
-    this.db = null;
-  }
-
-  async getDb() {
-    if (!this.db) {
-      this.db = await getDatabase();
-    }
-    return this.db;
-  }
-
   /**
    * Check if email exists in the system
    * @param {string} email - User email
@@ -23,8 +13,7 @@ class AuthService {
    */
   async checkEmailExists(email) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne({ email: email });
+      const user = await User.findOne({ email: email });
       return user;
     } catch (error) {
       throw new Error(`Error checking email: ${error.message}`);
@@ -38,8 +27,7 @@ class AuthService {
    */
   async getClientDetails(email) {
     try {
-      const db = await this.getDb();
-      const client = await db.collection('clients').findOne({ email: email });
+      const client = await Client.findOne({ email: email });
       return client;
     } catch (error) {
       throw new Error(`Error getting client details: ${error.message}`);
@@ -53,8 +41,7 @@ class AuthService {
    */
   async validateOrganizationCode(organizationCode) {
     try {
-      const db = await this.getDb();
-      const organization = await db.collection('organizations').findOne({ 
+      const organization = await Organization.findOne({ 
         organizationCode: organizationCode 
       });
       return organization;
@@ -70,10 +57,7 @@ class AuthService {
    */
   async validateOrganizationId(organizationId) {
     try {
-      const db = await this.getDb();
-      const organization = await db.collection('organizations').findOne({ 
-        _id: new MongoClient.ObjectId(organizationId) 
-      });
+      const organization = await Organization.findById(organizationId);
       return organization;
     } catch (error) {
       throw new Error(`Error validating organization ID: ${error.message}`);
@@ -87,13 +71,11 @@ class AuthService {
    */
   async createUser(userData) {
     try {
-      const db = await this.getDb();
-      
       // Generate salt and hash password
       const salt = crypto.randomBytes(16).toString('hex');
       const hashedPassword = bcrypt.hashSync(userData.password, 10);
       
-      const newUser = {
+      const newUser = new User({
         email: userData.email,
         password: hashedPassword,
         salt: salt,
@@ -105,14 +87,14 @@ class AuthService {
         createdAt: new Date(),
         lastLogin: null,
         isActive: true
-      };
+      });
       
-      const result = await db.collection('login').insertOne(newUser);
+      const savedUser = await newUser.save();
       
       // Create audit trail
       await auditService.createAuditTrail({
         action: 'USER_CREATED',
-        userId: result.insertedId.toString(),
+        userId: savedUser._id.toString(),
         userEmail: userData.email,
         organizationId: userData.organizationId,
         details: {
@@ -124,7 +106,7 @@ class AuthService {
         timestamp: new Date()
       });
       
-      return { ...newUser, _id: result.insertedId };
+      return savedUser;
     } catch (error) {
       throw new Error(`Error creating user: ${error.message}`);
     }
@@ -138,8 +120,7 @@ class AuthService {
    */
   async authenticateUser(email, password) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne({ email: email });
+      const user = await User.findOne({ email: email });
       
       if (!user) {
         throw new Error('User not found');
@@ -156,15 +137,11 @@ class AuthService {
       }
       
       // Update last login
-      await db.collection('login').updateOne(
-        { email: email },
-        { $set: { lastLogin: new Date() } }
-      );
+      user.lastLogin = new Date();
+      await user.save();
       
       // Get organization details
-      const organization = await db.collection('organizations').findOne({
-        _id: new MongoClient.ObjectId(user.organizationId)
-      });
+      const organization = await Organization.findById(user.organizationId);
       
       // Create audit trail
       await auditService.createAuditTrail({
@@ -187,7 +164,7 @@ class AuthService {
           lastName: user.lastName,
           role: user.role,
           organizationId: user.organizationId,
-          lastLogin: new Date()
+          lastLogin: user.lastLogin
         },
         organization: organization
       };
@@ -203,10 +180,9 @@ class AuthService {
    */
   async getUserPhoto(email) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne(
+      const user = await User.findOne(
         { email: email },
-        { projection: { photo: 1 } }
+        'photo'
       );
       
       if (!user || !user.photo) {
@@ -228,9 +204,7 @@ class AuthService {
    */
   async uploadUserPhoto(email, photoData, contentType) {
     try {
-      const db = await this.getDb();
-      
-      const result = await db.collection('login').updateOne(
+      const result = await User.updateOne(
         { email: email },
         {
           $set: {
@@ -274,10 +248,9 @@ class AuthService {
    */
   async getUserSalt(email) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne(
+      const user = await User.findOne(
         { email: email },
-        { projection: { password: 1 } }
+        'password'
       );
       
       if (!user) {
@@ -304,7 +277,6 @@ class AuthService {
    */
   async generateOTP(email) {
     try {
-      const db = await this.getDb();
       const user = await this.checkEmailExists(email);
       
       if (!user) {
@@ -315,7 +287,7 @@ class AuthService {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
       
-      await db.collection('login').updateOne(
+      await User.updateOne(
         { email: email },
         {
           $set: {
@@ -352,8 +324,7 @@ class AuthService {
    */
   async verifyOTP(email, otp) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne({ email: email });
+      const user = await User.findOne({ email: email });
       
       if (!user) {
         throw new Error('User not found');
@@ -372,7 +343,7 @@ class AuthService {
       }
       
       // Mark OTP as used
-      await db.collection('login').updateOne(
+      await User.updateOne(
         { email: email },
         { $set: { otpUsed: true } }
       );
@@ -401,7 +372,6 @@ class AuthService {
    */
   async updatePassword(email, newPassword) {
     try {
-      const db = await this.getDb();
       const user = await this.checkEmailExists(email);
       
       if (!user) {
@@ -412,7 +382,7 @@ class AuthService {
       const salt = crypto.randomBytes(16).toString('hex');
       const hashedPassword = bcrypt.hashSync(newPassword, 10);
       
-      await db.collection('login').updateOne(
+      await User.updateOne(
         { email: email },
         {
           $set: {
@@ -453,8 +423,7 @@ class AuthService {
    */
   async getInitData(email) {
     try {
-      const db = await this.getDb();
-      const user = await db.collection('login').findOne({ 
+      const user = await User.findOne({ 
         email: email,
         isActive: true 
       });
@@ -466,9 +435,7 @@ class AuthService {
       // Get organization details if user belongs to one
       let organizationDetails = null;
       if (user.organizationId) {
-        organizationDetails = await db.collection('organizations').findOne({ 
-          _id: new MongoClient.ObjectId(user.organizationId) 
-        });
+        organizationDetails = await Organization.findById(user.organizationId);
       }
       
       return {
