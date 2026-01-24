@@ -127,6 +127,27 @@ class EmailService {
         `;
         return this.sendEmail(invoice.clientEmail, subject, text, html);
     }
+    /**
+     * Send Client Activation Email
+     */
+    async sendClientActivationEmail(email, tempPassword) {
+        const subject = 'Activate Your Client Portal Account';
+        const text = `Welcome to CareNest!\n\nYour client portal account has been created. Please log in using the following temporary credentials:\n\nEmail: ${email}\nTemporary Password: ${tempPassword}\n\nYou will be required to change your password upon first login.\n\nLogin here: [App Link]\n\nBest,\nCareNest Team`;
+        const html = `
+            <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+                <h2 style="color: #1D55C0;">Welcome to CareNest!</h2>
+                <p>Your client portal account has been created.</p>
+                <p>Please log in using the following temporary credentials:</p>
+                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <p><strong>Email:</strong> ${email}</p>
+                    <p><strong>Temporary Password:</strong> ${tempPassword}</p>
+                </div>
+                <p><strong>Important:</strong> You will be required to change your password upon first login.</p>
+                <p>Best,<br>CareNest Team</p>
+            </div>
+        `;
+        return this.sendEmail(email, subject, text, html);
+    }
 }
 
 module.exports = new EmailService();

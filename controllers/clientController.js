@@ -1,7 +1,48 @@
 const clientService = require('../services/clientService');
 const logger = require('../config/logger');
 
+const clientAuthService = require('../services/clientAuthService');
+
 class ClientController {
+  /**
+   * Activate client account by Admin
+   * POST /activate
+   */
+  async activateClient(req, res) {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ statusCode: 400, message: "Client email is required" });
+      }
+
+      const result = await clientAuthService.activateClientByAdmin(email);
+      
+      res.status(200).json({
+        statusCode: 200,
+        message: "Client activated successfully",
+        data: result
+      });
+    } catch (error) {
+      logger.error('Client activation failed', {
+        error: error.message,
+        stack: error.stack,
+        email: req.body.email
+      });
+      
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ statusCode: 404, message: error.message });
+      }
+      if (error.message.includes('already activated')) {
+        return res.status(409).json({ statusCode: 409, message: error.message });
+      }
+
+      res.status(500).json({
+        statusCode: 500,
+        message: "Error activating client"
+      });
+    }
+  }
+
   async addClient(req, res) {
     try {
       const result = await clientService.addClient(req.body);
@@ -97,6 +138,44 @@ class ClientController {
       res.status(500).json({
         statusCode: 500,
         message: "Error retrieving client"
+      });
+    }
+  }
+
+  async updateCareNotes(req, res) {
+    try {
+      const { clientId } = req.params;
+      const { organizationId, userEmail, careNotes } = req.body;
+      
+      const result = await clientService.updateCareNotes(clientId, careNotes, organizationId, userEmail);
+      res.status(200).json({
+        statusCode: 200,
+        ...result
+      });
+    } catch (error) {
+      logger.error('Client care notes update failed', {
+        error: error.message,
+        stack: error.stack,
+        clientId: req.params.clientId
+      });
+      
+      if (error.message === 'User not authorized for this organization') {
+        return res.status(403).json({
+          statusCode: 403,
+          message: error.message
+        });
+      }
+      
+      if (error.message === 'Client not found') {
+        return res.status(404).json({
+          statusCode: 404,
+          message: error.message
+        });
+      }
+      
+      res.status(500).json({
+        statusCode: 500,
+        message: "Error updating client care notes"
       });
     }
   }
