@@ -23,6 +23,6 @@ const mmmLocationSchema = new mongoose.Schema({
   timestamps: true
 });
 
-mmmLocationSchema.index({ postcode: 1 });
+// Note: unique:true on postcode already creates an index
 
 module.exports = mongoose.model('MmmLocation', mmmLocationSchema, 'mmmLocations');
