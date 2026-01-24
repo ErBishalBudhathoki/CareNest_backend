@@ -4,7 +4,7 @@
  * Supports listing, viewing, sharing, and deleting invoices with organization-based access control
  */
 
-const { InvoiceManagementService: invoiceManagementService } = require('../services/InvoiceManagementService');
+const { InvoiceManagementService: invoiceManagementService } = require('../services/invoiceManagementService');
 const logger = require('../config/logger');
 
 // Service is already instantiated in the module export
