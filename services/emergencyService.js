@@ -1,6 +1,5 @@
 const EmergencyBroadcast = require('../models/EmergencyBroadcast');
 const TeamMember = require('../models/TeamMember');
-const { messaging } = require('../firebase-admin-config'); // Assuming this exists from previous task
 
 class EmergencyService {
   async sendBroadcast(senderId, teamId, message, priority) {

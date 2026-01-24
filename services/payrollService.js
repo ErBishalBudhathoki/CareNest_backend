@@ -31,7 +31,6 @@ class PayrollService {
 
             // 1. Fetch Employees
             const employees = await userService.getOrganizationEmployees(organizationId);
-            const employeeMap = new Map(employees.map(e => [e.email, e]));
 
             // 2. Fetch Worked Records (Shifts)
             const query = {

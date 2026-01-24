@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
 const Trip = require('../models/Trip');
-const User = require('../models/User');
 const Organization = require('../models/Organization');
 
 class TripService {
@@ -267,49 +266,7 @@ class TripService {
    */
   async calculateReimbursement(organizationId, startDate, endDate) {
     try {
-      const pipeline = [
-        // 1. Match relevant trips
-        {
-          $match: {
-            organizationId: new mongoose.Types.ObjectId(organizationId),
-            status: 'APPROVED',
-            tripType: { $in: ['BETWEEN_CLIENTS', 'WITH_CLIENT'] },
-            date: {
-              $gte: new Date(startDate),
-              $lte: new Date(endDate)
-            }
-          }
-        },
-        // 2. Group by Employee
-        {
-          $group: {
-            _id: "$userId",
-            totalDistance: { $sum: "$distance" },
-            tripCount: { $sum: 1 }
-          }
-        },
-        // 3. Lookup Organization to get rate
-        {
-          $lookup: {
-            from: "organizations",
-            localField: "organizationId", // Note: organizationId is not available in group stage _id, so we need to be careful.
-            // Actually, we are matching by organizationId first, so all docs belong to that org.
-            // But after $group, we lose the organizationId field unless we keep it.
-            // Let's re-structure the pipeline to look up organization *before* grouping or use a separate query.
-            // Or better, since we know organizationId, we can just fetch the rate separately.
-            // But to stick to aggregation:
-             pipeline: [
-              { $match: { _id: new mongoose.Types.ObjectId(organizationId) } },
-              { $project: { reimbursementRate: 1 } }
-            ],
-            as: "organization"
-          }
-        },
-        // Wait, looking up organization based on the input param is easier if we just fetch the org first.
-        // But let's try to fix the pipeline.
-        // The original pipeline used $lookup with 'let' and 'pipeline' which is powerful.
-        // Mongoose aggregate also supports this.
-      ];
+
 
       // Re-implementing the original logic but with Mongoose models
       // We can fetch the organization rate first to simplify the aggregation

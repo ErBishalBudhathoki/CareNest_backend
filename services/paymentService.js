@@ -1,4 +1,3 @@
-const mongoose = require('mongoose');
 const { Invoice, PaymentStatus } = require('../models/Invoice');
 const { CreditNote, CreditNoteStatus } = require('../models/CreditNote');
 const auditService = require('./auditService');

@@ -1,5 +1,4 @@
 const payrollService = require('../services/payrollService');
-const schadsService = require('../services/schadsService');
 
 // Mock Data
 const baseRate = 30.00;
@@ -47,13 +46,13 @@ const runScenario = (name, shifts) => {
     // Calc for Permanent
     const permResult = payrollService.calculateEmployeePayroll(permEmployee, shifts);
     console.log(`PERMANENT: Gross $${permResult.grossPay} | Breakdown:`, 
-        Object.entries(permResult.breakdown).filter(([k,v]) => v > 0).map(([k,v]) => `${k}: $${v.toFixed(2)}`).join(', ')
+        Object.entries(permResult.breakdown).filter(([_,v]) => v > 0).map(([k,v]) => `${k}: $${v.toFixed(2)}`).join(', ')
     );
 
     // Calc for Casual
     const casualResult = payrollService.calculateEmployeePayroll(casualEmployee, shifts);
     console.log(`CASUAL   : Gross $${casualResult.grossPay} | Breakdown:`, 
-        Object.entries(casualResult.breakdown).filter(([k,v]) => v > 0).map(([k,v]) => `${k}: $${v.toFixed(2)}`).join(', ')
+        Object.entries(casualResult.breakdown).filter(([_,v]) => v > 0).map(([k,v]) => `${k}: $${v.toFixed(2)}`).join(', ')
     );
     
     return { perm: permResult, casual: casualResult };

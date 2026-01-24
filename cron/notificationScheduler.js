@@ -1,11 +1,10 @@
 const cron = require('node-cron');
 const NotificationService = require('../services/notificationService');
-const NotificationSetting = require('../models/NotificationSetting');
 const NotificationHistory = require('../models/NotificationHistory');
 const Shift = require('../models/Shift');
 const Expense = require('../models/Expense');
 const User = require('../models/User');
-const logger = require('../utils/logger').createLogger('NotificationScheduler');
+const logger = require('../config/logger');
 const QueueManager = require('../core/QueueManager');
 const { QUEUE_NAME } = require('../workers/notificationWorker');
 
