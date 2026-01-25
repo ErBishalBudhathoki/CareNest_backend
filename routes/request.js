@@ -7,5 +7,6 @@ router.get('/organization/:organizationId', requestController.getRequests);
 router.patch('/:requestId/status', requestController.updateRequestStatus);
 router.post('/:requestId/claim', requestController.claimRequest);
 router.get('/forecast/:userEmail', requestController.getLeaveForecast);
+router.post('/calculate-hours', requestController.calculateLeaveHours);
 
 module.exports = router;
