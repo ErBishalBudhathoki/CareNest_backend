@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const leaveController = require('../controllers/leaveController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
-const errorHandler = require('../middleware/errorHandler');
+const { errorHandler } = require('../middleware/errorHandler');
 
 /**
  * @route GET /api/leave/balances/:userEmail
