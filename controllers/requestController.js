@@ -114,6 +114,31 @@ class RequestController {
       });
     }
   }
+
+  async calculateLeaveHours(req, res) {
+    try {
+      const { startDate, endDate, organizationId, dailyHours } = req.body;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing start or end date'
+        });
+      }
+
+      const result = await requestService.calculateLeaveHours(startDate, endDate, organizationId, dailyHours);
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      logger.error('Error calculating leave hours', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Error calculating leave hours'
+      });
+    }
+  }
 }
 
 module.exports = new RequestController();

@@ -198,6 +198,8 @@ const bankDetailsRoutes = require('./routes/bankDetails');
 console.log('Bank details routes loaded successfully');
 const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
 console.log('Admin invoice profile routes loaded successfully');
+const leaveRoutes = require('./routes/leave');
+console.log('Leave routes loaded successfully');
 const requestRoutes = require('./routes/request');
 console.log('Request routes loaded successfully');
 const tripRoutes = require('./routes/tripRoutes');
@@ -260,6 +262,9 @@ app.use('/api/analytics', analyticsRoutes);
 
 // Mount request routes
 app.use('/api/requests', requestRoutes);
+// Mount leave routes (balances, requests, forecast, holidays)
+app.use('/leave', leaveRoutes);
+app.use('/api/leave', leaveRoutes);
 
 // Mount timesheet reminder routes
 app.use('/api/reminders', timesheetReminderRoutes);
@@ -269,6 +274,9 @@ app.use('/api/earnings', earningsRoutes);
 
 // Mount payroll routes
 app.use('/api/payroll', payrollRoutes);
+
+// Mount leave balance routes
+app.use('/api/leave/balances', require('./routes/leaveBalanceRoutes'));
 
 // Mount onboarding routes
 app.use('/api/onboarding', onboardingRoutes);
