@@ -2,6 +2,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { messaging } = require('../firebase-admin-config');
+const LeaveBalanceService = require('./leaveBalanceService'); // Import LeaveBalanceService
 
 const uri = process.env.MONGODB_URI;
 
@@ -27,6 +28,37 @@ class RequestService {
       details, // Object containing specific fields
       note
     } = requestData;
+
+    // Validate Balance for TimeOff
+    if (type === 'TimeOff' && details && details.leaveType && details.totalHours) {
+        // Validate hours against dates
+        if (details.startDate && details.endDate) {
+            try {
+                const calculated = await this.calculateLeaveHours(details.startDate, details.endDate, organizationId);
+                // Allow small tolerance for floating point
+                if (details.totalHours > calculated.totalHours + 0.1) {
+                    throw new Error(`Total hours cannot exceed ${calculated.totalHours} for the selected dates.`);
+                }
+            } catch (e) {
+                if (e.message.includes('Total hours cannot exceed')) throw e;
+                console.error("Error verifying leave hours:", e);
+            }
+        }
+
+        try {
+            const hasBalance = await LeaveBalanceService.checkBalance(userEmail, details.leaveType, details.totalHours);
+            if (!hasBalance) {
+                // We could throw error, but maybe we just allow it and let manager reject?
+                // PRD says "Prevent requests that exceed available balance"
+                throw new Error(`Insufficient ${details.leaveType} balance.`);
+            }
+        } catch (e) {
+            console.error("Balance check failed:", e);
+             // If user not found or balance service error, maybe block or warn. 
+             // If "Insufficient...", rethrow.
+             if (e.message.includes('Insufficient')) throw e;
+        }
+    }
 
     let storedUserId = userId;
     if (typeof storedUserId === 'string' && storedUserId.includes('@')) {
@@ -275,6 +307,28 @@ class RequestService {
       }
     }
 
+    // Handle Leave Balance Deduction on Approval
+    if (status === 'Approved' && originalRequest.type === 'TimeOff') {
+        try {
+            const details = originalRequest.details;
+            if (details && details.leaveType && details.totalHours) {
+                // Determine userEmail for deduction
+                // originalRequest.createdBy is userEmail
+                await LeaveBalanceService.updateBalance(
+                    originalRequest.createdBy, 
+                    details.leaveType, 
+                    -Math.abs(details.totalHours), 
+                    `Leave Request Approved: ${requestId}`
+                );
+                console.log(`Deducted ${details.totalHours} hours from ${originalRequest.createdBy} for ${details.leaveType}`);
+            }
+        } catch (err) {
+            console.error('Failed to deduct leave balance', err);
+            // Should we block approval? Probably yes.
+            throw new Error(`Failed to update leave balance: ${err.message}`);
+        }
+    }
+
     let finalStatus = status;
     let unsetFields = {};
 
@@ -407,24 +461,15 @@ class RequestService {
   }
 
   async getLeaveForecast(userEmail, targetDate) {
-    const db = await this.connect();
-    
-    // 1. Get User Start Date
-    const user = await db.collection('login').findOne({ email: userEmail });
-    
-    // Default values
-    let startDate = new Date();
-    // Fallback: If no createdAt, assume start of current year
-    startDate.setMonth(0, 1); 
-    
-    if (user && user.createdAt) {
-       startDate = new Date(user.createdAt);
-    }
-    
+    // 1. Get Current Balance from Service
+    // We assume forecast is mainly for Annual Leave
+    const balances = await LeaveBalanceService.getBalances(userEmail);
+    const currentBalance = balances.annualLeave || 0;
+
     const target = new Date(targetDate);
     const now = new Date();
     
-    // 2. Calculate Accrual
+    // 2. Calculate Future Accrual
     // Rule: 20 days per year = 1.66 days/month.
     // Assuming 7.6 hours per day = 12.66 hours/month.
     const ACCRUAL_RATE_HOURS_PER_MONTH = 12.66;
@@ -438,49 +483,94 @@ class RequestService {
         return months <= 0 ? 0 : months;
     };
 
-    const monthsWorked = getMonthsDiff(startDate, now);
-    const accruedToDate = monthsWorked * ACCRUAL_RATE_HOURS_PER_MONTH;
-    
-    // 3. Calculate Taken Leave (Approved TimeOff)
-    // Support both ID and Email matching
-    const userId = user ? user._id.toString() : userEmail;
-    
-    const takenRequests = await db.collection('requests').find({
-        $or: [
-          { userId: userId },
-          { createdBy: userEmail }
-        ],
-        type: 'TimeOff',
-        status: 'Approved'
-    }).toArray();
-    
-    let takenHours = 0;
-    takenRequests.forEach(req => {
-        if (req.details && req.details.startDate && req.details.endDate) {
-            const start = new Date(req.details.startDate);
-            const end = new Date(req.details.endDate);
-            // Simple duration in hours
-            // In production, this should account for working days/hours only
-            const diffMs = end - start;
-            const diffHours = diffMs / (1000 * 60 * 60);
-            
-            // Cap max hours per day to 7.6 or 8 if spanning multiple days
-            // For now, use raw hours but cap at 24h * days
-            takenHours += diffHours;
-        }
-    });
-    
-    // 4. Forecast
     const monthsToTarget = getMonthsDiff(now, target);
     const forecastAccrual = monthsToTarget * ACCRUAL_RATE_HOURS_PER_MONTH;
-    const currentBalance = accruedToDate - takenHours;
+    
+    // 3. Calculate Approved Future Leave (not yet taken but approved)
+    // If LeaveBalanceService.updateBalance is called on Approval, then currentBalance ALREADY reflects approved leave?
+    // My implementation deducts on Approval. So currentBalance is already reduced by approved leave.
+    // So we don't need to subtract again.
+    // However, if the approved leave is in the *future*, it is still deducted from balance.
+    // So currentBalance = Available Balance.
+    
+    // 4. Forecast
+    const forecastBalance = currentBalance + forecastAccrual;
     
     return {
-        accrued: parseFloat(accruedToDate.toFixed(2)),
-        taken: parseFloat(takenHours.toFixed(2)),
+        accrued: parseFloat((balances.accruedHours || 0).toFixed(2)), // We might not track this perfectly in simple service yet
+        taken: parseFloat((balances.usedHours || 0).toFixed(2)),
         balance: parseFloat(currentBalance.toFixed(2)),
-        forecast: parseFloat((currentBalance + forecastAccrual).toFixed(2)),
+        forecast: parseFloat(forecastBalance.toFixed(2)),
         targetDate: target
+    };
+  }
+
+  /**
+   * Calculate leave hours excluding weekends and public holidays
+   * @param {string} startDate - ISO date string
+   * @param {string} endDate - ISO date string
+   * @param {string} organizationId - Organization ID
+   * @param {number} dailyHours - Hours per day (default 7.6)
+   */
+  async calculateLeaveHours(startDate, endDate, organizationId, dailyHours = 7.6) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new Error("Invalid date format");
+    }
+
+    if (end < start) {
+      throw new Error("End date must be after start date");
+    }
+
+    // 1. Get Holidays
+    const HolidayService = require('./holidayService');
+    const allHolidays = await HolidayService.getAllHolidays(organizationId);
+    
+    // Convert holidays to a Set of date strings (DD-MM-YYYY or YYYY-MM-DD - DB uses DD-MM-YYYY)
+    const holidayDates = new Set(allHolidays.map(h => h.Date)); // DB stores as "DD-MM-YYYY" string based on schema check
+    
+    // Helper to format date as DD-MM-YYYY
+    const formatDate = (date) => {
+      const d = date.getDate().toString().padStart(2, '0');
+      const m = (date.getMonth() + 1).toString().padStart(2, '0');
+      const y = date.getFullYear();
+      return `${d}-${m}-${y}`;
+    };
+
+    let totalHours = 0;
+    let workingDays = 0;
+    let weekendDays = 0;
+    let holidayDays = 0;
+    
+    // Iterate loop
+    const current = new Date(start);
+    while (current <= end) {
+      const dayOfWeek = current.getDay(); // 0 = Sun, 6 = Sat
+      const dateStr = formatDate(current);
+      
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        weekendDays++;
+      } else if (holidayDates.has(dateStr)) {
+        holidayDays++;
+      } else {
+        workingDays++;
+        totalHours += dailyHours;
+      }
+      
+      // Next day
+      current.setDate(current.getDate() + 1);
+    }
+
+    return {
+      totalHours: parseFloat(totalHours.toFixed(2)),
+      breakdown: {
+        workingDays,
+        weekendDays,
+        holidayDays,
+        dailyHours
+      }
     };
   }
 }
