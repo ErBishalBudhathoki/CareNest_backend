@@ -409,6 +409,71 @@ class OrganizationController {
       });
     }
   }
+
+  // Multi-Tenant Endpoints
+
+  async switchOrganization(req, res) {
+    try {
+      const { organizationId } = req.params;
+      const userId = req.user.userId;
+
+      const result = await organizationService.switchOrganization(userId, organizationId);
+      
+      res.status(200).json({
+        message: "Switched organization successfully",
+        data: result
+      });
+    } catch (error) {
+      logger.error('Error switching organization', {
+        error: error.message,
+        userId: req.user.userId,
+        organizationId: req.params.organizationId
+      });
+      res.status(403).json({
+        message: error.message
+      });
+    }
+  }
+
+  async getBranding(req, res) {
+    try {
+      const { organizationId } = req.params;
+      const branding = await organizationService.getOrganizationBranding(organizationId);
+      res.status(200).json({
+        data: branding
+      });
+    } catch (error) {
+      logger.error('Error getting branding', { error: error.message });
+      res.status(500).json({ message: "Error getting branding" });
+    }
+  }
+
+  async updateBranding(req, res) {
+    try {
+      const { organizationId } = req.params;
+      const branding = await organizationService.updateOrganizationBranding(organizationId, req.body);
+      res.status(200).json({
+        message: "Branding updated successfully",
+        data: branding
+      });
+    } catch (error) {
+      logger.error('Error updating branding', { error: error.message });
+      res.status(500).json({ message: "Error updating branding" });
+    }
+  }
+
+  async getMyOrganizations(req, res) {
+    try {
+      const userId = req.user.userId;
+      const organizations = await organizationService.getUserOrganizations(userId);
+      res.status(200).json({
+        data: organizations
+      });
+    } catch (error) {
+      logger.error('Error getting user organizations', { error: error.message });
+      res.status(500).json({ message: "Error getting user organizations" });
+    }
+  }
 }
 
 module.exports = new OrganizationController();

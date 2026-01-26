@@ -90,7 +90,10 @@ const userSchema = new mongoose.Schema({
   },
   passwordUpdatedAt: {
     type: Date
-  }
+  },
+  multiOrgEnabled: { type: Boolean, default: false },
+  defaultOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },
+  lastActiveOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' }
 }, {
   timestamps: true,
   collection: 'users'
