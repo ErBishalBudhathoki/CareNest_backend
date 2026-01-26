@@ -613,10 +613,36 @@ async function getCrossOrgMetrics(req, res) {
   }
 }
 
+/**
+ * Get Revenue Forecast
+ * GET /api/analytics/forecast
+ */
+async function getRevenueForecast(req, res) {
+  try {
+    // Placeholder implementation for forecast
+    // In a real scenario, this would likely use historical data to project future revenue
+    const orgId = req.params.organizationId || req.query.organizationId;
+    
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Revenue forecast feature coming soon',
+      data: [] 
+    });
+  } catch (error) {
+    logger.error('Error in getRevenueForecast', error);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+}
+
 module.exports = {
   getFinancialMetrics,
   getUtilizationMetrics,
   getOvertimeMetrics,
   getReliabilityMetrics,
-  getCrossOrgMetrics
+  getCrossOrgMetrics,
+  getRevenueForecast
 };
