@@ -49,4 +49,26 @@ router.get(
   analyticsController.getReliabilityMetrics
 );
 
+/**
+ * @route GET /api/analytics/cross-org/revenue
+ * @desc Get Cross-Organization Revenue
+ * @access Private (Owner/Cross-Org permission)
+ */
+router.get(
+  '/cross-org/revenue',
+  authenticateUser,
+  analyticsController.getCrossOrgMetrics
+);
+
+/**
+ * @route GET /api/analytics/forecast
+ * @desc Get Revenue Forecast
+ * @access Private
+ */
+router.get(
+  '/forecast',
+  authenticateUser,
+  analyticsController.getRevenueForecast
+);
+
 module.exports = router;

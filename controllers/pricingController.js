@@ -324,7 +324,10 @@ class PricingController {
    */
   async getPricingLookup(req, res) {
     try {
-      const { organizationId, supportItemNumber, clientId } = req.query;
+      // Support both query params and path params for backward compatibility
+      const organizationId = req.params.organizationId || req.query.organizationId;
+      const supportItemNumber = req.params.supportItemNumber || req.query.supportItemNumber;
+      const { clientId } = req.query;
 
       if (!organizationId || !supportItemNumber) {
         return res.status(400).json({
@@ -437,6 +440,93 @@ class PricingController {
       res.status(500).json({
         statusCode: 500,
         message: 'Error performing bulk import'
+      });
+    }
+  }
+  /**
+   * Get organization fallback base rate
+   * GET /api/pricing/fallback-base-rate/:organizationId
+   */
+  async getFallbackBaseRate(req, res) {
+    try {
+      const { organizationId } = req.params;
+
+      if (!organizationId) {
+        return res.status(400).json({
+          statusCode: 400,
+          message: 'organizationId is required'
+        });
+      }
+
+      const result = await pricingService.getFallbackBaseRate(organizationId);
+
+      res.status(200).json({
+        statusCode: 200,
+        data: result
+      });
+    } catch (error) {
+      logger.error('Error getting fallback base rate', {
+        error: error.message,
+        stack: error.stack,
+        organizationId: req.params.organizationId
+      });
+      
+      if (error.message.includes('No fallback base rate')) {
+        return res.status(404).json({
+          statusCode: 404,
+          message: error.message
+        });
+      }
+
+      res.status(500).json({
+        statusCode: 500,
+        message: 'Error retrieving fallback base rate'
+      });
+    }
+  }
+
+  /**
+   * Set organization fallback base rate
+   * PUT /api/pricing/fallback-base-rate/:organizationId
+   */
+  async setFallbackBaseRate(req, res) {
+    try {
+      const { organizationId } = req.params;
+      const { fallbackBaseRate, userEmail } = req.body;
+
+      if (!organizationId || fallbackBaseRate === undefined || !userEmail) {
+        return res.status(400).json({
+          statusCode: 400,
+          message: 'organizationId, fallbackBaseRate, and userEmail are required'
+        });
+      }
+
+      // Validate authorization
+      const isAuthorized = await pricingService.validateUserAuthorization(userEmail, organizationId);
+      if (!isAuthorized) {
+        return res.status(403).json({
+          statusCode: 403,
+          message: 'User not authorized for this organization'
+        });
+      }
+
+      const result = await pricingService.setFallbackBaseRate(organizationId, fallbackBaseRate, userEmail);
+
+      res.status(200).json({
+        statusCode: 200,
+        message: 'Fallback base rate updated',
+        data: result
+      });
+    } catch (error) {
+      logger.error('Error setting fallback base rate', {
+        error: error.message,
+        stack: error.stack,
+        organizationId: req.params.organizationId,
+        fallbackBaseRate: req.body.fallbackBaseRate
+      });
+      res.status(500).json({
+        statusCode: 500,
+        message: error.message || 'Error updating fallback base rate'
       });
     }
   }

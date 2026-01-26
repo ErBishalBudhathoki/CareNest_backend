@@ -37,6 +37,10 @@ connectMongoose();
 const notificationScheduler = require('./cron/notificationScheduler');
 notificationScheduler.start();
 
+// Start Dunning Scheduler
+const dunningScheduler = require('./cron/dunningScheduler');
+dunningScheduler();
+
 // Firebase Admin SDK Configuration Generation
 // fs and path are already imported at the top of server.js
 // const fs = require('fs');
@@ -60,26 +64,22 @@ const logger = require('./config/logger'); // Import structured logger
 console.log('Logger loaded successfully');
 const { keepAliveService } = require('./utils/keepAlive'); // Import keep-alive service
 console.log('Keep-alive service loaded successfully');
-const { startTimerWithTracking,
-  stopTimerWithTracking,
-  getActiveTimers
-} = require('./active_timers_endpoints');
+const activeTimerRoutesV1 = require('./routes/v1/activeTimers');
+const ActiveTimerController = require('./controllers/activeTimerController');
+const pricingController = require('./controllers/pricingController');
 console.log('Active timers endpoints loaded successfully');
+const auditRoutesV1 = require('./routes/v1/audit');
+console.log('Audit routes loaded successfully');
+const pricePromptRoutesV1 = require('./routes/v1/pricePrompt');
+console.log('Price prompt routes loaded successfully');
 
-const {
-  createCustomPricing,
-  getOrganizationPricing,
-  getPricingById,
-  updateCustomPricing,
-  deleteCustomPricing,
-  updatePricingApproval,
-  getPricingLookup,
-  getBulkPricingLookup,
-  bulkImportPricing,
-  getFallbackBaseRate,
-  setFallbackBaseRate
-} = require('./pricing_endpoints');
-console.log('Pricing endpoints loaded successfully');
+// V1 Modular Routes
+const pricingRoutesV1 = require('./routes/v1/pricing');
+
+const invoiceRoutesV1 = require('./routes/v1/invoice');
+// organizationRoutes is already required later as './routes/organization', we can migrate it to v1 later or alias it.
+// const organizationRoutesV1 = require('./routes/v1/organization'); 
+
 const {
   createExpense,
   getOrganizationExpenses,
@@ -101,15 +101,6 @@ const {
 } = require('./price_validation_endpoints');
 console.log('Price validation endpoints loaded successfully');
 const {
-  getEntityAuditHistoryEndpoint,
-  getOrganizationAuditLogsEndpoint,
-  getAuditStatisticsEndpoint,
-  createAuditLogEndpoint,
-  getAuditMetadataEndpoint,
-  exportAuditLogsEndpoint
-} = require('./audit_trail_endpoints');
-console.log('Audit trail endpoints loaded successfully');
-const {
   processRecurringExpensesEndpoint,
   createRecurringExpenseEndpoint,
   getOrganizationRecurringExpensesEndpoint,
@@ -119,35 +110,18 @@ const {
   getRecurringExpenseByIdEndpoint
 } = require('./recurring_expense_endpoints');
 console.log('Recurring expense endpoints loaded successfully');
-const {
-  generateInvoiceLineItems,
-  getInvoicePreview,
-  getAvailableAssignments,
-  validateInvoiceGenerationData,
-  generateBulkInvoices,
-  validateExistingInvoiceLineItems,
-  validatePricingRealtime,
-  getInvoiceValidationReport
-} = require('./invoice_generation_endpoints');
-console.log('Invoice generation endpoints loaded successfully');
+
 const {
   getInvoicesList,
   getInvoiceDetails,
   shareInvoice,
-  deleteInvoice
+  deleteInvoice,
+  getInvoiceStats
 } = require('./endpoints/invoice_management_endpoints');
 console.log('Invoice management endpoints loaded successfully');
-const {
-  createPricePrompt,
-  resolvePricePrompt,
-  getPendingPrompts,
-  cancelPricePrompt,
-  generateInvoiceWithPrompts,
-  completeInvoiceGeneration
-} = require('./price_prompt_endpoints');
-console.log('Price prompt endpoints loaded successfully');
 
 const { loggingMiddleware } = require('./middleware/logging');
+
 console.log('Logging middleware loaded successfully');
 const { errorTrackingMiddleware } = require('./middleware/errorTracking');
 //console.log('Error tracking middleware loaded successfully');
@@ -196,6 +170,9 @@ const teamRoutes = require('./routes/teamRoutes');
 const emergencyRoutes = require('./routes/emergencyRoutes');
 const bankDetailsRoutes = require('./routes/bankDetails');
 console.log('Bank details routes loaded successfully');
+const workerRoutes = require('./routes/workerRoutes');
+const complianceRoutes = require('./routes/complianceRoutes');
+const multiOrgRoutes = require('./routes/multiOrgRoutes');
 const adminInvoiceProfileRoutes = require('./routes/adminInvoiceProfile');
 console.log('Admin invoice profile routes loaded successfully');
 const leaveRoutes = require('./routes/leave');
@@ -221,11 +198,11 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
+      fontSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"]
@@ -234,7 +211,28 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-app.use(cors());
+const corsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = environmentConfig.getConfig().security.corsOrigins || [];
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || environmentConfig.isDevelopmentEnvironment()) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
+
+// Webhook routes (Must be before express.json() to capture raw body)
+const webhookRoutes = require('./routes/webhookRoutes');
+app.use('/api/webhooks', webhookRoutes);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(systemHealthMiddleware);
@@ -259,6 +257,10 @@ app.use('/api/security', securityDashboardRoutes);
 // Mount API usage analytics routes
 app.use('/api/analytics', apiUsageRoutes);
 app.use('/api/analytics', analyticsRoutes);
+
+app.use('/api/worker', workerRoutes);
+app.use('/api/compliance', complianceRoutes);
+app.use('/api/multiorg', multiOrgRoutes);
 
 // Mount request routes
 app.use('/api/requests', requestRoutes);
@@ -297,8 +299,18 @@ app.use('/', businessRoutes);
 console.log('Business routes loaded successfully');
 
 // Mount organization routes
-const organizationRoutes = require('./routes/organization');
+const organizationRoutes = require('./routes/v1/organization');
 app.use('/organization', organizationRoutes);
+
+// Mount V1 Modular Routes
+app.use('/api/pricing', pricingRoutesV1);
+app.use('/api/invoice', invoiceRoutesV1);
+app.use('/api/invoice', pricePromptRoutesV1);
+app.use('/api/active-timers', activeTimerRoutesV1);
+app.use('/api/audit', auditRoutesV1);
+
+
+
 console.log('Organization routes loaded successfully');
 
 // Mount client routes
@@ -312,9 +324,9 @@ app.use('/api/worked-time', workedTimeRoutes);
 console.log('Worked time routes loaded successfully');
 
 // Mount active timer endpoints directly to app
-app.post('/startTimerWithTracking', startTimerWithTracking);
-app.post('/stopTimerWithTracking', stopTimerWithTracking);
-app.get('/getActiveTimers/:organizationId', getActiveTimers);
+app.post('/startTimerWithTracking', ActiveTimerController.startTimer);
+app.post('/stopTimerWithTracking', ActiveTimerController.stopTimer);
+app.get('/getActiveTimers/:organizationId', ActiveTimerController.getActiveTimers);
 
 // Mount config routes
 const configRoutes = require('./routes/config');
@@ -1833,7 +1845,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
  * POST /startTimerWithTracking
  */
 app.post('/startTimerWithTracking', async (req, res) => {
-  await startTimerWithTracking(req, res);
+  await ActiveTimerController.startTimer(req, res);
 });
 
 // Duplicate route removed - using the one at line 3997 instead
@@ -5314,7 +5326,7 @@ app.post('/startTimer', async (req, res) => {
   const newReq = { body: requestBody };
 
   // Call the new implementation
-  await startTimerWithTracking(newReq, res);
+  await ActiveTimerController.startTimer(newReq, res);
 });
 
 /**
@@ -5334,26 +5346,27 @@ app.post('/stopTimer', async (req, res) => {
   const newReq = { body: requestBody };
 
   // Call the new implementation
-  await stopTimerWithTracking(newReq, res);
+  await ActiveTimerController.stopTimer(newReq, res);
 });
 
 /**
  * Start timer with tracking (new database-backed endpoint)
  * POST /startTimerWithTracking
  */
-app.post('/startTimerWithTracking', startTimerWithTracking);
+app.post('/startTimerWithTracking', ActiveTimerController.startTimer);
 
 /**
  * Stop timer with tracking (new database-backed endpoint)
  * POST /stopTimerWithTracking
  */
-app.post('/stopTimerWithTracking', stopTimerWithTracking);
+app.post('/stopTimerWithTracking', ActiveTimerController.stopTimer);
 
 /**
  * Get active timers for organization
  * GET /getActiveTimers/:organizationId
  */
-app.get('/getActiveTimers/:organizationId', getActiveTimers);
+app.get('/getActiveTimers/:organizationId', ActiveTimerController.getActiveTimers);
+
 
 /**
  * Set worked time for a client
@@ -6220,71 +6233,9 @@ app.get('/api/support-items/all', async (req, res) => {
 
 // ===== CUSTOM PRICING API ENDPOINTS =====
 
-/**
- * Create a new custom pricing record
- * POST /api/pricing/create
- */
-app.post('/api/pricing/create', createCustomPricing);
+// Pricing Routes (Migrated to v1)
+// Routes are now mounted at /api/pricing via pricingRoutesV1
 
-/**
- * Get pricing records for an organization
- * GET /api/pricing/organization/:organizationId
- */
-app.get('/api/pricing/organization/:organizationId', getOrganizationPricing);
-
-/**
- * Get specific pricing record by ID
- * GET /api/pricing/:pricingId
- */
-app.get('/api/pricing/:pricingId', getPricingById);
-
-/**
- * Update existing pricing record
- * PUT /api/pricing/:pricingId
- */
-app.put('/api/pricing/:pricingId', updateCustomPricing);
-
-/**
- * Delete (deactivate) pricing record
- * DELETE /api/pricing/:pricingId
- */
-app.delete('/api/pricing/:pricingId', deleteCustomPricing);
-
-/**
- * Update approval status for pricing record
- * PUT /api/pricing/:pricingId/approval
- */
-app.put('/api/pricing/:pricingId/approval', updatePricingApproval);
-
-/**
- * Get pricing lookup for invoice generation
- * GET /api/pricing/lookup/:organizationId/:supportItemNumber
- */
-app.get('/api/pricing/lookup/:organizationId/:supportItemNumber', getPricingLookup);
-
-/**
- * Get bulk pricing lookup for multiple NDIS items
- * POST /api/pricing/bulk-lookup
- */
-app.post('/api/pricing/bulk-lookup', getBulkPricingLookup);
-
-/**
- * Bulk import pricing records
- * POST /api/pricing/bulk-import
- */
-app.post('/api/pricing/bulk-import', bulkImportPricing);
-
-/**
- * Get organization fallback base rate
- * GET /api/pricing/fallback-base-rate/:organizationId
- */
-app.get('/api/pricing/fallback-base-rate/:organizationId', getFallbackBaseRate);
-
-/**
- * Set organization fallback base rate
- * PUT /api/pricing/fallback-base-rate/:organizationId
- */
-app.put('/api/pricing/fallback-base-rate/:organizationId', setFallbackBaseRate);
 
 /**
  * General Settings (atomic update)
@@ -6350,7 +6301,7 @@ app.get('/custom-price-organization/:ndisItemNumber', async (req, res) => {
       })
     };
 
-    await getPricingLookup(lookupReq, mockRes);
+    await pricingController.getPricingLookup(lookupReq, mockRes);
   } catch (error) {
     console.error('Error getting organization custom price:', error);
     res.status(500).json({
@@ -6400,7 +6351,7 @@ app.get('/custom-price-client/:ndisItemNumber/:clientId', async (req, res) => {
       })
     };
 
-    await getPricingLookup(lookupReq, mockRes);
+    await pricingController.getPricingLookup(lookupReq, mockRes);
   } catch (error) {
     console.error('Error getting client custom price:', error);
     res.status(500).json({
@@ -6446,7 +6397,7 @@ app.post('/save-custom-price-organization', async (req, res) => {
       }
     };
 
-    await createCustomPricing(transformedReq, res);
+    await pricingController.createCustomPricing(transformedReq, res);
   } catch (error) {
     console.error('Error in save-custom-price-organization:', error);
     res.status(500).json({
@@ -6493,7 +6444,7 @@ app.post('/save-custom-price-client', async (req, res) => {
       }
     };
 
-    await createCustomPricing(transformedReq, res);
+    await pricingController.createCustomPricing(transformedReq, res);
   } catch (error) {
     console.error('Error in save-custom-price-client:', error);
     res.status(500).json({
@@ -6705,41 +6656,8 @@ app.get('/api/price-validation/stats', getValidationStats);
 // AUDIT TRAIL API ENDPOINTS
 // ============================================================================
 
-/**
- * Get audit history for a specific entity
- * GET /api/audit/entity/:entityType/:entityId
- */
-app.get('/api/audit/entity/:entityType/:entityId', getEntityAuditHistoryEndpoint);
+// Audit routes are now mounted at /api/audit via auditRoutesV1
 
-/**
- * Get organization audit logs with filtering
- * GET /api/audit/organization/:organizationId
- */
-app.get('/api/audit/organization/:organizationId', getOrganizationAuditLogsEndpoint);
-
-/**
- * Get audit statistics for an organization
- * GET /api/audit/statistics/:organizationId
- */
-app.get('/api/audit/statistics/:organizationId', getAuditStatisticsEndpoint);
-
-/**
- * Create a manual audit log entry
- * POST /api/audit/log
- */
-app.post('/api/audit/log', createAuditLogEndpoint);
-
-/**
- * Get available audit actions and entity types
- * GET /api/audit/metadata
- */
-app.get('/api/audit/metadata', getAuditMetadataEndpoint);
-
-/**
- * Export audit logs for an organization
- * GET /api/audit/export/:organizationId
- */
-app.get('/api/audit/export/:organizationId', exportAuditLogsEndpoint);
 
 // ============================================================================
 // RECURRING EXPENSE AUTOMATION API ENDPOINTS
@@ -6791,46 +6709,9 @@ app.get('/api/recurring-expenses/statistics/:organizationId', getRecurringExpens
 // INVOICE GENERATION API ENDPOINTS (Task 2.1: clientAssignment-based extraction)
 // ============================================================================
 
-/**
- * Generate invoice line items based on clientAssignment data
- * POST /api/invoice/generate-line-items
- * Body: { userEmail, clientEmail, startDate, endDate }
- */
-app.post('/api/invoice/generate-line-items', generateInvoiceLineItems);
+// Invoice Generation Routes (Migrated to v1)
+// Routes are now mounted at /api/invoice via invoiceRoutesV1
 
-/**
- * Generate bulk invoices with pre-configured pricing
- * POST /api/invoice/generate-bulk-invoices
- * Body: { organizationId, userEmail, clients: [{ clientEmail, startDate, endDate }] }
- */
-app.post('/api/invoice/generate-bulk-invoices', generateBulkInvoices);
-
-/**
- * Validate existing invoice line items with comprehensive price validation
- * POST /api/invoice/validate-line-items
- * Body: { lineItems, defaultState?, defaultProviderType?, skipPriceValidation? }
- */
-app.post('/api/invoice/validate-line-items', validateExistingInvoiceLineItems);
-
-/**
- * Real-time price validation for invoice creation
- * POST /api/invoice/validate-pricing-realtime
- * Body: { lineItems, state?, providerType? }
- */
-app.post('/api/invoice/validate-pricing-realtime', validatePricingRealtime);
-
-/**
- * Get comprehensive invoice validation report
- * POST /api/invoice/validation-report
- * Body: { userEmail, clientEmail, startDate, endDate, includeExpenses?, defaultState?, defaultProviderType? }
- */
-app.post('/api/invoice/validation-report', getInvoiceValidationReport);
-
-/**
- * Get invoice generation preview
- * GET /api/invoice/preview/:userEmail/:clientEmail?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
- */
-app.get('/api/invoice/preview/:userEmail/:clientEmail', getInvoicePreview);
 
 /**
  * Get assigned client data
@@ -6892,18 +6773,7 @@ app.get('/assigned-client-data', async (req, res) => {
   }
 });
 
-/**
- * Get available assignments for invoice generation
- * GET /api/invoice/available-assignments/:userEmail
- */
-app.get('/api/invoice/available-assignments/:userEmail', getAvailableAssignments);
 
-/**
- * Validate invoice generation data
- * POST /api/invoice/validate-generation-data
- * Body: { userEmail, clientEmail, startDate, endDate }
- */
-app.post('/api/invoice/validate-generation-data', validateInvoiceGenerationData);
 
 // ============================================================================
 // INVOICE MANAGEMENT API ENDPOINTS (Generated Invoice List, View, Share, Delete)
@@ -6937,50 +6807,18 @@ app.post('/api/invoices/share/:invoiceId', shareInvoice);
  */
 app.delete('/api/invoices/delete/:invoiceId', deleteInvoice);
 
+/**
+ * Get invoice statistics for an organization
+ * GET /api/invoices/stats/:organizationId
+ */
+app.get('/api/invoices/stats/:organizationId', getInvoiceStats);
+
 // ============================================================================
 // PRICE PROMPT API ENDPOINTS (Task 2.3: Price prompt system for missing prices)
 // ============================================================================
 
-/**
- * Create a price prompt for missing pricing
- * POST /api/invoice/price-prompt/create
- * Body: { ndisItemNumber, itemDescription, organizationId, clientId, userEmail, clientEmail, quantity, unit, suggestedPrice, priceCap, state, providerType, sessionId, lineItemIndex }
- */
-app.post('/api/invoice/price-prompt/create', createPricePrompt);
+// Price prompt routes are now mounted at /api/invoice via pricePromptRoutesV1
 
-/**
- * Resolve a price prompt with user-provided pricing
- * POST /api/invoice/price-prompt/resolve
- * Body: { promptId, resolution: { providedPrice, saveAsCustomPricing, applyToClient, applyToOrganization, notes } }
- */
-app.post('/api/invoice/price-prompt/resolve', resolvePricePrompt);
-
-/**
- * Get pending price prompts for a session
- * GET /api/invoice/price-prompt/pending/:sessionId
- */
-app.get('/api/invoice/price-prompt/pending/:sessionId', getPendingPrompts);
-
-/**
- * Cancel a price prompt
- * POST /api/invoice/price-prompt/cancel
- * Body: { promptId, userEmail, organizationId, reason }
- */
-app.post('/api/invoice/price-prompt/cancel', cancelPricePrompt);
-
-/**
- * Generate invoice with price prompt handling
- * POST /api/invoice/generate-with-prompts
- * Body: { userEmail, clientEmail, startDate, endDate, sessionId }
- */
-app.post('/api/invoice/generate-with-prompts', generateInvoiceWithPrompts);
-
-/**
- * Complete invoice generation after all prompts are resolved
- * POST /api/invoice/complete-generation
- * Body: { sessionId, lineItems, userEmail, organizationId }
- */
-app.post('/api/invoice/complete-generation', completeInvoiceGeneration);
 
 // ============================================================================
 // BACKWARD COMPATIBILITY API ENDPOINTS (Task 2.7: Legacy invoice data support)

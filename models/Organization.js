@@ -49,6 +49,16 @@ const organizationSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  parentOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },
+  isMultiOrgEnabled: { type: Boolean, default: false },
+  allowedDomains: [String],
+  stripeAccountId: { type: String }, // For Stripe Connect
+  subscription: {
+    plan: { type: String, enum: ['basic', 'professional', 'enterprise'], default: 'basic' },
+    maxUsers: { type: Number, default: 10 },
+    maxSharedEmployees: { type: Number, default: 5 },
+    features: [String]
   }
 }, {
   timestamps: true,

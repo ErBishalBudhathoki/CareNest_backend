@@ -3,7 +3,10 @@ const SupportItem = require('../models/SupportItem');
 const Client = require('../models/Client');
 const User = require('../models/User');
 const auditService = require('./auditService');
+const cacheService = require('./cacheService');
 const { priceValidationService } = require('./priceValidationService');
+
+const PricingSettings = require('../models/PricingSettings');
 
 class PricingService {
   /**
@@ -426,6 +429,14 @@ class PricingService {
    */
   async getPricingLookup(organizationId, supportItemNumber, clientId = null) {
     try {
+      const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${clientId || 'global'}`;
+      const cachedResult = await cacheService.get(cacheKey);
+      
+      if (cachedResult) {
+        return cachedResult;
+      }
+
+      const lookupLogic = async () => {
       const currentDate = new Date();
       let clientIdForQuery = null;
       let stateUsed = 'NSW'; // default fallback
@@ -600,6 +611,15 @@ class PricingService {
       }
 
       return null;
+      };
+
+      const result = await lookupLogic();
+      // Cache only if result is found (non-null)
+      if (result) {
+        await cacheService.set(cacheKey, result, 600);
+      }
+      return result;
+
     } catch (error) {
       throw error;
     }
@@ -1035,6 +1055,111 @@ class PricingService {
       });
 
       return !!user;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get organization fallback base rate setting
+   */
+  async getFallbackBaseRate(organizationId) {
+    try {
+      const settingsDoc = await PricingSettings.findOne({
+        organizationId,
+        isActive: true
+      }).lean();
+
+      if (!settingsDoc || typeof settingsDoc.fallbackBaseRate !== 'number') {
+        throw new Error('No fallback base rate configured for this organization');
+      }
+
+      return {
+        organizationId,
+        fallbackBaseRate: settingsDoc.fallbackBaseRate,
+        updatedAt: settingsDoc.updatedAt,
+        updatedBy: settingsDoc.updatedBy,
+        version: settingsDoc.version || 1
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Set organization fallback base rate setting
+   */
+  async setFallbackBaseRate(organizationId, fallbackBaseRate, userEmail) {
+    try {
+      const numericRate = Number(fallbackBaseRate);
+      if (!Number.isFinite(numericRate) || numericRate <= 0) {
+        throw new Error('fallbackBaseRate must be a positive number');
+      }
+
+      const existing = await PricingSettings.findOne({
+        organizationId,
+        isActive: true
+      });
+
+      let resultDoc;
+      if (existing) {
+        await PricingSettings.updateOne(
+          { _id: existing._id },
+          {
+            $set: {
+              fallbackBaseRate: numericRate,
+              updatedBy: userEmail,
+              version: (existing.version || 1) + 1
+            },
+            $push: {
+              auditTrail: {
+                action: 'updated',
+                performedBy: userEmail,
+                timestamp: new Date(),
+                changes: `fallbackBaseRate set to ${numericRate}`
+              }
+            }
+          }
+        );
+        resultDoc = await PricingSettings.findById(existing._id).lean();
+      } else {
+        const settingsDoc = {
+          organizationId,
+          fallbackBaseRate: numericRate,
+          createdBy: userEmail,
+          updatedBy: userEmail,
+          isActive: true,
+          version: 1,
+          auditTrail: [{
+            action: 'created',
+            performedBy: userEmail,
+            timestamp: new Date(),
+            changes: `fallbackBaseRate set to ${numericRate}`
+          }]
+        };
+        const newSettings = await PricingSettings.create(settingsDoc);
+        resultDoc = newSettings.toObject();
+      }
+
+      // Audit log entry
+      await auditService.createAuditLog({
+        action: 'UPDATE',
+        entityType: 'pricing',
+        entityId: (resultDoc._id || resultDoc.id || '').toString(),
+        userEmail,
+        organizationId,
+        newValues: { fallbackBaseRate: numericRate },
+        reason: 'Updated fallback base rate',
+        metadata: { setting: 'fallbackBaseRate' }
+      });
+
+      return {
+        organizationId,
+        fallbackBaseRate: resultDoc.fallbackBaseRate,
+        updatedAt: resultDoc.updatedAt,
+        updatedBy: resultDoc.updatedBy,
+        version: resultDoc.version
+      };
     } catch (error) {
       throw error;
     }
