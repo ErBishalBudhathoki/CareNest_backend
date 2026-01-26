@@ -1,5 +1,6 @@
 const connectDB = require('../config/mongoose');
 const logger = require('../config/logger');
+const crossOrgService = require('../services/crossOrgService');
 
 /**
  * Analytics Controller
@@ -586,9 +587,36 @@ async function getReliabilityMetrics(req, res) {
   }
 }
 
+/**
+ * Get Cross-Org Revenue
+ * GET /api/analytics/cross-org/revenue
+ */
+async function getCrossOrgMetrics(req, res) {
+  try {
+    const { startDate, endDate } = req.query;
+    const userId = req.user.id; // Assumes auth middleware populates user
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ success: false, message: 'Start and End dates are required' });
+    }
+
+    await connectDB();
+    const result = await crossOrgService.getCrossOrgRevenue(userId, startDate, endDate);
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    logger.error('Error in getCrossOrgMetrics', error);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+}
+
 module.exports = {
   getFinancialMetrics,
   getUtilizationMetrics,
   getOvertimeMetrics,
-  getReliabilityMetrics
+  getReliabilityMetrics,
+  getCrossOrgMetrics
 };

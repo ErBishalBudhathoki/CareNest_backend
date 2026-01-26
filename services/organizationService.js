@@ -2,7 +2,11 @@ const Organization = require('../models/Organization');
 const User = require('../models/User');
 const Business = require('../models/Business');
 const Client = require('../models/Client');
+const UserOrganization = require('../models/UserOrganization');
+const OrganizationBranding = require('../models/OrganizationBranding');
+const SharedEmployeeAssignment = require('../models/SharedEmployeeAssignment');
 const { generateOrganizationCode } = require('../utils/cryptoHelpers');
+const cacheService = require('./cacheService');
 
 class OrganizationService {
   
@@ -82,13 +86,17 @@ class OrganizationService {
 
   async getOrganizationById(organizationId) {
     try {
+      const cacheKey = `org:${organizationId}`;
+      const cached = await cacheService.get(cacheKey);
+      if (cached) return cached;
+
       const organization = await Organization.findById(organizationId);
       
       if (!organization) {
         return null;
       }
       
-      return {
+      const result = {
         id: organization._id.toString(),
         name: organization.name,
         tradingName: organization.tradingName,
@@ -104,6 +112,9 @@ class OrganizationService {
         logoUrl: organization.logoUrl,
         isActive: organization.isActive
       };
+
+      await cacheService.set(cacheKey, result, 900); // 15 minutes
+      return result;
     } catch (error) {
       throw error;
     }
@@ -116,6 +127,10 @@ class OrganizationService {
         { $set: updates }
       );
       
+      if (result.modifiedCount > 0) {
+        await cacheService.del(`org:${organizationId}`);
+      }
+
       return result.modifiedCount > 0;
     } catch (error) {
       throw error;
@@ -173,6 +188,111 @@ class OrganizationService {
         payType: emp.payType || 'Hourly',
         payRates: emp.payRates || null
       }));
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Multi-Tenant Methods
+
+  async switchOrganization(userId, organizationId) {
+    try {
+      // Validate access
+      const userOrg = await UserOrganization.findOne({ userId, organizationId, isActive: true });
+      if (!userOrg) {
+        throw new Error('Access denied to organization');
+      }
+
+      // Update user's last active organization
+      await User.findByIdAndUpdate(userId, { lastActiveOrganizationId: organizationId });
+
+      // Return organization details with branding
+      const org = await this.getOrganizationById(organizationId);
+      const branding = await this.getOrganizationBranding(organizationId);
+
+      return { organization: org, branding, role: userOrg.role, permissions: userOrg.permissions };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getOrganizationBranding(organizationId) {
+    try {
+      let branding = await OrganizationBranding.findOne({ organizationId });
+      if (!branding) {
+        // Return defaults if not set
+        return {
+          primaryColor: '#DC143C',
+          secondaryColor: '#0066CC',
+          invoiceTemplate: { showLogo: true }
+        };
+      }
+      return branding;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async updateOrganizationBranding(organizationId, brandingData) {
+    try {
+      return await OrganizationBranding.findOneAndUpdate(
+        { organizationId },
+        { $set: brandingData },
+        { new: true, upsert: true }
+      );
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getUserOrganizations(userId) {
+    try {
+      const userOrgs = await UserOrganization.find({ userId, isActive: true })
+        .populate('organizationId', 'name code logoUrl');
+      
+      return userOrgs.map(uo => ({
+        id: uo.organizationId._id,
+        name: uo.organizationId.name,
+        code: uo.organizationId.code,
+        logoUrl: uo.organizationId.logoUrl,
+        role: uo.role,
+        lastAccessedAt: uo.lastAccessedAt
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async addSharedEmployee(employeeId, targetOrgId, assignmentData) {
+    try {
+      // Check if assignment exists
+      const existing = await SharedEmployeeAssignment.findOne({ 
+        employeeId, 
+        organizationId: targetOrgId,
+        status: 'active'
+      });
+      
+      if (existing) {
+        throw new Error('Employee is already assigned to this organization');
+      }
+
+      const assignment = new SharedEmployeeAssignment({
+        employeeId,
+        organizationId: targetOrgId,
+        ...assignmentData
+      });
+      
+      await assignment.save();
+
+      // Also create UserOrganization entry
+      await UserOrganization.create({
+        userId: employeeId,
+        organizationId: targetOrgId,
+        role: 'shared_employee',
+        permissions: ['read', 'write'] // Default permissions, should be refined
+      });
+
+      return assignment;
     } catch (error) {
       throw error;
     }

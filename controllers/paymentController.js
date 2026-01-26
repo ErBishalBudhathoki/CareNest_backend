@@ -3,11 +3,24 @@ const paymentService = require('../services/paymentService');
 class PaymentController {
   async createPaymentIntent(req, res) {
     try {
-      const { invoiceId, amount, currency, clientEmail } = req.body;
-      const result = await paymentService.createPaymentIntent(invoiceId, amount, currency, clientEmail);
+      // organizationId should be passed from frontend or inferred from invoice
+      const { invoiceId, amount, currency, clientEmail, organizationId } = req.body;
+      const result = await paymentService.createPaymentIntent(invoiceId, amount, currency, clientEmail, organizationId);
       res.json(result);
     } catch (error) {
       console.error('Create Payment Intent Error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  async createOnboardingLink(req, res) {
+    try {
+      const { organizationId } = req.body;
+      const userEmail = req.user ? req.user.email : 'system';
+      const result = await paymentService.createOnboardingLink(organizationId, userEmail);
+      res.json(result);
+    } catch (error) {
+      console.error('Create Onboarding Link Error:', error);
       res.status(500).json({ error: error.message });
     }
   }
@@ -47,6 +60,19 @@ class PaymentController {
       res.json(result);
     } catch (error) {
       console.error('Apply Credit Note Error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  async refundPayment(req, res) {
+    try {
+      const { invoiceId, amount, reason } = req.body;
+      const userEmail = req.user ? req.user.email : 'system';
+      
+      const result = await paymentService.processRefund(invoiceId, amount, reason, userEmail);
+      res.json(result);
+    } catch (error) {
+      console.error('Refund Payment Error:', error);
       res.status(500).json({ error: error.message });
     }
   }
