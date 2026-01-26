@@ -2,19 +2,33 @@ const nodemailer = require('nodemailer');
 
 class EmailService {
   constructor() {
-    this.transporter = nodemailer.createTransporter({
-      service: 'gmail',
-      auth: {
-        user: process.env.ADMIN_EMAIL, // Updated to match user's .env
-        pass: process.env.APP_PASSWORD, // Updated to match user's .env
-      },
-    });
+    this.transporter = null;
+    this.initTransporter();
+  }
+
+  initTransporter() {
+    try {
+      this.transporter = nodemailer.createTransporter({
+        service: 'gmail',
+        auth: {
+          user: process.env.ADMIN_EMAIL, 
+          pass: process.env.APP_PASSWORD,
+        },
+      });
+    } catch (error) {
+      console.warn('Failed to initialize email transporter. Email service will be disabled.', error.message);
+    }
   }
 
   async sendEmail(to, subject, html, attachments = []) {
+    if (!this.transporter) {
+      console.warn('Email service not initialized. Skipping email send.');
+      return null;
+    }
+
     try {
       const info = await this.transporter.sendMail({
-        from: `"CareNest" <${process.env.ADMIN_EMAIL}>`, // Updated to match user's .env
+        from: `"CareNest" <${process.env.ADMIN_EMAIL}>`,
         to,
         subject,
         html,
