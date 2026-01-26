@@ -13,6 +13,9 @@ const {
   validateRequiredFields,
   rateLimit
 } = require('./auth');
+
+const { organizationContextMiddleware } = require('./organizationContext');
+
 const {
   errorHandler,
   notFoundHandler,
@@ -43,6 +46,7 @@ module.exports = {
   verifyOTPMiddleware,
   validateRequiredFields,
   rateLimit,
+  organizationContextMiddleware,
   
   // Error handling middleware
   errorHandler,

@@ -1,5 +1,6 @@
 const express = require('express');
-const organizationController = require('../controllers/organizationController');
+const organizationController = require('../../controllers/organizationController');
+const multiTenantController = require('../../controllers/multiTenantController');
 const router = express.Router();
 
 /**
@@ -19,6 +20,14 @@ router.post('/createOrganization', organizationController.createOrganizationLega
  * POST /organization/verify-code
  */
 router.post('/verify-code', organizationController.verifyOrganizationCode);
+
+router.get('/my-list', organizationController.getMyOrganizations);
+
+/**
+ * Get cross-organization report
+ * GET /organization/cross-report
+ */
+router.get('/cross-report', multiTenantController.getCrossOrgReport);
 
 /**
  * Verify organization code (frontend endpoint)
@@ -67,5 +76,23 @@ router.get('/:organizationId/clients', organizationController.getOrganizationCli
  * GET /organization/:organizationId/employees
  */
 router.get('/:organizationId/employees', organizationController.getOrganizationEmployees);
+
+/**
+ * Switch active organization
+ * POST /organization/:organizationId/switch
+ */
+router.post('/:organizationId/switch', organizationController.switchOrganization);
+
+/**
+ * Get organization branding
+ * GET /organization/:organizationId/branding
+ */
+router.get('/:organizationId/branding', organizationController.getBranding);
+
+/**
+ * Update organization branding
+ * PUT /organization/:organizationId/branding
+ */
+router.put('/:organizationId/branding', organizationController.updateBranding);
 
 module.exports = router;
