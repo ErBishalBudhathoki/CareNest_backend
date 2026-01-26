@@ -1,5 +1,5 @@
 const multiOrgService = require('../services/multiOrgService');
-const { catchAsync } = require('../utils/errorHandler');
+const catchAsync = require('../utils/catchAsync');
 
 exports.getRollup = catchAsync(async (req, res) => {
   const userEmail = req.user.email;

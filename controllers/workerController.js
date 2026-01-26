@@ -1,5 +1,5 @@
 const workerService = require('../services/workerService');
-const { catchAsync } = require('../utils/errorHandler');
+const catchAsync = require('../utils/catchAsync');
 
 exports.getDashboard = catchAsync(async (req, res) => {
   // Use organizationId from params or header
