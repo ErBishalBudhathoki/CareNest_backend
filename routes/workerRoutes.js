@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const workerController = require('../controllers/workerController');
-const { protect } = require('../middleware/auth'); // Assuming protect middleware exists
+const { authenticateUser } = require('../middleware/auth');
 
-router.get('/dashboard', protect, workerController.getDashboard);
+router.get('/dashboard', authenticateUser, workerController.getDashboard);
 
 module.exports = router;
