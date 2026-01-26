@@ -1,5 +1,5 @@
 const complianceService = require('../services/complianceService');
-const { catchAsync } = require('../utils/errorHandler');
+const catchAsync = require('../utils/catchAsync');
 
 exports.getSummary = catchAsync(async (req, res) => {
   const { organizationId } = req.params;
