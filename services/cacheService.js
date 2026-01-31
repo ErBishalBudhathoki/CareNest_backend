@@ -47,15 +47,25 @@ class CacheService {
   }
 
   /**
-   * Clear cache by pattern
+   * Clear cache by pattern using SCAN (safe for production)
    * @param {string} pattern 
    */
   async clearPattern(pattern) {
+    const stream = redis.scanStream({
+      match: pattern,
+      count: 100
+    });
+
     try {
-      const keys = await redis.keys(pattern);
-      if (keys.length > 0) {
-        await redis.del(keys);
-      }
+      stream.on('data', async (keys) => {
+        if (keys.length > 0) {
+          await redis.del(keys);
+        }
+      });
+
+      stream.on('end', () => {
+        // logger.info(`Cache clear complete for pattern: ${pattern}`);
+      });
     } catch (error) {
       logger.error(`Cache Clear Pattern Error [${pattern}]:`, error);
     }

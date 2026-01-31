@@ -6,12 +6,16 @@ class CalendarController {
       const { provider, accessToken } = req.body;
       const userId = req.user.userId;
       
-      const events = await CalendarService.syncEvents(userId, provider, accessToken);
+      const result = await CalendarService.syncEvents(userId, provider, accessToken);
       
       res.json({
         success: true,
-        data: events,
-        message: 'Calendar synced successfully'
+        data: result.events,
+        meta: {
+          pulled: result.pulled,
+          pushed: result.pushed
+        },
+        message: `Calendar synced successfully (Pulled: ${result.pulled}, Pushed: ${result.pushed})`
       });
     } catch (error) {
       res.status(500).json({

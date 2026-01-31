@@ -76,7 +76,7 @@
     "testMatch": [
       "**/tests/**/*.test.js"
     ],
-    "setupFiles": [
+    "setupFilesAfterEnv": [
       "./tests/setup.js"
     ],
     "clearMocks": true
