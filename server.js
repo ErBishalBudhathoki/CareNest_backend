@@ -640,86 +640,42 @@ function getFullFileUrl(req, filePath) {
   return `${baseUrl}${cleanPath}`;
 }
 
-// Upload receipt file
+// Upload receipt file - Cloud Functions compatible
 // POST /upload/receipt
-app.post('/upload/receipt', (req, res, next) => {
+// Uses busboy with rawBody for Firebase/GCP Cloud Functions compatibility
+const { handleFileUpload } = require('./utils/cloudFunctionsUpload');
+
+app.post('/upload/receipt', async (req, res) => {
   console.log('📤 Upload receipt endpoint called');
   console.log('Headers:', req.headers);
   console.log('Content-Type:', req.headers['content-type']);
   console.log('Content-Length:', req.headers['content-length']);
-  
-  upload.single('receipt')(req, res, (err) => {
-    if (err) {
-      console.error('❌ Multer error uploading receipt:', err);
-      console.error('Error code:', err.code);
-      console.error('Error message:', err.message);
-      return res.status(400).json({
-        success: false,
-        message: err.message || 'Error uploading file',
-        error: err.code || 'UNKNOWN_ERROR'
-      });
-    }
+  console.log('Has rawBody:', !!req.rawBody);
 
-    try {
-      if (!req.file) {
-        console.warn('⚠️  No file received in upload request');
-        return res.status(400).json({
-          success: false,
-          message: 'No file uploaded'
-        });
-      }
+  try {
+    const result = await handleFileUpload(req, 'receipt');
 
-      console.log('✅ File received:', {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        filename: req.file.filename,
-        path: req.file.path
-      });
+    console.log(`✅ File uploaded successfully: ${result.filename}, Full URL: ${result.fileUrl}`);
 
-      let fullUrl;
-      let filename;
-
-      if (isR2Configured) {
-        console.log('🌐 Using R2 storage');
-        // For R2, req.file.location is populated by multer-s3
-        if (process.env.R2_PUBLIC_DOMAIN) {
-          fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
-          if (!fullUrl.startsWith('http')) {
-            fullUrl = `https://${fullUrl}`;
-          }
-        } else {
-          fullUrl = req.file.location;
-        }
-        filename = req.file.key;
-      } else {
-        console.log('💾 Using local storage');
-        // Local fallback
-        const relativePath = `/uploads/${req.file.filename}`;
-        fullUrl = getFullFileUrl(req, relativePath);
-        filename = req.file.filename;
-      }
-
-      console.log(`✅ File uploaded successfully: ${filename}, Full URL: ${fullUrl}`);
-
-      res.status(200).json({
-        success: true,
-        message: 'File uploaded successfully',
-        fileUrl: fullUrl,
-        filename: filename,
-        originalName: req.file.originalname,
-        size: req.file.size
-      });
-    } catch (error) {
-      console.error('❌ Error processing uploaded file:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error uploading file',
-        error: error.message
-      });
-    }
-  });
+    res.status(200).json({
+      success: true,
+      message: 'File uploaded successfully',
+      fileUrl: result.fileUrl,
+      filename: result.filename,
+      originalName: result.originalName,
+      size: result.size
+    });
+  } catch (error) {
+    console.error('❌ Error uploading receipt:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Error uploading file',
+      error: error.code || 'UPLOAD_ERROR'
+    });
+  }
 });
+
+// Helper function to get full URL (used by local storage)
 
 // Upload logo file
 // POST /upload/logo
@@ -2477,65 +2433,65 @@ app.get("/hello", (req, res) => {
  */
 app.get("/health", async (req, res) => {
   try {
-  const { environmentConfig } = require('./config/environment');
-  const { MongoClient, ServerApiVersion } = require("mongodb");
+    const { environmentConfig } = require('./config/environment');
+    const { MongoClient, ServerApiVersion } = require("mongodb");
 
-  const healthData = {
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    environment: environmentConfig.getEnvironment(),
-    version: "1.0.0",
-    uptime: process.uptime(),
-    memory: {
-      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
-      external: Math.round(process.memoryUsage().external / 1024 / 1024)
-    },
-    services: {
-      mongodb: "checking",
-      firebase: "initialized"
+    const healthData = {
+      status: "OK",
+      timestamp: new Date().toISOString(),
+      environment: environmentConfig.getEnvironment(),
+      version: "1.0.0",
+      uptime: process.uptime(),
+      memory: {
+        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        external: Math.round(process.memoryUsage().external / 1024 / 1024)
+      },
+      services: {
+        mongodb: "checking",
+        firebase: "initialized"
+      }
+    };
+
+    // Add keep-alive status in production
+    if (environmentConfig.isProductionEnvironment()) {
+      healthData.keepAlive = keepAliveService.getStatus();
     }
-  };
 
-  // Add keep-alive status in production
-  if (environmentConfig.isProductionEnvironment()) {
-    healthData.keepAlive = keepAliveService.getStatus();
-  }
+    // Test database connectivity
+    let client;
+    try {
+      client = new MongoClient(process.env.MONGODB_URI, {
+        serverApi: ServerApiVersion.v1,
+        serverSelectionTimeoutMS: 5000 // 5 second timeout
+      });
 
-  // Test database connectivity
-  let client;
-  try {
-    client = new MongoClient(process.env.MONGODB_URI, {
-      serverApi: ServerApiVersion.v1,
-      serverSelectionTimeoutMS: 5000 // 5 second timeout
-    });
+      await client.connect();
+      await client.db(DB_NAME).admin().ping();
+      healthData.services.mongodb = "connected";
 
-    await client.connect();
-    await client.db(DB_NAME).admin().ping();
-    healthData.services.mongodb = "connected";
+    } catch (error) {
+      healthData.services.mongodb = "disconnected";
+      healthData.status = "DEGRADED";
 
-  } catch (error) {
-    healthData.services.mongodb = "disconnected";
-    healthData.status = "DEGRADED";
-
-    // Only include error details in development
-    if (environmentConfig.shouldShowDetailedErrors()) {
-      healthData.mongodb_error = error.message;
+      // Only include error details in development
+      if (environmentConfig.shouldShowDetailedErrors()) {
+        healthData.mongodb_error = error.message;
+      }
+    } finally {
+      if (client) {
+        await client.close();
+      }
     }
-  } finally {
-    if (client) {
-      await client.close();
-    }
-  }
 
-  // Set appropriate HTTP status code
-  const statusCode = healthData.status === "OK" ? 200 : 503;
+    // Set appropriate HTTP status code
+    const statusCode = healthData.status === "OK" ? 200 : 503;
 
-  res.status(statusCode).json(healthData);
+    res.status(statusCode).json(healthData);
   } catch (err) {
-      console.error("CRITICAL ERROR IN /HEALTH:", err);
-      res.status(500).json({ error: err.message });
-    }
+    console.error("CRITICAL ERROR IN /HEALTH:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============================================================================
@@ -2595,15 +2551,15 @@ function generateEncryptionKey() {
  * @returns {string} XOR result
  */
 // xorHex function removed (unused)
-    /*
-    function xorHex(a, b) {
-      let result = '';
-      for (let i = 0; i < a.length; i += 2) {
-        result += (parseInt(a.substr(i, 2), 16) ^ parseInt(b.substr(i, 2), 16)).toString(16).padStart(2, '0');
-      }
-      return result;
-    }
-    */
+/*
+function xorHex(a, b) {
+  let result = '';
+  for (let i = 0; i < a.length; i += 2) {
+    result += (parseInt(a.substr(i, 2), 16) ^ parseInt(b.substr(i, 2), 16)).toString(16).padStart(2, '0');
+  }
+  return result;
+}
+*/
 
 /**
  * Encrypt OTP with timestamp
