@@ -16,4 +16,14 @@ if (process.env.NODE_ENV === 'production') {
 // Create and export the HTTPS function
 // This exposes the Express app as a Cloud Function named 'api'
 // Deployed to australia-southeast1 (Sydney)
-exports.api = onRequest(app);
+// Configured with increased limits for file uploads and to prevent cold starts
+exports.api = onRequest(
+  {
+    timeoutSeconds: 300,       // 5 minutes for large file uploads
+    memory: '512MiB',          // Sufficient memory for file processing
+    minInstances: 1,           // Prevent cold starts
+    maxInstances: 10,          // Allow scaling under load
+    cors: true,                // Enable CORS for cross-origin requests
+  },
+  app
+);
