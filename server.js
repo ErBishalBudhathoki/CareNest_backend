@@ -121,6 +121,7 @@ const {
 console.log('Invoice management endpoints loaded successfully');
 
 const { loggingMiddleware } = require('./middleware/logging');
+const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 console.log('Logging middleware loaded successfully');
 const { errorTrackingMiddleware } = require('./middleware/errorTracking');
@@ -651,106 +652,148 @@ function getFullFileUrl(req, filePath) {
  * Upload receipt file
  * POST /api/upload/receipt
  */
-app.post('/api/upload/receipt', upload.single('receipt'), (req, res) => {
-  try {
-    if (!req.file) {
+app.post('/api/upload/receipt', (req, res, next) => {
+  console.log('📤 Upload receipt endpoint called');
+  console.log('Headers:', req.headers);
+  console.log('Content-Type:', req.headers['content-type']);
+  console.log('Content-Length:', req.headers['content-length']);
+  
+  upload.single('receipt')(req, res, (err) => {
+    if (err) {
+      console.error('❌ Multer error uploading receipt:', err);
+      console.error('Error code:', err.code);
+      console.error('Error message:', err.message);
       return res.status(400).json({
         success: false,
-        message: 'No file uploaded'
+        message: err.message || 'Error uploading file',
+        error: err.code || 'UNKNOWN_ERROR'
       });
     }
 
-    let fullUrl;
-    let filename;
-
-    if (isR2Configured) {
-      // For R2, req.file.location is populated by multer-s3
-      if (process.env.R2_PUBLIC_DOMAIN) {
-        fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
-        if (!fullUrl.startsWith('http')) {
-          fullUrl = `https://${fullUrl}`;
-        }
-      } else {
-        fullUrl = req.file.location;
+    try {
+      if (!req.file) {
+        console.warn('⚠️  No file received in upload request');
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded'
+        });
       }
-      filename = req.file.key;
-    } else {
-      // Local fallback
-      const relativePath = `/uploads/${req.file.filename}`;
-      fullUrl = getFullFileUrl(req, relativePath);
-      filename = req.file.filename;
+
+      console.log('✅ File received:', {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        filename: req.file.filename,
+        path: req.file.path
+      });
+
+      let fullUrl;
+      let filename;
+
+      if (isR2Configured) {
+        console.log('🌐 Using R2 storage');
+        // For R2, req.file.location is populated by multer-s3
+        if (process.env.R2_PUBLIC_DOMAIN) {
+          fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
+          if (!fullUrl.startsWith('http')) {
+            fullUrl = `https://${fullUrl}`;
+          }
+        } else {
+          fullUrl = req.file.location;
+        }
+        filename = req.file.key;
+      } else {
+        console.log('💾 Using local storage');
+        // Local fallback
+        const relativePath = `/uploads/${req.file.filename}`;
+        fullUrl = getFullFileUrl(req, relativePath);
+        filename = req.file.filename;
+      }
+
+      console.log(`✅ File uploaded successfully: ${filename}, Full URL: ${fullUrl}`);
+
+      res.status(200).json({
+        success: true,
+        message: 'File uploaded successfully',
+        fileUrl: fullUrl,
+        filename: filename,
+        originalName: req.file.originalname,
+        size: req.file.size
+      });
+    } catch (error) {
+      console.error('❌ Error processing uploaded file:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error uploading file',
+        error: error.message
+      });
     }
-
-    console.log(`File uploaded: ${filename}, Full URL: ${fullUrl}`);
-
-    res.status(200).json({
-      success: true,
-      message: 'File uploaded successfully',
-      fileUrl: fullUrl,
-      filename: filename,
-      originalName: req.file.originalname,
-      size: req.file.size
-    });
-  } catch (error) {
-    console.error('Error uploading file:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error uploading file'
-    });
-  }
+  });
 });
 
 /**
  * Upload logo file
  * POST /api/upload/logo
  */
-app.post('/api/upload/logo', upload.single('logo'), (req, res) => {
-  try {
-    if (!req.file) {
+app.post('/api/upload/logo', (req, res, next) => {
+  upload.single('logo')(req, res, (err) => {
+    if (err) {
+      console.error('Multer error uploading logo:', err);
       return res.status(400).json({
         success: false,
-        message: 'No file uploaded'
+        message: err.message || 'Error uploading file',
+        error: err.code || 'UNKNOWN_ERROR'
       });
     }
 
-    let fullUrl;
-    let filename;
-
-    if (isR2Configured) {
-      // For R2, req.file.location is populated by multer-s3
-      if (process.env.R2_PUBLIC_DOMAIN) {
-        fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
-        if (!fullUrl.startsWith('http')) {
-          fullUrl = `https://${fullUrl}`;
-        }
-      } else {
-        fullUrl = req.file.location;
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded'
+        });
       }
-      filename = req.file.key;
-    } else {
-      // Local fallback
-      const relativePath = `/uploads/${req.file.filename}`;
-      fullUrl = getFullFileUrl(req, relativePath);
-      filename = req.file.filename;
+
+      let fullUrl;
+      let filename;
+
+      if (isR2Configured) {
+        // For R2, req.file.location is populated by multer-s3
+        if (process.env.R2_PUBLIC_DOMAIN) {
+          fullUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
+          if (!fullUrl.startsWith('http')) {
+            fullUrl = `https://${fullUrl}`;
+          }
+        } else {
+          fullUrl = req.file.location;
+        }
+        filename = req.file.key;
+      } else {
+        // Local fallback
+        const relativePath = `/uploads/${req.file.filename}`;
+        fullUrl = getFullFileUrl(req, relativePath);
+        filename = req.file.filename;
+      }
+
+      console.log(`Logo uploaded: ${filename}, Full URL: ${fullUrl}`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Logo uploaded successfully',
+        fileUrl: fullUrl,
+        filename: filename,
+        originalName: req.file.originalname,
+        size: req.file.size
+      });
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error uploading logo',
+        error: error.message
+      });
     }
-
-    console.log(`Logo uploaded: ${filename}, Full URL: ${fullUrl}`);
-
-    res.status(200).json({
-      success: true,
-      message: 'Logo uploaded successfully',
-      fileUrl: fullUrl,
-      filename: filename,
-      originalName: req.file.originalname,
-      size: req.file.size
-    });
-  } catch (error) {
-    console.error('Error uploading logo:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error uploading logo'
-    });
-  }
+  });
 });
 
 /**
@@ -6943,6 +6986,10 @@ app.get('/api/analytics/business/revenue/:organizationId', getRevenueForecastAna
  */
 app.get('/api/analytics/business/efficiency/:organizationId', getOperationalEfficiencyReport);
 
+// Error handling middleware - must be added after all routes
+app.use(notFoundHandler);
+app.use(errorHandler);
+
 // Handle both serverless and local environments
 module.exports = app;
 
@@ -6970,6 +7017,13 @@ if (process.env.SERVERLESS === 'true') {
   console.log(`🚀 Starting ${environmentConfig.getConfig().app.name}...`);
   console.log(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
   console.log(`📋 Port: ${PORT}`);
+
+  // Ensure uploads directory exists for local file storage
+  const uploadsDir = path.join(__dirname, 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log(`📁 Created uploads directory: ${uploadsDir}`);
+  }
 
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`✅ Server is now listening on port ${PORT}`);
