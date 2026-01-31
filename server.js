@@ -233,7 +233,7 @@ app.use(cors(corsOptions));
 
 // Webhook routes (Must be before express.json() to capture raw body)
 const webhookRoutes = require('./routes/webhookRoutes');
-app.use('/api/webhooks', webhookRoutes);
+app.use('/webhooks', webhookRoutes);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -254,43 +254,42 @@ app.use('/', invoiceManagementRoutes);
 app.use('/auth', authRoutes);
 
 // Mount security dashboard routes
-app.use('/api/security', securityDashboardRoutes);
-app.use('/api/ocr', ocrRoutes);
+app.use('/security', securityDashboardRoutes);
+app.use('/ocr', ocrRoutes);
 
 // Mount API usage analytics routes
-app.use('/api/analytics', apiUsageRoutes);
-app.use('/api/analytics', analyticsRoutes);
+app.use('/analytics', apiUsageRoutes);
+app.use('/analytics', analyticsRoutes);
 
-app.use('/api/worker', workerRoutes);
-app.use('/api/compliance', complianceRoutes);
-app.use('/api/multiorg', multiOrgRoutes);
+app.use('/worker', workerRoutes);
+app.use('/compliance', complianceRoutes);
+app.use('/multiorg', multiOrgRoutes);
 
 // Mount request routes
-app.use('/api/requests', requestRoutes);
+app.use('/requests', requestRoutes);
 // Mount leave routes (balances, requests, forecast, holidays)
 app.use('/leave', leaveRoutes);
-app.use('/api/leave', leaveRoutes);
 
 // Mount timesheet reminder routes
-app.use('/api/reminders', timesheetReminderRoutes);
+app.use('/reminders', timesheetReminderRoutes);
 
 // Mount earnings routes
-app.use('/api/earnings', earningsRoutes);
+app.use('/earnings', earningsRoutes);
 
 // Mount payroll routes
-app.use('/api/payroll', payrollRoutes);
+app.use('/payroll', payrollRoutes);
 
 // Mount leave balance routes
-app.use('/api/leave/balances', require('./routes/leaveBalanceRoutes'));
+app.use('/leave/balances', require('./routes/leaveBalanceRoutes'));
 
 // Mount onboarding routes
-app.use('/api/onboarding', onboardingRoutes);
+app.use('/onboarding', onboardingRoutes);
 
 // Mount trip routes
-app.use('/api/trips', tripRoutes);
+app.use('/trips', tripRoutes);
 
 // Mount expense reminder routes
-app.use('/api/reminders', expenseReminderRoutes);
+app.use('/reminders', expenseReminderRoutes);
 
 // Mount schedule routes (Automated Scheduling Engine)
 
@@ -302,15 +301,15 @@ app.use('/', businessRoutes);
 console.log('Business routes loaded successfully');
 
 // Mount organization routes
-const organizationRoutes = require('./routes/v1/organization');
-app.use('/organization', organizationRoutes);
+const organizationRoutesV1 = require('./routes/v1/organization');
+app.use('/organization', organizationRoutesV1);
 
 // Mount V1 Modular Routes
-app.use('/api/pricing', pricingRoutesV1);
-app.use('/api/invoice', invoiceRoutesV1);
-app.use('/api/invoice', pricePromptRoutesV1);
-app.use('/api/active-timers', activeTimerRoutesV1);
-app.use('/api/audit', auditRoutesV1);
+app.use('/pricing', pricingRoutesV1);
+app.use('/invoice', invoiceRoutesV1);
+app.use('/invoice', pricePromptRoutesV1);
+app.use('/active-timers', activeTimerRoutesV1);
+app.use('/audit', auditRoutesV1);
 
 
 
@@ -323,7 +322,7 @@ console.log('Client routes loaded successfully');
 
 // Mount worked time routes (Visit History)
 const workedTimeRoutes = require('./routes/workedTimeRoutes');
-app.use('/api/worked-time', workedTimeRoutes);
+app.use('/worked-time', workedTimeRoutes);
 console.log('Worked time routes loaded successfully');
 
 // Mount active timer endpoints directly to app
@@ -333,26 +332,26 @@ app.get('/getActiveTimers/:organizationId', ActiveTimerController.getActiveTimer
 
 // Mount config routes
 const configRoutes = require('./routes/config');
-app.use('/api/config', configRoutes);
+app.use('/config', configRoutes);
 
 // Mount Client Portal routes
 const clientPortalRoutes = require('./routes/clientPortalRoutes');
-app.use('/api/client-portal', clientPortalRoutes);
+app.use('/client-portal', clientPortalRoutes);
 console.log('Client Portal routes loaded successfully');
 
 // Mount Timesheet routes
 const timesheetRoutes = require('./routes/timesheetRoutes');
-app.use('/api/timesheets', timesheetRoutes);
+app.use('/timesheets', timesheetRoutes);
 console.log('Timesheet routes loaded successfully');
 
 // Mount payment routes
 const paymentRoutes = require('./routes/paymentRoutes');
-app.use('/api/payments', paymentRoutes);
+app.use('/payments', paymentRoutes);
 console.log('Payment routes loaded successfully');
 
 // Mount accounting routes
 const accountingRoutes = require('./routes/accounting.routes');
-app.use('/api/accounting', accountingRoutes);
+app.use('/accounting', accountingRoutes);
 console.log('Accounting routes loaded successfully');
 
 // Initialize Cron Scheduler
@@ -491,7 +490,7 @@ const filesDownloadHandler = async (req, res) => {
   }
 };
 
-app.get('/api/files/download', filesDownloadHandler);
+app.get('/files/download', filesDownloadHandler);
 app.get('/files/download', filesDownloadHandler);
 
 // Serve static files from uploads directory
@@ -504,29 +503,26 @@ app.use('/', adminInvoiceProfileRoutes);
 
 // Mount training and compliance routes
 const trainingComplianceRoutes = require('./routes/trainingComplianceRoutes');
-app.use('/api', trainingComplianceRoutes);
+app.use('/', trainingComplianceRoutes);
 
 // Mount notification routes
 const notificationRoutes = require('./routes/notificationRoutes');
-app.use('/api/notifications', notificationRoutes);
+app.use('/notifications', notificationRoutes);
 
 // Mount geofence routes
 const geofenceRoutes = require('./routes/geofenceRoutes');
-app.use('/api/geofence', geofenceRoutes);
-app.use('/api/notifications/ai-timing', aiTimingRoutes);
-app.use('/api/calendar', calendarRoutes);
-app.use('/api/snooze', snoozeRoutes);
-app.use('/api/voice', voiceRoutes);
-app.use('/api/teams', teamRoutes);
-app.use('/api/emergency', emergencyRoutes);
-
+app.use('/geofence', geofenceRoutes);
+app.use('/notifications/ai-timing', aiTimingRoutes);
+app.use('/calendar', calendarRoutes);
+app.use('/snooze', snoozeRoutes);
+app.use('/voice', voiceRoutes);
+app.use('/teams', teamRoutes);
+app.use('/emergency', emergencyRoutes);
 
 // Configure multer to handle file uploads
 const { upload, isR2Configured } = require('./config/storage');
 
-/**
- * Helper function to process custom pricing for an NDIS item
- */
+// Helper function to process custom pricing for an NDIS item
 async function processCustomPricing(db, customPricing, ndisItem, organizationId, clientExists, userEmail) {
   try {
     // Determine if this is client-specific pricing
@@ -626,18 +622,14 @@ async function processCustomPricing(db, customPricing, ndisItem, organizationId,
   }
 }
 
-/**
- * Get the base server URL
- */
+// Get the base server URL
 function getBaseUrl(req) {
   const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
   const host = req.get('host') || `localhost:${process.env.PORT || 8080}`;
   return `${protocol}://${host}`;
 }
 
-/**
- * Convert relative file path to full server URL
- */
+// Convert relative file path to full server URL
 function getFullFileUrl(req, filePath) {
   if (!filePath) return null;
   if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
@@ -648,11 +640,9 @@ function getFullFileUrl(req, filePath) {
   return `${baseUrl}${cleanPath}`;
 }
 
-/**
- * Upload receipt file
- * POST /api/upload/receipt
- */
-app.post('/api/upload/receipt', (req, res, next) => {
+// Upload receipt file
+// POST /upload/receipt
+app.post('/upload/receipt', (req, res, next) => {
   console.log('📤 Upload receipt endpoint called');
   console.log('Headers:', req.headers);
   console.log('Content-Type:', req.headers['content-type']);
@@ -731,11 +721,9 @@ app.post('/api/upload/receipt', (req, res, next) => {
   });
 });
 
-/**
- * Upload logo file
- * POST /api/upload/logo
- */
-app.post('/api/upload/logo', (req, res, next) => {
+// Upload logo file
+// POST /upload/logo
+app.post('/upload/logo', (req, res, next) => {
   upload.single('logo')(req, res, (err) => {
     if (err) {
       console.error('Multer error uploading logo:', err);
@@ -1703,7 +1691,7 @@ app.get('/getEmployeeTrackingData/:organizationId', async (req, res) => {
       });
     }
 
-    // Get worked time records for the organization (including both active and completed shifts)
+    // Mount worked time records for the organization (including both active and completed shifts)
     let workedTimeRecords = await db.collection("workedTime").aggregate([
       {
         $lookup: {
@@ -4156,10 +4144,14 @@ app.get("/organization/:organizationId/businesses", async function (req, res) {
   }
 });
 
-/**
- * Get clients for organization
- * GET /organization/:organizationId/clients
- */
+// Mount businesses for organization
+app.use('/organization/:organizationId/businesses', (req, res, next) => {
+  // Transfer organizationId to params for the business controller if needed
+  next();
+}, require('./routes/business'));
+
+// Get clients for organization
+// GET /organization/:organizationId/clients
 app.get("/organization/:organizationId/clients", async function (req, res) {
   const { organizationId } = req.params;
 
@@ -6241,9 +6233,9 @@ app.post("/check-holidays", async (req, res) => {
 
 /**
  * Search support items
- * GET /api/support-items/search?q=...
+ * GET /support-items/search?q=...
  */
-app.get('/api/support-items/search', async (req, res) => {
+app.get('/support-items/search', async (req, res) => {
   let client;
   try {
     const searchQuery = req.query.q;
@@ -6269,9 +6261,9 @@ app.get('/api/support-items/search', async (req, res) => {
 
 /**
  * Get all support items
- * GET /api/support-items/all
+ * GET /support-items/all
  */
-app.get('/api/support-items/all', async (req, res) => {
+app.get('/support-items/all', async (req, res) => {
   let client;
   try {
     client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
@@ -6289,32 +6281,32 @@ app.get('/api/support-items/all', async (req, res) => {
 // ===== CUSTOM PRICING API ENDPOINTS =====
 
 // Pricing Routes (Migrated to v1)
-// Routes are now mounted at /api/pricing via pricingRoutesV1
+// Routes are now mounted at /pricing via pricingRoutesV1
 
 
 /**
  * General Settings (atomic update)
- * PUT /api/settings/general
+ * PUT /settings/general
  */
-app.put('/api/settings/general', authenticateUser, updateGeneralSettings);
+app.put('/settings/general', authenticateUser, updateGeneralSettings);
 
 /**
  * General Settings (fallback POST)
- * POST /api/settings/general
+ * POST /settings/general
  */
-app.post('/api/settings/general', authenticateUser, createOrUpdateGeneralSettings);
+app.post('/settings/general', authenticateUser, createOrUpdateGeneralSettings);
 
 /**
  * Versioned General Settings
- * PUT /api/v1/settings/general
+ * PUT /v1/settings/general
  */
-app.put('/api/v1/settings/general', authenticateUser, updateGeneralSettings);
+app.put('/v1/settings/general', authenticateUser, updateGeneralSettings);
 
 /**
  * Versioned General Settings (fallback POST)
- * POST /api/v1/settings/general
+ * POST /v1/settings/general
  */
-app.post('/api/v1/settings/general', authenticateUser, createOrUpdateGeneralSettings);
+app.post('/v1/settings/general', authenticateUser, createOrUpdateGeneralSettings);
 
 /**
 Ho * Get custom price for organization (legacy endpoint)
@@ -6513,9 +6505,9 @@ app.post('/save-custom-price-client', async (req, res) => {
 
 /**
  * Create a new expense record
- * POST /api/expenses/create
+ * POST /expenses/create
  */
-app.post('/api/expenses/create', async (req, res) => {
+app.post('/expenses/create', async (req, res) => {
   try {
     const result = await createExpense(req.body);
     res.status(result.statusCode || 200).json(result);
@@ -6530,9 +6522,9 @@ app.post('/api/expenses/create', async (req, res) => {
 
 /**
  * Get expense categories and subcategories
- * GET /api/expenses/categories
+ * GET /expenses/categories
  */
-app.get('/api/expenses/categories', async (req, res) => {
+app.get('/expenses/categories', async (req, res) => {
   try {
     const result = await getExpenseCategories();
     res.status(result.statusCode || 200).json(result);
@@ -6547,9 +6539,9 @@ app.get('/api/expenses/categories', async (req, res) => {
 
 /**
  * Get expenses for an organization
- * GET /api/expenses/organization/:organizationId
+ * GET /expenses/organization/:organizationId
  */
-app.get('/api/expenses/organization/:organizationId', async (req, res) => {
+app.get('/expenses/organization/:organizationId', async (req, res) => {
   try {
     const { organizationId } = req.params;
     const result = await getOrganizationExpenses(organizationId, req.query);
@@ -6565,9 +6557,9 @@ app.get('/api/expenses/organization/:organizationId', async (req, res) => {
 
 /**
  * Get specific expense record by ID
- * GET /api/expenses/:expenseId
+ * GET /expenses/:expenseId
  */
-app.get('/api/expenses/:expenseId', async (req, res) => {
+app.get('/expenses/:expenseId', async (req, res) => {
   try {
     const { expenseId } = req.params;
     const result = await getExpenseById(expenseId);
@@ -6585,9 +6577,9 @@ app.get('/api/expenses/:expenseId', async (req, res) => {
 
 /**
  * Update existing expense record
- * PUT /api/expenses/:expenseId
+ * PUT /expenses/:expenseId
  */
-app.put('/api/expenses/:expenseId', async (req, res) => {
+app.put('/expenses/:expenseId', async (req, res) => {
   try {
     const { expenseId } = req.params;
     const result = await updateExpense(expenseId, req.body);
@@ -6606,9 +6598,9 @@ app.put('/api/expenses/:expenseId', async (req, res) => {
 
 /**
  * Delete (deactivate) expense record
- * DELETE /api/expenses/:expenseId
+ * DELETE /expenses/:expenseId
  */
-app.delete('/api/expenses/:expenseId', async (req, res) => {
+app.delete('/expenses/:expenseId', async (req, res) => {
   try {
     const { expenseId } = req.params;
     const { userEmail, deleteReason } = req.body;
@@ -6628,9 +6620,9 @@ app.delete('/api/expenses/:expenseId', async (req, res) => {
 
 /**
  * Update approval status for expense record
- * PUT /api/expenses/:expenseId/approval
+ * PUT /expenses/:expenseId/approval
  */
-app.put('/api/expenses/:expenseId/approval', async (req, res) => {
+app.put('/expenses/:expenseId/approval', async (req, res) => {
   try {
     const { expenseId } = req.params;
     const result = await updateExpenseApproval(expenseId, req.body);
@@ -6649,9 +6641,9 @@ app.put('/api/expenses/:expenseId/approval', async (req, res) => {
 
 /**
  * Bulk import expense records
- * POST /api/expenses/bulk-import
+ * POST /expenses/bulk-import
  */
-app.post('/api/expenses/bulk-import', async (req, res) => {
+app.post('/expenses/bulk-import', async (req, res) => {
   try {
     const result = await bulkImportExpenses(req.body);
     res.status(result.statusCode || 200).json(result);
@@ -6667,51 +6659,51 @@ app.post('/api/expenses/bulk-import', async (req, res) => {
 });
 
 const scheduleRoutes = require('./routes/schedule');
-app.use('/api/schedule', scheduleRoutes);
+app.use('/schedule', scheduleRoutes);
 
 // ===== PRICE VALIDATION API ENDPOINTS =====
 
 /**
  * Validate a single price against NDIS caps
- * POST /api/price-validation/validate
+ * POST /price-validation/validate
  */
-app.post('/api/price-validation/validate', validatePrice);
+app.post('/price-validation/validate', validatePrice);
 
 /**
  * Validate multiple prices in batch
- * POST /api/price-validation/validate-batch
+ * POST /price-validation/validate-batch
  */
-app.post('/api/price-validation/validate-batch', validatePricesBatch);
+app.post('/price-validation/validate-batch', validatePricesBatch);
 
 /**
  * Get price caps for a support item
- * GET /api/price-validation/caps/:supportItemNumber
+ * GET /price-validation/caps/:supportItemNumber
  */
-app.get('/api/price-validation/caps/:supportItemNumber', getPriceCaps);
+app.get('/price-validation/caps/:supportItemNumber', getPriceCaps);
 
 /**
  * Check if a support item requires quotes
- * GET /api/price-validation/quote-required/:supportItemNumber
+ * GET /price-validation/quote-required/:supportItemNumber
  */
-app.get('/api/price-validation/quote-required/:supportItemNumber', checkQuoteRequired);
+app.get('/price-validation/quote-required/:supportItemNumber', checkQuoteRequired);
 
 /**
  * Validate pricing for invoice line items
- * POST /api/price-validation/validate-invoice
+ * POST /price-validation/validate-invoice
  */
-app.post('/api/price-validation/validate-invoice', validateInvoiceLineItems);
+app.post('/price-validation/validate-invoice', validateInvoiceLineItems);
 
 /**
  * Get validation statistics
- * GET /api/price-validation/stats
+ * GET /price-validation/stats
  */
-app.get('/api/price-validation/stats', getValidationStats);
+app.get('/price-validation/stats', getValidationStats);
 
 // ============================================================================
 // AUDIT TRAIL API ENDPOINTS
 // ============================================================================
 
-// Audit routes are now mounted at /api/audit via auditRoutesV1
+// Audit routes are now mounted at /audit via auditRoutesV1
 
 
 // ============================================================================
@@ -6720,52 +6712,52 @@ app.get('/api/price-validation/stats', getValidationStats);
 
 /**
  * Process all due recurring expenses for an organization
- * POST /api/recurring-expenses/process
+ * POST /recurring-expenses/process
  */
-app.post('/api/recurring-expenses/process', processRecurringExpensesEndpoint);
+app.post('/recurring-expenses/process', processRecurringExpensesEndpoint);
 
 /**
  * Create a new recurring expense template
- * POST /api/recurring-expenses/create
+ * POST /recurring-expenses/create
  */
-app.post('/api/recurring-expenses/create', createRecurringExpenseEndpoint);
+app.post('/recurring-expenses/create', createRecurringExpenseEndpoint);
 
 /**
  * Get all recurring expenses for an organization
- * GET /api/recurring-expenses/organization/:organizationId
+ * GET /recurring-expenses/organization/:organizationId
  */
-app.get('/api/recurring-expenses/organization/:organizationId', getOrganizationRecurringExpensesEndpoint);
+app.get('/recurring-expenses/organization/:organizationId', getOrganizationRecurringExpensesEndpoint);
 
 /**
  * Get a specific recurring expense by ID
- * GET /api/recurring-expenses/:expenseId
+ * GET /recurring-expenses/:expenseId
  */
-app.get('/api/recurring-expenses/:expenseId', getRecurringExpenseByIdEndpoint);
+app.get('/recurring-expenses/:expenseId', getRecurringExpenseByIdEndpoint);
 
 /**
  * Update a recurring expense template
- * PUT /api/recurring-expenses/:expenseId
+ * PUT /recurring-expenses/:expenseId
  */
-app.put('/api/recurring-expenses/:expenseId', updateRecurringExpenseEndpoint);
+app.put('/recurring-expenses/:expenseId', updateRecurringExpenseEndpoint);
 
 /**
  * Deactivate a recurring expense (stop future occurrences)
- * PUT /api/recurring-expenses/:expenseId/deactivate
+ * PUT /recurring-expenses/:expenseId/deactivate
  */
-app.put('/api/recurring-expenses/:expenseId/deactivate', deactivateRecurringExpenseEndpoint);
+app.put('/recurring-expenses/:expenseId/deactivate', deactivateRecurringExpenseEndpoint);
 
 /**
  * Get recurring expense statistics for an organization
- * GET /api/recurring-expenses/statistics/:organizationId
+ * GET /recurring-expenses/statistics/:organizationId
  */
-app.get('/api/recurring-expenses/statistics/:organizationId', getRecurringExpenseStatisticsEndpoint);
+app.get('/recurring-expenses/statistics/:organizationId', getRecurringExpenseStatisticsEndpoint);
 
 // ============================================================================
 // INVOICE GENERATION API ENDPOINTS (Task 2.1: clientAssignment-based extraction)
 // ============================================================================
 
 // Invoice Generation Routes (Migrated to v1)
-// Routes are now mounted at /api/invoice via invoiceRoutesV1
+// Routes are now mounted at /invoice via invoiceRoutesV1
 
 
 /**
@@ -6836,43 +6828,43 @@ app.get('/assigned-client-data', async (req, res) => {
 
 /**
  * Get list of generated invoices for an organization
- * GET /api/invoices/list/:organizationId
+ * GET /invoices/list/:organizationId
  * Query params: page, limit, status, clientEmail, userEmail, startDate, endDate, sortBy, sortOrder
  */
-app.get('/api/invoices/list/:organizationId', getInvoicesList);
+app.get('/invoices/list/:organizationId', getInvoicesList);
 
 /**
  * Get detailed view of a specific invoice
- * GET /api/invoices/view/:invoiceId
+ * GET /invoices/view/:invoiceId
  * Query params: organizationId (required for access control)
  */
-app.get('/api/invoices/view/:invoiceId', getInvoiceDetails);
+app.get('/invoices/view/:invoiceId', getInvoiceDetails);
 
 /**
  * Share invoice (generate shareable link or send via email)
- * POST /api/invoices/share/:invoiceId
+ * POST /invoices/share/:invoiceId
  * Body: { organizationId, shareMethod, recipientEmail?, userEmail?, message? }
  */
-app.post('/api/invoices/share/:invoiceId', shareInvoice);
+app.post('/invoices/share/:invoiceId', shareInvoice);
 
 /**
  * Delete invoice (soft delete with audit trail)
- * DELETE /api/invoices/delete/:invoiceId
+ * DELETE /invoices/delete/:invoiceId
  * Body: { organizationId, userEmail?, reason? }
  */
-app.delete('/api/invoices/delete/:invoiceId', deleteInvoice);
+app.delete('/invoices/delete/:invoiceId', deleteInvoice);
 
 /**
  * Get invoice statistics for an organization
- * GET /api/invoices/stats/:organizationId
+ * GET /invoices/stats/:organizationId
  */
-app.get('/api/invoices/stats/:organizationId', getInvoiceStats);
+app.get('/invoices/stats/:organizationId', getInvoiceStats);
 
 // ============================================================================
 // PRICE PROMPT API ENDPOINTS (Task 2.3: Price prompt system for missing prices)
 // ============================================================================
 
-// Price prompt routes are now mounted at /api/invoice via pricePromptRoutesV1
+// Price prompt routes are now mounted at /invoice via pricePromptRoutesV1
 
 
 // ============================================================================
@@ -6881,50 +6873,50 @@ app.get('/api/invoices/stats/:organizationId', getInvoiceStats);
 
 /**
  * Process legacy invoice data and transform to modern format
- * POST /api/invoice/process-legacy
+ * POST /invoice/process-legacy
  * Body: { invoiceData, options? }
  */
-// app.post('/api/invoice/process-legacy', processLegacyInvoice);
+// app.post('/invoice/process-legacy', processLegacyInvoice);
 
 /**
  * Validate legacy invoice compatibility
- * POST /api/invoice/validate-legacy
+ * POST /invoice/validate-legacy
  * Body: { invoiceData }
  */
-// app.post('/api/invoice/validate-legacy', validateLegacyCompatibility);
+// app.post('/invoice/validate-legacy', validateLegacyCompatibility);
 
 /**
  * Transform legacy invoice to modern format
- * POST /api/invoice/transform-legacy
+ * POST /invoice/transform-legacy
  * Body: { invoiceData, preserveOriginal? }
  */
-// app.post('/api/invoice/transform-legacy', transformLegacyInvoice);
+// app.post('/invoice/transform-legacy', transformLegacyInvoice);
 
 /**
  * Migrate legacy invoices in batch
- * POST /api/invoice/migrate-legacy-batch
+ * POST /invoice/migrate-legacy-batch
  * Body: { batchSize?, dryRun?, skipAlreadyMigrated? }
  */
-// app.post('/api/invoice/migrate-legacy-batch', migrateLegacyInvoicesBatch);
+// app.post('/invoice/migrate-legacy-batch', migrateLegacyInvoicesBatch);
 
 /**
  * Get legacy data statistics
- * GET /api/invoice/legacy-stats
+ * GET /invoice/legacy-stats
  */
-// app.get('/api/invoice/legacy-stats', getLegacyDataStats);
+// app.get('/invoice/legacy-stats', getLegacyDataStats);
 
 /**
  * Map legacy item to NDIS format
- * POST /api/invoice/map-legacy-item
+ * POST /invoice/map-legacy-item
  * Body: { legacyItem }
  */
-// app.post('/api/invoice/map-legacy-item', mapLegacyItemToNdis);
+// app.post('/invoice/map-legacy-item', mapLegacyItemToNdis);
 
 /**
  * Check invoice backward compatibility
- * GET /api/invoice/:invoiceId/compatibility
+ * GET /invoice/:invoiceId/compatibility
  */
-// app.get('/api/invoice/:invoiceId/compatibility', checkInvoiceCompatibility);
+// app.get('/invoice/:invoiceId/compatibility', checkInvoiceCompatibility);
 
 // ============================================================================
 // PRICING ANALYTICS API ENDPOINTS
@@ -6932,59 +6924,51 @@ app.get('/api/invoices/stats/:organizationId', getInvoiceStats);
 
 /**
  * Get comprehensive pricing analytics
- * GET /api/analytics/pricing/:organizationId
+ * GET /analytics/pricing/:organizationId
  */
-app.get('/api/analytics/pricing/:organizationId', getPricingAnalytics);
+app.get('/analytics/pricing/:organizationId', getPricingAnalytics);
 
 /**
  * Get pricing compliance report
- * GET /api/analytics/pricing/compliance/:organizationId
+ * GET /analytics/pricing/compliance/:organizationId
  */
-app.get('/api/analytics/pricing/compliance/:organizationId', getPricingComplianceReport);
-
-// ============================================================================
-// CLIENT ACTIVITY ANALYTICS API ENDPOINTS
-// ============================================================================
+app.get('/analytics/pricing/compliance/:organizationId', getPricingComplianceReport);
 
 /**
  * Get client activity analytics
- * GET /api/analytics/clients/:organizationId
+ * GET /analytics/clients/:organizationId
  */
-app.get('/api/analytics/clients/:organizationId', getClientActivityAnalytics);
+app.get('/analytics/clients/:organizationId', getClientActivityAnalytics);
 
 /**
  * Get top performing clients
- * GET /api/analytics/clients/top/:organizationId/:metric
+ * GET /analytics/clients/top/:organizationId/:metric
  */
-app.get('/api/analytics/clients/top/:organizationId/:metric', getTopPerformingClients);
+app.get('/analytics/clients/top/:organizationId/:metric', getTopPerformingClients);
 
 /**
  * Get client service patterns
- * GET /api/analytics/clients/patterns/:organizationId
+ * GET /analytics/clients/patterns/:organizationId
  */
-app.get('/api/analytics/clients/patterns/:organizationId', getClientServicePatterns);
-
-// ============================================================================
-// BUSINESS INTELLIGENCE API ENDPOINTS
-// ============================================================================
+app.get('/analytics/clients/patterns/:organizationId', getClientServicePatterns);
 
 /**
- * Get business intelligence dashboard
- * GET /api/analytics/business/:organizationId
+ * Get business intelligence dashboard summary
+ * GET /analytics/business/:organizationId
  */
-app.get('/api/analytics/business/:organizationId', getBusinessIntelligenceDashboard);
+app.get('/analytics/business/:organizationId', getBusinessIntelligenceDashboard);
 
 /**
  * Get revenue forecast
- * GET /api/analytics/business/revenue/:organizationId
+ * GET /analytics/business/revenue/:organizationId
  */
-app.get('/api/analytics/business/revenue/:organizationId', getRevenueForecastAnalysis);
+app.get('/analytics/business/revenue/:organizationId', getRevenueForecastAnalysis);
 
 /**
  * Get operational efficiency report
- * GET /api/analytics/business/efficiency/:organizationId
+ * GET /analytics/business/efficiency/:organizationId
  */
-app.get('/api/analytics/business/efficiency/:organizationId', getOperationalEfficiencyReport);
+app.get('/analytics/business/efficiency/:organizationId', getOperationalEfficiencyReport);
 
 // Error handling middleware - must be added after all routes
 app.use(notFoundHandler);
