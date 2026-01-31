@@ -91,8 +91,6 @@ if (isR2Configured) {
         }),
         fileFilter: fileFilter,
         limits: limits
-    }).on('error', (err) => {
-        console.error('❌ Multer-S3 error:', err);
     });
 } else {
     console.log('R2 credentials not found, falling back to local disk storage');
