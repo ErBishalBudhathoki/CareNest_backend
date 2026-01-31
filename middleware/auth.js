@@ -2,12 +2,14 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { RedisStore } = require('rate-limit-redis');
 const redis = require('../config/redis');
+const IORedis = require('ioredis');
 const { createLogger } = require('../utils/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
 
 const logger = createLogger('AuthMiddleware');
+const USE_REDIS_MOCK = process.env.USE_REDIS_MOCK === 'true';
 
 /**
  * Secure authentication middleware with comprehensive security features
@@ -495,10 +497,7 @@ function rateLimitMiddleware(type) {
 
   const config = configs[type] || configs.default;
 
-  return rateLimit({
-    store: new RedisStore({
-      sendCommand: (...args) => redis.call(...args),
-    }),
+  const options = {
     windowMs: config.windowMs,
     max: config.max,
     message: {
@@ -516,8 +515,6 @@ function rateLimitMiddleware(type) {
         type: type,
         userAgent: req.get('User-Agent')
       });
-      
-      // Record in securityMonitor for centralized visibility and history (if available)
       if (typeof securityMonitor !== 'undefined' && securityMonitor && typeof securityMonitor.recordRateLimitViolation === 'function') {
         try {
           securityMonitor.recordRateLimitViolation({
@@ -530,7 +527,6 @@ function rateLimitMiddleware(type) {
           logger.warn('Failed to record rate limit violation in securityMonitor', { error: e.message });
         }
       }
-      
       res.status(429).json({
         success: false,
         message: config.message,
@@ -538,7 +534,25 @@ function rateLimitMiddleware(type) {
         timestamp: new Date().toISOString()
       });
     }
-  });
+  };
+
+  if (!USE_REDIS_MOCK) {
+    options.store = new RedisStore({
+      sendCommand: (...args) => {
+        if (redis && typeof redis.call === 'function') {
+          return redis.call(...args);
+        }
+        const [command, ...commandArgs] = args;
+        if (redis && typeof redis.sendCommand === 'function' && IORedis && IORedis.Command) {
+          const cmd = new IORedis.Command(command, commandArgs);
+          return redis.sendCommand(cmd);
+        }
+        return Promise.reject(new Error('Unsupported redis command'));
+      },
+    });
+  }
+
+  return rateLimit(options);
 }
 
 module.exports = {

@@ -91,7 +91,7 @@ class AlertingSystem {
     // Initialize email transporter
     if (this.config.email.enabled && this.config.email.smtp.host) {
       try {
-        this.channels.email = nodemailer.createTransporter(this.config.email.smtp);
+        this.channels.email = nodemailer.createTransport(this.config.email.smtp);
         this.logger.info('Email alerting channel initialized');
       } catch (error) {
         this.logger.error('Failed to initialize email channel', { error: error.message });

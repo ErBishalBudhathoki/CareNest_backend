@@ -8,7 +8,7 @@ class EmailService {
 
   initTransporter() {
     try {
-      this.transporter = nodemailer.createTransporter({
+      this.transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
           user: process.env.ADMIN_EMAIL, 
