@@ -6,11 +6,11 @@ const fs = require('fs');
 
 // Ensure uploads directory exists for local fallback
 const uploadDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadDir)) {
+if (process.env.SERVERLESS !== 'true' && !fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-const isR2Configured = process.env.R2_ACCOUNT_ID &&
+let isR2Configured = process.env.R2_ACCOUNT_ID &&
                        process.env.R2_ACCESS_KEY_ID &&
                        process.env.R2_SECRET_ACCESS_KEY &&
                        process.env.R2_BUCKET_NAME;
@@ -69,7 +69,10 @@ if (isR2Configured) {
         console.log('Falling back to local disk storage');
         isR2Configured = false;
     }
+}
 
+// Separate block for Multer initialization to respect potential fallback above
+if (isR2Configured) {
     upload = multer({
         storage: multerS3({
             s3: s3Client,
@@ -93,7 +96,7 @@ if (isR2Configured) {
         limits: limits
     });
 } else {
-    console.log('R2 credentials not found, falling back to local disk storage');
+    console.log('R2 credentials not found or initialization failed, falling back to local disk storage');
     // Fallback to disk storage
     const storage = multer.diskStorage({
         destination: "./uploads",
