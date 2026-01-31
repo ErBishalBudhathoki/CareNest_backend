@@ -347,6 +347,11 @@ const paymentRoutes = require('./routes/paymentRoutes');
 app.use('/api/payments', paymentRoutes);
 console.log('Payment routes loaded successfully');
 
+// Mount accounting routes
+const accountingRoutes = require('./routes/accounting.routes');
+app.use('/api/accounting', accountingRoutes);
+console.log('Accounting routes loaded successfully');
+
 // Initialize Cron Scheduler
 const scheduler = require('./cron/scheduler');
 scheduler.start();
@@ -2438,6 +2443,7 @@ app.get("/hello", (req, res) => {
  * Provides server health status and environment information
  */
 app.get("/health", async (req, res) => {
+  try {
   const { environmentConfig } = require('./config/environment');
   const { MongoClient, ServerApiVersion } = require("mongodb");
 
@@ -2493,6 +2499,10 @@ app.get("/health", async (req, res) => {
   const statusCode = healthData.status === "OK" ? 200 : 503;
 
   res.status(statusCode).json(healthData);
+  } catch (err) {
+      console.error("CRITICAL ERROR IN /HEALTH:", err);
+      res.status(500).json({ error: err.message });
+    }
 });
 
 // ============================================================================

@@ -2,6 +2,7 @@ const { Invoice, PaymentStatus } = require('../models/Invoice');
 const { CreditNote, CreditNoteStatus } = require('../models/CreditNote');
 const Organization = require('../models/Organization');
 const auditService = require('./auditService');
+const emailService = require('./emailService');
 
 // Conditionally load Stripe
 let stripe;
