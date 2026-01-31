@@ -50,11 +50,11 @@ const firebaseTemplatePath = path.join(__dirname, 'firebase-admin-config.js.temp
 const firebaseOutputPath = path.join(__dirname, 'firebase-admin-config.js');
 
 // Check if the template file exists and generate the config
-if (fs.existsSync(firebaseTemplatePath)) {
+if (process.env.SERVERLESS !== 'true' && fs.existsSync(firebaseTemplatePath)) {
   const templateContent = fs.readFileSync(firebaseTemplatePath, 'utf8');
   fs.writeFileSync(firebaseOutputPath, templateContent, 'utf8');
   console.log('Firebase Admin SDK configuration file generated successfully.');
-} else {
+} else if (process.env.SERVERLESS !== 'true') {
   console.warn('Firebase Admin SDK template file not found. Skipping configuration generation.');
 }
 
