@@ -139,7 +139,7 @@ async function sendOtpEmail(email, flutterClientKey) {
   const otp = generateOTP();
   const verificationKey = encryptOTP(otp, flutterClientKey);
 
-  const transporter = nodemailer.createTransporter({
+  const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.ADMIN_EMAIL,

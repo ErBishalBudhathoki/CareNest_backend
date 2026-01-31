@@ -320,7 +320,7 @@ class AuthController {
       const otp = await authService.generateOTP(email);
       
       // Configure email transporter (you may want to move this to a config file)
-      const transporter = nodemailer.createTransporter({
+      const transporter = nodemailer.createTransport({
         service: 'gmail', // or your email service
         auth: {
           user: process.env.EMAIL_USER,
