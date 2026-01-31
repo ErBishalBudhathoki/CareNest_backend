@@ -2,11 +2,11 @@ const CalendarEvent = require('../models/CalendarEvent');
 
 class CalendarService {
   /**
-   * Sync events from an external provider (Mocked)
+   * Sync events from an external provider (Two-way simulation)
    */
-  async syncEvents(userId, _provider, _accessToken) {
-    // Mock fetching from Google/Outlook
-    const mockEvents = [
+  async syncEvents(userId, provider, accessToken) {
+    // 1. Pull: Mock fetching from Google/Outlook
+    const pulledEvents = [
       {
         title: 'Deep Work',
         startTime: new Date(Date.now() + 3600000), // 1 hour from now
@@ -23,18 +23,34 @@ class CalendarService {
       }
     ];
 
-    // Clear existing future events for sync
+    // Clear existing future events from provider for clean sync
     await CalendarEvent.deleteMany({ 
       userId, 
-      startTime: { $gt: new Date() } 
+      startTime: { $gt: new Date() },
+      source: { $ne: 'local' } // Don't delete local events
     });
 
-    // Save new events
-    const savedEvents = await CalendarEvent.insertMany(
-      mockEvents.map(e => ({ ...e, userId }))
+    // Save pulled events
+    await CalendarEvent.insertMany(
+      pulledEvents.map(e => ({ ...e, userId, source: provider }))
     );
 
-    return savedEvents;
+    // 2. Push: Fetch local events to push to provider
+    const localEvents = await CalendarEvent.find({
+      userId,
+      source: 'local',
+      startTime: { $gt: new Date() }
+    });
+
+    // Simulate pushing to provider
+    const pushedCount = localEvents.length;
+    // await providerApi.push(localEvents); 
+
+    return {
+      pulled: pulledEvents.length,
+      pushed: pushedCount,
+      events: await this.getUpcomingEvents(userId)
+    };
   }
 
   async getUpcomingEvents(userId, hours = 24) {
