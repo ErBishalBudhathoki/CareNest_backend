@@ -50,7 +50,7 @@ class WebhookController {
   }
 
   async handlePaymentSuccess(paymentIntent) {
-    const { invoiceId, organizationId } = paymentIntent.metadata;
+    const { invoiceId } = paymentIntent.metadata;
     if (!invoiceId) {
       console.warn('Invoice ID missing in payment intent metadata');
       return;
