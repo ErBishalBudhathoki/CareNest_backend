@@ -13,8 +13,20 @@ class Scheduler {
   }
 
   start() {
+    // Skip cron jobs in production Cloud Functions environment
+    // Use Google Cloud Scheduler to trigger HTTP endpoints instead for production
+    const isProductionServerless = process.env.NODE_ENV === 'production' &&
+      (process.env.FUNCTIONS_EMULATOR === 'true' ||
+        process.env.K_SERVICE ||  // Cloud Run/Functions indicator
+        process.env.FUNCTION_TARGET);  // Cloud Functions indicator
+
+    if (isProductionServerless) {
+      logger.info('Skipping in-process invoice/reminder scheduler in production Cloud Functions');
+      return;
+    }
+
     logger.info('Starting Cron Scheduler...');
-    
+
     // Run every day at midnight
     cron.schedule('0 0 * * *', async () => {
       logger.info('Running daily scheduled tasks');
@@ -154,7 +166,7 @@ class Scheduler {
       for (const invoice of overdueInvoices) {
         // Send email (Mocked for now as we haven't updated EmailService fully)
         // await emailService.sendOverdueReminder(invoice);
-        
+
         await db.collection("invoices").updateOne(
           { _id: invoice._id },
           {
