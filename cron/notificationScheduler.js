@@ -10,6 +10,18 @@ const { QUEUE_NAME } = require('../workers/notificationWorker');
 
 class NotificationScheduler {
   start() {
+    // Skip cron jobs in production Cloud Functions environment
+    // Use Google Cloud Scheduler to trigger HTTP endpoints instead for production
+    const isProductionServerless = process.env.NODE_ENV === 'production' &&
+      (process.env.FUNCTIONS_EMULATOR === 'true' ||
+        process.env.K_SERVICE ||  // Cloud Run/Functions indicator
+        process.env.FUNCTION_TARGET);  // Cloud Functions indicator
+
+    if (isProductionServerless) {
+      logger.info('Skipping in-process cron scheduler in production Cloud Functions - use Cloud Scheduler instead');
+      return;
+    }
+
     logger.info('Starting Notification Scheduler...');
 
     // Shift Reminders: Run every 15 minutes
@@ -52,7 +64,7 @@ class NotificationScheduler {
 
         for (const timing of settings.shiftReminders.timings) {
           // Check if we are within the window for this reminder (e.g. +/- 7.5 mins)
-          if (Math.abs(timeUntilShift - timing) < 0.25) { 
+          if (Math.abs(timeUntilShift - timing) < 0.25) {
             // Check if already sent
             const alreadySent = await NotificationHistory.findOne({
               userId: userId,
@@ -80,7 +92,7 @@ class NotificationScheduler {
   async processExpenseReminders() {
     try {
       logger.info('Processing expense reminders...');
-      
+
       // Find expenses without receipts created > 24 hours ago (simplified)
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -105,11 +117,11 @@ class NotificationScheduler {
           userId: user._id,
           type: 'expense',
           'data.expenseId': expense._id,
-          createdAt: { $gte: new Date(now.setHours(0,0,0,0)) }
+          createdAt: { $gte: new Date(now.setHours(0, 0, 0, 0)) }
         });
 
         if (!alreadySentToday) {
-           await this.sendNotification(user._id, {
+          await this.sendNotification(user._id, {
             type: 'expense',
             title: 'Expense Receipt Missing',
             body: `Please upload a receipt for your expense of $${expense.amount}.`,
@@ -147,7 +159,7 @@ class NotificationScheduler {
       notification,
       historyId: history._id
     });
-    
+
     logger.info(`Notification scheduled for user ${userId}: ${notification.title}`);
   }
 }
