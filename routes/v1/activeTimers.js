@@ -10,15 +10,15 @@ const ActiveTimerController = require('../../controllers/activeTimerController')
 const router = express.Router();
 
 // Start a timer
-// POST /api/active-timers/start
+// POST /active-timers/start
 router.post('/start', ActiveTimerController.startTimer);
 
 // Stop a timer
-// POST /api/active-timers/stop
+// POST /active-timers/stop
 router.post('/stop', ActiveTimerController.stopTimer);
 
 // Get active timers for an organization
-// GET /api/active-timers/:organizationId
+// GET /active-timers/:organizationId
 router.get('/:organizationId', ActiveTimerController.getActiveTimers);
 
 module.exports = router;
