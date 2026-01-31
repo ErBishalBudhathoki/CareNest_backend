@@ -158,6 +158,7 @@ const SecureAuthController = require('./controllers/secureAuthController');
 const { apiUsageMonitor } = require('./utils/apiUsageMonitor');
 console.log('API usage monitor loaded successfully');
 const securityDashboardRoutes = require('./routes/securityDashboard');
+const ocrRoutes = require('./routes/ocrRoutes');
 console.log('Security dashboard routes loaded successfully');
 const apiUsageRoutes = require('./routes/apiUsageRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
@@ -253,6 +254,7 @@ app.use('/auth', authRoutes);
 
 // Mount security dashboard routes
 app.use('/api/security', securityDashboardRoutes);
+app.use('/api/ocr', ocrRoutes);
 
 // Mount API usage analytics routes
 app.use('/api/analytics', apiUsageRoutes);
