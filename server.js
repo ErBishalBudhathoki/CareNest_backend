@@ -38,8 +38,8 @@ const notificationScheduler = require('./cron/notificationScheduler');
 notificationScheduler.start();
 
 // Start Dunning Scheduler
-const dunningScheduler = require('./cron/dunningScheduler');
-dunningScheduler();
+const { scheduleDunning } = require('./cron/dunningScheduler');
+scheduleDunning();
 
 // Firebase Admin SDK Configuration Generation
 // fs and path are already imported at the top of server.js
@@ -256,6 +256,11 @@ app.use('/auth', authRoutes);
 // Mount security dashboard routes
 app.use('/security', securityDashboardRoutes);
 app.use('/ocr', ocrRoutes);
+
+// Cloud Scheduler routes (for production scheduled tasks)
+const schedulerRoutes = require('./routes/scheduler_routes');
+app.use('/scheduler', schedulerRoutes);
+
 
 // Mount API usage analytics routes
 app.use('/analytics', apiUsageRoutes);

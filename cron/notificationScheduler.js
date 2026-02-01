@@ -164,4 +164,10 @@ class NotificationScheduler {
   }
 }
 
-module.exports = new NotificationScheduler();
+const notificationSchedulerInstance = new NotificationScheduler();
+
+// Export instance and individual methods for Cloud Scheduler
+module.exports = notificationSchedulerInstance;
+module.exports.processShiftReminders = notificationSchedulerInstance.processShiftReminders.bind(notificationSchedulerInstance);
+module.exports.processExpenseReminders = notificationSchedulerInstance.processExpenseReminders.bind(notificationSchedulerInstance);
+module.exports.processTimesheetReminders = notificationSchedulerInstance.processTimesheetReminders.bind(notificationSchedulerInstance);
