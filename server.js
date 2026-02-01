@@ -2852,6 +2852,161 @@ app.post("/createOrganization", async function (req, res) {
 });
 
 /**
+ * Create organization AND admin user in ONE transaction
+ * POST /createOrganizationWithAdmin
+ */
+app.post("/createOrganizationWithAdmin", async function (req, res) {
+  const {
+    organizationName,
+    ownerFirstName,
+    ownerLastName,
+    ownerEmail,
+    password,
+    salt,
+    abn
+  } = req.body;
+
+  console.log('[CREATE ORG+ADMIN] Starting combined creation for:', ownerEmail);
+
+  try {
+    const client = new MongoClient(process.env.MONGODB_URI);
+    await client.connect();
+    const db = client.db(DB_NAME);
+
+    // Start a session for transaction
+    const session = client.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        // 1. Check if email already exists
+        const existingUser = await db.collection("login").findOne({ email: ownerEmail }, { session });
+        if (existingUser) {
+          throw new Error('EMAIL_EXISTS');
+        }
+
+        // 2. Check if organization name already exists
+        const existingOrg = await db.collection("organizations").findOne({
+          name: { $regex: new RegExp(`^${organizationName}$`, 'i') }
+        }, { session });
+
+        if (existingOrg) {
+          throw new Error('ORG_EXISTS');
+        }
+
+        // 3. Generate unique organization code
+        let organizationCode;
+        let codeExists = true;
+
+        while (codeExists) {
+          organizationCode = generateOrganizationCode();
+          const existingCode = await db.collection("organizations").findOne(
+            { code: organizationCode },
+            { session }
+          );
+          codeExists = !!existingCode;
+        }
+
+        // 4. Create organization document
+        const organizationDoc = {
+          _id: new ObjectId(),
+          name: organizationName,
+          code: organizationCode,
+          ownerEmail: ownerEmail,
+          ownerFirstName: ownerFirstName,
+          ownerLastName: ownerLastName,
+          createdAt: new Date(),
+          isActive: true,
+          settings: {
+            allowEmployeeInvites: true,
+            maxEmployees: 100
+          }
+        };
+
+        const orgResult = await db.collection("organizations").insertOne(organizationDoc, { session });
+        const organizationId = orgResult.insertedId.toString();
+
+        console.log('[CREATE ORG+ADMIN] Organization created with ID:', organizationId);
+
+        // 5. Create admin user document
+        const userDoc = {
+          _id: new ObjectId(),
+          firstName: ownerFirstName,
+          lastName: ownerLastName,
+          email: ownerEmail,
+          password: password,
+          salt: salt,
+          abn: abn,
+          role: 'admin',
+          organizationId: organizationId,
+          organizationName: organizationName,
+          createdAt: new Date(),
+          isActive: true,
+          lastLogin: null
+        };
+
+        const userResult = await db.collection("login").insertOne(userDoc, { session });
+
+        console.log('[CREATE ORG+ADMIN] Admin user created with ID:', userResult.insertedId.toString());
+
+        // Store results for response
+        req.transactionResults = {
+          organizationId,
+          organizationCode,
+          organizationName,
+          userId: userResult.insertedId.toString()
+        };
+      });
+
+      await session.endSession();
+      await client.close();
+
+      console.log('[CREATE ORG+ADMIN] Transaction completed successfully');
+
+      res.status(200).json({
+        statusCode: 200,
+        message: "Organization and admin user created successfully",
+        organizationId: req.transactionResults.organizationId,
+        organizationCode: req.transactionResults.organizationCode,
+        organizationName: req.transactionResults.organizationName,
+        userId: req.transactionResults.userId,
+        email: ownerEmail,
+        role: 'admin'
+      });
+
+    } catch (transactionError) {
+      await session.endSession();
+      await client.close();
+
+      console.error('[CREATE ORG+ADMIN] Transaction error:', transactionError.message);
+
+      if (transactionError.message === 'EMAIL_EXISTS') {
+        return res.status(409).json({
+          statusCode: 409,
+          message: "Email already exists"
+        });
+      }
+
+      if (transactionError.message === 'ORG_EXISTS') {
+        return res.status(409).json({
+          statusCode: 409,
+          message: "Organization name already exists"
+        });
+      }
+
+      throw transactionError;
+    }
+
+  } catch (error) {
+    console.error('[CREATE ORG+ADMIN] Error:', error);
+    res.status(500).json({
+      statusCode: 500,
+      message: "Error creating organization and admin user"
+    });
+  }
+}
+});
+
+/**
  * Verify organization code
  * POST /organization/verify-code
  */
@@ -3381,8 +3536,13 @@ app.post("/signup/:email", async function (req, res) {
 
     // If organizationId is provided, validate and get organization name
     if (finalOrganizationId) {
+      console.log('[SIGNUP DEBUG] Validating organizationId:', finalOrganizationId);
+      console.log('[SIGNUP DEBUG] organizationId type:', typeof finalOrganizationId);
+      console.log('[SIGNUP DEBUG] organizationId length:', finalOrganizationId?.length);
+
       // Validate ObjectId format
       if (!ObjectId.isValid(finalOrganizationId)) {
+        console.log('[SIGNUP DEBUG] Invalid ObjectId format');
         await client.close();
         return res.status(400).json({
           statusCode: 400,
@@ -3390,9 +3550,24 @@ app.post("/signup/:email", async function (req, res) {
         });
       }
 
+      console.log('[SIGNUP DEBUG] ObjectId is valid, searching database...');
       const organization = await db.collection("organizations").findOne({
         _id: new ObjectId(finalOrganizationId)
       });
+
+      console.log('[SIGNUP DEBUG] Organization found:', !!organization);
+      if (organization) {
+        console.log('[SIGNUP DEBUG] Organization ID from DB:', organization._id.toString());
+        console.log('[SIGNUP DEBUG] Organization name:', organization.name);
+      } else {
+        console.log('[SIGNUP DEBUG] No organization found with ID:', finalOrganizationId);
+        // Try to find ANY organization to see if there's data
+        const anyOrg = await db.collection("organizations").findOne({});
+        console.log('[SIGNUP DEBUG] Any organization exists?', !!anyOrg);
+        if (anyOrg) {
+          console.log('[SIGNUP DEBUG] Sample org ID:', anyOrg._id.toString());
+        }
+      }
 
       if (organization) {
         organizationName = organization.name;
