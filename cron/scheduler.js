@@ -185,4 +185,9 @@ class Scheduler {
   }
 }
 
-module.exports = new Scheduler();
+const schedulerInstance = new Scheduler();
+
+// Export instance and individual methods for Cloud Scheduler
+module.exports = schedulerInstance;
+module.exports.processRecurringInvoices = schedulerInstance.processRecurringInvoices.bind(schedulerInstance);
+module.exports.processOverdueReminders = schedulerInstance.processOverdueReminders.bind(schedulerInstance);

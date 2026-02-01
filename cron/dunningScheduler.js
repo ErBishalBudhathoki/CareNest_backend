@@ -20,8 +20,27 @@ const scheduleDunning = () => {
             logger.error('Daily dunning process failed', error);
         }
     });
-    
+
     logger.info('Dunning scheduler initialized (0 9 * * *)');
 };
 
-module.exports = scheduleDunning;
+/**
+ * Manual trigger for Cloud Scheduler
+ * Processes overdue invoices for dunning
+ */
+const processDunning = async () => {
+    logger.info('Starting dunning process (triggered by Cloud Scheduler)...');
+    try {
+        const result = await dunningService.processOverdueInvoices();
+        logger.info('Dunning process completed', result);
+        return result;
+    } catch (error) {
+        logger.error('Dunning process failed', error);
+        throw error;
+    }
+};
+
+module.exports = {
+    scheduleDunning,
+    processDunning
+};
