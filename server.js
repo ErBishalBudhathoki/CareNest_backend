@@ -3892,71 +3892,51 @@ app.get('/initData/:email', async (req, res) => {
 /**
  * Upload user photo
  * POST /uploadPhoto
+ * Uses Cloud Functions-compatible busboy parsing (handles req.rawBody)
  */
-app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
-  const { email } = req.body;
-
-  // console.log('uploadPhoto called for:', email);
-
-  if (!req.file) {
-    return res.status(400).json({
-      statusCode: 400,
-      message: "No photo file provided"
-    });
-  }
+app.post('/uploadPhoto', async (req, res) => {
+  console.log('📸 uploadPhoto endpoint called');
 
   try {
-    let photoUrl;
-    // let filename;
+    // Use Cloud Functions-compatible upload handler (works with req.rawBody)
+    const { handleFileUpload } = require('./utils/cloudFunctionsUpload');
+    const uploadResult = await handleFileUpload(req, 'photo');
 
-    if (isR2Configured) {
-      // For R2, req.file.location is populated by multer-s3
-      if (process.env.R2_PUBLIC_DOMAIN) {
-        photoUrl = `${process.env.R2_PUBLIC_DOMAIN}/${req.file.key}`;
-        if (!photoUrl.startsWith('http')) {
-          photoUrl = `https://${photoUrl}`;
-        }
-      } else {
-        photoUrl = req.file.location;
-      }
-      // filename = req.file.key;
-    } else {
-      // Local fallback
-      // const fs = require('fs');
-      // For local storage, we still might need to save as base64 if we don't want to serve files
-      // BUT user asked to avoid blob. So we should serve files.
-      // However, current local fallback in config/storage.js saves to disk.
-      // Let's assume for local dev without R2, we return a local URL.
-      // But wait, the previous code read file to base64.
-      // For backward compatibility with NO R2, we might need to stick to base64?
-      // The user explicitly said "We are not doing that [blob]".
-      // So I will assume R2 is the primary goal.
-      // If R2 is NOT configured, I will still use the old blob method as fallback to not break local dev without R2.
-      // Or I can serve static files.
-      // Let's stick to blob for local fallback if R2 is missing, OR check isR2Configured.
+    const email = uploadResult.fields.email;
+    console.log('📸 uploadPhoto for email:', email);
+
+    if (!email) {
+      return res.status(400).json({
+        statusCode: 400,
+        message: "Email is required"
+      });
     }
+
+    const photoUrl = uploadResult.fileUrl;
 
     const client = new MongoClient(process.env.MONGODB_URI);
     await client.connect();
     const db = client.db(DB_NAME);
 
     let updateData = {
-      filename: req.file.originalname,
+      filename: uploadResult.filename,
       updatedAt: new Date()
     };
 
-    if (isR2Configured) {
+    if (uploadResult.storage === 'r2') {
       updateData.photoUrl = photoUrl;
-      // Optionally clear photoData to save space, but let's keep it empty for new uploads
+      // Clear photoData to save space for R2 uploads
       updateData.photoData = null;
     } else {
-      // Fallback to Blob for local dev if R2 not configured
+      // Local storage fallback - read file and convert to base64
       const fs = require('fs');
-      const photoData = fs.readFileSync(req.file.path);
-      const base64PhotoData = photoData.toString('base64');
-      updateData.photoData = base64PhotoData;
-      // Clean up uploaded file
-      fs.unlinkSync(req.file.path);
+      const filePath = require('path').join(__dirname, uploadResult.fileUrl);
+      if (fs.existsSync(filePath)) {
+        const photoData = fs.readFileSync(filePath);
+        updateData.photoData = photoData.toString('base64');
+        // Clean up uploaded file
+        fs.unlinkSync(filePath);
+      }
     }
 
     const result = await db.collection("login").updateOne(
@@ -3983,7 +3963,7 @@ app.post('/uploadPhoto', upload.single('photo'), async (req, res) => {
     console.error('Error uploading photo:', error);
     res.status(500).json({
       statusCode: 500,
-      message: "Error uploading photo"
+      message: error.message || "Error uploading photo"
     });
   }
 });
