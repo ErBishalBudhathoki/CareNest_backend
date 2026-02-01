@@ -251,7 +251,9 @@ app.use('/', metricsRoutes);
 app.use('/', invoiceManagementRoutes);
 
 // Add authentication routes
+// Add authentication routes
 app.use('/auth', authRoutes);
+app.use('/auth/v2', require('./routes/auth_v2'));
 
 // Mount security dashboard routes
 app.use('/security', securityDashboardRoutes);
