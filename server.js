@@ -235,8 +235,23 @@ app.use(cors(corsOptions));
 const webhookRoutes = require('./routes/webhookRoutes');
 app.use('/webhooks', webhookRoutes);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({
+  verify: (req, res, buf, encoding) => {
+    // Skip parsing for multipart/form-data - let Multer handle it
+    if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
+      throw new Error('Multipart data should not be parsed by express.json()');
+    }
+  }
+}));
+app.use(express.urlencoded({
+  extended: true,
+  verify: (req, res, buf, encoding) => {
+    // Skip parsing for multipart/form-data - let Multer handle it
+    if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
+      throw new Error('Multipart data should not be parsed by express.urlencoded()');
+    }
+  }
+}));
 app.use(systemHealthMiddleware);
 app.use(loggingMiddleware);
 app.use(errorTrackingMiddleware);
