@@ -5,8 +5,15 @@ const organizationSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  tradingName: String,
+  organizationName: String,  // Alias for 'name' used by some endpoints
   code: { type: String, required: true },
+  organizationCode: String,  // Alias for 'code' used by some endpoints
   abn: String,
+  logoUrl: String,
+  ownerEmail: String,
+  ownerFirstName: String,
+  ownerLastName: String,
   address: {
     street: String,
     city: String,
@@ -23,11 +30,14 @@ const organizationSchema = new mongoose.Schema({
     bankName: String,
     accountName: String,
     bsb: String,
-    accountNumber: String
+    accountNumber: String,
+    isVerified: { type: Boolean, default: false }
   },
   ndisRegistration: {
     isRegistered: Boolean,
-    registrationNumber: String
+    registrationNumber: String,
+    renewalDate: String,
+    expiryDate: String
   },
   businessName: String,
   settings: {
