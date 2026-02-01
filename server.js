@@ -3003,7 +3003,6 @@ app.post("/createOrganizationWithAdmin", async function (req, res) {
       message: "Error creating organization and admin user"
     });
   }
-}
 });
 
 /**
