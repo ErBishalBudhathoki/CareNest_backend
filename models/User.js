@@ -39,7 +39,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     default: 'user',
-    enum: ['user', 'admin', 'superadmin'] 
+    enum: ['user', 'admin', 'superadmin']
   },
   roles: {
     type: [String],
@@ -93,7 +93,17 @@ const userSchema = new mongoose.Schema({
   },
   multiOrgEnabled: { type: Boolean, default: false },
   defaultOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },
-  lastActiveOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' }
+  defaultOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },
+  lastActiveOrganizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },
+  refreshTokens: [{
+    token: { type: String, required: true },
+    expires: { type: Date, required: true },
+    created: { type: Date, default: Date.now },
+    createdByIp: { type: String },
+    revoked: { type: Date },
+    revokedByIp: { type: String },
+    replacedByToken: { type: String }
+  }]
 }, {
   timestamps: true,
   collection: 'users'
