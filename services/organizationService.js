@@ -125,16 +125,24 @@ class OrganizationService {
 
   async updateOrganizationDetails(organizationId, updates) {
     try {
+      // Add updatedAt timestamp
+      updates.updatedAt = new Date();
+
       const result = await Organization.updateOne(
         { _id: organizationId },
         { $set: updates }
       );
 
-      if (result.modifiedCount > 0) {
+      // Clear cache if organization was found (matched)
+      if (result.matchedCount > 0) {
         await cacheService.del(`org:${organizationId}`);
       }
 
-      return result.modifiedCount > 0;
+      // Return object with both matchedCount and modifiedCount for better error handling
+      return {
+        found: result.matchedCount > 0,
+        modified: result.modifiedCount > 0
+      };
     } catch (error) {
       throw error;
     }
