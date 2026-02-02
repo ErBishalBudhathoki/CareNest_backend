@@ -4,21 +4,27 @@ const logger = require('../utils/logger').createLogger('MongooseConfig');
 const connectMongoose = async () => {
   try {
     const uri = process.env.MONGODB_URI;
-    
+    const dbName = process.env.DB_NAME || 'Invoice';
+
     if (!uri) {
       throw new Error('MONGODB_URI environment variable is not defined');
     }
+
+    console.log('🔗 [MONGOOSE] Connecting to MongoDB...');
+    console.log('🔗 [MONGOOSE] Database name:', dbName);
 
     // Mongoose connection options
     const options = {
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
+      dbName: dbName, // Explicitly set database name
     };
 
     await mongoose.connect(uri, options);
-    
-    logger.info('Mongoose connected successfully');
-    
+
+    console.log('🔗 [MONGOOSE] Connected successfully to database:', mongoose.connection.db?.databaseName);
+    logger.info('Mongoose connected successfully', { dbName: mongoose.connection.db?.databaseName });
+
     mongoose.connection.on('error', (err) => {
       logger.error('Mongoose connection error', { error: err.message });
     });
