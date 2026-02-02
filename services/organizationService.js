@@ -128,10 +128,17 @@ class OrganizationService {
       // Add updatedAt timestamp
       updates.updatedAt = new Date();
 
+      console.log('🔧 [SERVICE] updateOrganizationDetails called');
+      console.log('🔧 [SERVICE] organizationId:', organizationId);
+      console.log('🔧 [SERVICE] updates keys:', Object.keys(updates || {}));
+
       const result = await Organization.updateOne(
         { _id: organizationId },
         { $set: updates }
       );
+
+      console.log('🔧 [SERVICE] MongoDB result:', JSON.stringify(result));
+      console.log('🔧 [SERVICE] matchedCount:', result.matchedCount, 'modifiedCount:', result.modifiedCount);
 
       // Clear cache if organization was found (matched)
       if (result.matchedCount > 0) {
@@ -144,6 +151,7 @@ class OrganizationService {
         modified: result.modifiedCount > 0
       };
     } catch (error) {
+      console.log('🔧 [SERVICE] Error:', error.message);
       throw error;
     }
   }
