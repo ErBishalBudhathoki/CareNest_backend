@@ -249,6 +249,10 @@ class OrganizationController {
       const { organizationId } = req.params;
       const updates = req.body;
 
+      console.log('📤 [UPDATE ORG] Request received');
+      console.log('📤 [UPDATE ORG] organizationId:', organizationId);
+      console.log('📤 [UPDATE ORG] updates keys:', Object.keys(updates || {}));
+
       if (!organizationId) {
         return res.status(400).json({
           message: "Organization ID is required"
@@ -265,7 +269,10 @@ class OrganizationController {
 
       const result = await organizationService.updateOrganizationDetails(organizationId, updates);
 
+      console.log('📤 [UPDATE ORG] Service result:', JSON.stringify(result));
+
       if (!result.found) {
+        console.log('📤 [UPDATE ORG] Organization NOT found! Returning 404');
         return res.status(404).json({
           message: "Organization not found",
           success: false
@@ -273,6 +280,7 @@ class OrganizationController {
       }
 
       // Organization found - success even if no changes were made
+      console.log('📤 [UPDATE ORG] Success! Modified:', result.modified);
       res.status(200).json({
         message: result.modified ? "Organization details updated successfully" : "No changes detected",
         success: true
