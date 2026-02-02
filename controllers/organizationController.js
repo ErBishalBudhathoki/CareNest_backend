@@ -5,18 +5,18 @@ class OrganizationController {
   async createOrganization(req, res) {
     try {
       const { organizationName, ownerEmail } = req.body;
-      
+
       if (!organizationName || !ownerEmail) {
         return res.status(400).json({
           message: "Organization name and owner email are required"
         });
       }
-      
+
       const result = await organizationService.createOrganization({
         organizationName,
         ownerEmail
       });
-      
+
       res.status(200).json({
         message: "Organization created successfully",
         ...result
@@ -27,13 +27,13 @@ class OrganizationController {
         stack: error.stack,
         organizationData: req.body
       });
-      
+
       if (error.message === 'Organization name already exists') {
         return res.status(400).json({
           message: error.message
         });
       }
-      
+
       res.status(500).json({
         message: "Error creating organization"
       });
@@ -43,21 +43,21 @@ class OrganizationController {
   async createOrganizationLegacy(req, res) {
     try {
       const { organizationName, ownerFirstName, ownerLastName, ownerEmail } = req.body;
-      
+
       if (!organizationName || !ownerEmail) {
         return res.status(400).json({
           statusCode: 400,
           message: "Organization name and owner email are required"
         });
       }
-      
+
       const result = await organizationService.createOrganization({
         organizationName,
         ownerEmail,
         ownerFirstName,
         ownerLastName
       });
-      
+
       res.status(200).json({
         statusCode: 200,
         message: "Organization created successfully",
@@ -69,14 +69,14 @@ class OrganizationController {
         stack: error.stack,
         organizationData: req.body
       });
-      
+
       if (error.message === 'Organization name already exists') {
         return res.status(409).json({
           statusCode: 409,
           message: error.message
         });
       }
-      
+
       res.status(500).json({
         statusCode: 500,
         message: "Error creating organization"
@@ -87,15 +87,15 @@ class OrganizationController {
   async verifyOrganizationCode(req, res) {
     try {
       const { organizationCode } = req.body;
-      
+
       if (!organizationCode) {
         return res.status(400).json({
           message: "Organization code is required"
         });
       }
-      
+
       const organization = await organizationService.verifyOrganizationCode(organizationCode);
-      
+
       if (organization) {
         res.status(200).json({
           message: "Organization code is valid",
@@ -121,7 +121,7 @@ class OrganizationController {
   async verifyOrganizationCodeGet(req, res) {
     try {
       const { organizationCode } = req.params;
-      
+
       if (!organizationCode) {
         return res.status(400).json({
           success: false,
@@ -129,9 +129,9 @@ class OrganizationController {
           message: "Organization code is required"
         });
       }
-      
+
       const organization = await organizationService.verifyOrganizationCode(organizationCode);
-      
+
       if (organization) {
         res.status(200).json({
           success: true,
@@ -163,7 +163,7 @@ class OrganizationController {
   async verifyOrganizationCodeLegacy(req, res) {
     try {
       const { code } = req.params;
-      
+
       if (!code) {
         return res.status(400).json({
           success: false,
@@ -171,9 +171,9 @@ class OrganizationController {
           message: "Organization code is required"
         });
       }
-      
+
       const organization = await organizationService.verifyOrganizationCode(code);
-      
+
       if (organization) {
         res.status(200).json({
           success: true,
@@ -205,15 +205,15 @@ class OrganizationController {
   async getOrganizationById(req, res) {
     try {
       const { organizationId } = req.params;
-      
+
       if (!organizationId) {
         return res.status(400).json({
           message: "Organization ID is required"
         });
       }
-      
+
       const organization = await organizationService.getOrganizationById(organizationId);
-      
+
       if (organization) {
         // Construct full URL for logo if present
         if (organization.logoUrl && !organization.logoUrl.startsWith('http')) {
@@ -248,7 +248,7 @@ class OrganizationController {
     try {
       const { organizationId } = req.params;
       const updates = req.body;
-      
+
       if (!organizationId) {
         return res.status(400).json({
           message: "Organization ID is required"
@@ -262,21 +262,21 @@ class OrganizationController {
           updates.logoUrl = match[1];
         }
       }
-      
-      const success = await organizationService.updateOrganizationDetails(organizationId, updates);
-      
-      if (success) {
-        res.status(200).json({
-          message: "Organization details updated successfully",
-          success: true
-        });
-      } else {
-        // Could be that the ID doesn't exist or no changes were made
-        res.status(200).json({ 
-          message: "No changes made or organization not found",
+
+      const result = await organizationService.updateOrganizationDetails(organizationId, updates);
+
+      if (!result.found) {
+        return res.status(404).json({
+          message: "Organization not found",
           success: false
         });
       }
+
+      // Organization found - success even if no changes were made
+      res.status(200).json({
+        message: result.modified ? "Organization details updated successfully" : "No changes detected",
+        success: true
+      });
     } catch (error) {
       logger.error('Error updating organization details', {
         error: error.message,
@@ -293,16 +293,16 @@ class OrganizationController {
   async getOrganizationMembers(req, res) {
     try {
       const { organizationId } = req.params;
-      
+
       if (!organizationId) {
         return res.status(400).json({
           statusCode: 400,
           message: "Organization ID is required"
         });
       }
-      
+
       const members = await organizationService.getOrganizationMembers(organizationId);
-      
+
       res.status(200).json({
         statusCode: 200,
         members: members
@@ -323,16 +323,16 @@ class OrganizationController {
   async getOrganizationBusinesses(req, res) {
     try {
       const { organizationId } = req.params;
-      
+
       if (!organizationId) {
         return res.status(400).json({
           statusCode: 400,
           message: "Organization ID is required"
         });
       }
-      
+
       const businesses = await organizationService.getOrganizationBusinesses(organizationId);
-      
+
       res.status(200).json({
         statusCode: 200,
         businesses: businesses
@@ -353,16 +353,16 @@ class OrganizationController {
   async getOrganizationClients(req, res) {
     try {
       const { organizationId } = req.params;
-      
+
       if (!organizationId) {
         return res.status(400).json({
           statusCode: 400,
           message: "Organization ID is required"
         });
       }
-      
+
       const clients = await organizationService.getOrganizationClients(organizationId);
-      
+
       res.status(200).json({
         statusCode: 200,
         clients: clients
@@ -383,16 +383,16 @@ class OrganizationController {
   async getOrganizationEmployees(req, res) {
     try {
       const { organizationId } = req.params;
-      
+
       if (!organizationId) {
         return res.status(400).json({
           statusCode: 400,
           message: "Organization ID is required"
         });
       }
-      
+
       const employees = await organizationService.getOrganizationEmployees(organizationId);
-      
+
       res.status(200).json({
         statusCode: 200,
         employees: employees
@@ -418,7 +418,7 @@ class OrganizationController {
       const userId = req.user.userId;
 
       const result = await organizationService.switchOrganization(userId, organizationId);
-      
+
       res.status(200).json({
         message: "Switched organization successfully",
         data: result
