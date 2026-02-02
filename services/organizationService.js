@@ -86,13 +86,28 @@ class OrganizationService {
 
   async getOrganizationById(organizationId) {
     try {
+      console.log('🔍 [GET ORG BY ID] Called with:', organizationId);
+      console.log('🔍 [GET ORG BY ID] Mongoose connection state:', Organization.db?.readyState);
+      console.log('🔍 [GET ORG BY ID] Database name:', Organization.db?.name);
+      console.log('🔍 [GET ORG BY ID] Collection name:', Organization.collection?.name);
+
       const cacheKey = `org:${organizationId}`;
       const cached = await cacheService.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        console.log('🔍 [GET ORG BY ID] Returning cached result');
+        return cached;
+      }
 
+      console.log('🔍 [GET ORG BY ID] Querying database...');
       const organization = await Organization.findById(organizationId);
 
+      console.log('🔍 [GET ORG BY ID] Query result:', organization ? 'FOUND' : 'NOT FOUND');
+      if (organization) {
+        console.log('🔍 [GET ORG BY ID] Org name:', organization.name);
+      }
+
       if (!organization) {
+        console.log('🔍 [GET ORG BY ID] Returning null - organization not in database');
         return null;
       }
 
