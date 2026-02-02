@@ -112,7 +112,7 @@ class OrganizationService {
       }
 
       const result = {
-        id: organization._id.toString(),
+        // id field removed for security: organization._id.toString(),
         name: organization.name,
         tradingName: organization.tradingName || organization.name,
         code: organization.code || organization.organizationCode,
