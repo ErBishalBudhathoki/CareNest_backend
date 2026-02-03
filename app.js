@@ -94,24 +94,9 @@ app.use(apiUsageMonitor.middleware);
 // API Documentation (Swagger)
 app.use('/', require('./config/swagger'));
 
-// Main API Routes
-app.use('/', require('./routes'));
-
-// Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    service: environmentConfig.getConfig().app.name,
-    timestamp: new Date().toISOString(),
-    environment: environmentConfig.getEnvironment()
-  });
-});
-
 // DEV ONLY: Reset rate limits and IP blocks (no auth required)
 // This endpoint is only available in development environment
+// Placed BEFORE main routes to avoid auth middleware
 app.post('/dev/reset-rate-limits', (req, res) => {
   // Only allow in development
   if (!environmentConfig.isDevelopmentEnvironment()) {
@@ -152,6 +137,24 @@ app.post('/dev/reset-rate-limits', (req, res) => {
     });
   }
 });
+
+// Main API Routes
+app.use('/', require('./routes'));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    service: environmentConfig.getConfig().app.name,
+    timestamp: new Date().toISOString(),
+    environment: environmentConfig.getEnvironment()
+  });
+});
+
+
 
 // Error handling middleware - must be added after all routes
 app.use(notFoundHandler);
