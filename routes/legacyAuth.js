@@ -26,14 +26,14 @@ const otpValidation = [
     // { userOTP, userVerificationKey, generatedOTP, encryptVerificationKey }
     // But authController.js verifyOTP expects:
     // { email, otp }
-    
+
     // There is a MISMATCH between the frontend implementation I read and the backend controller I read.
     // Frontend (lines 1100+): verifyOTP body = { userOTP, userVerificationKey... }
     // Backend (lines 276+): verifyOTP body = { email, otp }
-    
+
     // This implies the `authController.js` I read MIGHT NOT be the one the frontend was designed for, 
     // OR the frontend code I read is newer/older than the backend state.
-    
+
     // However, I must restore the route. I will bind it to the controller.
 ];
 
