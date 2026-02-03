@@ -9,10 +9,11 @@ class EmailService {
   initTransporter() {
     try {
       this.transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: "mail.smtp2go.com",
+        port: 587,
         auth: {
-          user: process.env.ADMIN_EMAIL, 
-          pass: process.env.APP_PASSWORD,
+          user: process.env.SMTP_ADMIN_EMAIL,
+          pass: process.env.SMTP_PASSWORD,
         },
       });
     } catch (error) {
@@ -28,7 +29,7 @@ class EmailService {
 
     try {
       const info = await this.transporter.sendMail({
-        from: `"CareNest" <${process.env.ADMIN_EMAIL}>`,
+        from: `"CareNest" <${process.env.SMTP_ADMIN_EMAIL}>`,
         to,
         subject,
         html,
