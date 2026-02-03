@@ -138,13 +138,7 @@ app.post('/dev/reset-rate-limits', (req, res) => {
   }
 });
 
-// Main API Routes
-app.use('/', require('./routes'));
-
-// Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Health check endpoint
+// Health check endpoint (placed before main routes to ensure access)
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
@@ -153,6 +147,14 @@ app.get('/health', (req, res) => {
     environment: environmentConfig.getEnvironment()
   });
 });
+
+// Main API Routes
+app.use('/', require('./routes'));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+
 
 
 

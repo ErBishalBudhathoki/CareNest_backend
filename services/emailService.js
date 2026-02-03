@@ -8,6 +8,9 @@ class EmailService {
 
   initTransporter() {
     try {
+      console.log('SMTP Debug - User:', process.env.SMTP_ADMIN_EMAIL ? 'Set' : 'Missing');
+      console.log('SMTP Debug - Pass:', process.env.SMTP_PASSWORD ? 'Set' : 'Missing');
+
       this.transporter = nodemailer.createTransport({
         host: "mail.smtp2go.com",
         port: 587,
