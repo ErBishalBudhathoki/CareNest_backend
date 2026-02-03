@@ -110,6 +110,49 @@ app.get('/health', (req, res) => {
   });
 });
 
+// DEV ONLY: Reset rate limits and IP blocks (no auth required)
+// This endpoint is only available in development environment
+app.post('/dev/reset-rate-limits', (req, res) => {
+  // Only allow in development
+  if (!environmentConfig.isDevelopmentEnvironment()) {
+    return res.status(403).json({
+      success: false,
+      message: 'This endpoint is only available in development environment'
+    });
+  }
+
+  try {
+    const { AuthMiddleware } = require('./middleware/auth');
+
+    // Clear blocked IPs
+    if (AuthMiddleware.blockedIPs) {
+      const blockedCount = AuthMiddleware.blockedIPs.size;
+      AuthMiddleware.blockedIPs.clear();
+      console.log(`[DEV] Cleared ${blockedCount} blocked IPs`);
+    }
+
+    // Clear failed attempts
+    if (AuthMiddleware.failedAttempts) {
+      const attemptsCount = AuthMiddleware.failedAttempts.size;
+      AuthMiddleware.failedAttempts.clear();
+      console.log(`[DEV] Cleared ${attemptsCount} failed attempt records`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Rate limits and IP blocks cleared successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[DEV] Error resetting rate limits:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error resetting rate limits',
+      error: error.message
+    });
+  }
+});
+
 // Error handling middleware - must be added after all routes
 app.use(notFoundHandler);
 app.use(errorHandler);
