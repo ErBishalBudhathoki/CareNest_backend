@@ -1,6 +1,6 @@
 const AuthService = require('../services/authService_v2');
 const { z } = require('zod');
-const { createLogger } = require('../utils/logger');
+const { createLogger } = require('../config/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
 const catchAsync = require('../utils/catchAsync');
 
