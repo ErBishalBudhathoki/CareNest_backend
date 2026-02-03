@@ -202,23 +202,10 @@ router.get('/profile',
 router.put('/profile',
   authenticateUser,
   rateLimitMiddleware('update'),
-  // Validation for update profile? Added inline or separate if critical.
   async (req, res) => {
     try {
-      // SecureAuthController didn't have updateProfile in my rewrite?
-      // I saw `getProfile`, `logout`, `assignJobRole`.
-      // I probably missed `updateProfile` in rewrite.
-      // I should add it to SecureAuthController or keep legacy handler?
-      // I rewrote WHOLE file with overwrite. So updateProfile is GONE unless I included it.
-      // I did NOT include updateProfile in Step 81 rewrite.
-      // I should check Step 68. Wait, Step 68 ended at `assignJobRole`.
-      // `updateProfile` was likely present in original file but I missed it.
-      // I will assume `updateProfile` is needed.
-      // For now, I'll comment it out or point to 501 Not Implemented?
-      // Or I'll add a placeholder.
-      return res.status(501).json({ error: 'Not Implemented Yet' });
-      // const result = await SecureAuthController.updateProfile(req, res);
-      // return result;
+      const result = await SecureAuthController.updateProfile(req, res);
+      return result;
     } catch (error) {
       logger.error('Update profile route error', {
         error: error.message,
@@ -239,11 +226,8 @@ router.post('/change-password',
   rateLimitMiddleware('change-password'),
   async (req, res) => {
     try {
-      // I also missed changePassword in SecureAuthController rewrite?
-      // I should check.
-      return res.status(501).json({ error: 'Not Implemented Yet' });
-      // const result = await SecureAuthController.changePassword(req, res);
-      // return result;
+      const result = await SecureAuthController.changePassword(req, res);
+      return result;
     } catch (error) {
       logger.error('Change password route error', {
         error: error.message,
@@ -285,10 +269,8 @@ router.post('/refresh-token',
   rateLimitMiddleware('refresh'),
   async (req, res) => {
     try {
-      // Missed refreshToken in SecureAuthController rewrite too?
-      return res.status(501).json({ error: 'Not Implemented Yet' });
-      // const result = await SecureAuthController.refreshToken(req, res);
-      // return result;
+      const result = await SecureAuthController.refreshToken(req, res);
+      return result;
     } catch (error) {
       logger.error('Refresh token route error', {
         error: error.message,
@@ -332,8 +314,8 @@ router.delete('/account',
   rateLimitMiddleware('delete'),
   async (req, res) => {
     try {
-      // deactivateAccount missed?
-      return res.status(501).json({ error: 'Not Implemented Yet' });
+      const result = await SecureAuthController.deactivateAccount(req, res);
+      return result;
     } catch (error) {
       return SecureErrorHandler.handleError(error, res);
     }
