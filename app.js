@@ -22,6 +22,9 @@ const { apiUsageMonitor } = require('./utils/apiUsageMonitor');
 // Initialize express app
 const app = express();
 
+// Trust Proxy (Required for Cloud Run / Load Balancer)
+app.set('trust proxy', 1);
+
 // Security middleware - must be first
 app.use(helmet({
   contentSecurityPolicy: {
