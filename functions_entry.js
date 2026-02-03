@@ -1,7 +1,11 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { setGlobalOptions } = require('firebase-functions/v2');
-const app = require('./server');
+const app = require('./app'); // Import app directly from app.js instead of server.js to avoid side-effects
+const connectMongoose = require('./config/mongoose'); // Import DB connection
 const { keepAliveService } = require('./utils/keepAlive');
+
+// Connect to MongoDB
+connectMongoose();
 
 // Set global options for 2nd Gen functions
 setGlobalOptions({ region: 'australia-southeast1' });
