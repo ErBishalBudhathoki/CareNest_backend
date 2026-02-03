@@ -135,6 +135,10 @@ userSchema.pre('save', async function (next) {
 
 // Instance method: Verify password
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  // Ensure we have a valid bcrypt hash before comparing
+  if (!this.password || !this.password.startsWith('$2')) {
+    return false;
+  }
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
