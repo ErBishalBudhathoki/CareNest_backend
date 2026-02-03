@@ -1,5 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param, query } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 const {
   getEntityAuditHistory,
   getOrganizationAuditLogs,
@@ -10,8 +14,67 @@ const {
 } = require('../services/auditService');
 const logger = require('../config/logger');
 
+// Rate limiting configurations
+const auditLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many audit requests.' }
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, message: 'Too many requests.' }
+});
+
+// Validation rules
+const entityAuditValidation = [
+  param('entityType').trim().notEmpty().withMessage('Entity type is required'),
+  param('entityId').isMongoId().withMessage('Valid entity ID is required'),
+  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100')
+];
+
+const orgAuditValidation = [
+  param('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  query('action').optional().trim().isLength({ max: 100 }),
+  query('entityType').optional().trim().isLength({ max: 100 }),
+  query('userId').optional().isMongoId().withMessage('Invalid user ID'),
+  query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  query('endDate').optional().isISO8601().withMessage('Invalid end date')
+];
+
+const statsValidation = [
+  param('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  query('endDate').optional().isISO8601().withMessage('Invalid end date')
+];
+
+const manualLogValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('userId').isMongoId().withMessage('Valid user ID is required'),
+  body('action').trim().notEmpty().withMessage('Action is required'),
+  body('entityType').trim().notEmpty().withMessage('Entity type is required'),
+  body('entityId').isMongoId().withMessage('Valid entity ID is required'),
+  body('description').optional().trim().isLength({ max: 1000 }),
+  body('metadata').optional().isObject()
+];
+
+const exportValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('format').isIn(['csv', 'json', 'xlsx']).withMessage('Format must be csv, json, or xlsx'),
+  body('filters').optional().isObject(),
+  body('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  body('endDate').optional().isISO8601().withMessage('Invalid end date')
+];
+
+// Apply authentication to all routes
+router.use(authenticateUser);
+
 // Get audit history for a specific entity
-router.get('/api/audit/entity/:entityType/:entityId', async (req, res) => {
+router.get('/api/audit/entity/:entityType/:entityId', auditLimiter, entityAuditValidation, handleValidationErrors, async (req, res) => {
   try {
     const { entityType, entityId } = req.params;
     const { page = 1, limit = 50 } = req.query;
@@ -35,7 +98,7 @@ router.get('/api/audit/entity/:entityType/:entityId', async (req, res) => {
 });
 
 // Get audit logs for an organization
-router.get('/api/audit/organization/:organizationId', async (req, res) => {
+router.get('/api/audit/organization/:organizationId', auditLimiter, orgAuditValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const {
@@ -72,7 +135,7 @@ router.get('/api/audit/organization/:organizationId', async (req, res) => {
 });
 
 // Get audit statistics
-router.get('/api/audit/stats/:organizationId', async (req, res) => {
+router.get('/api/audit/stats/:organizationId', auditLimiter, statsValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { startDate, endDate } = req.query;
@@ -96,7 +159,7 @@ router.get('/api/audit/stats/:organizationId', async (req, res) => {
 });
 
 // Create a manual audit log entry
-router.post('/api/audit/manual', async (req, res) => {
+router.post('/api/audit/manual', strictLimiter, requireRoles(['admin']), manualLogValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       organizationId,
@@ -132,7 +195,7 @@ router.post('/api/audit/manual', async (req, res) => {
 });
 
 // Get audit metadata (actions, entity types, etc.)
-router.get('/api/audit/metadata', async (req, res) => {
+router.get('/api/audit/metadata', auditLimiter, async (req, res) => {
   try {
     const metadata = await getAuditMetadata();
     res.json(metadata);
@@ -149,7 +212,7 @@ router.get('/api/audit/metadata', async (req, res) => {
 });
 
 // Export audit logs
-router.post('/api/audit/export', async (req, res) => {
+router.post('/api/audit/export', strictLimiter, requireRoles(['admin']), exportValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       organizationId,

@@ -1,50 +1,17 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
-const argon2 = require('argon2');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { createLogger } = require('../utils/logger');
 const logger = createLogger('AuthServiceV2');
 
 // Constants
-const ACCESS_TOKEN_EXPIRE = '15m';
+const ACCESS_TOKEN_EXPIRE = process.env.JWT_EXPIRES_IN || '24h'; // Align with .env
 const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 class AuthServiceV2 {
 
-    /**
-     * Hash password using Argon2
-     * @param {string} password 
-     * @returns {Promise<string>}
-     */
-    async hashPassword(password) {
-        try {
-            return await argon2.hash(password, {
-                type: argon2.argon2id, // recommended for password hashing
-                memoryCost: 2 ** 16,
-                timeCost: 3,
-                parallelism: 1
-            });
-        } catch (err) {
-            logger.error('Argon2 hashing failed', { error: err.message });
-            throw new Error('Security system error');
-        }
-    }
-
-    /**
-     * Verify password using Argon2
-     * @param {string} hash 
-     * @param {string} plain 
-     * @returns {Promise<boolean>}
-     */
-    async verifyPassword(hash, plain) {
-        try {
-            return await argon2.verify(hash, plain);
-        } catch (err) {
-            logger.warn('Argon2 verification failed', { error: err.message });
-            return false;
-        }
-    }
+    // Removed manual hash/verify methods in favor of User model methods
 
     /**
      * Generate Access and Refresh tokens
@@ -78,7 +45,7 @@ class AuthServiceV2 {
      * @param {string} ipAddress 
      */
     async login(email, password, ipAddress) {
-        const user = await User.findOne({ email: email.toLowerCase() });
+        const user = await User.findOne({ email: email.toLowerCase() }).select('+password +loginAttempts +lockUntil');
         if (!user) {
             throw new Error('Invalid credentials');
         }
@@ -87,10 +54,17 @@ class AuthServiceV2 {
             throw new Error('Account disabled');
         }
 
-        const valid = await this.verifyPassword(user.password, password);
+        // Use User model instance method (Bcrypt)
+        const valid = await user.comparePassword(password);
         if (!valid) {
-            // Logic for locking account could go here (reusing existing logic from SecureAuth if needed)
+            // Lockout logic should be centralized, duplicating basic increment here
+            await User.updateOne({ _id: user._id }, { $inc: { loginAttempts: 1 } });
             throw new Error('Invalid credentials');
+        }
+
+        // Reset attempts
+        if (user.loginAttempts > 0) {
+            await User.updateOne({ _id: user._id }, { $set: { loginAttempts: 0 } });
         }
 
         const { accessToken, refreshToken, refreshTokenExpiry } = this.generateTokens(user);
@@ -103,13 +77,13 @@ class AuthServiceV2 {
             createdByIp: ipAddress
         };
 
-        user.refreshTokens.push(tokenModel);
-
-        // Update last login
-        user.lastLogin = new Date();
-        user.loginAttempts = 0;
-
-        await user.save();
+        await User.updateOne(
+            { _id: user._id },
+            {
+                $push: { refreshTokens: tokenModel },
+                $set: { lastLogin: new Date() }
+            }
+        );
 
         return {
             user: {
@@ -135,13 +109,11 @@ class AuthServiceV2 {
             throw new Error('Email already registered');
         }
 
-        const hashedPassword = await this.hashPassword(userData.password);
-
+        // Pass plain password. Pre-save hook will hash it.
         const user = new User({
             ...userData,
             email: userData.email.toLowerCase(),
-            password: hashedPassword,
-            salt: crypto.randomBytes(16).toString('hex'), // Required by current schema
+            password: userData.password,
             refreshTokens: [],
             roles: ['user'],
             isActive: true
@@ -185,32 +157,39 @@ class AuthServiceV2 {
 
         // Check expiry
         if (Date.now() >= currentToken.expires) {
-            user.refreshTokens = user.refreshTokens.filter(t => t.token !== requestToken);
-            await user.save();
+            // Remove expired token
+            await User.updateOne(
+                { _id: user._id },
+                { $pull: { refreshTokens: { token: requestToken } } }
+            );
             throw new Error('Refresh Token Expired');
         }
 
         // Valid token. Rotate it.
         const { accessToken, refreshToken, refreshTokenExpiry } = this.generateTokens(user);
 
-        // Revoke the old one
-        currentToken.revoked = new Date();
-        currentToken.revokedByIp = ipAddress;
-        currentToken.replacedByToken = refreshToken;
+        // Mark old as revoked
+        // Note: Using updateOne with positional operator $ to update specific element array
+        await User.updateOne(
+            { _id: user._id, 'refreshTokens.token': requestToken },
+            {
+                $set: {
+                    'refreshTokens.$.revoked': new Date(),
+                    'refreshTokens.$.revokedByIp': ipAddress,
+                    'refreshTokens.$.replacedByToken': refreshToken
+                },
+                $push: {
+                    refreshTokens: {
+                        token: refreshToken,
+                        expires: refreshTokenExpiry,
+                        created: new Date(),
+                        createdByIp: ipAddress
+                    }
+                }
+            }
+        );
 
-        // Add new one
-        user.refreshTokens.push({
-            token: refreshToken,
-            expires: refreshTokenExpiry,
-            created: new Date(),
-            createdByIp: ipAddress
-        });
-
-        // Clean up old revoked tokens (older than 30 days)
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        user.refreshTokens = user.refreshTokens.filter(t => !t.revoked || t.revoked > thirtyDaysAgo);
-
-        await user.save();
+        // Clean up logic (optional, keep it simple for now)
 
         return {
             accessToken,
@@ -219,33 +198,32 @@ class AuthServiceV2 {
     }
 
     async logout(token, ipAddress) {
-        const user = await User.findOne({ 'refreshTokens.token': token });
-        if (user) {
-            const t = user.refreshTokens.find(x => x.token === token);
-            if (t) {
-                t.revoked = new Date();
-                t.revokedByIp = ipAddress;
-                await user.save();
+        await User.updateOne(
+            { 'refreshTokens.token': token },
+            {
+                $set: {
+                    'refreshTokens.$.revoked': new Date(),
+                    'refreshTokens.$.revokedByIp': ipAddress
+                }
             }
-        }
+        );
         return true;
     }
 
     async changePassword(userId, currentPassword, newPassword, ipAddress) {
-        const user = await User.findById(userId);
+        const user = await User.findById(userId).select('+password');
         if (!user) {
             throw new Error('User not found');
         }
 
-        const valid = await this.verifyPassword(user.password, currentPassword);
+        const valid = await user.comparePassword(currentPassword);
         if (!valid) {
-            throw new Error('Invalid credentials'); // Message matched in controller
+            throw new Error('Invalid credentials');
         }
 
-        const hashedPassword = await this.hashPassword(newPassword);
-        user.password = hashedPassword;
+        user.password = newPassword; // Pre-save will hash
 
-        // Revoke all existing sessions on password change for security
+        // Revoke all existing sessions
         user.refreshTokens.forEach(t => {
             if (!t.revoked) {
                 t.revoked = new Date();

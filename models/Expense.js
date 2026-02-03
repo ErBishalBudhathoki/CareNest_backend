@@ -147,7 +147,34 @@ const expenseSchema = new mongoose.Schema({
   auditTrail: [auditTrailSchema]
 }, {
   timestamps: true,
-  collection: 'expenses'
+  collection: 'expenses',
+  toJSON: {
+    transform: function (doc, ret) {
+      // Transform _id to id (Flutter expects 'id' as string)
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      // Transform dates to ISO 8601 strings
+      if (ret.expenseDate) ret.expenseDate = ret.expenseDate.toISOString();
+      if (ret.submittedAt) ret.submittedAt = ret.submittedAt.toISOString();
+      if (ret.approvedAt) ret.approvedAt = ret.approvedAt.toISOString();
+      if (ret.rejectedAt) ret.rejectedAt = ret.rejectedAt.toISOString();
+      if (ret.deletedAt) ret.deletedAt = ret.deletedAt.toISOString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      
+      // Transform nested audit trail dates
+      if (ret.auditTrail && Array.isArray(ret.auditTrail)) {
+        ret.auditTrail = ret.auditTrail.map(entry => ({
+          ...entry,
+          timestamp: entry.timestamp ? entry.timestamp.toISOString() : null
+        }));
+      }
+      
+      return ret;
+    }
+  }
 });
 
 // Indexes
