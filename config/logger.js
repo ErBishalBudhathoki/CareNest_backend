@@ -221,7 +221,21 @@ const createLogMethods = (logger) => {
 const loggerWithHelpers = {
   ...createLogMethods(logger),
   winston: logger,
-  logDir
+  logDir,
+  // Add createLogger compatibility method
+  createLogger: (serviceName) => {
+    // Return a child logger or wrapper that includes the service name in metadata
+    // For simplicity, we'll just return the main logger but with a bound method to add serviceName
+    const childLogger = logger.child({ service: serviceName });
+    return {
+      ...createLogMethods(childLogger),
+      winston: childLogger,
+      // Security logger method
+      security: (message, metadata = {}) => childLogger.warn(message, { metadata: { ...metadata, type: 'SECURITY' } })
+    };
+  },
+  // Add security logger to main export
+  security: (message, metadata = {}) => logger.warn(message, { metadata: { ...metadata, type: 'SECURITY' } })
 };
 
 // Export logger with helper methods
