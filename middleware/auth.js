@@ -545,6 +545,7 @@ module.exports = {
   AuthMiddleware,
   authenticateUser: AuthMiddleware.authenticateUser,
   requireRoles: AuthMiddleware.requireRoles,
+  requireAdmin: AuthMiddleware.requireRoles(['admin']), // Add requireAdmin alias
   authenticateAPIKey: AuthMiddleware.authenticateAPIKey,
   rateLimitMiddleware,
   rateLimit: rateLimitMiddleware,
