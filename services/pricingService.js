@@ -10,6 +10,107 @@ const PricingSettings = require('../models/PricingSettings');
 
 class PricingService {
   /**
+   * Process custom pricing for an NDIS item (Upsert logic)
+   * Used during assignment creation
+   */
+  async processCustomPricing(customPricing, ndisItem, organizationId, clientExists, userEmail) {
+    try {
+      // Determine if this is client-specific pricing
+      const isClientSpecific = customPricing.clientSpecific || false;
+      const targetClientId = isClientSpecific ? clientExists._id.toString() : null;
+
+      // Build the query to check for existing custom pricing
+      const duplicateCheckQuery = {
+        organizationId,
+        supportItemNumber: ndisItem.itemNumber,
+        clientSpecific: isClientSpecific,
+        isActive: true
+      };
+
+      // Only add clientId to query if it's client-specific pricing
+      if (isClientSpecific) {
+        duplicateCheckQuery.clientId = targetClientId;
+      } else {
+        duplicateCheckQuery.clientId = null;
+      }
+
+      // console.log(`Checking for duplicate custom pricing with query:`, JSON.stringify(duplicateCheckQuery, null, 2));
+
+      const existingCustomPricing = await CustomPricing.findOne(duplicateCheckQuery);
+
+      if (existingCustomPricing) {
+        // Check if the price is different before updating
+        const newPrice = customPricing.price || customPricing.customPrice;
+        const existingPrice = existingCustomPricing.customPrice;
+
+        if (newPrice !== existingPrice) {
+          // Update existing custom pricing with new price
+          await CustomPricing.updateOne(
+            { _id: existingCustomPricing._id },
+            {
+              $set: {
+                customPrice: newPrice,
+                pricingType: customPricing.pricingType === 'custom' ? 'fixed' : (customPricing.pricingType || 'fixed'),
+                updatedBy: userEmail,
+                updatedAt: new Date(),
+                version: (existingCustomPricing.version || 1) + 1
+              },
+              $push: {
+                auditTrail: {
+                  action: 'updated',
+                  performedBy: userEmail,
+                  timestamp: new Date(),
+                  changes: `Price updated from ${existingPrice} to ${newPrice} (${customPricing.pricingType || 'fixed'})`,
+                  reason: 'Assignment creation update'
+                }
+              }
+            }
+          );
+          // console.log(`Updated existing custom pricing for NDIS item ${ndisItem.itemNumber} from ${existingPrice} to ${newPrice}`);
+        } else {
+          // console.log(`Custom pricing for NDIS item ${ndisItem.itemNumber} already exists with same price ${newPrice}, skipping duplicate creation`);
+        }
+      } else {
+        // Create new custom pricing record
+        const pricingDoc = {
+          organizationId,
+          supportItemNumber: ndisItem.itemNumber,
+          supportItemName: ndisItem.itemName || ndisItem.description,
+          pricingType: customPricing.pricingType === 'custom' ? 'fixed' : (customPricing.pricingType || 'fixed'),
+          customPrice: (customPricing.pricingType === 'custom' || customPricing.pricingType === 'fixed' || !customPricing.pricingType) ? (customPricing.price || customPricing.customPrice) : null,
+          multiplier: customPricing.pricingType === 'multiplier' ? (customPricing.price || customPricing.customPrice) : null,
+          clientId: targetClientId,
+          clientSpecific: isClientSpecific,
+          ndisCompliant: true,
+          exceedsNdisCap: false,
+          approvalStatus: 'approved',
+          effectiveDate: new Date(),
+          expiryDate: null,
+          createdBy: userEmail,
+          createdAt: new Date(),
+          updatedBy: userEmail,
+          updatedAt: new Date(),
+          isActive: true,
+          version: 1,
+          auditTrail: [{
+            action: 'created',
+            performedBy: userEmail,
+            timestamp: new Date(),
+            changes: `Custom pricing created: ${customPricing.price || customPricing.customPrice} (${customPricing.pricingType || 'fixed'})`,
+            reason: 'Assignment creation'
+          }]
+        };
+
+        await CustomPricing.create(pricingDoc);
+        // console.log(`Created new custom pricing for NDIS item ${ndisItem.itemNumber} (clientSpecific: ${isClientSpecific}, clientId: ${targetClientId})`);
+      }
+    } catch (error) {
+      console.error(`Error processing custom pricing for NDIS item ${ndisItem.itemNumber}:`, error);
+      // Don't throw, just log error to allow assignment to proceed
+    }
+  }
+
+  /**
    * Create custom pricing record
    */
   async createCustomPricing(pricingData, userEmail) {

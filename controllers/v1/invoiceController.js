@@ -1,23 +1,38 @@
 const InvoiceGenerationService = require('../../services/invoiceGenerationService');
 const auditService = require('../../services/auditService');
 const logger = require('../../config/logger');
+const catchAsync = require('../../utils/catchAsync');
 
 class InvoiceController {
   /**
    * Generate invoice line items based on clientAssignment data
    * POST /api/invoice/generate-line-items
    */
-  async generateInvoiceLineItems(req, res) {
+  generateInvoiceLineItems = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
       const { userEmail, clientEmail, startDate, endDate, includeExpenses = false } = req.body;
       
+      logger.business('Starting invoice line items generation', {
+        userEmail,
+        clientEmail,
+        startDate,
+        endDate,
+        includeExpenses
+      });
+      
       // Validate input parameters
       const validationErrors = service.validateGenerationParams(userEmail, clientEmail, startDate, endDate);
       if (validationErrors.length > 0) {
+        logger.business('Invoice generation validation failed', {
+          userEmail,
+          clientEmail,
+          validationErrors
+        });
         return res.status(400).json({
           success: false,
+          code: 'VALIDATION_ERROR',
           message: 'Validation failed',
           errors: validationErrors
         });
@@ -62,7 +77,7 @@ class InvoiceController {
       await auditService.createAuditLog({
         entityType: auditService.AUDIT_ENTITIES.INVOICE,
         entityId: result.metadata.assignmentId,
-        action: auditService.AUDIT_ACTIONS.CREATE, // Using CREATE as closest mapping to generate_line_items
+        action: auditService.AUDIT_ACTIONS.CREATE,
         userEmail: userEmail,
         organizationId: result.lineItems[0]?.organizationId,
         metadata: {
@@ -78,12 +93,22 @@ class InvoiceController {
         }
       });
 
+      logger.business('Invoice line items generated successfully', {
+        userEmail,
+        clientEmail,
+        itemCount: result.lineItems.length,
+        validItems: validation.validItems,
+        invalidItems: validation.invalidItems,
+        ndisCompliant: validation.isValid
+      });
+
       res.status(200).json({
         success: true,
+        code: 'INVOICE_LINE_ITEMS_GENERATED',
         message: 'Invoice line items generated successfully',
         data: {
           ...result,
-          expenses: expenses, // Add expenses as separate array
+          expenses: expenses,
           validation,
           summary: {
             totalItems: result.lineItems.length,
@@ -114,6 +139,7 @@ class InvoiceController {
       if (error.message.includes('No active assignment found')) {
         return res.status(404).json({
           success: false,
+          code: 'ASSIGNMENT_NOT_FOUND',
           message: 'No active client assignment found',
           error: error.message
         });
@@ -122,6 +148,7 @@ class InvoiceController {
       if (error.message.includes('Client not found')) {
         return res.status(404).json({
           success: false,
+          code: 'CLIENT_NOT_FOUND',
           message: 'Client not found or inactive',
           error: error.message
         });
@@ -129,28 +156,37 @@ class InvoiceController {
 
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error generating invoice line items',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 
   /**
    * Get invoice generation preview
    * GET /api/invoice/preview/:userEmail/:clientEmail
    */
-  async getInvoicePreview(req, res) {
+  getInvoicePreview = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
       const { userEmail, clientEmail } = req.params;
       const { startDate, endDate } = req.query;
       
+      logger.business('Generating invoice preview', {
+        userEmail,
+        clientEmail,
+        startDate,
+        endDate
+      });
+      
       if (!startDate || !endDate) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_PARAMETERS',
           message: 'startDate and endDate query parameters are required'
         });
       }
@@ -160,6 +196,7 @@ class InvoiceController {
       if (validationErrors.length > 0) {
         return res.status(400).json({
           success: false,
+          code: 'VALIDATION_ERROR',
           message: 'Validation failed',
           errors: validationErrors
         });
@@ -179,8 +216,17 @@ class InvoiceController {
         return acc;
       }, { totalAmount: 0, totalHours: 0, totalItems: 0 });
 
+      logger.business('Invoice preview generated successfully', {
+        userEmail,
+        clientEmail,
+        totalItems: totals.totalItems,
+        totalAmount: totals.totalAmount,
+        ndisCompliant: validation.isValid
+      });
+
       res.status(200).json({
         success: true,
+        code: 'INVOICE_PREVIEW_GENERATED',
         message: 'Invoice preview generated successfully',
         data: {
           ...result,
@@ -216,27 +262,33 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error generating invoice preview',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 
   /**
    * Get available assignments for invoice generation
    * GET /api/invoice/available-assignments/:userEmail
    */
-  async getAvailableAssignments(req, res) {
+  getAvailableAssignments = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
       const { userEmail } = req.params;
       
+      logger.business('Retrieving available assignments', {
+        userEmail
+      });
+      
       if (!userEmail) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_PARAMETERS',
           message: 'userEmail parameter is required'
         });
       }
@@ -271,8 +323,14 @@ class InvoiceController {
         }
       }
 
+      logger.business('Available assignments retrieved successfully', {
+        userEmail,
+        totalCount: enrichedAssignments.length
+      });
+
       res.status(200).json({
         success: true,
+        code: 'ASSIGNMENTS_RETRIEVED',
         message: 'Available assignments retrieved successfully',
         data: {
           assignments: enrichedAssignments,
@@ -290,29 +348,39 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error retrieving available assignments',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 
   /**
    * Validate invoice generation data with enhanced NDIS compliance checking
    * POST /api/invoice/validate-generation-data
    */
-  async validateInvoiceGenerationData(req, res) {
+  validateInvoiceGenerationData = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
       const { userEmail, clientEmail, startDate, endDate, validatePricing = true } = req.body;
+      
+      logger.business('Validating invoice generation data', {
+        userEmail,
+        clientEmail,
+        startDate,
+        endDate,
+        validatePricing
+      });
       
       // Validate input parameters
       const validationErrors = service.validateGenerationParams(userEmail, clientEmail, startDate, endDate);
       if (validationErrors.length > 0) {
         return res.status(400).json({
           success: false,
+          code: 'VALIDATION_ERROR',
           message: 'Validation failed',
           errors: validationErrors
         });
@@ -433,8 +501,17 @@ class InvoiceController {
         });
       }
 
+      logger.business('Invoice generation data validation completed', {
+        userEmail,
+        clientEmail,
+        canGenerateInvoice: validation.canGenerateInvoice,
+        hasAssignment: validation.hasAssignment,
+        hasClient: validation.hasClient
+      });
+
       res.status(200).json({
         success: true,
+        code: 'VALIDATION_COMPLETED',
         message: 'Validation completed',
         data: {
           validation,
@@ -463,18 +540,21 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error validating invoice generation data',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 
   /**
    * Generate bulk invoices for multiple clients with pre-configured pricing
    */
-  async generateBulkInvoices(req, res) {
+  generateBulkInvoices = catchAsync(async (req, res) => {
+    const service = new InvoiceGenerationService();
+    
     try {
       const {
         organizationId,
@@ -486,10 +566,21 @@ class InvoiceController {
         batchSize = 10
       } = req.body;
       
+      logger.business('Starting bulk invoice generation', {
+        organizationId,
+        userEmail,
+        totalClients: clients?.length,
+        usePreConfiguredPricing,
+        skipPricePrompts,
+        includeExpenses,
+        batchSize
+      });
+      
       // Validate required parameters
       if (!organizationId) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_ORGANIZATION_ID',
           message: 'Organization ID is required'
         });
       }
@@ -497,6 +588,7 @@ class InvoiceController {
       if (!userEmail) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_USER_EMAIL',
           message: 'User email is required'
         });
       }
@@ -504,6 +596,7 @@ class InvoiceController {
       if (!clients || !Array.isArray(clients) || clients.length === 0) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_CLIENTS',
           message: 'At least one client is required for bulk generation'
         });
       }
@@ -512,7 +605,7 @@ class InvoiceController {
       await auditService.createAuditLog({
         entityType: auditService.AUDIT_ENTITIES.INVOICE,
         entityId: organizationId,
-        action: 'bulk_invoice_generation_started', // Custom action, or map to generic
+        action: 'bulk_invoice_generation_started',
         userEmail: userEmail,
         organizationId: organizationId,
         metadata: {
@@ -525,8 +618,7 @@ class InvoiceController {
       });
       
       // Generate bulk invoices
-      const invoiceService = new InvoiceGenerationService();
-      const result = await invoiceService.generateBulkInvoices({
+      const result = await service.generateBulkInvoices({
         organizationId,
         userEmail,
         clients,
@@ -555,14 +647,33 @@ class InvoiceController {
       });
       
       if (result.success) {
+        logger.business('Bulk invoice generation completed successfully', {
+          organizationId,
+          userEmail,
+          totalClients: result.totalClients,
+          processedClients: result.processedClients,
+          successfulInvoices: result.successfulInvoices?.length,
+          failedInvoices: result.failedInvoices?.length,
+          totalAmount: result.summary?.totalAmount
+        });
+        
         res.status(200).json({
           success: true,
+          code: 'BULK_INVOICES_GENERATED',
           message: 'Bulk invoice generation completed successfully',
           data: result
         });
       } else {
+        logger.business('Bulk invoice generation failed', {
+          organizationId,
+          userEmail,
+          message: result.message,
+          errors: result.errors
+        });
+        
         res.status(400).json({
           success: false,
+          code: 'BULK_GENERATION_FAILED',
           message: result.message || 'Bulk invoice generation failed',
           error: result.error,
           errors: result.errors
@@ -599,17 +710,20 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Internal server error during bulk invoice generation',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
+    } finally {
+      await service.disconnect();
     }
-  }
+  });
 
   /**
    * Validate existing invoice line items with comprehensive price validation
    * POST /api/invoice/validate-line-items
    */
-  async validateExistingInvoiceLineItems(req, res) {
+  validateExistingInvoiceLineItems = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
@@ -620,10 +734,18 @@ class InvoiceController {
         skipPriceValidation = false 
       } = req.body;
       
+      logger.business('Validating existing invoice line items', {
+        lineItemCount: lineItems?.length,
+        defaultState,
+        defaultProviderType,
+        skipPriceValidation
+      });
+      
       // Input validation
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_LINE_ITEMS',
           message: 'Line items array is required and must not be empty'
         });
       }
@@ -651,8 +773,16 @@ class InvoiceController {
         }
       });
 
+      logger.business('Line items validation completed', {
+        totalItems: validation.totalItems,
+        validItems: validation.validItems,
+        invalidItems: validation.invalidItems,
+        isValid: validation.isValid
+      });
+
       res.status(200).json({
         success: true,
+        code: 'LINE_ITEMS_VALIDATED',
         message: 'Line items validation completed',
         data: {
           validation,
@@ -677,19 +807,20 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error validating invoice line items',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 
   /**
    * Real-time price validation for invoice creation
    * POST /api/invoice/validate-pricing-realtime
    */
-  async validatePricingRealtime(req, res) {
+  validatePricingRealtime = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
@@ -699,10 +830,17 @@ class InvoiceController {
         providerType = 'standard' 
       } = req.body;
       
+      logger.business('Starting real-time price validation', {
+        lineItemCount: lineItems?.length,
+        state,
+        providerType
+      });
+      
       // Input validation
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
         return res.status(400).json({
           success: false,
+          code: 'MISSING_LINE_ITEMS',
           message: 'Line items array is required and must not be empty'
         });
       }
@@ -731,8 +869,16 @@ class InvoiceController {
         }
       });
 
+      logger.business('Real-time price validation completed', {
+        totalItems: priceValidationResult.summary.totalItems,
+        validItems: priceValidationResult.summary.validItems,
+        invalidItems: priceValidationResult.summary.invalidItems,
+        compliancePercentage: priceValidationResult.summary.compliancePercentage
+      });
+
       res.status(200).json({
         success: true,
+        code: 'PRICING_VALIDATED',
         message: 'Real-time price validation completed',
         data: priceValidationResult
       });
@@ -746,19 +892,20 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error performing real-time price validation',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 
   /**
    * Get comprehensive invoice validation report
    * POST /api/invoice/validation-report
    */
-  async getInvoiceValidationReport(req, res) {
+  getInvoiceValidationReport = catchAsync(async (req, res) => {
     const service = new InvoiceGenerationService();
     
     try {
@@ -771,11 +918,19 @@ class InvoiceController {
         defaultProviderType = 'standard'
       } = req.body;
       
+      logger.business('Generating invoice validation report', {
+        userEmail,
+        clientEmail,
+        startDate,
+        endDate
+      });
+      
       // Validate input parameters
       const validationErrors = service.validateGenerationParams(userEmail, clientEmail, startDate, endDate);
       if (validationErrors.length > 0) {
         return res.status(400).json({
           success: false,
+          code: 'VALIDATION_ERROR',
           message: 'Validation failed',
           errors: validationErrors
         });
@@ -882,8 +1037,18 @@ class InvoiceController {
         }
       });
 
+      logger.business('Invoice validation report generated successfully', {
+        userEmail,
+        clientEmail,
+        totalItems: report.validation.totalItems,
+        validItems: report.validation.validItems,
+        invalidItems: report.validation.invalidItems,
+        compliancePercentage: validation.priceValidationSummary?.compliancePercentage
+      });
+
       res.status(200).json({
         success: true,
+        code: 'VALIDATION_REPORT_GENERATED',
         message: 'Invoice validation report generated',
         data: report
       });
@@ -898,13 +1063,14 @@ class InvoiceController {
       
       res.status(500).json({
         success: false,
+        code: 'INTERNAL_ERROR',
         message: 'Error generating validation report',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
       await service.disconnect();
     }
-  }
+  });
 }
 
 module.exports = new InvoiceController();

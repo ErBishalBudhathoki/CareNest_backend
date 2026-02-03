@@ -3,29 +3,38 @@ const mongoose = require('mongoose');
 const businessSchema = new mongoose.Schema({
   businessName: {
     type: String,
-    required: true
+    required: true,
+    trim: true
   },
   businessEmail: {
     type: String,
-    required: true
+    required: true,
+    trim: true,
+    lowercase: true
   },
   businessPhone: {
-    type: String
+    type: String,
+    trim: true
   },
   businessAddress: {
-    type: String
+    type: String,
+    trim: true
   },
   businessCity: {
-    type: String
+    type: String,
+    trim: true
   },
   businessState: {
-    type: String
+    type: String,
+    trim: true
   },
   businessZip: {
-    type: String
+    type: String,
+    trim: true
   },
   organizationId: {
-    type: String,
+    type: String, // Or ObjectId if ref, keeping String for legacy
+    required: true,
     index: true
   },
   createdBy: {
@@ -33,11 +42,23 @@ const businessSchema = new mongoose.Schema({
   },
   isActive: {
     type: Boolean,
-    default: true
+    default: true,
+    index: true
   }
 }, {
   timestamps: true,
-  collection: 'businesses'
+  collection: 'businesses',
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      return ret;
+    }
+  }
 });
 
 // Index to prevent duplicates within an organization

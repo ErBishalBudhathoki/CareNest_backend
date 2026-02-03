@@ -1,115 +1,119 @@
 const GeofenceService = require('../services/geofenceService');
-const logger = require('../utils/logger').createLogger('GeofenceController');
+const catchAsync = require('../utils/catchAsync');
+const logger = require('../config/logger');
 
 class GeofenceController {
   /**
    * Create a new geofence location
    * POST /api/geofence/locations
    */
-  async createGeofence(req, res) {
-    try {
-      const data = req.body;
-      const geofence = await GeofenceService.createGeofence(data);
-
-      return res.status(201).json({
-        success: true,
-        data: geofence,
-        message: 'Geofence location created successfully'
-      });
-    } catch (error) {
-      logger.error('Error creating geofence', { error: error.message });
-      return res.status(500).json({
+  createGeofence = catchAsync(async (req, res) => {
+    const data = req.body;
+    
+    if (!data || !data.name || !data.latitude || !data.longitude || !data.radius) {
+      return res.status(400).json({
         success: false,
-        message: 'Failed to create geofence location'
+        code: 'VALIDATION_ERROR',
+        message: 'Missing required fields: name, latitude, longitude, radius'
       });
     }
-  }
+    
+    const geofence = await GeofenceService.createGeofence(data);
+
+    logger.business('Geofence created', {
+      action: 'geofence_create',
+      geofenceId: geofence?._id,
+      name: data.name
+    });
+
+    return res.status(201).json({
+      success: true,
+      code: 'GEOFENCE_CREATED',
+      data: geofence,
+      message: 'Geofence location created successfully'
+    });
+  });
 
   /**
    * Get all geofence locations
    * GET /api/geofence/locations
    */
-  async getGeofences(req, res) {
-    try {
-      const { clientId } = req.query;
-      const geofences = await GeofenceService.getGeofences({ clientId });
+  getGeofences = catchAsync(async (req, res) => {
+    const { clientId } = req.query;
+    const geofences = await GeofenceService.getGeofences({ clientId });
 
-      return res.status(200).json({
-        success: true,
-        data: geofences
-      });
-    } catch (error) {
-      logger.error('Error fetching geofences', { error: error.message });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch geofence locations'
-      });
-    }
-  }
+    logger.business('Retrieved geofences', {
+      action: 'geofence_list',
+      clientId,
+      count: geofences?.length || 0
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: 'GEOFENCES_RETRIEVED',
+      data: geofences
+    });
+  });
 
   /**
    * Update a geofence location
    * PUT /api/geofence/locations/:id
    */
-  async updateGeofence(req, res) {
-    try {
-      const { id } = req.params;
-      const updates = req.body;
+  updateGeofence = catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
 
-      const geofence = await GeofenceService.updateGeofence(id, updates);
-
-      return res.status(200).json({
-        success: true,
-        data: geofence,
-        message: 'Geofence location updated successfully'
-      });
-    } catch (error) {
-      logger.error('Error updating geofence', { error: error.message, id: req.params.id });
-      
-      if (error.message === 'Geofence not found') {
-        return res.status(404).json({
-          success: false,
-          message: 'Geofence location not found'
-        });
-      }
-
-      return res.status(500).json({
+    if (!id) {
+      return res.status(400).json({
         success: false,
-        message: 'Failed to update geofence location'
+        code: 'VALIDATION_ERROR',
+        message: 'Geofence ID is required'
       });
     }
-  }
+
+    const geofence = await GeofenceService.updateGeofence(id, updates);
+
+    logger.business('Geofence updated', {
+      action: 'geofence_update',
+      geofenceId: id
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: 'GEOFENCE_UPDATED',
+      data: geofence,
+      message: 'Geofence location updated successfully'
+    });
+  });
 
   /**
    * Delete a geofence location
    * DELETE /api/geofence/locations/:id
    */
-  async deleteGeofence(req, res) {
-    try {
-      const { id } = req.params;
+  deleteGeofence = catchAsync(async (req, res) => {
+    const { id } = req.params;
 
-      await GeofenceService.deleteGeofence(id);
-
-      return res.status(200).json({
-        success: true,
-        message: 'Geofence location deleted successfully'
-      });
-    } catch (error) {
-      logger.error('Error deleting geofence', { error: error.message, id: req.params.id });
-      
-      if (error.message === 'Geofence not found') {
-        return res.status(404).json({
-          success: false,
-          message: 'Geofence location not found'
-        });
-      }
-
-      return res.status(500).json({
+    if (!id) {
+      return res.status(400).json({
         success: false,
-        message: 'Failed to delete geofence location'
+        code: 'VALIDATION_ERROR',
+        message: 'Geofence ID is required'
       });
     }
-  }
+
+    await GeofenceService.deleteGeofence(id);
+
+    logger.business('Geofence deleted', {
+      action: 'geofence_delete',
+      geofenceId: id
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: 'GEOFENCE_DELETED',
+      message: 'Geofence location deleted successfully'
+    });
+  });
 }
 
 module.exports = new GeofenceController();

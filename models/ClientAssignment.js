@@ -2,15 +2,15 @@ const mongoose = require('mongoose');
 
 const scheduleItemSchema = new mongoose.Schema({
   date: {
-    type: String,
+    type: String, // YYYY-MM-DD
     required: true
   },
   startTime: {
-    type: String,
+    type: String, // HH:MM
     required: true
   },
   endTime: {
-    type: String,
+    type: String, // HH:MM
     required: true
   },
   break: {
@@ -22,32 +22,36 @@ const scheduleItemSchema = new mongoose.Schema({
     default: false
   },
   ndisItem: {
-    type: mongoose.Schema.Types.Mixed,
+    type: mongoose.Schema.Types.Mixed, // Flexible NDIS item data
     default: null
   }
-}, { _id: false });
+});
 
 const clientAssignmentSchema = new mongoose.Schema({
   userEmail: {
     type: String,
     required: true,
     trim: true,
-    lowercase: true
+    lowercase: true,
+    index: true
   },
   clientEmail: {
     type: String,
     required: true,
     trim: true,
-    lowercase: true
+    lowercase: true,
+    index: true
   },
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client',
-    required: true
+    required: true,
+    index: true
   },
   organizationId: {
-    type: String,
-    required: true
+    type: String, // Or ObjectId, legacy seems to be String
+    required: true,
+    index: true
   },
   schedule: [scheduleItemSchema],
   assignedNdisItemNumber: {
@@ -56,16 +60,27 @@ const clientAssignmentSchema = new mongoose.Schema({
   },
   isActive: {
     type: Boolean,
-    default: true
+    default: true,
+    index: true
   }
 }, {
   timestamps: true,
-  collection: 'clientAssignments'
+  collection: 'clientAssignments',
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+
+      if (ret.clientId) ret.clientId = ret.clientId.toString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      return ret;
+    }
+  }
 });
 
 // Indexes
 clientAssignmentSchema.index({ userEmail: 1, clientEmail: 1, isActive: 1 });
-clientAssignmentSchema.index({ organizationId: 1 });
-clientAssignmentSchema.index({ clientId: 1 });
 
 module.exports = mongoose.model('ClientAssignment', clientAssignmentSchema);

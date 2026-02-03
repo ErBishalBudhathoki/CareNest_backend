@@ -1,105 +1,78 @@
 const express = require('express');
 const router = express.Router();
-const { AdminInvoiceProfileService } = require('../services/adminInvoiceProfileService');
-const logger = require('../config/logger');
+const rateLimit = require('express-rate-limit');
+const { body, param } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
+const adminInvoiceProfileController = require('../controllers/adminInvoiceProfileController');
+const { authenticateUser } = require('../middleware/auth');
+
+// Rate limiting
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many admin requests.' }
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, message: 'Too many requests.' }
+});
+
+// Validation rules
+const createProfileValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('businessName').trim().notEmpty().withMessage('Business name is required'),
+  body('abn').optional().trim().matches(/^[0-9]{11}$/).withMessage('ABN must be 11 digits'),
+  body('contactEmail').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('contactPhone').optional().trim().isMobilePhone().withMessage('Invalid phone number'),
+  body('address.street').optional().trim().isLength({ max: 255 }),
+  body('address.city').optional().trim().isLength({ max: 100 }),
+  body('address.state').optional().trim().isLength({ max: 50 }),
+  body('address.postcode').optional().trim().isLength({ max: 20 }),
+  body('bankAccount.accountName').optional().trim(),
+  body('bankAccount.bsb').optional().trim().matches(/^[0-9]{6}$/),
+  body('bankAccount.accountNumber').optional().trim()
+];
+
+const updateProfileValidation = [
+  param('profileId').isMongoId().withMessage('Valid profile ID is required'),
+  body('businessName').optional().trim().notEmpty().withMessage('Business name cannot be empty'),
+  body('abn').optional().trim().matches(/^[0-9]{11}$/).withMessage('ABN must be 11 digits'),
+  body('contactEmail').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('contactPhone').optional().trim().isMobilePhone().withMessage('Invalid phone number'),
+  body('isActive').optional().isBoolean().withMessage('isActive must be a boolean')
+];
+
+const organizationIdValidation = [
+  param('organizationId').isMongoId().withMessage('Valid organization ID is required')
+];
+
+const profileIdValidation = [
+  param('profileId').isMongoId().withMessage('Valid profile ID is required')
+];
+
+// Protected routes
+router.use(authenticateUser);
 
 /**
  * Create admin invoice profile
  */
-router.post('/api/admin-invoice-profile', async (req, res) => {
-  const service = new AdminInvoiceProfileService();
-  try {
-    const { organizationId, businessName, businessAddress, contactEmail, contactPhone, taxIdentifiers, bankDetails } = req.body || {};
-    if (!organizationId || !businessName || !businessAddress || !contactEmail || !contactPhone) {
-      return res.status(400).json({
-        success: false,
-        message: 'organizationId, businessName, businessAddress, contactEmail and contactPhone are required',
-      });
-    }
-    const result = await service.createProfile({
-      organizationId,
-      businessName,
-      businessAddress,
-      contactEmail,
-      contactPhone,
-      taxIdentifiers,
-      bankDetails,
-      isActive: true,
-    });
-    if (!result.success) {
-      return res.status(500).json({ success: false, message: result.error });
-    }
-    res.status(201).json({ success: true, data: result.data });
-  } catch (error) {
-    logger.error('Create admin invoice profile failed', { error: error.message, stack: error.stack });
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  } finally {
-    await service.disconnect();
-  }
-});
+router.post('/api/admin-invoice-profile', adminLimiter, createProfileValidation, handleValidationErrors, adminInvoiceProfileController.createProfile);
 
 /**
  * Get active admin invoice profile by organization
  */
-router.get('/api/admin-invoice-profile/:organizationId', async (req, res) => {
-  const service = new AdminInvoiceProfileService();
-  try {
-    const { organizationId } = req.params;
-    if (!organizationId) {
-      return res.status(400).json({ success: false, message: 'organizationId is required' });
-    }
-    const result = await service.getActiveProfileByOrganization(organizationId);
-    if (!result.success) {
-      return res.status(404).json({ success: false, message: result.error });
-    }
-    res.status(200).json({ success: true, data: result.data });
-  } catch (error) {
-    logger.error('Get admin invoice profile failed', { error: error.message, stack: error.stack });
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  } finally {
-    await service.disconnect();
-  }
-});
+router.get('/api/admin-invoice-profile/:organizationId', adminLimiter, organizationIdValidation, handleValidationErrors, adminInvoiceProfileController.getActiveProfile);
 
 /**
  * Update admin invoice profile
  */
-router.put('/api/admin-invoice-profile/:profileId', async (req, res) => {
-  const service = new AdminInvoiceProfileService();
-  try {
-    const { profileId } = req.params;
-    const updates = req.body || {};
-    const result = await service.updateProfile(profileId, updates);
-    if (!result.success) {
-      return res.status(404).json({ success: false, message: result.error });
-    }
-    res.status(200).json({ success: true, data: result.data });
-  } catch (error) {
-    logger.error('Update admin invoice profile failed', { error: error.message, stack: error.stack });
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  } finally {
-    await service.disconnect();
-  }
-});
+router.put('/api/admin-invoice-profile/:profileId', strictLimiter, updateProfileValidation, handleValidationErrors, adminInvoiceProfileController.updateProfile);
 
 /**
  * Soft delete admin invoice profile
  */
-router.delete('/api/admin-invoice-profile/:profileId', async (req, res) => {
-  const service = new AdminInvoiceProfileService();
-  try {
-    const { profileId } = req.params;
-    const result = await service.deleteProfile(profileId);
-    if (!result.success) {
-      return res.status(404).json({ success: false, message: result.error });
-    }
-    res.status(200).json({ success: true, data: result.data });
-  } catch (error) {
-    logger.error('Delete admin invoice profile failed', { error: error.message, stack: error.stack });
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  } finally {
-    await service.disconnect();
-  }
-});
+router.delete('/api/admin-invoice-profile/:profileId', strictLimiter, profileIdValidation, handleValidationErrors, adminInvoiceProfileController.deleteProfile);
 
 module.exports = router;

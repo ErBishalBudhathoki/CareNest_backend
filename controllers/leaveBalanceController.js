@@ -1,52 +1,64 @@
 const LeaveBalanceService = require('../services/leaveBalanceService');
+const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 
 class LeaveBalanceController {
-  async getBalances(req, res) {
-    try {
-      const { userEmail } = req.params;
-      if (!userEmail) {
-        return res.status(400).json({ success: false, message: 'User email is required' });
-      }
-
-      const balances = await LeaveBalanceService.getBalances(userEmail);
-      res.status(200).json({
-        success: true,
-        balances,
-        message: 'Balances retrieved successfully'
-      });
-    } catch (error) {
-      logger.error('Error getting leave balances', error);
-      res.status(500).json({
+  getBalances = catchAsync(async (req, res) => {
+    const { userEmail } = req.params;
+    
+    if (!userEmail) {
+      return res.status(400).json({
         success: false,
-        message: error.message || 'Error getting leave balances'
+        code: 'VALIDATION_ERROR',
+        message: 'User email is required'
       });
     }
-  }
 
-  async updateBalance(req, res) {
-    try {
-      const { userEmail } = req.params;
-      const { leaveType, hours, reason } = req.body;
+    const balances = await LeaveBalanceService.getBalances(userEmail);
+    
+    logger.business('Retrieved leave balances', {
+      action: 'leave_balance_get',
+      userEmail,
+      balanceCount: balances?.length || 0
+    });
+    
+    res.status(200).json({
+      success: true,
+      code: 'LEAVE_BALANCES_RETRIEVED',
+      balances,
+      message: 'Balances retrieved successfully'
+    });
+  });
 
-      if (!userEmail || !leaveType || hours === undefined || !reason) {
-        return res.status(400).json({ success: false, message: 'Missing required fields' });
-      }
+  updateBalance = catchAsync(async (req, res) => {
+    const { userEmail } = req.params;
+    const { leaveType, hours, reason } = req.body;
 
-      const updatedBalance = await LeaveBalanceService.updateBalance(userEmail, leaveType, hours, reason);
-      res.status(200).json({
-        success: true,
-        data: updatedBalance,
-        message: 'Balance updated successfully'
-      });
-    } catch (error) {
-      logger.error('Error updating leave balance', error);
-      res.status(500).json({
+    if (!userEmail || !leaveType || hours === undefined || !reason) {
+      return res.status(400).json({
         success: false,
-        message: error.message || 'Error updating leave balance'
+        code: 'VALIDATION_ERROR',
+        message: 'Missing required fields: userEmail, leaveType, hours, reason'
       });
     }
-  }
+
+    const updatedBalance = await LeaveBalanceService.updateBalance(userEmail, leaveType, hours, reason);
+    
+    logger.business('Updated leave balance', {
+      action: 'leave_balance_update',
+      userEmail,
+      leaveType,
+      hours,
+      reason
+    });
+    
+    res.status(200).json({
+      success: true,
+      code: 'LEAVE_BALANCE_UPDATED',
+      data: updatedBalance,
+      message: 'Balance updated successfully'
+    });
+  });
 }
 
 module.exports = new LeaveBalanceController();

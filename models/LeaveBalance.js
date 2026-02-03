@@ -53,7 +53,26 @@ const leaveBalanceSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  collection: 'leave_balances'
+  collection: 'leave_balances',
+  toJSON: {
+    transform: function (doc, ret) {
+      // Transform _id to id (Flutter expects 'id' as string)
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      // Transform ObjectId refs to strings for Flutter
+      if (ret.userId) ret.userId = ret.userId.toString();
+      
+      // Transform dates to ISO 8601 strings
+      if (ret.lastAccrualDate) ret.lastAccrualDate = ret.lastAccrualDate.toISOString();
+      if (ret.expiryDate) ret.expiryDate = ret.expiryDate.toISOString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      
+      return ret;
+    }
+  }
 });
 
 // Compound index for efficient queries

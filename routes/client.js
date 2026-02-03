@@ -1,53 +1,47 @@
 const express = require('express');
-const clientController = require('../controllers/clientController');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param, query } = require('express-validator');
+const clientController = require('../controllers/clientController');
+const { authenticateUser } = require('../middleware/auth');
 
-/**
- * Activate client account (Admin only)
- * POST /activate
- */
-router.post('/activate', clientController.activateClient);
+// Rate limiting
+const clientLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many client requests.' }
+});
 
-/**
- * Add client with organization context
- * POST /addClient
- */
-router.post('/addClient', clientController.addClient);
+// Validation
+const addClientValidation = [
+  body('clientEmail').isEmail(),
+  body('clientFirstName').trim().notEmpty(),
+  body('clientLastName').trim().notEmpty(),
+  body('organizationId').optional().isMongoId()
+];
 
-/**
- * Get clients for organization (legacy endpoint)
- * GET /clients/:organizationId
- */
-router.get('/clients/:organizationId', clientController.getClients);
+const assignValidation = [
+  body('userEmail').isEmail(),
+  body('clientEmail').isEmail(),
+  body('dateList').isArray(),
+  body('startTimeList').isArray(),
+  body('endTimeList').isArray()
+];
 
-/**
- * Get all clients (simple endpoint for backward compatibility)
- * GET /getClients
- */
-router.get('/getClients', clientController.getClients);
+// Protected routes
+router.use(authenticateUser);
 
-/**
- * Update client care notes
- * POST /updateCareNotes/:clientId
- */
-router.post('/updateCareNotes/:clientId', clientController.updateCareNotes);
+router.post('/activate', clientLimiter, body('email').isEmail(), clientController.activateClient);
+router.post('/addClient', clientLimiter, addClientValidation, clientController.addClient);
+router.get('/clients/:organizationId', clientLimiter, param('organizationId').isMongoId(), clientController.getClients);
+router.get('/getClients', clientLimiter, clientController.getClients);
 
-/**
- * Get multiple clients by email list
- * GET /getMultipleClients/:emails
- */
-router.get('/getMultipleClients/:emails', clientController.getMultipleClients);
+// Get client details by ID
+router.get('/details/:clientId', clientLimiter, param('clientId').isMongoId(), clientController.getClientById);
 
-/**
- * Assign client to user with schedule
- * POST /assignClientToUser
- */
-router.post('/assignClientToUser', clientController.assignClientToUser);
-
-/**
- * Get user assignments
- * GET /getUserAssignments/:userEmail
- */
-router.get('/getUserAssignments/:userEmail', clientController.getUserAssignments);
+router.post('/updateCareNotes/:clientId', clientLimiter, param('clientId').isMongoId(), clientController.updateCareNotes);
+router.get('/getMultipleClients/:emails', clientLimiter, clientController.getMultipleClients);
+router.post('/assignClientToUser', clientLimiter, assignValidation, clientController.assignClientToUser);
+router.get('/getUserAssignments/:userEmail', clientLimiter, param('userEmail').isEmail(), clientController.getUserAssignments);
 
 module.exports = router;
