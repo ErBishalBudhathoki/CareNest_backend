@@ -75,8 +75,8 @@ class ClientPortalService {
   async approveInvoice(invoiceId, userId, userEmail) {
     // Check permissions implicitly by query
     const invoice = await Invoice.findOne({
-        _id: invoiceId,
-        'clientEmail': userEmail // Basic check, better to use clientId from auth
+      _id: invoiceId,
+      'clientEmail': userEmail // Basic check, better to use clientId from auth
     });
 
     if (!invoice) throw new Error('Invoice not found');
@@ -94,10 +94,10 @@ class ClientPortalService {
     );
 
     await auditService.logAction({
-        userEmail,
-        action: 'INVOICE_APPROVED_BY_CLIENT',
-        details: { invoiceId },
-        timestamp: new Date()
+      userEmail,
+      action: 'INVOICE_APPROVED_BY_CLIENT',
+      details: { invoiceId },
+      timestamp: new Date()
     });
 
     return result;
@@ -111,7 +111,7 @@ class ClientPortalService {
       { _id: invoiceId },
       {
         $set: {
-          'workflow.status': 'disputed', 
+          'workflow.status': 'disputed',
           'workflow.rejectionReason': reason,
           'workflow.nextAction': 'admin_review',
           'payment.status': 'pending'
@@ -120,10 +120,10 @@ class ClientPortalService {
     );
 
     await auditService.logAction({
-        userEmail,
-        action: 'INVOICE_DISPUTED_BY_CLIENT',
-        details: { invoiceId, reason },
-        timestamp: new Date()
+      userEmail,
+      action: 'INVOICE_DISPUTED_BY_CLIENT',
+      details: { invoiceId, reason },
+      timestamp: new Date()
     });
 
     return result;
@@ -136,17 +136,94 @@ class ClientPortalService {
     // Query clientAssignments
     // Structure: { clientEmail: '...', schedule: [{ date, startTime... }] }
     const assignments = await ClientAssignment.aggregate([
-        { $match: { clientEmail: clientEmail, isActive: true } },
-        { $unwind: '$schedule' },
-        { $match: { 'schedule.date': { $gte: new Date().toISOString().split('T')[0] } } }, // Upcoming
-        { $sort: { 'schedule.date': 1 } }
+      { $match: { clientEmail: clientEmail, isActive: true } },
+      { $unwind: '$schedule' },
+      { $match: { 'schedule.date': { $gte: new Date().toISOString().split('T')[0] } } }, // Upcoming
+      { $sort: { 'schedule.date': 1 } }
     ]);
 
     return assignments.map(a => ({
-        ...a.schedule,
-        userEmail: a.userEmail, // The employee assigned
-        assignmentId: a._id
+      ...a.schedule,
+      scheduleId: a.schedule._id || 'legacy', // Fallback for old docs
+      userEmail: a.userEmail, // The employee assigned
+      assignmentId: a._id
     }));
+  }
+
+  /**
+   * Get appointment detail
+   * @param {string} assignmentId - ClientAssignment ID
+   * @param {string} scheduleId - Schedule Item ID (can be null for legacy, then use helpers?) 
+   * Actually we'll search by assignmentId and matching schedule element
+   */
+  async getAppointmentDetail(assignmentId, scheduleId, clientEmail) {
+    // 1. Find the assignment and the specific schedule item
+    // We match by assignmentId and ensure it belongs to the client (security)
+    // We also use $elemMatch or projection to find the specific schedule item if possible,
+    // but aggregate is better to join User data.
+
+    const [detail] = await ClientAssignment.aggregate([
+      {
+        $match: {
+          _id: new require('mongoose').Types.ObjectId(assignmentId),
+          clientEmail: clientEmail
+        }
+      },
+      { $unwind: '$schedule' },
+      {
+        $match: {
+          'schedule._id': new require('mongoose').Types.ObjectId(scheduleId)
+        }
+      },
+      // Lookup Employee Details from User collection (using userEmail)
+      {
+        $lookup: {
+          from: 'login', // User collection is 'login'
+          localField: 'userEmail',
+          foreignField: 'email',
+          as: 'employee'
+        }
+      },
+
+      // Lookup Client Details for address
+      {
+        $lookup: {
+          from: 'clients',
+          localField: 'clientId',
+          foreignField: '_id',
+          as: 'clientDetails'
+        }
+      },
+      { $unwind: { path: '$clientDetails', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          assignmentId: '$_id',
+          userEmail: 1,
+          schedule: 1,
+          employee: {
+            firstName: 1,
+            lastName: 1,
+            photo: 1,
+            email: 1,
+            phone: 1
+          },
+          clientAddress: '$clientDetails.address'
+        }
+      }
+    ]);
+
+    if (!detail) {
+      throw new Error('Appointment not found');
+    }
+
+    return {
+      ...detail.schedule,
+      assignmentId: detail.assignmentId,
+      employee: detail.employee,
+      location: detail.clientAddress ?
+        `${detail.clientAddress.street || ''} ${detail.clientAddress.suburb || ''} ${detail.clientAddress.state || ''}`.trim()
+        : 'Client Home'
+    };
   }
 
   /**
@@ -155,11 +232,11 @@ class ClientPortalService {
   async requestAppointment(userEmail, userId, type, details, note) {
     // Delegate to RequestService
     return await requestService.createRequest({
-        organizationId: 'SELF', // Or fetch from client profile
-        userId: userId,
-        type: type || 'Appointment',
-        details,
-        note
+      organizationId: 'SELF', // Or fetch from client profile
+      userId: userId,
+      type: type || 'Appointment',
+      details,
+      note
     }, userEmail);
   }
 }

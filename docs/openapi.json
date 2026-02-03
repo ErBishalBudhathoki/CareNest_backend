@@ -1,0 +1,792 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Invoice App API",
+    "description": "Comprehensive API documentation for the Invoice App - NDIS Invoice Management System",
+    "version": "1.0.0",
+    "contact": {
+      "name": "API Support",
+      "email": "support@invoiceapp.com"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local development server"
+    },
+    {
+      "url": "https://api.invoiceapp.com",
+      "description": "Production server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT token in the format: Bearer {token}"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "code": {
+            "type": "string",
+            "example": "VALIDATION_ERROR"
+          },
+          "message": {
+            "type": "string",
+            "example": "Validation failed"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Success": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "code": {
+            "type": "string",
+            "example": "OPERATION_SUCCESS"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "User's unique identifier"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["admin", "manager", "employee", "client"]
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Client": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "clientEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "clientFirstName": {
+            "type": "string"
+          },
+          "clientLastName": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "ndisNumber": {
+            "type": "string"
+          },
+          "planManager": {
+            "type": "string"
+          }
+        }
+      },
+      "Invoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "invoiceId": {
+            "type": "string",
+            "description": "Human-readable invoice ID (e.g., INV-001)"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "lineItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvoiceLineItem"
+            }
+          },
+          "totalAmount": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "sent", "paid", "overdue", "cancelled"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InvoiceLineItem": {
+        "type": "object",
+        "properties": {
+          "supportItemNumber": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "unitPrice": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          }
+        }
+      },
+      "Expense": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "expenseDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "receiptUrl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "approved", "rejected"]
+          }
+        }
+      },
+      "Timer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "clientEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused", "stopped"]
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "user@example.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "example": "password123"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "User login",
+        "description": "Authenticate user and return JWT token",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "User registration",
+        "description": "Register a new user account",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password", "firstName", "lastName"],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Success"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "User logout",
+        "description": "Logout user and invalidate token",
+        "responses": {
+          "200": {
+            "description": "Logout successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Success"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/active-timers/start": {
+      "post": {
+        "tags": ["Clock In/Out"],
+        "summary": "Start timer",
+        "description": "Start a work timer for a client assignment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["userEmail", "clientEmail", "organizationId"],
+                "properties": {
+                  "userEmail": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "clientEmail": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Timer started successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "timerId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/active-timers/stop": {
+      "post": {
+        "tags": ["Clock In/Out"],
+        "summary": "Stop timer",
+        "description": "Stop the active work timer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["userEmail", "organizationId"],
+                "properties": {
+                  "userEmail": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Timer stopped successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "timeWorked": {
+                      "type": "string"
+                    },
+                    "totalSeconds": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/clients/list/{organizationId}": {
+      "get": {
+        "tags": ["Clients"],
+        "summary": "Get clients list",
+        "description": "Retrieve all clients for an organization",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Clients retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "clients": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Client"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invoices/create": {
+      "post": {
+        "tags": ["Invoices"],
+        "summary": "Create invoice",
+        "description": "Create a new invoice for a client",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["organizationId", "clientId", "lineItems"],
+                "properties": {
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "lineItems": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/InvoiceLineItem"
+                    }
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invoice created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "$ref": "#/components/schemas/Invoice"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/expenses/create": {
+      "post": {
+        "tags": ["Expenses"],
+        "summary": "Create expense",
+        "description": "Create a new expense record",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Expense"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Expense created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "expense": {
+                      "$ref": "#/components/schemas/Expense"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compliance/summary": {
+      "get": {
+        "tags": ["Compliance"],
+        "summary": "Get compliance summary",
+        "description": "Retrieve compliance summary for an organization",
+        "responses": {
+          "200": {
+            "description": "Compliance data retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/create-intent": {
+      "post": {
+        "tags": ["Payments"],
+        "summary": "Create payment intent",
+        "description": "Create a Stripe payment intent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["invoiceId", "amount", "organizationId"],
+                "properties": {
+                  "invoiceId": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "default": "AUD"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment intent created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Success"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "User authentication and authorization endpoints"
+    },
+    {
+      "name": "Clients",
+      "description": "Client management endpoints"
+    },
+    {
+      "name": "Invoices",
+      "description": "Invoice creation and management"
+    },
+    {
+      "name": "Expenses",
+      "description": "Expense tracking and management"
+    },
+    {
+      "name": "Clock In/Out",
+      "description": "Employee time tracking"
+    },
+    {
+      "name": "Payments",
+      "description": "Payment processing with Stripe"
+    },
+    {
+      "name": "Compliance",
+      "description": "NDIS compliance and reporting"
+    }
+  ]
+}

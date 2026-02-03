@@ -18,6 +18,11 @@ const teamMemberSchema = new mongoose.Schema({
     enum: ['member', 'admin', 'manager'],
     default: 'member'
   },
+  status: { // Added to match frontend 'status' field
+    type: String,
+    enum: ['active', 'invited', 'inactive'],
+    default: 'active'
+  },
   availabilitySettings: {
     status: { type: String, default: 'available' }, // 'available', 'busy', 'offline'
     manualOverride: Boolean,
@@ -28,7 +33,20 @@ const teamMemberSchema = new mongoose.Schema({
     default: false
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  collection: 'team_members',
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      if (ret.createdAt) ret.joinedAt = ret.createdAt.toISOString(); // Map createdAt to joinedAt
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      return ret;
+    }
+  }
 });
 
 // Ensure a user is unique within a team

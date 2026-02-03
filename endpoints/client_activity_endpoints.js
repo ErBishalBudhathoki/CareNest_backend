@@ -9,7 +9,8 @@
  * - Client retention and growth metrics
  */
 
-const { MongoClient } = require('mongodb');
+const InvoiceLineItem = require('../models/InvoiceLineItem');
+const Client = require('../models/Client');
 const logger = require('../config/logger');
 
 /**
@@ -17,24 +18,17 @@ const logger = require('../config/logger');
  * GET /api/analytics/clients/:organizationId
  */
 async function getClientActivityAnalytics(req, res) {
-  let client;
-  
   try {
     const { organizationId } = req.params;
     const { startDate, endDate, limit = 50, sortBy = 'revenue', userEmail } = req.query;
-    
+
     if (!organizationId) {
       return res.status(400).json({
         success: false,
         message: 'Organization ID is required'
       });
     }
-    
-    // Connect to database
-    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-    
+
     // Build date filter
     const dateFilter = {};
     if (startDate && endDate) {
@@ -43,22 +37,22 @@ async function getClientActivityAnalytics(req, res) {
         $lte: new Date(endDate)
       };
     }
-    
+
     // Get client activity metrics
-    const clientMetrics = await getClientMetrics(db, organizationId, dateFilter, limit, sortBy);
-    
+    const clientMetrics = await getClientMetrics(organizationId, dateFilter, limit, sortBy);
+
     // Get service utilization patterns
-    const servicePatterns = await getServiceUtilizationPatterns(db, organizationId, dateFilter);
-    
+    const servicePatterns = await getServiceUtilizationPatterns(organizationId, dateFilter);
+
     // Get client engagement trends
-    const engagementTrends = await getClientEngagementTrends(db, organizationId, dateFilter);
-    
+    const engagementTrends = await getClientEngagementTrends(organizationId, dateFilter);
+
     // Get client retention metrics
-    const retentionMetrics = await getClientRetentionMetrics(db, organizationId, dateFilter);
-    
+    const retentionMetrics = await getClientRetentionMetrics(organizationId, dateFilter);
+
     // Calculate summary statistics
     const summary = calculateClientSummary(clientMetrics, servicePatterns, engagementTrends);
-    
+
     // Log analytics access
     logger.business('Client Activity Analytics Accessed', {
       event: 'client_activity_analytics_accessed',
@@ -74,7 +68,7 @@ async function getClientActivityAnalytics(req, res) {
       },
       timestamp: new Date().toISOString()
     });
-    
+
     res.status(200).json({
       success: true,
       message: 'Client activity analytics retrieved successfully',
@@ -93,10 +87,10 @@ async function getClientActivityAnalytics(req, res) {
         }
       }
     });
-    
+
   } catch (error) {
     console.error('Error in getClientActivityAnalytics:', error);
-    
+
     logger.business('Client Activity Analytics Error', {
       event: 'client_activity_analytics_error',
       organizationId: req.params.organizationId,
@@ -106,16 +100,12 @@ async function getClientActivityAnalytics(req, res) {
       },
       timestamp: new Date().toISOString()
     });
-    
+
     res.status(500).json({
       success: false,
       message: 'Error retrieving client activity analytics',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -124,16 +114,10 @@ async function getClientActivityAnalytics(req, res) {
  * GET /api/analytics/clients/top/:organizationId
  */
 async function getTopPerformingClients(req, res) {
-  let client;
-  
   try {
     const { organizationId } = req.params;
     const { metric = 'revenue', limit = 10, startDate, endDate } = req.query;
-    
-    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-    
+
     const dateFilter = {};
     if (startDate && endDate) {
       dateFilter.createdAt = {
@@ -141,9 +125,9 @@ async function getTopPerformingClients(req, res) {
         $lte: new Date(endDate)
       };
     }
-    
-    const topClients = await getTopClientsByMetric(db, organizationId, dateFilter, metric, parseInt(limit));
-    
+
+    const topClients = await getTopClientsByMetric(organizationId, dateFilter, metric, parseInt(limit));
+
     logger.business('Top Performing Clients Retrieved', {
       event: 'top_clients_retrieved',
       organizationId,
@@ -155,7 +139,7 @@ async function getTopPerformingClients(req, res) {
       })),
       timestamp: new Date().toISOString()
     });
-    
+
     res.status(200).json({
       success: true,
       message: 'Top performing clients retrieved successfully',
@@ -169,19 +153,15 @@ async function getTopPerformingClients(req, res) {
         }
       }
     });
-    
+
   } catch (error) {
     console.error('Error in getTopPerformingClients:', error);
-    
+
     res.status(500).json({
       success: false,
       message: 'Error retrieving top performing clients',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
@@ -190,16 +170,10 @@ async function getTopPerformingClients(req, res) {
  * GET /api/analytics/clients/services/:organizationId
  */
 async function getClientServicePatterns(req, res) {
-  let client;
-  
   try {
     const { organizationId } = req.params;
     const { clientId, startDate, endDate } = req.query;
-    
-    client = new MongoClient(process.env.MONGODB_URI, { tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-    
+
     const filter = { organizationId };
     if (clientId) filter.clientId = clientId;
     if (startDate && endDate) {
@@ -208,10 +182,10 @@ async function getClientServicePatterns(req, res) {
         $lte: new Date(endDate)
       };
     }
-    
-    const servicePatterns = await analyzeServicePatterns(db, filter);
-    const utilizationMetrics = await calculateServiceUtilization(db, filter);
-    
+
+    const servicePatterns = await analyzeServicePatterns(filter);
+    const utilizationMetrics = await calculateServiceUtilization(filter);
+
     logger.business('Client Service Patterns Retrieved', {
       event: 'client_service_patterns_retrieved',
       organizationId,
@@ -223,7 +197,7 @@ async function getClientServicePatterns(req, res) {
       },
       timestamp: new Date().toISOString()
     });
-    
+
     res.status(200).json({
       success: true,
       message: 'Client service patterns retrieved successfully',
@@ -233,26 +207,22 @@ async function getClientServicePatterns(req, res) {
         insights: generateServiceInsights(servicePatterns, utilizationMetrics)
       }
     });
-    
+
   } catch (error) {
     console.error('Error in getClientServicePatterns:', error);
-    
+
     res.status(500).json({
       success: false,
       message: 'Error retrieving client service patterns',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 }
 
 /**
  * Get comprehensive client metrics
  */
-async function getClientMetrics(db, organizationId, dateFilter, limit, sortBy) {
+async function getClientMetrics(organizationId, dateFilter, limit, sortBy) {
   const pipeline = [
     {
       $match: {
@@ -305,35 +275,35 @@ async function getClientMetrics(db, organizationId, dateFilter, limit, sortBy) {
     },
     {
       $sort: {
-        [sortBy === 'revenue' ? 'totalRevenue' : 
-         sortBy === 'activity' ? 'totalItems' :
-         sortBy === 'hours' ? 'totalHours' : 'totalRevenue']: -1
+        [sortBy === 'revenue' ? 'totalRevenue' :
+          sortBy === 'activity' ? 'totalItems' :
+            sortBy === 'hours' ? 'totalHours' : 'totalRevenue']: -1
       }
     },
     {
       $limit: parseInt(limit)
     }
   ];
-  
-  const metrics = await db.collection('invoiceLineItems').aggregate(pipeline).toArray();
-  
+
+  const metrics = await InvoiceLineItem.aggregate(pipeline);
+
   // Enrich with client details
   for (const metric of metrics) {
-    const clientDetails = await db.collection('clients').findOne({ _id: metric.clientId });
+    const clientDetails = await Client.findOne({ _id: metric.clientId });
     if (clientDetails) {
-      metric.clientName = clientDetails.clientName;
+      metric.clientName = clientDetails.clientFirstName + ' ' + clientDetails.clientLastName;
       metric.clientType = clientDetails.clientType;
-      metric.status = clientDetails.status;
+      metric.status = clientDetails.isActive ? 'active' : 'inactive';
     }
   }
-  
+
   return metrics;
 }
 
 /**
  * Get service utilization patterns
  */
-async function getServiceUtilizationPatterns(db, organizationId, dateFilter) {
+async function getServiceUtilizationPatterns(organizationId, dateFilter) {
   const pipeline = [
     {
       $match: {
@@ -368,14 +338,14 @@ async function getServiceUtilizationPatterns(db, organizationId, dateFilter) {
       $limit: 20
     }
   ];
-  
-  return await db.collection('invoiceLineItems').aggregate(pipeline).toArray();
+
+  return await InvoiceLineItem.aggregate(pipeline);
 }
 
 /**
  * Get client engagement trends
  */
-async function getClientEngagementTrends(db, organizationId, dateFilter) {
+async function getClientEngagementTrends(organizationId, dateFilter) {
   const pipeline = [
     {
       $match: {
@@ -412,16 +382,16 @@ async function getClientEngagementTrends(db, organizationId, dateFilter) {
       $sort: { '_id.year': 1, '_id.month': 1 }
     }
   ];
-  
-  return await db.collection('invoiceLineItems').aggregate(pipeline).toArray();
+
+  return await InvoiceLineItem.aggregate(pipeline);
 }
 
 /**
  * Get client retention metrics
  */
-async function getClientRetentionMetrics(db, organizationId, dateFilter) {
+async function getClientRetentionMetrics(organizationId, dateFilter) {
   // Get all clients with their first and last activity
-  const clientActivity = await db.collection('invoiceLineItems').aggregate([
+  const clientActivity = await InvoiceLineItem.aggregate([
     {
       $match: {
         organizationId,
@@ -436,16 +406,16 @@ async function getClientRetentionMetrics(db, organizationId, dateFilter) {
         totalActivities: { $sum: 1 }
       }
     }
-  ]).toArray();
-  
+  ]);
+
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-  
+
   const activeClients = clientActivity.filter(c => c.lastActivity >= thirtyDaysAgo);
   const recentClients = clientActivity.filter(c => c.lastActivity >= ninetyDaysAgo);
   const churnedClients = clientActivity.filter(c => c.lastActivity < ninetyDaysAgo);
-  
+
   return {
     totalClients: clientActivity.length,
     activeClients: activeClients.length,
@@ -460,14 +430,14 @@ async function getClientRetentionMetrics(db, organizationId, dateFilter) {
 /**
  * Get top clients by specific metric
  */
-async function getTopClientsByMetric(db, organizationId, dateFilter, metric, limit) {
+async function getTopClientsByMetric(organizationId, dateFilter, metric, limit) {
   const sortField = {
     revenue: 'totalRevenue',
     activity: 'totalItems',
     hours: 'totalHours',
     services: 'uniqueServiceCount'
   }[metric] || 'totalRevenue';
-  
+
   const pipeline = [
     {
       $match: {
@@ -497,14 +467,14 @@ async function getTopClientsByMetric(db, organizationId, dateFilter, metric, lim
       $limit: limit
     }
   ];
-  
-  return await db.collection('invoiceLineItems').aggregate(pipeline).toArray();
+
+  return await InvoiceLineItem.aggregate(pipeline);
 }
 
 /**
  * Analyze service patterns
  */
-async function analyzeServicePatterns(db, filter) {
+async function analyzeServicePatterns(filter) {
   const pipeline = [
     { $match: filter },
     {
@@ -539,15 +509,15 @@ async function analyzeServicePatterns(db, filter) {
       $sort: { totalUsage: -1 }
     }
   ];
-  
-  return await db.collection('invoiceLineItems').aggregate(pipeline).toArray();
+
+  return await InvoiceLineItem.aggregate(pipeline);
 }
 
 /**
  * Calculate service utilization
  */
-async function calculateServiceUtilization(db, filter) {
-  const stats = await db.collection('invoiceLineItems').aggregate([
+async function calculateServiceUtilization(filter) {
+  const stats = await InvoiceLineItem.aggregate([
     { $match: filter },
     {
       $group: {
@@ -559,8 +529,8 @@ async function calculateServiceUtilization(db, filter) {
         avgRevenuePerHour: { $avg: { $divide: ['$totalPrice', '$hours'] } }
       }
     }
-  ]).toArray();
-  
+  ]);
+
   return stats[0] || {
     totalHours: 0,
     totalRevenue: 0,
@@ -577,7 +547,7 @@ function calculateClientSummary(clientMetrics, servicePatterns, engagementTrends
   const totalRevenue = clientMetrics.reduce((sum, c) => sum + (c.totalRevenue || 0), 0);
   const totalHours = clientMetrics.reduce((sum, c) => sum + (c.totalHours || 0), 0);
   const totalItems = clientMetrics.reduce((sum, c) => sum + (c.totalItems || 0), 0);
-  
+
   return {
     totalClients: clientMetrics.length,
     totalRevenue,
@@ -596,7 +566,7 @@ function calculateClientSummary(clientMetrics, servicePatterns, engagementTrends
  */
 function generateServiceInsights(servicePatterns, utilizationMetrics) {
   const insights = [];
-  
+
   if (servicePatterns.length > 0) {
     const topService = servicePatterns[0];
     insights.push({
@@ -605,7 +575,7 @@ function generateServiceInsights(servicePatterns, utilizationMetrics) {
       value: topService.totalUsage
     });
   }
-  
+
   if (utilizationMetrics.avgRevenuePerHour > 50) {
     insights.push({
       type: 'high_efficiency',
@@ -613,7 +583,7 @@ function generateServiceInsights(servicePatterns, utilizationMetrics) {
       value: utilizationMetrics.avgRevenuePerHour
     });
   }
-  
+
   return insights;
 }
 
@@ -622,10 +592,10 @@ function generateServiceInsights(servicePatterns, utilizationMetrics) {
  */
 function calculateMonthlyGrowth(trends) {
   if (trends.length < 2) return 0;
-  
+
   const latest = trends[trends.length - 1];
   const previous = trends[trends.length - 2];
-  
+
   return ((latest.totalRevenue - previous.totalRevenue) / Math.max(previous.totalRevenue, 1)) * 100;
 }
 

@@ -1,5 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param, query } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
+const { authenticateUser } = require('../middleware/auth');
 const logger = require('../config/logger');
 const {
   createPricePrompt,
@@ -10,8 +14,73 @@ const {
   completeInvoiceGenerationAfterPrompts
 } = require('../services/pricePromptService');
 
+// Rate limiting configurations
+const pricePromptLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many price prompt requests.' }
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, message: 'Too many requests.' }
+});
+
+// Validation rules
+const createPromptValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('supportItemNumber').trim().notEmpty().withMessage('Support item number is required'),
+  body('supportItemNumber').isLength({ max: 50 }).withMessage('Support item number too long'),
+  body('clientId').isMongoId().withMessage('Valid client ID is required'),
+  body('serviceDate').isISO8601().withMessage('Valid service date is required'),
+  body('requestedBy').isMongoId().withMessage('Valid requester ID is required'),
+  body('context').optional().isObject().withMessage('Context must be an object'),
+  body('priority').optional().isIn(['low', 'medium', 'high', 'critical']).withMessage('Priority must be low, medium, high, or critical')
+];
+
+const resolvePromptValidation = [
+  param('promptId').isMongoId().withMessage('Valid prompt ID is required'),
+  body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
+  body('resolvedBy').isMongoId().withMessage('Valid resolver ID is required'),
+  body('notes').optional().trim().isLength({ max: 1000 }).withMessage('Notes too long'),
+  body('createCustomPricing').optional().isBoolean().withMessage('createCustomPricing must be a boolean')
+];
+
+const getPendingValidation = [
+  param('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  query('priority').optional().isIn(['low', 'medium', 'high', 'critical']).withMessage('Invalid priority filter'),
+  query('supportItemNumber').optional().trim().isLength({ max: 50 }),
+  query('clientId').optional().isMongoId().withMessage('Invalid client ID filter'),
+  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100')
+];
+
+const cancelPromptValidation = [
+  param('promptId').isMongoId().withMessage('Valid prompt ID is required'),
+  body('cancelledBy').isMongoId().withMessage('Valid canceller ID is required'),
+  body('reason').optional().trim().isLength({ max: 500 }).withMessage('Reason too long')
+];
+
+const generateInvoiceValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('clientId').isMongoId().withMessage('Valid client ID is required'),
+  body('startDate').isISO8601().withMessage('Valid start date is required'),
+  body('endDate').isISO8601().withMessage('Valid end date is required'),
+  body('requestedBy').isMongoId().withMessage('Valid requester ID is required'),
+  body('autoCreatePrompts').optional().isBoolean().withMessage('autoCreatePrompts must be a boolean')
+];
+
+const completeInvoiceValidation = [
+  param('invoiceId').isMongoId().withMessage('Valid invoice ID is required'),
+  body('completedBy').isMongoId().withMessage('Valid completer ID is required')
+];
+
+// Apply authentication to all routes
+router.use(authenticateUser);
+
 // Create a new price prompt for missing pricing
-router.post('/api/price-prompts/create', async (req, res) => {
+router.post('/api/price-prompts/create', pricePromptLimiter, createPromptValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       organizationId,
@@ -50,7 +119,7 @@ router.post('/api/price-prompts/create', async (req, res) => {
 });
 
 // Resolve a price prompt with pricing information
-router.post('/api/price-prompts/:promptId/resolve', async (req, res) => {
+router.post('/api/price-prompts/:promptId/resolve', strictLimiter, resolvePromptValidation, handleValidationErrors, async (req, res) => {
   try {
     const { promptId } = req.params;
     const {
@@ -82,7 +151,7 @@ router.post('/api/price-prompts/:promptId/resolve', async (req, res) => {
 });
 
 // Get pending price prompts for an organization
-router.get('/api/price-prompts/pending/:organizationId', async (req, res) => {
+router.get('/api/price-prompts/pending/:organizationId', pricePromptLimiter, getPendingValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const {
@@ -118,7 +187,7 @@ router.get('/api/price-prompts/pending/:organizationId', async (req, res) => {
 });
 
 // Cancel a price prompt
-router.delete('/api/price-prompts/:promptId', async (req, res) => {
+router.delete('/api/price-prompts/:promptId', strictLimiter, cancelPromptValidation, handleValidationErrors, async (req, res) => {
   try {
     const { promptId } = req.params;
     const { cancelledBy, reason } = req.body;
@@ -142,7 +211,7 @@ router.delete('/api/price-prompts/:promptId', async (req, res) => {
 });
 
 // Generate invoice with prompt handling for missing prices
-router.post('/api/price-prompts/generate-invoice', async (req, res) => {
+router.post('/api/price-prompts/generate-invoice', strictLimiter, generateInvoiceValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       organizationId,
@@ -179,7 +248,7 @@ router.post('/api/price-prompts/generate-invoice', async (req, res) => {
 });
 
 // Complete invoice generation after all prompts are resolved
-router.post('/api/price-prompts/complete-invoice/:invoiceId', async (req, res) => {
+router.post('/api/price-prompts/complete-invoice/:invoiceId', strictLimiter, completeInvoiceValidation, handleValidationErrors, async (req, res) => {
   try {
     const { invoiceId } = req.params;
     const { completedBy } = req.body;

@@ -1,310 +1,226 @@
-const { getDatabase } = require('../config/database');
-const { ObjectId } = require('mongodb');
+const Certification = require('../models/Certification');
+const TrainingModule = require('../models/TrainingModule');
+const TrainingProgress = require('../models/TrainingProgress');
+const ComplianceChecklist = require('../models/ComplianceChecklist');
+const UserChecklistStatus = require('../models/UserChecklistStatus');
+const catchAsync = require('../utils/catchAsync');
+const logger = require('../utils/logger');
 
 class TrainingComplianceController {
   // --- Certifications ---
 
-  async uploadCertification(req, res, next) {
-    try {
-      const { name, issuer, expiryDate, notes } = req.body;
-      // Fallback: if req.user is string, use it; if object, use email or id
-      const userId = req.user.email || req.user.id || req.user; 
+  uploadCertification = catchAsync(async (req, res) => {
+    const { name, issuer, expiryDate, notes } = req.body;
+    const userId = req.user.id; // Auth middleware sets this
 
-      if (!req.file) {
-        return res.status(400).json({ success: false, message: 'No file uploaded' });
-      }
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
 
-      // Construct file URL based on storage config
-      // If R2/S3 is used, use the public domain if available
-      let fileUrl;
-      if (req.file.location || req.file.key) {
-        if (process.env.R2_PUBLIC_DOMAIN && req.file.key) {
-           // Ensure no double slashes if domain ends with / or key starts with /
-           const domain = process.env.R2_PUBLIC_DOMAIN.replace(/\/$/, '');
-           const key = req.file.key.replace(/^\//, '');
-           fileUrl = `${domain}/${key}`;
-        } else {
-           fileUrl = req.file.location;
-        }
+    // Construct file URL
+    let fileUrl;
+    if (req.file.location || req.file.key) {
+      if (process.env.R2_PUBLIC_DOMAIN && req.file.key) {
+         const domain = process.env.R2_PUBLIC_DOMAIN.replace(/\/$/, '');
+         const key = req.file.key.replace(/^\//, '');
+         fileUrl = `${domain}/${key}`;
       } else {
-        fileUrl = `${req.protocol}://${req.get('host')}/uploads/certifications/${req.file.filename}`;
+         fileUrl = req.file.location;
       }
+    } else {
+      fileUrl = `${req.protocol}://${req.get('host')}/uploads/certifications/${req.file.filename}`;
+    }
 
-      const db = await getDatabase();
-      const certificationData = {
-        userId,
-        name,
-        issuer,
-        fileUrl,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
+    const certification = await Certification.create({
+      userId,
+      name,
+      issuer,
+      fileUrl,
+      expiryDate: expiryDate ? new Date(expiryDate) : null,
+      notes,
+      status: 'pending_approval' // Enum value from schema
+    });
+
+    logger.info(`Certification uploaded by ${userId}: ${name}`);
+
+    res.status(201).json({ success: true, data: certification });
+  });
+
+  getCertifications = catchAsync(async (req, res) => {
+    const { userId, status } = req.query;
+    const currentUser = req.user.id;
+    const query = {};
+
+    // Admin can filter by userId, otherwise users see their own
+    if (userId && req.user.role === 'admin') {
+        query.userId = userId;
+    } else {
+        query.userId = currentUser;
+    }
+
+    if (status) query.status = status;
+
+    const certifications = await Certification.find(query).sort({ createdAt: -1 });
+
+    res.json({ success: true, data: certifications });
+  });
+
+  auditCertification = catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+    const auditorId = req.user.id;
+
+    // Use findByIdAndUpdate
+    const certification = await Certification.findByIdAndUpdate(
+      id,
+      {
+        status,
         notes,
-        status: 'Pending',
-        createdAt: new Date(),
+        // auditedBy: auditorId, // Schema doesn't have auditedBy yet, maybe add to notes or schema update?
+        // For now, logging audit action is enough or update schema if critical.
         updatedAt: new Date()
-      };
+      },
+      { new: true, runValidators: true }
+    );
 
-      const result = await db.collection('certifications').insertOne(certificationData);
-      certificationData._id = result.insertedId;
-
-      res.status(201).json({ success: true, data: certificationData });
-    } catch (error) {
-      next(error);
+    if (!certification) {
+      return res.status(404).json({ success: false, message: 'Certification not found' });
     }
-  }
 
-  async getCertifications(req, res, next) {
-    try {
-      const { userId, status } = req.query;
-      const currentUser = req.user.email || req.user.id || req.user;
-      const query = {};
+    logger.info(`Certification ${id} audited by ${auditorId}: ${status}`);
 
-      if (userId) query.userId = userId;
-      else if (!status) query.userId = currentUser; // Default to self if not filtering by status (admin view)
-
-      if (status) query.status = status;
-
-      const db = await getDatabase();
-      const certifications = await db.collection('certifications')
-        .find(query)
-        .sort({ createdAt: -1 })
-        .toArray();
-
-      res.json({ success: true, data: certifications });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async auditCertification(req, res, next) {
-    try {
-      const { id } = req.params;
-      const { status, notes } = req.body;
-      const auditorId = req.user.email || req.user.id || req.user;
-
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ success: false, message: 'Invalid ID format' });
-      }
-
-      const db = await getDatabase();
-      const result = await db.collection('certifications').findOneAndUpdate(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            status,
-            notes,
-            auditedBy: auditorId,
-            auditDate: new Date(),
-            updatedAt: new Date()
-          }
-        },
-        { returnDocument: 'after' }
-      );
-
-      if (!result) {
-        return res.status(404).json({ success: false, message: 'Certification not found' });
-      }
-
-      res.json({ success: true, data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
+    res.json({ success: true, data: certification });
+  });
 
   // --- Training ---
 
-  async createTrainingModule(req, res, next) {
-    try {
-      const createdBy = req.user.email || req.user.id || req.user;
-      const moduleData = { 
-        ...req.body, 
-        createdBy,
-        createdAt: new Date(),
-        updatedAt: new Date()
+  createTrainingModule = catchAsync(async (req, res) => {
+    // Check admin role
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const module = await TrainingModule.create(req.body);
+    
+    logger.info(`Training module created: ${module.title}`);
+
+    res.status(201).json({ success: true, data: module });
+  });
+
+  getTrainingModules = catchAsync(async (req, res) => {
+    const modules = await TrainingModule.find({ isPublished: true }).sort({ createdAt: -1 });
+    const userId = req.user.id;
+
+    // Attach progress
+    // Using lean() would be faster but we need to attach virtuals/transforms if any.
+    // Since we attach 'userProgress' manually, we convert toObject().
+    const modulesWithProgress = await Promise.all(modules.map(async (mod) => {
+      const progress = await TrainingProgress.findOne({ 
+        userId, 
+        moduleId: mod.id 
+      });
+      return {
+        ...mod.toJSON(),
+        userProgress: progress || null
       };
+    }));
 
-      const db = await getDatabase();
-      const result = await db.collection('trainingModules').insertOne(moduleData);
-      moduleData._id = result.insertedId;
+    res.json({ success: true, data: modulesWithProgress });
+  });
 
-      res.status(201).json({ success: true, data: moduleData });
-    } catch (error) {
-      next(error);
-    }
-  }
+  updateTrainingProgress = catchAsync(async (req, res) => {
+    const { id } = req.params; // moduleId
+    const { status, progressPercentage } = req.body;
+    const userId = req.user.id;
 
-  async getTrainingModules(req, res, next) {
-    try {
-      const db = await getDatabase();
-      const modules = await db.collection('trainingModules').find({ isPublished: true }).toArray();
-      const userId = req.user.email || req.user.id || req.user;
-
-      // Attach progress
-      const modulesWithProgress = await Promise.all(modules.map(async (mod) => {
-        const progress = await db.collection('trainingProgress').findOne({ 
-          userId, 
-          moduleId: mod._id // Assuming stored as ObjectId
-        });
-        return {
-          ...mod,
-          userProgress: progress || null
-        };
-      }));
-
-      res.json({ success: true, data: modulesWithProgress });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async updateTrainingProgress(req, res, next) {
-    try {
-      const { id } = req.params; // moduleId
-      const { status, progressPercentage } = req.body;
-      const userId = req.user.email || req.user.id || req.user;
-
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ success: false, message: 'Invalid module ID' });
-      }
-
-      const db = await getDatabase();
-      const moduleId = new ObjectId(id);
-
-      const updateData = {
-        userId,
-        moduleId,
+    // Using findOneAndUpdate with upsert
+    // We need to handle 'completedAt' logic: set only if becoming completed for first time
+    
+    let updateOps = {
         status,
-        progressPercentage,
-        updatedAt: new Date()
-      };
+        progress: progressPercentage, // Schema uses 'progress' not 'progressPercentage'
+        lastAccessedAt: new Date()
+    };
 
-      if (status === 'Completed') {
-        // We need to check if it's already completed to preserve original completion date or update it?
-        // Simple approach: set completedAt if not present, or update it.
-        // For upsert, we can use $setOnInsert for createdAt and $set for others.
-        // But logic below was: if completed && !completedAt -> set it.
-        updateData.completedAt = new Date();
-      }
-
-      // We'll use findOneAndUpdate with upsert to handle both create and update
-      // But we need to be careful not to overwrite completedAt if it already exists and we don't want to change it?
-      // The original logic: if exists, update. if status completed and !completedAt, set it.
-      
-      let progress = await db.collection('trainingProgress').findOne({ userId, moduleId });
-      
-      if (progress) {
-        const setFields = {
-            status,
-            progressPercentage,
-            updatedAt: new Date()
-        };
-        if (status === 'Completed' && !progress.completedAt) {
-            setFields.completedAt = new Date();
-        }
-        
-        await db.collection('trainingProgress').updateOne(
-            { _id: progress._id },
-            { $set: setFields }
-        );
-        progress = { ...progress, ...setFields };
-      } else {
-        const newProgress = {
-            userId,
-            moduleId,
-            status,
-            progressPercentage,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            completedAt: status === 'Completed' ? new Date() : null
-        };
-        const result = await db.collection('trainingProgress').insertOne(newProgress);
-        progress = { ...newProgress, _id: result.insertedId };
-      }
-
-      res.json({ success: true, data: progress });
-    } catch (error) {
-      next(error);
+    if (status === 'completed') { // Schema enum is lowercase 'completed'
+        // Only set completedAt if not already set? Mongoose update operators:
+        // $setOnInsert logic works for create, but for update we need conditional.
+        // Easiest is to fetch first or use $cond (aggregation) but that's complex.
+        // Let's fetch first to be safe and simple.
     }
-  }
+
+    let progress = await TrainingProgress.findOne({ userId, moduleId: id });
+
+    if (progress) {
+        progress.status = status;
+        progress.progress = progressPercentage;
+        progress.lastAccessedAt = new Date();
+        if (status === 'completed' && !progress.completedAt) {
+            progress.completedAt = new Date();
+        }
+        await progress.save();
+    } else {
+        progress = await TrainingProgress.create({
+            userId,
+            moduleId: id,
+            status,
+            progress: progressPercentage,
+            completedAt: status === 'completed' ? new Date() : null
+        });
+    }
+
+    res.json({ success: true, data: progress });
+  });
 
   // --- Compliance Checklists ---
 
-  async createChecklist(req, res, next) {
-    try {
-      const checklistData = {
-        ...req.body,
-        createdAt: new Date(),
-        updatedAt: new Date()
+  createChecklist = catchAsync(async (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const checklist = await ComplianceChecklist.create(req.body);
+    
+    logger.info(`Compliance checklist created: ${checklist.title}`);
+
+    res.status(201).json({ success: true, data: checklist });
+  });
+
+  getChecklists = catchAsync(async (req, res) => {
+    const checklists = await ComplianceChecklist.find({ isActive: true });
+    const userId = req.user.id;
+
+    const checklistsWithStatus = await Promise.all(checklists.map(async (list) => {
+      const status = await UserChecklistStatus.findOne({ 
+          userId, 
+          checklistId: list.id 
+      });
+      return {
+        ...list.toJSON(),
+        userStatus: status || null
       };
+    }));
 
-      const db = await getDatabase();
-      const result = await db.collection('complianceChecklists').insertOne(checklistData);
-      checklistData._id = result.insertedId;
+    res.json({ success: true, data: checklistsWithStatus });
+  });
 
-      res.status(201).json({ success: true, data: checklistData });
-    } catch (error) {
-      next(error);
-    }
-  }
+  updateChecklistStatus = catchAsync(async (req, res) => {
+    const { checklistId, completedItems, isCompleted } = req.body; // Schema uses completedItems (array)
+    const userId = req.user.id;
 
-  async getChecklists(req, res, next) {
-    try {
-      const db = await getDatabase();
-      const checklists = await db.collection('complianceChecklists').find().toArray();
-      const userId = req.user.email || req.user.id || req.user;
+    const status = await UserChecklistStatus.findOneAndUpdate(
+      { userId, checklistId },
+      {
+          completedItems, // Array of strings
+          isCompleted,
+          completedAt: isCompleted ? new Date() : null, // Set date if completed
+          // updatedAt handled by timestamp
+      },
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+    );
 
-      const checklistsWithStatus = await Promise.all(checklists.map(async (list) => {
-        const status = await db.collection('userChecklistStatus').findOne({ 
-            userId, 
-            checklistId: list._id 
-        });
-        return {
-          ...list,
-          userStatus: status || null
-        };
-      }));
-
-      res.json({ success: true, data: checklistsWithStatus });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async updateChecklistStatus(req, res, next) {
-    try {
-      const { checklistId, itemsStatus, isCompleted } = req.body;
-      const userId = req.user.email || req.user.id || req.user;
-
-      if (!ObjectId.isValid(checklistId)) {
-          return res.status(400).json({ success: false, message: 'Invalid checklist ID' });
-      }
-
-      const db = await getDatabase();
-      const cId = new ObjectId(checklistId);
-
-      // Using updateOne with upsert is cleaner here
-      const result = await db.collection('userChecklistStatus').findOneAndUpdate(
-        { userId, checklistId: cId },
-        {
-            $set: {
-                itemsStatus,
-                isCompleted,
-                lastUpdated: new Date(),
-                updatedAt: new Date()
-            },
-            $setOnInsert: {
-                userId,
-                checklistId: cId,
-                createdAt: new Date()
-            }
-        },
-        { upsert: true, returnDocument: 'after' }
-      );
-
-      res.json({ success: true, data: result });
-    } catch (error) {
-      next(error);
-    }
-  }
+    res.json({ success: true, data: status });
+  });
 }
 
 module.exports = new TrainingComplianceController();

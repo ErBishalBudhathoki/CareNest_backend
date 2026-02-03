@@ -2,6 +2,7 @@ const AuthService = require('../services/authService_v2');
 const { z } = require('zod');
 const { createLogger } = require('../utils/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
+const catchAsync = require('../utils/catchAsync');
 
 const logger = createLogger('AuthControllerV2');
 
@@ -42,22 +43,24 @@ function isStrongPassword(password) {
 
 class AuthControllerV2 {
 
-    async register(req, res) {
-        try {
-            // Validate
-            const validation = registerSchema.safeParse(req.body);
-            if (!validation.success) {
-                return res.status(400).json(
-                    SecureErrorHandler.createErrorResponse(
-                        'Validation Error',
-                        400,
-                        'VALIDATION_ERROR',
-                        validation.error.issues
-                    )
-                );
-            }
+    register = catchAsync(async (req, res) => {
+        // Validate
+        const validation = registerSchema.safeParse(req.body);
+        if (!validation.success) {
+            return res.status(400).json(
+                SecureErrorHandler.createErrorResponse(
+                    'Validation Error',
+                    400,
+                    'VALIDATION_ERROR',
+                    validation.error.issues
+                )
+            );
+        }
 
+        try {
             const result = await AuthService.register(validation.data);
+
+            logger.info('User registered successfully', { userId: result._id, email: result.email });
 
             return res.status(201).json(
                 SecureErrorHandler.createSuccessResponse(
@@ -65,111 +68,104 @@ class AuthControllerV2 {
                     'Registration successful'
                 )
             );
-
         } catch (error) {
             if (error.message === 'Email already registered') {
                 return res.status(409).json(SecureErrorHandler.createErrorResponse(error.message, 409, 'USER_EXISTS'));
             }
-            logger.error('Register Error', { error: error.message });
-            return SecureErrorHandler.handleError(error, res);
+            // Let catchAsync handle unexpected errors
+            throw error;
         }
-    }
+    });
 
-    async login(req, res) {
+    login = catchAsync(async (req, res) => {
+        const validation = loginSchema.safeParse(req.body);
+        if (!validation.success) {
+            return res.status(400).json(SecureErrorHandler.createErrorResponse('Invalid credentials format', 400, 'VALIDATION_ERROR'));
+        }
+
         try {
-            const validation = loginSchema.safeParse(req.body);
-            if (!validation.success) {
-                return res.status(400).json(SecureErrorHandler.createErrorResponse('Invalid credentials format', 400, 'VALIDATION_ERROR'));
-            }
-
             const ipAddress = req.ip || req.connection.remoteAddress;
             const result = await AuthService.login(validation.data.email, validation.data.password, ipAddress);
 
             // Check for weak password on login
             if (!isStrongPassword(validation.data.password)) {
                 result.requiresPasswordChange = true;
-                // We still return key data, but frontend should redirect to change password
-                // Alternatively, we could withhold tokens, but that prevents the 'change password' authenticated request.
-                // So we return tokens but flag it.
             }
+
+            logger.info('User logged in successfully', { email: validation.data.email });
 
             return res.status(200).json(
                 SecureErrorHandler.createSuccessResponse(result, 'Login successful')
             );
-
         } catch (error) {
-            logger.error('Login Error', { error: error.message, email: req.body?.email });
+            logger.warn('Login failed', { error: error.message, email: req.body?.email });
             if (error.message === 'Invalid credentials' || error.message === 'Account disabled') {
                 return res.status(401).json(SecureErrorHandler.createErrorResponse(error.message, 401, 'AUTH_FAILED'));
             }
-            return SecureErrorHandler.handleError(error, res);
+            throw error;
         }
-    }
+    });
 
-    async refreshToken(req, res) {
+    refreshToken = catchAsync(async (req, res) => {
+        const validation = refreshTokenSchema.safeParse(req.body);
+        if (!validation.success) {
+            return res.status(400).json(SecureErrorHandler.createErrorResponse('Missing refresh token', 400, 'VALIDATION_ERROR'));
+        }
+
         try {
-            const validation = refreshTokenSchema.safeParse(req.body);
-            if (!validation.success) {
-                return res.status(400).json(SecureErrorHandler.createErrorResponse('Missing refresh token', 400, 'VALIDATION_ERROR'));
-            }
-
             const ipAddress = req.ip || req.connection.remoteAddress;
             const result = await AuthService.refreshToken(validation.data.refreshToken, ipAddress);
 
             return res.status(200).json(
                 SecureErrorHandler.createSuccessResponse(result, 'Token refreshed')
             );
-
         } catch (error) {
-            logger.error('Refresh Token Error', { error: error.message });
+            logger.warn('Refresh token failed', { error: error.message });
             if (error.message.includes('Security Alert')) {
                 return res.status(403).json(SecureErrorHandler.createErrorResponse(error.message, 403, 'SECURITY_ALERT'));
             }
             if (error.message.includes('Invalid') || error.message.includes('Expired')) {
                 return res.status(401).json(SecureErrorHandler.createErrorResponse(error.message, 401, 'INVALID_TOKEN'));
             }
-            return SecureErrorHandler.handleError(error, res);
+            throw error;
         }
-    }
+    });
 
-    async logout(req, res) {
-        try {
-            const { refreshToken } = req.body;
-            if (refreshToken) {
-                const ipAddress = req.ip || req.connection.remoteAddress;
-                await AuthService.logout(refreshToken, ipAddress);
-            }
-            return res.status(200).json(SecureErrorHandler.createSuccessResponse(null, 'Logged out'));
-        } catch (error) {
-            return SecureErrorHandler.handleError(error, res);
-        }
-    }
-
-    async changePassword(req, res) {
-        try {
-            const validation = changePasswordSchema.safeParse(req.body);
-            if (!validation.success) {
-                return res.status(400).json(SecureErrorHandler.createErrorResponse('Weak or invalid password', 400, 'VALIDATION_ERROR', validation.error.issues));
-            }
-
-            const userId = req.user.id; // From authenticateUser middleware
+    logout = catchAsync(async (req, res) => {
+        const { refreshToken } = req.body;
+        if (refreshToken) {
             const ipAddress = req.ip || req.connection.remoteAddress;
+            await AuthService.logout(refreshToken, ipAddress);
+        }
+        return res.status(200).json(SecureErrorHandler.createSuccessResponse(null, 'Logged out'));
+    });
 
+    changePassword = catchAsync(async (req, res) => {
+        const validation = changePasswordSchema.safeParse(req.body);
+        if (!validation.success) {
+            return res.status(400).json(SecureErrorHandler.createErrorResponse('Weak or invalid password', 400, 'VALIDATION_ERROR', validation.error.issues));
+        }
+
+        const userId = req.user.id; // From authenticateUser middleware
+        const ipAddress = req.ip || req.connection.remoteAddress;
+
+        try {
             await AuthService.changePassword(userId, validation.data.currentPassword, validation.data.newPassword, ipAddress);
+            
+            logger.info('Password changed successfully', { userId });
 
             return res.status(200).json(SecureErrorHandler.createSuccessResponse(null, 'Password changed successfully'));
-
         } catch (error) {
-            logger.error('Change Password Error', { error: error.message });
+            logger.warn('Change password failed', { error: error.message, userId });
             if (error.message === 'Invalid credentials') {
                 return res.status(401).json(SecureErrorHandler.createErrorResponse('Incorrect current password', 401, 'AUTH_FAILED'));
             }
             if (error.message.includes('Reuse')) {
                 return res.status(403).json(SecureErrorHandler.createErrorResponse(error.message, 403, 'SECURITY_ALERT'));
             }
-            return SecureErrorHandler.handleError(error, res);
+            throw error;
         }
-    }
+    });
 }
 
 module.exports = new AuthControllerV2();
