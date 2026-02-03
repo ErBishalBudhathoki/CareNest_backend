@@ -47,7 +47,7 @@ const requestSchema = new mongoose.Schema({
 });
 
 requestSchema.index({ organizationId: 1, status: 1 });
-requestSchema.index({ userId: 1 });
+// requestSchema.index({ userId: 1 }); // Removed duplicate index
 requestSchema.index({ createdBy: 1 });
 
 module.exports = mongoose.model('Request', requestSchema);
