@@ -11,6 +11,7 @@ const User = require('../models/User');
 const FcmToken = require('../models/FcmToken');
 const { messaging } = require('../firebase-admin-config');
 const logger = require('../config/logger');
+const catchAsync = require('../utils/catchAsync');
 
 /**
  * ===========================================================================
@@ -182,292 +183,307 @@ class ActiveTimerController {
    * Start timer with database persistence
    * POST /api/active-timers/start
    */
-  static async startTimer(req, res) {
-    try {
-      const { userEmail, clientEmail, organizationId } = req.body;
-      if (!userEmail || !clientEmail || !organizationId) {
-        return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, clientEmail, organizationId' });
-      }
-
-      const existingTimer = await ActiveTimer.findOne({ userEmail });
-      if (existingTimer) {
-        return res.status(409).json({ success: false, message: 'User already has an active timer running.' });
-      }
-
-      const timerData = { userEmail, clientEmail, organizationId, startTime: new Date() };
-      const newTimer = await ActiveTimer.create(timerData);
-      
-      logger.info('Timer started successfully', {
-        userEmail,
-        clientEmail,
-        organizationId,
-        timerId: newTimer._id
+  startTimer = catchAsync(async (req, res) => {
+    const { userEmail, clientEmail, organizationId } = req.body;
+    
+    if (!userEmail || !clientEmail || !organizationId) {
+      return res.status(400).json({ 
+        success: false, 
+        code: 'VALIDATION_ERROR',
+        message: 'Missing required fields: userEmail, clientEmail, organizationId' 
       });
-
-      // --- NOTIFICATION LOGIC ---
-      // 1. Notify the employee who started the timer.
-      // Primary: Get FCM token from login collection
-      const userDoc = await User.findOne({ 
-        email: userEmail,
-        fcmToken: { $exists: true, $nin: [null, ''] }
-      }).lean();
-      
-      let userTokens = [];
-      if (userDoc && userDoc.fcmToken) {
-        userTokens = [userDoc.fcmToken];
-        logger.info(`Found FCM token in login collection for ${userEmail}`);
-      } else {
-        // Fallback: Check fcmTokens collection
-        const userTokenDocs = await FcmToken.find({
-          organizationId: organizationId,
-          userEmail: userEmail,
-          fcmToken: { $exists: true, $nin: [null, ''] }
-        }).select('fcmToken').lean();
-        userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
-        if (userTokens.length > 0) {
-          logger.info(`Found FCM token in fcmTokens collection for ${userEmail}`);
-        }
-      }
-
-      if (userTokens.length > 0) {
-        try {
-          await messaging.sendEachForMulticast({
-            tokens: userTokens,
-            notification: { title: '⏱️ Timer Started', body: `Your timer for client ${clientEmail} has started.` },
-            data: {
-              type: 'TIMER_START',
-              clientEmail,
-              title: '⏱️ Timer Started',
-              body: `Your timer for client ${clientEmail} has started.`,
-              channelId: 'timer_alerts',
-              click_action: 'FLUTTER_NOTIFICATION_CLICK',
-              timestamp: new Date().toISOString(),
-            },
-            android: {
-              priority: 'high',
-              notification: {
-                channel_id: 'timer_alerts',
-                sound: 'default',
-              },
-            },
-            apns: {
-              payload: { aps: { sound: 'default', 'content-available': 1 } },
-              headers: { 'apns-priority': '10' },
-            },
-          });
-          logger.info(`Timer start notification sent to ${userEmail}`);
-        } catch (e) {
-          logger.error('Failed to notify employee', { error: e.message, userEmail });
-        }
-      } else {
-        logger.warn(`No FCM token found for user ${userEmail}`);
-      }
-
-      // 2. Notify ONLY the admins of the organization.
-      await sendAdminNotification(
-        organizationId,
-        '👤 Employee Started Shift',
-        `${userEmail} started working with client ${clientEmail}`,
-        {
-          type: 'EMPLOYEE_TIMER_START',
-          employeeEmail: userEmail,
-          clientEmail: clientEmail,
-        }
-      );
-
-      res.status(200).json({ success: true, message: 'Timer started successfully', timerId: newTimer._id });
-
-    } catch (error) {
-      logger.error('Error starting timer', {
-        error: error.message,
-        stack: error.stack,
-        timerData: req.body
-      });
-      res.status(500).json({ success: false, message: 'Internal server error while starting timer' });
     }
-  }
+
+    const existingTimer = await ActiveTimer.findOne({ userEmail });
+    if (existingTimer) {
+      return res.status(409).json({ 
+        success: false, 
+        code: 'TIMER_EXISTS',
+        message: 'User already has an active timer running.' 
+      });
+    }
+
+    const timerData = { userEmail, clientEmail, organizationId, startTime: new Date() };
+    const newTimer = await ActiveTimer.create(timerData);
+    
+    logger.business('Timer started successfully', {
+      action: 'timer_start',
+      userEmail,
+      clientEmail,
+      organizationId,
+      timerId: newTimer._id
+    });
+
+    // --- NOTIFICATION LOGIC ---
+    // 1. Notify the employee who started the timer.
+    // Primary: Get FCM token from login collection
+    const userDoc = await User.findOne({ 
+      email: userEmail,
+      fcmToken: { $exists: true, $nin: [null, ''] }
+    }).lean();
+    
+    let userTokens = [];
+    if (userDoc && userDoc.fcmToken) {
+      userTokens = [userDoc.fcmToken];
+      logger.info(`Found FCM token in login collection for ${userEmail}`);
+    } else {
+      // Fallback: Check fcmTokens collection
+      const userTokenDocs = await FcmToken.find({
+        organizationId: organizationId,
+        userEmail: userEmail,
+        fcmToken: { $exists: true, $nin: [null, ''] }
+      }).select('fcmToken').lean();
+      userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
+      if (userTokens.length > 0) {
+        logger.info(`Found FCM token in fcmTokens collection for ${userEmail}`);
+      }
+    }
+
+    if (userTokens.length > 0) {
+      try {
+        await messaging.sendEachForMulticast({
+          tokens: userTokens,
+          notification: { title: '⏱️ Timer Started', body: `Your timer for client ${clientEmail} has started.` },
+          data: {
+            type: 'TIMER_START',
+            clientEmail,
+            title: '⏱️ Timer Started',
+            body: `Your timer for client ${clientEmail} has started.`,
+            channelId: 'timer_alerts',
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+            timestamp: new Date().toISOString(),
+          },
+          android: {
+            priority: 'high',
+            notification: {
+              channel_id: 'timer_alerts',
+              sound: 'default',
+            },
+          },
+          apns: {
+            payload: { aps: { sound: 'default', 'content-available': 1 } },
+            headers: { 'apns-priority': '10' },
+          },
+        });
+        logger.info(`Timer start notification sent to ${userEmail}`);
+      } catch (e) {
+        logger.error('Failed to notify employee', { error: e.message, userEmail });
+      }
+    } else {
+      logger.warn(`No FCM token found for user ${userEmail}`);
+    }
+
+    // 2. Notify ONLY the admins of the organization.
+    await sendAdminNotification(
+      organizationId,
+      '👤 Employee Started Shift',
+      `${userEmail} started working with client ${clientEmail}`,
+      {
+        type: 'EMPLOYEE_TIMER_START',
+        employeeEmail: userEmail,
+        clientEmail: clientEmail,
+      }
+    );
+
+    res.status(200).json({ 
+      success: true, 
+      code: 'TIMER_STARTED',
+      message: 'Timer started successfully', 
+      timerId: newTimer._id 
+    });
+  });
 
   /**
    * Stop timer and create worked time record
    * POST /api/active-timers/stop
    */
-  static async stopTimer(req, res) {
-    try {
-      const { userEmail, organizationId } = req.body;
-      if (!userEmail || !organizationId) {
-        return res.status(400).json({ success: false, message: 'Missing required fields: userEmail, organizationId' });
-      }
-
-      logger.info('Looking for active timer', { userEmail });
-      const activeTimer = await ActiveTimer.findOneAndDelete({ userEmail });
-      
-      logger.info('Active timer query result', {
-        userEmail,
-        timerFound: !!activeTimer
+  stopTimer = catchAsync(async (req, res) => {
+    const { userEmail, organizationId } = req.body;
+    
+    if (!userEmail || !organizationId) {
+      return res.status(400).json({ 
+        success: false, 
+        code: 'VALIDATION_ERROR',
+        message: 'Missing required fields: userEmail, organizationId' 
       });
-      
-      if (!activeTimer) {
-        logger.warn('No active timer found for user', { userEmail });
-        return res.status(404).json({ success: false, message: 'No active timer found for this user.' });
-      }
-
-      const timerDoc = activeTimer;
-      logger.info('Timer document retrieved', {
-        userEmail,
-        clientEmail: timerDoc.clientEmail,
-        startTime: timerDoc.startTime
-      });
-      const stopTime = new Date();
-      const startTime = timerDoc.startTime;
-      const totalSeconds = Math.floor((stopTime.getTime() - startTime.getTime()) / 1000);
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      const formattedTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-
-      await WorkedTime.create({
-        userEmail,
-        clientEmail: timerDoc.clientEmail,
-        organizationId,
-        startTime,
-        endTime: stopTime,
-        timeWorked: totalSeconds,
-        totalSeconds,
-        createdAt: new Date(),
-      });
-      
-      logger.info('Timer stopped and worked time recorded', {
-        userEmail,
-        clientEmail: timerDoc.clientEmail,
-        organizationId,
-        timeWorked: formattedTime,
-        totalSeconds
-      });
-
-      // --- NOTIFICATION LOGIC ---
-      // 1. Notify the employee who stopped the timer.
-      // Primary: Get FCM token from login collection
-      const userDoc = await User.findOne({ 
-        email: userEmail,
-        fcmToken: { $exists: true, $nin: [null, ''] }
-      }).lean();
-      
-      let userTokens = [];
-      if (userDoc && userDoc.fcmToken) {
-        userTokens = [userDoc.fcmToken];
-        logger.info(`Found FCM token in login collection for ${userEmail}`);
-      } else {
-        // Fallback: Check fcmTokens collection
-        const userTokenDocs = await FcmToken.find({
-          organizationId: organizationId,
-          userEmail: userEmail,
-          fcmToken: { $exists: true, $nin: [null, ''] }
-        }).select('fcmToken').lean();
-        userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
-        if (userTokens.length > 0) {
-          logger.info(`Found FCM token in fcmTokens collection for ${userEmail}`);
-        }
-      }
-
-      if (userTokens.length > 0) {
-        try {
-          const message = {
-            tokens: userTokens,
-            notification: { title: '⏱️ Timer Stopped', body: `Time worked: ${formattedTime}` },
-            data: {
-              type: 'TIMER_STOP',
-              clientEmail: timerDoc.clientEmail,
-              timeWorked: formattedTime,
-              title: '⏱️ Timer Stopped',
-              body: `Time worked: ${formattedTime}`,
-              channelId: 'timer_alerts',
-              click_action: 'FLUTTER_NOTIFICATION_CLICK',
-              timestamp: new Date().toISOString(),
-            },
-            android: {
-              priority: 'high',
-              notification: {
-                channel_id: 'timer_alerts',
-                sound: 'default',
-              },
-            },
-            apns: {
-              payload: { aps: { sound: 'default', 'content-available': 1 } },
-              headers: { 'apns-priority': '10' },
-            },
-          };
-          const fcmResponse = await messaging.sendEachForMulticast(message);
-          logger.info(`Timer stop notification sent to ${userEmail}`);
-          if (fcmResponse.failureCount > 0) {
-            const tokensToRemove = [];
-            fcmResponse.responses.forEach((response, index) => {
-              if (!response.success) {
-                const errorCode = response.error.code;
-                if (['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(errorCode)) {
-                  tokensToRemove.push(userTokens[index]);
-                }
-              }
-            });
-            if (tokensToRemove.length > 0) {
-              await FcmToken.deleteMany(
-                { organizationId: organizationId, fcmToken: { $in: tokensToRemove } }
-              );
-              await User.updateMany(
-                { fcmToken: { $in: tokensToRemove } },
-                { $unset: { fcmToken: "" } }
-              );
-            }
-          }
-        } catch (e) {
-          logger.error('Failed to notify employee', { error: e.message, code: e.code, userEmail });
-        }
-      } else {
-        logger.warn(`No FCM token found for user ${userEmail}`);
-      }
-
-      // 2. Notify ONLY the admins of the organization.
-      await sendAdminNotification(
-        organizationId,
-        '👤 Employee Ended Shift',
-        `${userEmail} finished working with client ${timerDoc.clientEmail}. Duration: ${formattedTime}`,
-        {
-          type: 'EMPLOYEE_TIMER_STOP',
-          employeeEmail: userEmail,
-          clientEmail: timerDoc.clientEmail,
-          timeWorked: formattedTime,
-        }
-      );
-
-      res.status(200).json({ success: true, message: 'Timer stopped successfully', timeWorked: formattedTime, totalSeconds });
-
-    } catch (error) {
-      logger.error('Error stopping timer', {
-        error: error.message,
-        stack: error.stack,
-        timerId: req.params.timerId
-      });
-      res.status(500).json({ success: false, message: 'Internal server error while stopping timer' });
     }
-  }
+
+    logger.info('Looking for active timer', { userEmail });
+    const activeTimer = await ActiveTimer.findOneAndDelete({ userEmail });
+    
+    logger.info('Active timer query result', {
+      userEmail,
+      timerFound: !!activeTimer
+    });
+    
+    if (!activeTimer) {
+      logger.warn('No active timer found for user', { userEmail });
+      return res.status(404).json({ 
+        success: false, 
+        code: 'TIMER_NOT_FOUND',
+        message: 'No active timer found for this user.' 
+      });
+    }
+
+    const timerDoc = activeTimer;
+    logger.info('Timer document retrieved', {
+      userEmail,
+      clientEmail: timerDoc.clientEmail,
+      startTime: timerDoc.startTime
+    });
+    
+    const stopTime = new Date();
+    const startTime = timerDoc.startTime;
+    const totalSeconds = Math.floor((stopTime.getTime() - startTime.getTime()) / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const formattedTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+    await WorkedTime.create({
+      userEmail,
+      clientEmail: timerDoc.clientEmail,
+      organizationId,
+      startTime,
+      endTime: stopTime,
+      timeWorked: totalSeconds,
+      totalSeconds,
+      createdAt: new Date(),
+    });
+    
+    logger.business('Timer stopped and worked time recorded', {
+      action: 'timer_stop',
+      userEmail,
+      clientEmail: timerDoc.clientEmail,
+      organizationId,
+      timeWorked: formattedTime,
+      totalSeconds
+    });
+
+    // --- NOTIFICATION LOGIC ---
+    // 1. Notify the employee who stopped the timer.
+    // Primary: Get FCM token from login collection
+    const userDoc = await User.findOne({ 
+      email: userEmail,
+      fcmToken: { $exists: true, $nin: [null, ''] }
+    }).lean();
+    
+    let userTokens = [];
+    if (userDoc && userDoc.fcmToken) {
+      userTokens = [userDoc.fcmToken];
+      logger.info(`Found FCM token in login collection for ${userEmail}`);
+    } else {
+      // Fallback: Check fcmTokens collection
+      const userTokenDocs = await FcmToken.find({
+        organizationId: organizationId,
+        userEmail: userEmail,
+        fcmToken: { $exists: true, $nin: [null, ''] }
+      }).select('fcmToken').lean();
+      userTokens = [...new Set(userTokenDocs.map(doc => doc.fcmToken).filter(Boolean))];
+      if (userTokens.length > 0) {
+        logger.info(`Found FCM token in fcmTokens collection for ${userEmail}`);
+      }
+    }
+
+    if (userTokens.length > 0) {
+      try {
+        const message = {
+          tokens: userTokens,
+          notification: { title: '⏱️ Timer Stopped', body: `Time worked: ${formattedTime}` },
+          data: {
+            type: 'TIMER_STOP',
+            clientEmail: timerDoc.clientEmail,
+            timeWorked: formattedTime,
+            title: '⏱️ Timer Stopped',
+            body: `Time worked: ${formattedTime}`,
+            channelId: 'timer_alerts',
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+            timestamp: new Date().toISOString(),
+          },
+          android: {
+            priority: 'high',
+            notification: {
+              channel_id: 'timer_alerts',
+              sound: 'default',
+            },
+          },
+          apns: {
+            payload: { aps: { sound: 'default', 'content-available': 1 } },
+            headers: { 'apns-priority': '10' },
+          },
+        };
+        const fcmResponse = await messaging.sendEachForMulticast(message);
+        logger.info(`Timer stop notification sent to ${userEmail}`);
+        if (fcmResponse.failureCount > 0) {
+          const tokensToRemove = [];
+          fcmResponse.responses.forEach((response, index) => {
+            if (!response.success) {
+              const errorCode = response.error.code;
+              if (['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(errorCode)) {
+                tokensToRemove.push(userTokens[index]);
+              }
+            }
+          });
+          if (tokensToRemove.length > 0) {
+            await FcmToken.deleteMany(
+              { organizationId: organizationId, fcmToken: { $in: tokensToRemove } }
+            );
+            await User.updateMany(
+              { fcmToken: { $in: tokensToRemove } },
+              { $unset: { fcmToken: "" } }
+            );
+          }
+        }
+      } catch (e) {
+        logger.error('Failed to notify employee', { error: e.message, code: e.code, userEmail });
+      }
+    } else {
+      logger.warn(`No FCM token found for user ${userEmail}`);
+    }
+
+    // 2. Notify ONLY the admins of the organization.
+    await sendAdminNotification(
+      organizationId,
+      '👤 Employee Ended Shift',
+      `${userEmail} finished working with client ${timerDoc.clientEmail}. Duration: ${formattedTime}`,
+      {
+        type: 'EMPLOYEE_TIMER_STOP',
+        employeeEmail: userEmail,
+        clientEmail: timerDoc.clientEmail,
+        timeWorked: formattedTime,
+      }
+    );
+
+    res.status(200).json({ 
+      success: true, 
+      code: 'TIMER_STOPPED',
+      message: 'Timer stopped successfully', 
+      timeWorked: formattedTime, 
+      totalSeconds 
+    });
+  });
 
   /**
    * Get active timers for an organization
    * GET /api/active-timers/:organizationId
    */
-  static async getActiveTimers(req, res) {
-    try {
-      const { organizationId } = req.params;
-      const activeTimers = await ActiveTimer.find({ organizationId }).lean();
-      res.status(200).json({ success: true, activeTimers, count: activeTimers.length });
-    } catch (error) {
-      logger.error('Error getting active timers', {
-        error: error.message,
-        stack: error.stack,
-        organizationId: req.params.organizationId
-      });
-      res.status(500).json({ success: false, message: 'Internal server error while getting active timers' });
-    }
-  }
+  getActiveTimers = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+    const activeTimers = await ActiveTimer.find({ organizationId }).lean();
+    
+    logger.business('Retrieved active timers for organization', {
+      action: 'timer_list',
+      organizationId,
+      count: activeTimers.length
+    });
+    
+    res.status(200).json({ 
+      success: true, 
+      code: 'TIMERS_RETRIEVED',
+      activeTimers, 
+      count: activeTimers.length 
+    });
+  });
 }
 
-module.exports = ActiveTimerController;
+module.exports = new ActiveTimerController();

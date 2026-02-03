@@ -105,6 +105,41 @@ class WorkedTimeService {
       throw error;
     }
   }
+  /**
+   * Get worked time for a specific user and client
+   * @param {string} userEmail - User Email
+   * @param {string} clientEmail - Client Email
+   * @param {string} organizationId - Organization ID
+   */
+  async getWorkedTime(userEmail, clientEmail, organizationId) {
+    try {
+      // Find visits matching user and client
+      // Note: We're not validating organizationId strictly here as WorkedTime 
+      // might not have organizationId in legacy records, or it's just a filter.
+      // Assuming we just want records matching emails.
+      
+      const query = {
+        userEmail: userEmail,
+        clientEmail: clientEmail,
+        isActive: true
+      };
+
+      const visits = await WorkedTime.find(query)
+        .sort({ createdAt: -1 });
+
+      return {
+        success: true,
+        visits: visits,
+        // Legacy frontend expects 'workedTimes' key sometimes, or just the array or list inside visits
+        // We'll return 'visits' but controller can map it if needed.
+        // Actually, let's stick to 'visits' and let controller handle response shape.
+      };
+
+    } catch (error) {
+      logger.error('Error getting worked time:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new WorkedTimeService();

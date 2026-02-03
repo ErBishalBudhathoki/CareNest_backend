@@ -7,8 +7,8 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticateUser } = require('./middleware/auth');
-const { createLogger } = require('./utils/logger');
+const { authenticateUser } = require('../middleware/auth');
+const { createLogger } = require('../config/logger');
 
 const logger = createLogger('AuthTestEndpoint');
 

@@ -7,6 +7,9 @@
 
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { query } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
 const { getSystemHealthSnapshot } = require('../middleware/systemHealth');
 const logger = require('../config/logger');
 const { MongoClient, ServerApiVersion } = require('mongodb');
@@ -14,6 +17,13 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const uri = process.env.MONGODB_URI;
+
+// Rate limiting for metrics endpoints
+const metricsLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { success: false, message: 'Too many metrics requests.' }
+});
 
 /**
  * Convert metrics to Prometheus format
@@ -168,7 +178,7 @@ function formatBusinessMetrics(metrics) {
  * Main Prometheus metrics endpoint
  * GET /metrics
  */
-router.get('/metrics', async (req, res) => {
+router.get('/metrics', metricsLimiter, async (req, res) => {
   try {
     const systemHealth = getSystemHealthSnapshot();
     const businessMetrics = await getBusinessMetrics();
@@ -198,7 +208,7 @@ router.get('/metrics', async (req, res) => {
  * System health metrics endpoint
  * GET /api/metrics/system
  */
-router.get('/api/metrics/system', async (req, res) => {
+router.get('/api/metrics/system', metricsLimiter, async (req, res) => {
   try {
     const systemHealth = getSystemHealthSnapshot();
     const output = formatPrometheusMetrics(systemHealth);
@@ -224,7 +234,7 @@ router.get('/api/metrics/system', async (req, res) => {
  * Business metrics endpoint
  * GET /api/metrics/business
  */
-router.get('/api/metrics/business', async (req, res) => {
+router.get('/api/metrics/business', metricsLimiter, async (req, res) => {
   try {
     const businessMetrics = await getBusinessMetrics();
     const output = formatBusinessMetrics(businessMetrics);

@@ -41,8 +41,8 @@ class AuthService {
    */
   async validateOrganizationCode(organizationCode) {
     try {
-      const organization = await Organization.findOne({ 
-        organizationCode: organizationCode 
+      const organization = await Organization.findOne({
+        organizationCode: organizationCode
       });
       return organization;
     } catch (error) {
@@ -71,26 +71,24 @@ class AuthService {
    */
   async createUser(userData) {
     try {
-      // Generate salt and hash password
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hashedPassword = bcrypt.hashSync(userData.password, 10);
-      
+      // Create user instance with plain password (model handles hashing)
       const newUser = new User({
         email: userData.email,
-        password: hashedPassword,
-        salt: salt,
+        password: userData.password, // Will be hashed by pre-save hook
         firstName: userData.firstName,
         lastName: userData.lastName,
         organizationCode: userData.organizationCode,
         organizationId: userData.organizationId,
         role: userData.role || 'user',
+        roles: ['user'], // Ensure default role in array
         createdAt: new Date(),
         lastLogin: null,
-        isActive: true
+        isActive: true,
+        isEmailVerified: false
       });
-      
+
       const savedUser = await newUser.save();
-      
+
       // Create audit trail
       await auditService.createAuditTrail({
         action: 'USER_CREATED',
@@ -105,7 +103,7 @@ class AuthService {
         },
         timestamp: new Date()
       });
-      
+
       return savedUser;
     } catch (error) {
       throw new Error(`Error creating user: ${error.message}`);
@@ -120,29 +118,30 @@ class AuthService {
    */
   async authenticateUser(email, password) {
     try {
-      const user = await User.findOne({ email: email });
-      
+      // Explicitly select password since it's now excluded by default
+      const user = await User.findOne({ email: email }).select('+password');
+
       if (!user) {
         throw new Error('User not found');
       }
-      
+
       if (!user.isActive) {
         throw new Error('User account is deactivated');
       }
-      
-      // Verify password
-      const isPasswordValid = bcrypt.compareSync(password, user.password);
+
+      // Verify password using instance method
+      const isPasswordValid = await user.comparePassword(password);
       if (!isPasswordValid) {
         throw new Error('Invalid password');
       }
-      
+
       // Update last login
       user.lastLogin = new Date();
       await user.save();
-      
+
       // Get organization details
       const organization = await Organization.findById(user.organizationId);
-      
+
       // Create audit trail
       await auditService.createAuditTrail({
         action: 'USER_LOGIN',
@@ -155,7 +154,7 @@ class AuthService {
         },
         timestamp: new Date()
       });
-      
+
       return {
         user: {
           _id: user._id,
@@ -184,11 +183,11 @@ class AuthService {
         { email: email },
         'photo'
       );
-      
+
       if (!user || !user.photo) {
         return null;
       }
-      
+
       return user.photo;
     } catch (error) {
       throw new Error(`Error getting user photo: ${error.message}`);
@@ -216,11 +215,11 @@ class AuthService {
           }
         }
       );
-      
+
       if (result.matchedCount === 0) {
         throw new Error('User not found');
       }
-      
+
       // Create audit trail
       const user = await this.checkEmailExists(email);
       await auditService.createAuditTrail({
@@ -234,7 +233,7 @@ class AuthService {
         },
         timestamp: new Date()
       });
-      
+
       return true;
     } catch (error) {
       throw new Error(`Error uploading photo: ${error.message}`);
@@ -252,17 +251,17 @@ class AuthService {
         { email: email },
         'password'
       );
-      
+
       if (!user) {
         throw new Error('User not found');
       }
-      
+
       // Extract salt from stored password (last 64 characters)
       // Password format: hash(64 chars) + salt(64 chars)
       if (!user.password || user.password.length < 64) {
         throw new Error('Invalid password format');
       }
-      
+
       const salt = user.password.slice(-64); // Last 64 characters
       return salt;
     } catch (error) {
@@ -278,15 +277,15 @@ class AuthService {
   async generateOTP(email) {
     try {
       const user = await this.checkEmailExists(email);
-      
+
       if (!user) {
         throw new Error('User not found');
       }
-      
+
       // Generate 6-digit OTP
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-      
+
       await User.updateOne(
         { email: email },
         {
@@ -297,7 +296,7 @@ class AuthService {
           }
         }
       );
-      
+
       // Create audit trail
       await auditService.createAuditTrail({
         action: 'OTP_GENERATED',
@@ -309,7 +308,7 @@ class AuthService {
         },
         timestamp: new Date()
       });
-      
+
       return otp;
     } catch (error) {
       throw new Error(`Error generating OTP: ${error.message}`);
@@ -325,29 +324,29 @@ class AuthService {
   async verifyOTP(email, otp) {
     try {
       const user = await User.findOne({ email: email });
-      
+
       if (!user) {
         throw new Error('User not found');
       }
-      
+
       if (!user.otp || user.otpUsed) {
         throw new Error('No valid OTP found');
       }
-      
+
       if (new Date() > user.otpExpiry) {
         throw new Error('OTP has expired');
       }
-      
+
       if (user.otp !== otp) {
         throw new Error('Invalid OTP');
       }
-      
+
       // Mark OTP as used
       await User.updateOne(
         { email: email },
         { $set: { otpUsed: true } }
       );
-      
+
       // Create audit trail
       await auditService.createAuditTrail({
         action: 'OTP_VERIFIED',
@@ -357,7 +356,7 @@ class AuthService {
         details: {},
         timestamp: new Date()
       });
-      
+
       return true;
     } catch (error) {
       throw new Error(`OTP verification failed: ${error.message}`);
@@ -373,15 +372,15 @@ class AuthService {
   async updatePassword(email, newPassword) {
     try {
       const user = await this.checkEmailExists(email);
-      
+
       if (!user) {
         throw new Error('User not found');
       }
-      
+
       // Generate new salt and hash password
       const salt = crypto.randomBytes(16).toString('hex');
       const hashedPassword = bcrypt.hashSync(newPassword, 10);
-      
+
       await User.updateOne(
         { email: email },
         {
@@ -397,7 +396,7 @@ class AuthService {
           }
         }
       );
-      
+
       // Create audit trail
       await auditService.createAuditTrail({
         action: 'PASSWORD_UPDATED',
@@ -409,7 +408,7 @@ class AuthService {
         },
         timestamp: new Date()
       });
-      
+
       return true;
     } catch (error) {
       throw new Error(`Error updating password: ${error.message}`);
@@ -423,21 +422,21 @@ class AuthService {
    */
   async getInitData(email) {
     try {
-      const user = await User.findOne({ 
+      const user = await User.findOne({
         email: email,
-        isActive: true 
+        isActive: true
       });
-      
+
       if (!user) {
         throw new Error('User not found');
       }
-      
+
       // Get organization details if user belongs to one
       let organizationDetails = null;
       if (user.organizationId) {
         organizationDetails = await Organization.findById(user.organizationId);
       }
-      
+
       return {
         firstName: user.firstName,
         lastName: user.lastName,
@@ -450,7 +449,7 @@ class AuthService {
           code: organizationDetails.organizationCode
         } : null
       };
-      
+
     } catch (error) {
       throw new Error(`Error getting user initial data: ${error.message}`);
     }
