@@ -1,6 +1,19 @@
 const Redis = require('ioredis');
 const logger = require('./logger');
 
+// Check if we should use mock Redis (Test only)
+const useMockRedis = process.env.NODE_ENV === 'test';
+
+let RedisClass = Redis;
+if (useMockRedis) {
+  try {
+    RedisClass = require('ioredis-mock');
+    logger.info('Using ioredis-mock for test environment');
+  } catch (err) {
+    logger.warn('ioredis-mock not found, falling back to real Redis');
+  }
+}
+
 const redisConfig = process.env.REDIS_URL || {
   host: process.env.REDIS_HOST || 'localhost',
   port: process.env.REDIS_PORT || 6379,
@@ -16,9 +29,9 @@ const redisConfig = process.env.REDIS_URL || {
 // If REDIS_URL starts with rediss://, it implies TLS
 let redis;
 if (typeof redisConfig === 'string') {
-  redis = new Redis(redisConfig);
+  redis = new RedisClass(redisConfig);
 } else {
-  redis = new Redis(redisConfig);
+  redis = new RedisClass(redisConfig);
 }
 
 redis.on('connect', () => {
