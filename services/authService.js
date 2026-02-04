@@ -358,7 +358,8 @@ class AuthService {
         throw new Error('OTP has expired');
       }
 
-      if (user.otp !== otp) {
+      // Ensure strict string comparison to handle cases where frontend sends number
+      if (String(user.otp).trim() !== String(otp).trim()) {
         throw new Error('Invalid OTP');
       }
 
