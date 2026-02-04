@@ -166,7 +166,7 @@ class AuthController {
   });
 
   /**
-   * Get user photo
+   * Get user photo (Supports R2 and Legacy)
    */
   getUserPhoto = catchAsync(async (req, res) => {
     const { email } = req.params;
@@ -175,18 +175,33 @@ class AuthController {
       return res.status(400).json({ error: 'Email is required' });
     }
     
-    const photo = await authService.getUserPhoto(email);
+    const photoResult = await authService.getUserPhoto(email);
     
-    if (!photo) {
+    if (!photoResult) {
       return res.status(404).json({ error: 'Photo not found' });
     }
     
-    res.set('Content-Type', photo.contentType);
-    res.send(photo.data);
+    if (photoResult.type === 'url') {
+      // Return JSON with URL for R2/Cloudflare
+      return res.json({ 
+        success: true, 
+        photoUrl: photoResult.url 
+      });
+    } else if (photoResult.type === 'buffer') {
+      // Return JSON with Base64 for Legacy Buffer (Frontend expects JSON)
+      const base64Data = photoResult.data.toString('base64');
+      return res.json({
+        success: true,
+        data: base64Data,
+        contentType: photoResult.contentType
+      });
+    } else {
+      return res.status(500).json({ error: 'Unknown photo type' });
+    }
   });
 
   /**
-   * Upload user photo
+   * Upload user photo (R2 Only)
    */
   uploadPhoto = catchAsync(async (req, res) => {
     const { email } = req.body;
@@ -198,16 +213,31 @@ class AuthController {
     if (!req.file) {
       return res.status(400).json({ error: 'No photo file provided' });
     }
+
+    // Get URL from multer-s3 (R2) or fallback to file path (Disk)
+    let photoUrl;
+    if (req.file.location) {
+      photoUrl = req.file.location; // R2/S3 URL
+    } else if (req.file.path) {
+      // Local development fallback
+      photoUrl = req.file.path; 
+    } else {
+      return res.status(500).json({ error: 'File upload failed: No location returned' });
+    }
     
-    await authService.uploadUserPhoto(email, req.file.buffer, req.file.mimetype);
+    await authService.uploadUserPhoto(email, photoUrl, req.file.mimetype);
     
     logger.business('User Photo Uploaded', {
       event: 'user_photo_uploaded',
       email,
+      photoUrl,
       timestamp: new Date().toISOString()
     });
     
-    res.json({ message: 'Photo uploaded successfully' });
+    res.json({ 
+      message: 'Photo uploaded successfully',
+      photoUrl: photoUrl 
+    });
   });
 
   /**

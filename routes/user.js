@@ -5,7 +5,8 @@ const { authenticateUser } = require('../middleware/auth');
 const { param, body } = require('express-validator');
 const { validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
-const multer = require('multer');
+// Use the configured upload middleware (R2/S3 aware) instead of memory storage
+const { upload } = require('../config/storage');
 const router = express.Router();
 
 // Rate limiters
@@ -21,21 +22,8 @@ const photoUploadLimiter = rateLimit({
   message: { success: false, message: 'Too many photo upload requests.' }
 });
 
-// Multer configuration for photo uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Accept only image files
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'), false);
-    }
-  }
-});
+// Multer configuration is now handled by config/storage.js
+// const upload = multer({ ... }); removed
 
 // Validation middleware
 const handleValidationErrors = (req, res, next) => {
