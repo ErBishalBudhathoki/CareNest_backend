@@ -176,45 +176,55 @@ class AuthService {
   }
 
   /**
-   * Get user photo data
+   * Get user photo data (R2 Only - returns URL)
    * @param {string} email - User email
-   * @returns {Object} - Photo data if exists
+   * @returns {Object} - { type: 'url', url: string }
    */
   async getUserPhoto(email) {
     try {
       const user = await User.findOne(
         { email: email },
-        'photo'
+        'photoUrl profilePic'
       );
 
-      if (!user || !user.photo) {
+      if (!user) {
         return null;
       }
 
-      return user.photo;
+      // 1. Check for R2 URL (photoUrl or profilePic)
+      if (user.photoUrl) {
+        return { type: 'url', url: user.photoUrl };
+      }
+      if (user.profilePic && (user.profilePic.startsWith('http') || user.profilePic.startsWith('/'))) {
+        return { type: 'url', url: user.profilePic };
+      }
+
+      // Legacy buffer fallback removed as requested.
+      return null;
     } catch (error) {
       throw new Error(`Error getting user photo: ${error.message}`);
     }
   }
 
   /**
-   * Upload user photo
+   * Upload user photo (R2/URL only)
    * @param {string} email - User email
-   * @param {Buffer} photoData - Photo buffer data
+   * @param {string} photoUrl - Photo URL (from R2)
    * @param {string} contentType - Photo content type
    * @returns {boolean} - Success status
    */
-  async uploadUserPhoto(email, photoData, contentType) {
+  async uploadUserPhoto(email, photoUrl, contentType) {
     try {
       const result = await User.updateOne(
         { email: email },
         {
           $set: {
-            photo: {
-              data: photoData,
-              contentType: contentType,
-              uploadedAt: new Date()
-            }
+            photoUrl: photoUrl,
+            profilePic: photoUrl, // Compatibility alias
+            photoUpdatedAt: new Date()
+          },
+          $unset: {
+            photo: "" // Remove legacy buffer field to enforce R2 usage
           }
         }
       );
@@ -233,7 +243,7 @@ class AuthService {
         organizationId: user.organizationId,
         details: {
           contentType: contentType,
-          size: photoData.length
+          url: photoUrl
         },
         timestamp: new Date()
       });
