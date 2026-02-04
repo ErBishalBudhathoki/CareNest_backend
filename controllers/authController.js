@@ -293,11 +293,24 @@ class AuthController {
    * Update user password
    */
   updatePassword = catchAsync(async (req, res) => {
-    const result = await authService.updatePassword(req.body);
+    const { email, otp, newPassword } = req.body;
+
+    if (!otp) {
+      return res.status(400).json({ error: 'OTP is required' });
+    }
+
+    // Verify OTP first (allow already used if verified recently in same flow)
+    try {
+      await authService.verifyOTP(email, otp, { allowAlreadyUsed: true });
+    } catch (error) {
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    const result = await authService.updatePassword(email, newPassword);
     
     logger.business('Password Updated', {
       event: 'password_updated',
-      email: req.body.email,
+      email: email,
       timestamp: new Date().toISOString()
     });
     

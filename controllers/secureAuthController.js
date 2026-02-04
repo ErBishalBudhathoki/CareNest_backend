@@ -482,7 +482,8 @@ class SecureAuthController {
 
     // Verify OTP via authService
     try {
-      await authService.verifyOTP(email, otp);
+      // Allow already used OTPs to handle cases where frontend verifies before reset
+      await authService.verifyOTP(email, otp, { allowAlreadyUsed: true });
     } catch (error) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
@@ -493,34 +494,42 @@ class SecureAuthController {
       );
     }
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json(
+    try {
+      // Use authService to update password (handles hashing, salt, and OTP cleanup)
+      await authService.updatePassword(email, newPassword);
+
+      // Unlock account (reset login attempts)
+      await User.updateOne(
+        { email: email },
+        { 
+          $set: { 
+            loginAttempts: 0, 
+            lockUntil: undefined 
+          } 
+        }
+      );
+
+      logger.business('Password reset', {
+        action: 'PASSWORD_RESET',
+        email,
+        ip: req.ip
+      });
+
+      res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          null,
+          'Password reset successfully'
+        )
+      );
+    } catch (error) {
+      return res.status(500).json(
         SecureErrorHandler.createErrorResponse(
-          'User not found',
-          404,
-          'USER_NOT_FOUND'
+          `Error resetting password: ${error.message}`,
+          500,
+          'INTERNAL_ERROR'
         )
       );
     }
-
-    user.password = newPassword;
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-    await user.save();
-
-    logger.business('Password reset', {
-      action: 'PASSWORD_RESET',
-      email,
-      ip: req.ip
-    });
-
-    res.status(200).json(
-      SecureErrorHandler.createSuccessResponse(
-        null,
-        'Password reset successfully'
-      )
-    );
   });
 
   /**
