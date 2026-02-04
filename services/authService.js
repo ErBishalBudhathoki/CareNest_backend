@@ -340,9 +340,12 @@ class AuthService {
    * Verify OTP for password reset
    * @param {string} email - User email
    * @param {string} otp - OTP to verify
+   * @param {Object} options - Verification options
+   * @param {boolean} options.preventConsumption - If true, do not mark OTP as used
+   * @param {boolean} options.allowAlreadyUsed - If true, allow verification even if already used
    * @returns {boolean} - Verification status
    */
-  async verifyOTP(email, otp) {
+  async verifyOTP(email, otp, options = {}) {
     try {
       const user = await User.findOne({ email: email });
 
@@ -350,8 +353,14 @@ class AuthService {
         throw new Error('User not found');
       }
 
-      if (!user.otp || user.otpUsed) {
+      // Check if OTP exists
+      if (!user.otp) {
         throw new Error('No valid OTP found');
+      }
+
+      // Check if used (unless we allow already used OTPs)
+      if (user.otpUsed && !options.allowAlreadyUsed) {
+        throw new Error('No valid OTP found'); // Maintain same error message for security/consistency
       }
 
       if (new Date() > user.otpExpiry) {
@@ -363,22 +372,24 @@ class AuthService {
         throw new Error('Invalid OTP');
       }
 
-      // Mark OTP as used
-      await User.updateOne(
-        { email: email },
-        { $set: { otpUsed: true } }
-      );
+      // Mark OTP as used (unless prevented)
+      if (!options.preventConsumption && !user.otpUsed) {
+        await User.updateOne(
+          { email: email },
+          { $set: { otpUsed: true } }
+        );
 
-      // Create audit trail
-      await auditService.createAuditLog({
-        action: 'OTP_VERIFIED',
-        entityType: 'user',
-        entityId: user._id.toString(),
-        userEmail: email,
-        organizationId: user.organizationId,
-        details: {},
-        timestamp: new Date()
-      });
+        // Create audit trail only on first consumption
+        await auditService.createAuditLog({
+          action: 'OTP_VERIFIED',
+          entityType: 'user',
+          entityId: user._id.toString(),
+          userEmail: email,
+          organizationId: user.organizationId,
+          details: {},
+          timestamp: new Date()
+        });
+      }
 
       return true;
     } catch (error) {
