@@ -1,6 +1,7 @@
 const express = require('express');
 const SecureAuthController = require('../controllers/secureAuthController');
-const { authenticateUser, rateLimitMiddleware } = require('../middleware/auth');
+const AdminAuthController = require('../controllers/adminAuthController');
+const { authenticateUser, rateLimitMiddleware, requireRoles } = require('../middleware/auth');
 const SecureErrorHandler = require('../utils/errorHandler');
 const { createLogger } = require('../utils/logger');
 const { securityMonitor } = require('../utils/securityMonitor');
@@ -368,6 +369,24 @@ router.post('/unlock-account',
     try {
       // unlockAccount missed?
       return res.status(501).json({ error: 'Not Implemented Yet' });
+    } catch (error) {
+      return SecureErrorHandler.handleError(error, res);
+    }
+  }
+);
+
+/**
+ * @route POST /api/auth/admin/reset-rate-limit
+ * @desc Reset rate limits for a specific user email
+ * @access Private (Admin)
+ */
+router.post('/admin/reset-rate-limit',
+  authenticateUser,
+  requireRoles(['admin']),
+  async (req, res) => {
+    try {
+      const result = await AdminAuthController.resetRateLimits(req, res);
+      return result;
     } catch (error) {
       return SecureErrorHandler.handleError(error, res);
     }

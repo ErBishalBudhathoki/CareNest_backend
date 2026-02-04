@@ -495,12 +495,26 @@ function rateLimitMiddleware(type) {
 
   const config = configs[type] || configs.default;
 
-  return rateLimit({
-    store: new RedisStore({
-      sendCommand: (...args) => redis.call(...args),
-    }),
+  // Key generator that prefers email for auth-related actions
+  const keyGenerator = (req) => {
+    // If user is authenticated, use their ID or email
+    if (req.user && req.user.email) return req.user.email;
+    
+    // For public auth endpoints, use email from body if available
+    if (req.body && req.body.email && [
+      'login', 'register', 'verify', 'forgot', 'reset', 'resend'
+    ].includes(type)) {
+      return req.body.email;
+    }
+    
+    // Fallback to IP
+    return req.ip;
+  };
+
+  const rateLimitOptions = {
     windowMs: config.windowMs,
     max: config.max,
+    keyGenerator: keyGenerator,
     message: {
       success: false,
       message: config.message,
@@ -538,7 +552,18 @@ function rateLimitMiddleware(type) {
         timestamp: new Date().toISOString()
       });
     }
-  });
+  };
+
+  // Always use Redis store (assuming Redis is available via REDIS_URL)
+  // Fallback to memory store only for tests if needed
+  if (process.env.NODE_ENV !== 'test') {
+    rateLimitOptions.store = new RedisStore({
+      sendCommand: (...args) => redis.call(...args),
+      prefix: `rl:${type}:`, // Unique prefix for each rate limiter type
+    });
+  }
+
+  return rateLimit(rateLimitOptions);
 }
 
 module.exports = {
