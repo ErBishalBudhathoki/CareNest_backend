@@ -481,11 +481,27 @@ class SecureAuthController {
     }
 
     // Verify OTP via authService
-    await authService.verifyOTP(email, otp);
+    try {
+      await authService.verifyOTP(email, otp);
+    } catch (error) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          error.message || 'Invalid or expired OTP',
+          400,
+          'INVALID_OTP'
+        )
+      );
+    }
 
     const user = await User.findOne({ email });
     if (!user) {
-      throw new Error('User not found');
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
     }
 
     user.password = newPassword;
