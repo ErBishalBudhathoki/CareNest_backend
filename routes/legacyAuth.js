@@ -50,4 +50,7 @@ router.post('/updatePassword', authLimiter, passwordValidation, handleValidation
 // Add /hello/:email alias if needed here or keep in initRoutes
 // keeping hello in initRoutes is fine as it's GET.
 
+// Add legacy photo route to match frontend expectation
+router.get('/getUserPhoto/:email', authLimiter, AuthController.getUserPhoto);
+
 module.exports = router;
