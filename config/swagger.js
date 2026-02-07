@@ -31,9 +31,42 @@ try {
 }
 
 /**
+ * Simple Basic Auth Middleware for Swagger UI
+ * Protects documentation from unauthorized public access
+ */
+const basicAuth = (req, res, next) => {
+  // Allow in development without auth if explicitly configured
+  if (process.env.NODE_ENV === 'development' && process.env.SWAGGER_NO_AUTH === 'true') {
+    return next();
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Invoice API Docs"');
+    return res.status(401).send('Authentication required');
+  }
+
+  const auth = Buffer.from(authHeader.split(' ')[1], 'base64').toString().split(':');
+  const user = auth[0];
+  const pass = auth[1];
+
+  // Use environment variables or safe defaults
+  // In production, these MUST be set
+  const validUser = process.env.SWAGGER_USER || 'admin';
+  const validPass = process.env.SWAGGER_PASSWORD || 'admin'; 
+
+  if (user === validUser && pass === validPass) {
+    return next();
+  } else {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Invoice API Docs"');
+    return res.status(401).send('Invalid credentials');
+  }
+};
+
+/**
  * Custom middleware to serve OpenAPI spec as JSON
  */
-router.get('/api-docs/docs.json', (req, res) => {
+router.get('/api-docs/docs.json', basicAuth, (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -74,7 +107,7 @@ router.get('/api-docs/docs.json', (req, res) => {
 /**
  * Serve Enhanced Swagger UI
  */
-router.get('/api-docs', (req, res) => {
+router.get('/api-docs', basicAuth, (req, res) => {
   const html = `
 <!DOCTYPE html>
 <html lang="en">

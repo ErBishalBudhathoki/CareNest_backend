@@ -14,6 +14,24 @@ class InvoiceController {
     try {
       const { userEmail, clientEmail, startDate, endDate, includeExpenses = false } = req.body;
       
+      // Security Check: IDOR Prevention
+      // Ensure the authenticated user is generating invoice for themselves OR has admin role
+      const requestingUserEmail = req.user.email;
+      const requestingUserRoles = req.user.roles || [];
+      
+      if (userEmail !== requestingUserEmail && !requestingUserRoles.includes('admin') && !requestingUserRoles.includes('superadmin')) {
+         logger.security('Unauthorized invoice generation attempt (IDOR)', {
+            requestingUser: requestingUserEmail,
+            targetUser: userEmail,
+            ip: req.ip
+         });
+         return res.status(403).json({
+           success: false,
+           code: 'FORBIDDEN',
+           message: 'You are not authorized to generate invoices for this user.'
+         });
+      }
+
       logger.business('Starting invoice line items generation', {
         userEmail,
         clientEmail,
@@ -176,6 +194,23 @@ class InvoiceController {
       const { userEmail, clientEmail } = req.params;
       const { startDate, endDate } = req.query;
       
+      // Security Check: IDOR Prevention
+      const requestingUserEmail = req.user.email;
+      const requestingUserRoles = req.user.roles || [];
+      
+      if (userEmail !== requestingUserEmail && !requestingUserRoles.includes('admin') && !requestingUserRoles.includes('superadmin')) {
+         logger.security('Unauthorized invoice preview attempt (IDOR)', {
+            requestingUser: requestingUserEmail,
+            targetUser: userEmail,
+            ip: req.ip
+         });
+         return res.status(403).json({
+           success: false,
+           code: 'FORBIDDEN',
+           message: 'You are not authorized to view this invoice preview.'
+         });
+      }
+
       logger.business('Generating invoice preview', {
         userEmail,
         clientEmail,
@@ -281,6 +316,23 @@ class InvoiceController {
     try {
       const { userEmail } = req.params;
       
+      // Security Check: IDOR Prevention
+      const requestingUserEmail = req.user.email;
+      const requestingUserRoles = req.user.roles || [];
+      
+      if (userEmail !== requestingUserEmail && !requestingUserRoles.includes('admin') && !requestingUserRoles.includes('superadmin')) {
+         logger.security('Unauthorized assignments access attempt (IDOR)', {
+            requestingUser: requestingUserEmail,
+            targetUser: userEmail,
+            ip: req.ip
+         });
+         return res.status(403).json({
+           success: false,
+           code: 'FORBIDDEN',
+           message: 'You are not authorized to view assignments for this user.'
+         });
+      }
+
       logger.business('Retrieving available assignments', {
         userEmail
       });
