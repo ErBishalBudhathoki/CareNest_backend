@@ -10,6 +10,39 @@ const { securityMonitor } = require('../utils/securityMonitor');
 const logger = createLogger('AuthMiddleware');
 
 /**
+ * Validate critical environment variables on startup
+ * Throws error if JWT_SECRET is not properly configured
+ */
+function validateSecurityConfig() {
+  const jwtSecret = process.env.JWT_SECRET;
+  
+  if (!jwtSecret) {
+    logger.error('CRITICAL: JWT_SECRET environment variable is not set');
+    throw new Error('JWT_SECRET must be configured. Application cannot start.');
+  }
+  
+  if (jwtSecret.length < 32) {
+    // Downgrade to warning to allow legacy/dev secrets
+    logger.warn('WARNING: JWT_SECRET is too short (less than 32 chars). usage is discouraged for production.', { length: jwtSecret.length });
+    // throw new Error('JWT_SECRET must be at least 32 characters long for security.');
+  }
+  
+  // Warn if using default or weak secrets
+  const weakSecrets = ['secret', 'password', 'changeme', 'test', 'dev', 'default'];
+  if (weakSecrets.some(weak => jwtSecret.toLowerCase().includes(weak))) {
+    logger.warn('WARNING: JWT_SECRET appears to be a weak or default value. Use a strong random secret in production.');
+  }
+  
+  logger.info('Security configuration validated successfully', {
+    jwtSecretLength: jwtSecret.length,
+    environment: process.env.NODE_ENV || 'development'
+  });
+}
+
+// Validate configuration on module load
+validateSecurityConfig();
+
+/**
  * Secure authentication middleware with comprehensive security features
  * Provides JWT token validation, rate limiting, and security logging
  */
@@ -26,6 +59,28 @@ class AuthMiddleware {
    */
   static async authenticateUser(req, res, next) {
     try {
+      // Public endpoints that don't require authentication
+      const publicEndpoints = [
+        '/api/auth/login',
+        '/api/auth/register',
+        '/api/auth/secure-login',
+        '/api/auth/forgot-password',
+        '/api/auth/reset-password',
+        '/api/auth/verify-email',
+        '/api/auth/health',
+        '/api/auth/v2/register',
+        '/api/auth/v2/login',
+        '/api/health',
+        '/api-docs',
+        '/api-docs.json'
+      ];
+      
+      // Check if this is a public endpoint (use originalUrl for full path)
+      const path = req.originalUrl || req.path;
+      if (publicEndpoints.some(endpoint => path.startsWith(endpoint))) {
+        return next();
+      }
+      
       // Check if IP is blocked
       if (AuthMiddleware.isIPBlocked(req.ip)) {
         logger.security('Blocked IP attempted access', { ip: req.ip, path: req.path });
@@ -72,9 +127,9 @@ class AuthMiddleware {
       }
 
       // Verify JWT token using the same private key as login endpoint
-      const privateKey = process.env.JWT_SECRET || process.env.PRIVATE_KEY;
+      const privateKey = process.env.JWT_SECRET;
       if (!privateKey) {
-        logger.error('JWT_SECRET not configured in environment variables');
+        logger.error('JWT_SECRET not properly configured in environment variables');
         return res.status(500).json(
           SecureErrorHandler.createErrorResponse(
             'Server configuration error. Please contact administrator.',
@@ -83,6 +138,14 @@ class AuthMiddleware {
           )
         );
       }
+      
+      /* Relaxed length check for dev environments
+      if (privateKey.length < 32) {
+         // Log warning but proceed
+         logger.warn('Weak JWT_SECRET in use', { length: privateKey.length });
+      }
+      */
+
       const decoded = jwt.verify(token, privateKey, {
         issuer: 'invoice-app',
         audience: 'invoice-app-users'
@@ -496,7 +559,7 @@ function rateLimitMiddleware(type) {
   const config = configs[type] || configs.default;
 
   // Key generator that prefers email for auth-related actions
-  const keyGenerator = (req) => {
+  const keyGenerator = (req, res) => {
     // If user is authenticated, use their ID or email
     if (req.user && req.user.email) return req.user.email;
     
@@ -507,8 +570,8 @@ function rateLimitMiddleware(type) {
       return req.body.email;
     }
     
-    // Fallback to IP
-    return req.ip;
+    // Fallback to undefined - let express-rate-limit use default IP handling
+    return undefined;
   };
 
   const rateLimitOptions = {

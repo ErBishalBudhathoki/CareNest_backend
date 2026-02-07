@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const Client = require('../models/Client');
 const User = require('../models/User');
+const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
 
@@ -43,6 +44,24 @@ class ClientAuthService {
       // For now I'll proceed, Mongoose will ignore unknown fields.
 
       const savedUser = await newUser.save();
+
+      // Create UserOrganization record (Zero-Trust requirement)
+      if (client.organizationId) {
+        try {
+          await UserOrganization.create({
+            userId: savedUser._id.toString(),
+            organizationId: client.organizationId.toString(),
+            role: 'client',
+            permissions: ['read'],
+            isActive: true,
+            joinedAt: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+        } catch (orgError) {
+          console.error('Failed to create UserOrganization record for client:', orgError.message);
+        }
+      }
 
       // 5. Send Activation Email
       await emailService.sendClientActivationEmail(email, tempPassword);
@@ -123,6 +142,24 @@ class ClientAuthService {
       });
 
       const savedUser = await newUser.save();
+
+      // Create UserOrganization record (Zero-Trust requirement)
+      if (client.organizationId) {
+        try {
+          await UserOrganization.create({
+            userId: savedUser._id.toString(),
+            organizationId: client.organizationId.toString(),
+            role: 'client',
+            permissions: ['read'],
+            isActive: true,
+            joinedAt: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+        } catch (orgError) {
+          console.error('Failed to create UserOrganization record for client activation:', orgError.message);
+        }
+      }
 
       // 4. Log audit trail
       await auditService.createAuditTrail({

@@ -2,6 +2,11 @@ const express = require('express');
 const userController = require('../controllers/userController');
 const authController = require('../controllers/authController');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  optionalOrganizationContext,
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 const { param, body } = require('express-validator');
 const { validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
@@ -45,6 +50,7 @@ const handleValidationErrors = (req, res, next) => {
 router.get(
   "/getUsers/",
   authenticateUser,
+  optionalOrganizationContext,
   userController.getAllUsers
 );
 
@@ -55,6 +61,7 @@ router.get(
 router.get(
   "/organization/:organizationId/employees",
   authenticateUser,
+  organizationContextMiddleware,
   [
     param('organizationId').isMongoId().withMessage('Invalid organization ID')
   ],
@@ -69,6 +76,8 @@ router.get(
 router.post(
   '/fixClientOrganizationId',
   authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
   [
     body('userEmail').isEmail().normalizeEmail().withMessage('Valid user email is required'),
     body('organizationId').isMongoId().withMessage('Invalid organization ID')
@@ -85,6 +94,7 @@ router.post(
 router.get(
   '/photo/:email',
   authenticateUser,
+  optionalOrganizationContext,
   photoReadLimiter,
   [
     param('email').isEmail().normalizeEmail().withMessage('Valid email is required')
@@ -101,6 +111,7 @@ router.get(
 router.post(
   '/photo',
   authenticateUser,
+  optionalOrganizationContext,
   photoUploadLimiter,
   upload.single('photo'),
   [
@@ -118,6 +129,7 @@ router.post(
 router.get(
   '/init-data/:email',
   authenticateUser,
+  optionalOrganizationContext,
   [
     param('email').isEmail().normalizeEmail().withMessage('Valid email is required')
   ],

@@ -4,6 +4,11 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const clientController = require('../controllers/clientController');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationOwnership,
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const clientLimiter = rateLimit({
@@ -30,16 +35,17 @@ const assignValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
 router.post('/activate', clientLimiter, body('email').isEmail(), clientController.activateClient);
 router.post('/addClient', clientLimiter, addClientValidation, clientController.addClient);
-router.get('/clients/:organizationId', clientLimiter, param('organizationId').isMongoId(), clientController.getClients);
+router.get('/clients/:organizationId', clientLimiter, param('organizationId').isMongoId(), requireOrganizationMatch('organizationId'), clientController.getClients);
 router.get('/getClients', clientLimiter, clientController.getClients);
 
 // Get client details by ID
-router.get('/details/:clientId', clientLimiter, param('clientId').isMongoId(), clientController.getClientById);
+router.get('/details/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.getClientById);
 
-router.post('/updateCareNotes/:clientId', clientLimiter, param('clientId').isMongoId(), clientController.updateCareNotes);
+router.post('/updateCareNotes/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.updateCareNotes);
 router.get('/getMultipleClients/:emails', clientLimiter, clientController.getMultipleClients);
 router.post('/assignClientToUser', clientLimiter, assignValidation, clientController.assignClientToUser);
 router.get('/getUserAssignments/:userEmail', clientLimiter, param('userEmail').isEmail(), clientController.getUserAssignments);

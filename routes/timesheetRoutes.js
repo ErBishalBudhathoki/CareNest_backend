@@ -5,6 +5,10 @@ const { body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const timesheetController = require('../controllers/timesheetController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const exportLimiter = rateLimit({
@@ -36,6 +40,7 @@ const listValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
 /**
  * Get timesheet list
@@ -44,6 +49,7 @@ router.use(authenticateUser);
 router.post(
   '/list',
   listLimiter,
+  requireOrganizationMatch('organizationId'),
   listValidation,
   handleValidationErrors,
   timesheetController.getTimesheets
@@ -58,6 +64,7 @@ router.post(
   '/export-payroll', 
   requireRoles(['admin']), 
   exportLimiter, 
+  requireOrganizationMatch('organizationId'),
   exportValidation, 
   handleValidationErrors,
   timesheetController.exportPayroll

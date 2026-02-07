@@ -40,6 +40,32 @@ const organizationSchema = new mongoose.Schema({
     renewalDate: String,
     expiryDate: String
   },
+  integrations: {
+    xero: {
+      isConnected: { type: Boolean, default: false },
+      lastSync: Date
+    },
+    myob: {
+      isConnected: { type: Boolean, default: false },
+      lastSync: Date
+    },
+    googleCalendar: {
+      isConnected: { type: Boolean, default: false },
+      lastSync: Date
+    },
+    outlookCalendar: {
+      isConnected: { type: Boolean, default: false },
+      lastSync: Date
+    },
+    slack: {
+      isConnected: { type: Boolean, default: false },
+      lastSync: Date
+    },
+    teams: {
+      isConnected: { type: Boolean, default: false },
+      lastSync: Date
+    }
+  },
   businessName: String,
   settings: {
     mileage: {
