@@ -17,8 +17,14 @@ RUN npm ci --omit=dev
 # Copy the rest of the application code
 COPY . .
 
+# Change ownership to non-root user
+RUN chown -R node:node /app
+
 # Expose port 8080 (Google Cloud Run default)
 EXPOSE 8080
+
+# Switch to non-root user
+USER node
 
 # Start the application
 CMD ["npm", "start"]

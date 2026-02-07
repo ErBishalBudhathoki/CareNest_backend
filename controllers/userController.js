@@ -8,11 +8,27 @@ class UserController {
    * GET /getUsers/
    */
   getAllUsers = catchAsync(async (req, res) => {
-    const users = await userService.getAllUsers();
+    // Security: Filter by authenticated user's organization
+    // Only superadmins might be allowed to see all, but for now we restrict to org
+    const organizationId = req.user.organizationId;
+    
+    // If no organization ID in token (shouldn't happen for valid users), return empty or error
+    if (!organizationId) {
+       // Check if superadmin, maybe allow? For now, safer to return empty or specific error
+       // Assuming standard user flow
+       return res.status(403).json({
+         success: false,
+         code: 'FORBIDDEN',
+         message: 'Organization context required'
+       });
+    }
+
+    const users = await userService.getAllUsers(organizationId);
     
     logger.business('Retrieved all users', {
       action: 'user_list_all',
-      count: users.length
+      count: users.length,
+      organizationId
     });
     
     res.status(200).json({
