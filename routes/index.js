@@ -59,6 +59,7 @@ const supportItemsRoutes = require('./supportItems');
 const notesRoutes = require('./notesRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const employeeTrackingRoutes = require('./employeeTracking');
+const scheduleRoutes = require('./schedule'); // Import schedule routes
 
 // Mount Routes
 
