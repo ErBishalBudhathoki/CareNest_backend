@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const UserOrganization = require('../models/UserOrganization');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { createLogger } = require('../utils/logger');
@@ -120,6 +121,28 @@ class AuthServiceV2 {
         });
 
         await user.save();
+
+        // Create UserOrganization record (Zero-Trust requirement)
+        if (userData.organizationId) {
+            try {
+                await UserOrganization.create({
+                    userId: user._id.toString(),
+                    organizationId: userData.organizationId,
+                    role: 'user',
+                    permissions: ['read', 'write'],
+                    isActive: true,
+                    joinedAt: new Date(),
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                });
+            } catch (orgError) {
+                logger.error('Failed to create UserOrganization record', {
+                    userId: user._id.toString(),
+                    error: orgError.message
+                });
+            }
+        }
+
         return user;
     }
 

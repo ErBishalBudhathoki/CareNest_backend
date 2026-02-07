@@ -1,4 +1,4 @@
-name: Deploy Backend to Firebase (Dev)
+name: Deploy Backend to Cloud Run (Dev)
 
 on:
   push:
@@ -44,8 +44,6 @@ jobs:
           FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
           FIREBASE_CLIENT_CERT_URL: ${{ secrets.FIREBASE_CLIENT_CERT_URL }}
 
-
-
       - name: Create .env file
         run: |
           echo "NODE_ENV=development" >> .env
@@ -67,11 +65,38 @@ jobs:
           echo "GCP_LOCATION=australia-southeast1" >> .env
           echo "STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}" >> .env
           echo "STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}" >> .env
-          
-          # Redis Cloud Configuration
           echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> .env
 
-      - name: Deploy to Firebase
-        run: npx firebase-tools deploy --only functions,hosting --non-interactive --project "${{ secrets.FIREBASE_PROJECT_ID }}" --force
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: service-account.json
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }} # Fallback if they have a dedicated key, but we can try to use the generated one if we set it up correctly. 
+          # Actually, since we generated service-account.json, let's use it.
+          # The setup-gcloud action doesn't take a file path for service_account_key directly in this version easily without reading it.
+          # But we can use gcloud auth activate-service-account manually if we don't provide input here, OR we can cat the file.
+        # Let's try the manual auth approach which is robust with the file we have.
+
+      - name: Authenticate gcloud with generated key
+        run: |
+          gcloud auth activate-service-account --key-file=service-account.json
+          gcloud config set project ${{ secrets.FIREBASE_PROJECT_ID }}
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker
+
+      - name: Build and Push Container
+        run: |
+          docker build -t gcr.io/${{ secrets.FIREBASE_PROJECT_ID }}/backend-dev:${{ github.sha }} .
+          docker push gcr.io/${{ secrets.FIREBASE_PROJECT_ID }}/backend-dev:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy backend-dev \
+            --image gcr.io/${{ secrets.FIREBASE_PROJECT_ID }}/backend-dev:${{ github.sha }} \
+            --region australia-southeast1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 0 \
+            --cpu-boost \
+            --port 8080

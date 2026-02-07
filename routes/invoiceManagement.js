@@ -5,6 +5,10 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
 const { requireAdmin, requireOrganizationMatch } = require('../middleware/rbac');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationOwnership 
+} = require('../middleware/organizationContext');
 const {
   getInvoicesList,
   getInvoiceDetails,
@@ -77,30 +81,85 @@ const statsValidation = [
 ];
 
 // Create a new invoice
-router.post('/api/invoices', authenticateUser, standardLimiter, createInvoiceValidation, handleValidationErrors, createInvoice);
+router.post('/api/invoices', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  standardLimiter, 
+  createInvoiceValidation, 
+  handleValidationErrors, 
+  createInvoice
+);
 
 // Get list of invoices for an organization
-router.get('/api/invoices', authenticateUser, standardLimiter, getInvoicesValidation, handleValidationErrors, getInvoicesList);
+router.get('/api/invoices', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  standardLimiter, 
+  getInvoicesValidation, 
+  handleValidationErrors, 
+  getInvoicesList
+);
 
 // Get details of a specific invoice
-router.get('/api/invoices/:invoiceId', authenticateUser, standardLimiter, invoiceIdValidation, handleValidationErrors, getInvoiceDetails);
+router.get('/api/invoices/:invoiceId', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  standardLimiter, 
+  invoiceIdValidation, 
+  handleValidationErrors, 
+  getInvoiceDetails
+);
 
 // Update payment status
-router.patch('/api/invoices/:invoiceId/payment-status', authenticateUser, strictLimiter, updatePaymentValidation, handleValidationErrors, updatePaymentStatus);
+router.patch('/api/invoices/:invoiceId/payment-status', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  strictLimiter, 
+  updatePaymentValidation, 
+  handleValidationErrors, 
+  updatePaymentStatus
+);
 
 // Share an invoice
-router.post('/api/invoices/:invoiceId/share', authenticateUser, standardLimiter, shareInvoiceValidation, handleValidationErrors, shareInvoice);
+router.post('/api/invoices/:invoiceId/share', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  standardLimiter, 
+  shareInvoiceValidation, 
+  handleValidationErrors, 
+  shareInvoice
+);
 
 // Share an invoice as PDF
-router.post('/api/invoices/:invoiceId/share/pdf', authenticateUser, standardLimiter, shareInvoiceValidation, handleValidationErrors, shareInvoice);
+router.post('/api/invoices/:invoiceId/share/pdf', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  standardLimiter, 
+  shareInvoiceValidation, 
+  handleValidationErrors, 
+  shareInvoice
+);
 
 // Delete an invoice
-router.delete('/api/invoices/:invoiceId', authenticateUser, strictLimiter, invoiceIdValidation, handleValidationErrors, deleteInvoice);
+router.delete('/api/invoices/:invoiceId', 
+  authenticateUser, 
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  strictLimiter, 
+  invoiceIdValidation, 
+  handleValidationErrors, 
+  deleteInvoice
+);
 
 // Get invoice statistics
 router.get(
   '/api/invoices/stats/:organizationId',
   authenticateUser,
+  organizationContextMiddleware,
   standardLimiter,
   requireAdmin,
   requireOrganizationMatch('organizationId'),

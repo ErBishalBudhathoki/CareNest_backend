@@ -29,7 +29,16 @@ const redisConfig = process.env.REDIS_URL || {
 // If REDIS_URL starts with rediss://, it implies TLS
 let redis;
 if (typeof redisConfig === 'string') {
-  redis = new RedisClass(redisConfig);
+  // Redis Cloud requires rediss:// for TLS connection
+  if (redisConfig.startsWith('rediss://')) {
+    redis = new RedisClass(redisConfig);
+  } else if (redisConfig.startsWith('redis://')) {
+    // For development/testing with local Redis
+    redis = new RedisClass(redisConfig);
+  } else {
+    // Assume it's just a hostname:port format
+    redis = new RedisClass(redisConfig);
+  }
 } else {
   redis = new RedisClass(redisConfig);
 }
@@ -53,10 +62,9 @@ redis.on('ready', () => {
   redis.config('GET', 'maxmemory-policy').then((result) => {
     // result is usually array: ['maxmemory-policy', 'volatile-lru']
     const policy = result[1];
-    if (policy === 'volatile-lru' || policy === 'allkeys-lru') {
-      logger.warn(`Redis maxmemory-policy is set to '${policy}'. It is recommended to use 'noeviction' to prevent job loss.`);
-      // Optionally try to set it if allowed (often not allowed in managed instances)
-      // redis.config('SET', 'maxmemory-policy', 'noeviction').catch(e => logger.warn('Could not set redis config:', e.message));
+    if (policy !== 'noeviction') {
+      // This is informational - managed Redis (Cloud) may not allow changing this
+      logger.info(`Redis maxmemory-policy is '${policy}'. For BullMQ job queues, 'noeviction' is recommended. Contact your Redis provider to change if needed.`);
     }
   }).catch(err => {
     // Ignore config get errors (e.g. if command renamed or restricted)

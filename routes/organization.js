@@ -5,6 +5,10 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const organizationController = require('../controllers/organizationController');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  optionalOrganizationContext 
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const orgLimiter = rateLimit({
@@ -54,23 +58,23 @@ const organizationIdValidation = [
 router.use(authenticateUser);
 
 // General
-router.post('/create', orgLimiter, createValidation, handleValidationErrors, organizationController.createOrganization);
-router.get('/user/my-organizations', orgLimiter, organizationController.getMyOrganizations);
-router.post('/verify-code', orgLimiter, verifyCodeValidation, handleValidationErrors, organizationController.verifyOrganizationCode);
-router.post('/switch/:organizationId', strictLimiter, organizationIdValidation, handleValidationErrors, organizationController.switchOrganization);
+router.post('/create', orgLimiter, optionalOrganizationContext, createValidation, handleValidationErrors, organizationController.createOrganization);
+router.get('/user/my-organizations', orgLimiter, optionalOrganizationContext, organizationController.getMyOrganizations);
+router.post('/verify-code', orgLimiter, optionalOrganizationContext, verifyCodeValidation, handleValidationErrors, organizationController.verifyOrganizationCode);
+router.post('/switch/:organizationId', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.switchOrganization);
 
 // By ID
-router.get('/:organizationId', orgLimiter, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationById);
-router.put('/:organizationId', strictLimiter, organizationIdValidation, updateOrgValidation, handleValidationErrors, organizationController.updateOrganizationDetails);
+router.get('/:organizationId', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationById);
+router.put('/:organizationId', strictLimiter, organizationContextMiddleware, organizationIdValidation, updateOrgValidation, handleValidationErrors, organizationController.updateOrganizationDetails);
 
 // Sub-resources
-router.get('/:organizationId/members', orgLimiter, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationMembers);
-router.get('/:organizationId/businesses', orgLimiter, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationBusinesses);
-router.get('/:organizationId/clients', orgLimiter, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationClients);
-router.get('/:organizationId/employees', orgLimiter, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationEmployees);
+router.get('/:organizationId/members', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationMembers);
+router.get('/:organizationId/businesses', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationBusinesses);
+router.get('/:organizationId/clients', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationClients);
+router.get('/:organizationId/employees', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationEmployees);
 
 // Branding
-router.get('/:organizationId/branding', orgLimiter, organizationIdValidation, handleValidationErrors, organizationController.getBranding);
-router.put('/:organizationId/branding', strictLimiter, organizationIdValidation, brandingValidation, handleValidationErrors, organizationController.updateBranding);
+router.get('/:organizationId/branding', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getBranding);
+router.put('/:organizationId/branding', strictLimiter, organizationContextMiddleware, organizationIdValidation, brandingValidation, handleValidationErrors, organizationController.updateBranding);
 
 module.exports = router;

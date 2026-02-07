@@ -4,6 +4,11 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationMatch,
+  requireOrganizationOwnership
+} = require('../middleware/organizationContext');
 const logger = require('../config/logger');
 const {
   createPricePrompt,
@@ -78,9 +83,10 @@ const completeInvoiceValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
 // Create a new price prompt for missing pricing
-router.post('/api/price-prompts/create', pricePromptLimiter, createPromptValidation, handleValidationErrors, async (req, res) => {
+router.post('/api/price-prompts/create', pricePromptLimiter, requireOrganizationMatch('organizationId'), createPromptValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       organizationId,
@@ -119,7 +125,7 @@ router.post('/api/price-prompts/create', pricePromptLimiter, createPromptValidat
 });
 
 // Resolve a price prompt with pricing information
-router.post('/api/price-prompts/:promptId/resolve', strictLimiter, resolvePromptValidation, handleValidationErrors, async (req, res) => {
+router.post('/api/price-prompts/:promptId/resolve', strictLimiter, requireOrganizationOwnership('promptId', () => require('../models/PricePrompt')), resolvePromptValidation, handleValidationErrors, async (req, res) => {
   try {
     const { promptId } = req.params;
     const {

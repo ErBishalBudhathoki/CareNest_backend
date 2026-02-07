@@ -4,6 +4,10 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 const logger = require('../config/logger');
 const {
   validatePrice,
@@ -72,9 +76,10 @@ const statsValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
 // Validate a single price
-router.post('/api/price-validation/validate', priceValidationLimiter, validatePriceValidation, handleValidationErrors, async (req, res) => {
+router.post('/api/price-validation/validate', priceValidationLimiter, requireOrganizationMatch('organizationId'), validatePriceValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       supportItemNumber,
@@ -178,7 +183,7 @@ router.get('/api/price-validation/quote-required/:supportItemNumber', priceValid
 });
 
 // Validate an entire invoice
-router.post('/api/price-validation/validate-invoice', priceValidationLimiter, validateInvoiceValidation, handleValidationErrors, async (req, res) => {
+router.post('/api/price-validation/validate-invoice', priceValidationLimiter, requireOrganizationMatch('invoiceData.organizationId'), validateInvoiceValidation, handleValidationErrors, async (req, res) => {
   try {
     const { invoiceData } = req.body;
     const result = await validateInvoice(invoiceData);

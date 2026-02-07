@@ -5,6 +5,11 @@ const { body } = require('express-validator');
 const paymentController = require('../controllers/paymentController');
 const { authenticateUser } = require('../middleware/auth');
 const { handleValidationErrors } = require('../middleware/validation');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationOwnership,
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const paymentLimiter = rateLimit({
@@ -53,7 +58,9 @@ const refundValidation = [
 
 // Payment Routes
 router.post('/create-intent', 
-  authenticateUser, 
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
   paymentLimiter, 
   createIntentValidation, 
   handleValidationErrors, 
@@ -61,7 +68,9 @@ router.post('/create-intent',
 );
 
 router.post('/onboarding-link', 
-  authenticateUser, 
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
   paymentLimiter, 
   body('organizationId').notEmpty().withMessage('Organization ID is required'),
   handleValidationErrors, 
@@ -69,7 +78,9 @@ router.post('/onboarding-link',
 );
 
 router.post('/record', 
-  authenticateUser, 
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
   paymentLimiter, 
   recordPaymentValidation, 
   handleValidationErrors, 
@@ -78,7 +89,9 @@ router.post('/record',
 
 // Credit Note Routes
 router.post('/credit-note', 
-  authenticateUser, 
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
   paymentLimiter, 
   creditNoteValidation, 
   handleValidationErrors, 
@@ -86,7 +99,8 @@ router.post('/credit-note',
 );
 
 router.post('/credit-note/apply', 
-  authenticateUser, 
+  authenticateUser,
+  organizationContextMiddleware,
   paymentLimiter, 
   applyCreditValidation, 
   handleValidationErrors, 
@@ -95,7 +109,9 @@ router.post('/credit-note/apply',
 
 // Refund Route - stricter rate limiting
 router.post('/refund', 
-  authenticateUser, 
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
   refundLimiter, 
   refundValidation, 
   handleValidationErrors, 

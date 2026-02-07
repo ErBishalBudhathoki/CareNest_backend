@@ -47,17 +47,30 @@ app.use(helmet({
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = environmentConfig.getConfig().security.corsOrigins || [];
+    
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || environmentConfig.isDevelopmentEnvironment()) {
+    
+    // In development, allow localhost origins explicitly defined in config
+    // NEVER allow all origins even in development for security
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
+      // Log rejected CORS attempts for security monitoring
+      const { createLogger } = require('./utils/logger');
+      const logger = createLogger('CORS');
+      logger.security('CORS request blocked', { 
+        origin, 
+        allowed: allowedOrigins,
+        environment: process.env.NODE_ENV 
+      });
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id'],
-  credentials: true
+  credentials: true,
+  maxAge: 86400 // 24 hours - cache preflight requests
 };
 
 app.use(cors(corsOptions));
@@ -91,7 +104,7 @@ app.use(securityLogger); // Security event logger
 app.use(errorTrackingMiddleware);
 app.use(apiUsageMonitor.middleware);
 
-// API Documentation (Swagger)
+// API Documentation (Swagger & Redoc)
 app.use('/', require('./config/swagger'));
 
 // DEV ONLY: Reset rate limits and IP blocks (no auth required)
@@ -149,7 +162,7 @@ app.get('/health', (req, res) => {
 });
 
 // Main API Routes
-app.use('/', require('./routes'));
+app.use('/api', require('./routes'));
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

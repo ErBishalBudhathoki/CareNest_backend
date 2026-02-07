@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-02-07T14:23:22.677Z",
+  "summary": {
+    "totalWithUserOrg": 0,
+    "totalWithoutUserOrg": 3,
+    "totalIssues": 3
+  },
+  "findings": {
+    "userCreationWithUserOrg": [],
+    "userCreationWithoutUserOrg": [
+      {
+        "file": "services/authService.js",
+        "lineNumber": 94,
+        "line": "const newUser = new User({",
+        "hasOrgId": true,
+        "hasUserOrg": false,
+        "context": "   * @returns {Object} - Created user data\n   */\n  async createUser(userData) {\n    try {\n      // Create user instance with plain password (model handles hashing)\n      const newUser = new User({\n        email: userData.email,\n        password: userData.password, // Will be hashed by pre-save hook\n        firstName: userData.firstName,\n        lastName: userData.lastName,\n        organizationCode: userData.organizationCode,\n        organizationId: userData.organizationId,\n        role: userData"
+      },
+      {
+        "file": "services/clientAuthService.js",
+        "lineNumber": 32,
+        "line": "const newUser = new User({",
+        "hasOrgId": true,
+        "hasUserOrg": false,
+        "context": "\n      // 3. Generate secure temporary password\n      const tempPassword = crypto.randomBytes(8).toString('hex'); // 16 chars hex\n\n      // 4. Create user in 'login' collection\n      const newUser = new User({\n        email: email,\n        password: tempPassword, // Mongoose pre-save hook will hash this\n        firstName: client.clientFirstName,\n        lastName: client.clientLastName,\n        organizationId: client.organizationId,\n        role: 'client',\n        clientId: client._id,\n        is"
+      },
+      {
+        "file": "services/clientAuthService.js",
+        "lineNumber": 114,
+        "line": "const newUser = new User({",
+        "hasOrgId": true,
+        "hasUserOrg": false,
+        "context": "      if (existingUser) {\n        throw new Error('Account already activated. Please login.');\n      }\n\n      // 3. Create user in 'login' collection\n      const newUser = new User({\n        email: email,\n        password: password, // Mongoose pre-save hook will hash this\n        firstName: client.clientFirstName,\n        lastName: client.clientLastName,\n        organizationId: client.organizationId,\n        role: 'client',\n        clientId: client._id, // Link to client record\n        isActive"
+      }
+    ],
+    "potentialIssues": [
+      {
+        "file": "services/authService.js",
+        "issue": "Creates users but does not handle UserOrganization records"
+      },
+      {
+        "file": "services/authService_v2.js",
+        "issue": "Creates users but does not handle UserOrganization records"
+      },
+      {
+        "file": "services/clientAuthService.js",
+        "issue": "Creates users but does not handle UserOrganization records"
+      }
+    ]
+  }
+}

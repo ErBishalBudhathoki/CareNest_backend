@@ -3,8 +3,27 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const Client = require('../models/Client');
 const Organization = require('../models/Organization');
+const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
+
+/**
+ * Get auth collection (login collection)
+ * @returns {Collection} MongoDB collection
+ */
+function getAuthCollection() {
+  const mongoose = require('mongoose');
+  return mongoose.connection.collection('login');
+}
+
+/**
+ * Get users collection
+ * @returns {Collection} MongoDB collection
+ */
+function getUsersCollection() {
+  const mongoose = require('mongoose');
+  return mongoose.connection.collection('users');
+}
 
 class AuthService {
   /**
@@ -90,6 +109,25 @@ class AuthService {
 
       const savedUser = await newUser.save();
 
+      // Create UserOrganization record (Zero-Trust requirement)
+      if (userData.organizationId) {
+        try {
+          await UserOrganization.create({
+            userId: savedUser._id.toString(),
+            organizationId: userData.organizationId,
+            role: userData.role || 'user',
+            permissions: (userData.role === 'admin' || userData.role === 'owner') ? ['*'] : ['read', 'write'],
+            isActive: true,
+            joinedAt: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+        } catch (orgError) {
+          console.error('Failed to create UserOrganization record:', orgError.message);
+          // Don't fail user creation, but log the error
+        }
+      }
+
       // Create audit trail
       await auditService.createAuditLog({
         action: 'USER_CREATED',
@@ -120,52 +158,98 @@ class AuthService {
    */
   async authenticateUser(email, password) {
     try {
-      // Explicitly select password since it's now excluded by default
-      const user = await User.findOne({ email: email }).select('+password');
+      // 1. Get auth credentials from login collection
+      const authCollection = getAuthCollection();
+      const authData = await authCollection.findOne({ email: email });
 
-      if (!user) {
+      if (!authData) {
         throw new Error('User not found');
       }
 
-      if (!user.isActive) {
+      // 2. Check if account is active (from auth data or user profile)
+      const usersCollection = getUsersCollection();
+      const userProfile = await usersCollection.findOne({ email: email });
+      
+      if (userProfile && userProfile.isActive === false) {
         throw new Error('User account is deactivated');
       }
 
-      // Verify password using instance method
-      const isPasswordValid = await user.comparePassword(password);
+      // 3. Verify password using bcrypt
+      if (!authData.password || !authData.password.startsWith('$2')) {
+        throw new Error('Invalid password format');
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, authData.password);
       if (!isPasswordValid) {
         throw new Error('Invalid password');
       }
 
-      // Update last login
-      user.lastLogin = new Date();
-      await user.save();
+      // 4. Get user profile from users collection
+      const user = await usersCollection.findOne({ email: email });
+      
+      if (!user) {
+        throw new Error('User profile not found');
+      }
 
-      // Get organization details
+      // 5. Update last login in auth collection
+      await authCollection.updateOne(
+        { email: email },
+        { $set: { lastLogin: new Date() } }
+      );
+
+      // 6. Get organization details
       const organization = await Organization.findById(user.organizationId);
 
-      // Create audit trail
+      // 7. Create audit trail
       await auditService.createAuditLog({
         action: 'USER_LOGIN',
         entityType: 'user',
-        entityId: user._id.toString(),
+        entityId: user._id?.toString() || user.email,
         userEmail: email,
         organizationId: user.organizationId,
         details: {
-          loginTime: new Date(),
-          ipAddress: null // Will be set by controller
+          loginTime: new Date()
         },
         timestamp: new Date()
       });
 
+      // 8. Return combined auth + profile data
       return {
+        auth: {
+          email: authData.email,
+          lastLogin: authData.lastLogin
+        },
         user: {
           _id: user._id,
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
+          displayName: user.displayName,
+          phone: user.phone,
+          photo: user.photo,
+          photoUrl: user.photoUrl,
           role: user.role,
+          roles: user.roles || (user.role ? [user.role] : ['user']),
           organizationId: user.organizationId,
+          organizationCode: user.organizationCode,
+          organizationName: user.organizationName,
+          jobRole: user.jobRole,
+          employmentType: user.employmentType,
+          classificationLevel: user.classificationLevel,
+          payPoint: user.payPoint,
+          stream: user.stream,
+          payRate: user.payRate || 0,
+          rates: user.rates || {},
+          activeAllowances: user.activeAllowances || [],
+          payType: user.payType,
+          abn: user.abn,
+          multiOrgEnabled: user.multiOrgEnabled || false,
+          defaultOrganizationId: user.defaultOrganizationId,
+          lastActiveOrganizationId: user.lastActiveOrganizationId,
+          isActive: user.isActive !== false,
+          isEmailVerified: user.isEmailVerified || false,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
           lastLogin: user.lastLogin
         },
         organization: organization

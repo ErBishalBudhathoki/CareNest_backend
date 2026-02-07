@@ -2,6 +2,10 @@ const express = require('express');
 const organizationController = require('../../controllers/organizationController');
 const multiTenantController = require('../../controllers/multiTenantController');
 const { authenticateUser } = require('../../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  optionalOrganizationContext 
+} = require('../../middleware/organizationContext');
 const { body, param, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
@@ -120,6 +124,7 @@ router.use(authenticateUser);
 router.post(
   '/create',
   organizationCreateLimiter,
+  optionalOrganizationContext,
   createOrganizationValidation,
   handleValidationErrors,
   organizationController.createOrganization
@@ -132,6 +137,7 @@ router.post(
 router.post(
   '/createOrganization',
   organizationCreateLimiter,
+  optionalOrganizationContext,
   createOrganizationLegacyValidation,
   handleValidationErrors,
   organizationController.createOrganizationLegacy
@@ -144,6 +150,7 @@ router.post(
 router.post(
   '/verify-code',
   organizationReadLimiter,
+  optionalOrganizationContext,
   verifyCodeValidation,
   handleValidationErrors,
   organizationController.verifyOrganizationCode
@@ -156,6 +163,18 @@ router.post(
 router.get(
   '/my-list',
   organizationReadLimiter,
+  optionalOrganizationContext,
+  organizationController.getMyOrganizations
+);
+
+/**
+ * Get my organizations list (Legacy/Frontend path)
+ * GET /organization/user/my-organizations
+ */
+router.get(
+  '/user/my-organizations',
+  organizationReadLimiter,
+  optionalOrganizationContext,
   organizationController.getMyOrganizations
 );
 
@@ -166,6 +185,7 @@ router.get(
 router.get(
   '/cross-report',
   organizationReadLimiter,
+  optionalOrganizationContext,
   multiTenantController.getCrossOrgReport
 );
 
@@ -176,6 +196,7 @@ router.get(
 router.get(
   '/verify/:organizationCode',
   organizationReadLimiter,
+  optionalOrganizationContext,
   verifyCodeParamValidation,
   handleValidationErrors,
   organizationController.verifyOrganizationCodeGet
@@ -188,6 +209,7 @@ router.get(
 router.get(
   '/verifyOrganizationCode/:code',
   organizationReadLimiter,
+  optionalOrganizationContext,
   verifyCodeLegacyValidation,
   handleValidationErrors,
   organizationController.verifyOrganizationCodeLegacy
@@ -200,6 +222,7 @@ router.get(
 router.get(
   '/:organizationId',
   organizationReadLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.getOrganizationById
@@ -212,6 +235,7 @@ router.get(
 router.put(
   '/:organizationId',
   organizationWriteLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.updateOrganizationDetails
@@ -224,6 +248,7 @@ router.put(
 router.get(
   '/:organizationId/members',
   organizationReadLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.getOrganizationMembers
@@ -236,6 +261,7 @@ router.get(
 router.get(
   '/:organizationId/businesses',
   organizationReadLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.getOrganizationBusinesses
@@ -248,6 +274,7 @@ router.get(
 router.get(
   '/:organizationId/clients',
   organizationReadLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.getOrganizationClients
@@ -260,6 +287,7 @@ router.get(
 router.get(
   '/:organizationId/employees',
   organizationReadLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.getOrganizationEmployees
@@ -272,6 +300,7 @@ router.get(
 router.post(
   '/:organizationId/switch',
   organizationWriteLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.switchOrganization
@@ -284,6 +313,7 @@ router.post(
 router.get(
   '/:organizationId/branding',
   organizationReadLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.getBranding
@@ -296,6 +326,7 @@ router.get(
 router.put(
   '/:organizationId/branding',
   organizationWriteLimiter,
+  organizationContextMiddleware,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.updateBranding
