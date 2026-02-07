@@ -13,7 +13,7 @@ const userOrganizationSchema = new mongoose.Schema({
   lastAccessedAt: { type: Date, default: Date.now }
 }, {
   timestamps: true,
-  collection: 'user_organizations'
+  collection: 'userorganizations'
 });
 
 // Compound index for efficient queries

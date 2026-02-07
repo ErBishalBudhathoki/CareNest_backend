@@ -4,6 +4,7 @@ const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 const User = require('../models/User');
 const FcmToken = require('../models/FcmToken');
+const UserOrganization = require('../models/UserOrganization');
 const authService = require('../services/authService');
 const SecureErrorHandler = require('../utils/errorHandler');
 const { messaging } = require('../firebase-admin-config');
@@ -68,7 +69,33 @@ class SecureAuthController {
       role: 'user'
     });
 
-    // 5. GENERATE OTP
+    // 5. CREATE USER ORGANIZATION RECORD (Zero-Trust requirement)
+    if (organizationId) {
+      try {
+        await UserOrganization.create({
+          userId: newUser._id.toString(),
+          organizationId: organizationId,
+          role: 'user',
+          permissions: ['read', 'write'],
+          isActive: true,
+          joinedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+        logger.info('UserOrganization record created', {
+          userId: newUser._id.toString(),
+          organizationId: organizationId
+        });
+      } catch (orgError) {
+        logger.error('Failed to create UserOrganization record', {
+          userId: newUser._id.toString(),
+          organizationId: organizationId,
+          error: orgError.message
+        });
+      }
+    }
+
+    // 6. GENERATE OTP
     await authService.generateOTP(email);
 
     logger.business('User registered', {
@@ -223,9 +250,10 @@ class SecureAuthController {
 
   /**
    * User login with enhanced security
+   * Uses separated collections: login (auth) + users (profile)
    */
   login = catchAsync(async (req, res) => {
-    // 1. VALIDATION CHECK (express-validator)
+    // 1. VALIDATION CHECK
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json(
@@ -250,10 +278,22 @@ class SecureAuthController {
       );
     }
 
-    // 2. FIND USER
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password +loginAttempts +lockUntil');
+    // 2. FIND AUTH CREDENTIALS (from login collection)
+    const getAuthCollection = () => {
+      const mongoose = require('mongoose');
+      return mongoose.connection.collection('login');
+    };
+    const getUserCollection = () => {
+      const mongoose = require('mongoose');
+      return mongoose.connection.collection('users');
+    };
 
-    if (!user) {
+    const authCollection = getAuthCollection();
+    const userCollection = getUserCollection();
+
+    const authData = await authCollection.findOne({ email: email.toLowerCase() });
+
+    if (!authData) {
       logger.business('Login attempt with non-existent email', {
         action: 'LOGIN_FAILED',
         reason: 'NON_EXISTENT_EMAIL',
@@ -270,12 +310,12 @@ class SecureAuthController {
     }
 
     // 3. CHECK LOCKOUT
-    if (user.lockUntil && user.lockUntil > new Date()) {
+    if (authData.lockUntil && authData.lockUntil > new Date()) {
       logger.business('Login attempt on locked account', {
         action: 'LOGIN_FAILED',
         reason: 'ACCOUNT_LOCKED',
         ip: req.ip,
-        email: user.email
+        email: authData.email
       });
       return res.status(423).json(
         SecureErrorHandler.createErrorResponse(
@@ -286,7 +326,10 @@ class SecureAuthController {
       );
     }
 
-    if (!user.isActive) {
+    // 4. CHECK USER STATUS (from users collection)
+    const userProfile = await userCollection.findOne({ email: email.toLowerCase() });
+
+    if (userProfile && userProfile.isActive === false) {
       return res.status(403).json(
         SecureErrorHandler.createErrorResponse(
           'Account is deactivated',
@@ -296,8 +339,19 @@ class SecureAuthController {
       );
     }
 
-    // 4. VERIFY PASSWORD
-    const isMatch = await user.comparePassword(password);
+    // 5. VERIFY PASSWORD
+    if (!authData.password || !authData.password.startsWith('$2')) {
+      return res.status(401).json(
+        SecureErrorHandler.createErrorResponse(
+          SecureErrorHandler.GENERIC_AUTH_ERROR,
+          401,
+          'INVALID_CREDENTIALS'
+        )
+      );
+    }
+
+    const bcrypt = require('bcryptjs');
+    const isMatch = await bcrypt.compare(password, authData.password);
 
     if (!isMatch) {
       // Increment attempts
@@ -307,19 +361,19 @@ class SecureAuthController {
       const updates = { $inc: { loginAttempts: 1 } };
 
       // If attempts will exceed max, lock
-      if ((user.loginAttempts || 0) + 1 >= maxAttempts) {
+      if ((authData.loginAttempts || 0) + 1 >= maxAttempts) {
         updates.$set = { lockUntil: new Date(Date.now() + lockDuration), loginAttempts: 0 };
         delete updates.$inc;
       }
 
-      await User.updateOne({ _id: user._id }, updates);
+      await authCollection.updateOne({ email: email.toLowerCase() }, updates);
 
       logger.business('Failed login attempt', {
         action: 'LOGIN_FAILED',
         reason: 'INVALID_PASSWORD',
         ip: req.ip,
-        email: user.email,
-        attempts: user.loginAttempts + 1
+        email: authData.email,
+        attempts: (authData.loginAttempts || 0) + 1
       });
 
       return res.status(401).json(
@@ -331,17 +385,34 @@ class SecureAuthController {
       );
     }
 
-    // 5. SUCCESS
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-    user.lastLogin = new Date();
-    await user.save();
+    // 6. SUCCESS - Get user profile
+    const user = await userCollection.findOne({ email: email.toLowerCase() });
 
-    // 6. TOKEN
+    if (!user) {
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'User profile not found',
+          500,
+          'PROFILE_NOT_FOUND'
+        )
+      );
+    }
+
+    // 7. Reset attempts and update last login
+    await authCollection.updateOne(
+      { email: email.toLowerCase() },
+      { $set: { loginAttempts: 0, lockUntil: null, lastLogin: new Date() } }
+    );
+
+    // 8. Generate token
+    const userRoles = user.roles && user.roles.length > 0
+      ? user.roles
+      : (user.role ? [user.role] : ['user']);
+
     const tokenPayload = {
-      userId: user._id.toString(),
+      userId: user._id?.toString() || user.email,
       email: user.email,
-      roles: user.roles || ['user'],
+      roles: userRoles,
       organizationId: user.organizationId
     };
 
@@ -357,16 +428,51 @@ class SecureAuthController {
 
     logger.business('User logged in', {
       action: 'USER_LOGIN',
-      userId: user._id.toString(),
+      userId: user._id?.toString() || user.email,
       email: user.email,
       ip: req.ip
     });
+
+    // 9. Return user profile (not auth data)
+    const responseUser = {
+      id: user._id?.toString(),
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      displayName: user.displayName,
+      phone: user.phone,
+      photo: user.photo,
+      photoUrl: user.photoUrl,
+      role: user.role,
+      roles: userRoles,
+      organizationId: user.organizationId,
+      organizationCode: user.organizationCode,
+      organizationName: user.organizationName,
+      jobRole: user.jobRole,
+      employmentType: user.employmentType,
+      classificationLevel: user.classificationLevel,
+      payPoint: user.payPoint,
+      stream: user.stream,
+      payRate: user.payRate || 0,
+      rates: user.rates || {},
+      activeAllowances: user.activeAllowances || [],
+      payType: user.payType,
+      abn: user.abn,
+      multiOrgEnabled: user.multiOrgEnabled || false,
+      defaultOrganizationId: user.defaultOrganizationId,
+      lastActiveOrganizationId: user.lastActiveOrganizationId,
+      isActive: user.isActive !== false,
+      isEmailVerified: user.isEmailVerified || false,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      lastLogin: user.lastLogin
+    };
 
     res.status(200).json(
       SecureErrorHandler.createSuccessResponse(
         {
           token,
-          user: user.toJSON()
+          user: responseUser
         },
         'Login successful'
       )
@@ -642,10 +748,15 @@ class SecureAuthController {
       );
     }
 
+    // Handle both legacy 'role' and new 'roles' fields
+    const userRoles = user.roles && user.roles.length > 0 
+      ? user.roles 
+      : (user.role ? [user.role] : ['user']);
+    
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      roles: user.roles || ['user'],
+      roles: userRoles,
       organizationId: user.organizationId
     };
 

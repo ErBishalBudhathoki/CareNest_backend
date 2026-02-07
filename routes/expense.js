@@ -4,6 +4,11 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query, validationResult } = require('express-validator');
 const expenseController = require('../controllers/expenseController');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationOwnership,
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const expenseReadLimiter = rateLimit({
@@ -63,15 +68,64 @@ const approvalValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
 // Routes with validation
-router.post('/create', expenseWriteLimiter, createValidation, handleValidationErrors, expenseController.createExpense);
+router.post('/create', 
+  expenseWriteLimiter, 
+  requireOrganizationMatch('organizationId'),
+  createValidation, 
+  handleValidationErrors, 
+  expenseController.createExpense
+);
+
 router.get('/categories', expenseReadLimiter, expenseController.getExpenseCategories);
-router.get('/organization/:organizationId', expenseReadLimiter, param('organizationId').isMongoId(), handleValidationErrors, expenseController.getOrganizationExpenses);
-router.get('/:expenseId', expenseReadLimiter, param('expenseId').isMongoId(), handleValidationErrors, expenseController.getExpenseById);
-router.put('/:expenseId', expenseWriteLimiter, updateValidation, handleValidationErrors, expenseController.updateExpense);
-router.delete('/:expenseId', expenseWriteLimiter, param('expenseId').isMongoId(), handleValidationErrors, expenseController.deleteExpense);
-router.put('/:expenseId/approval', expenseWriteLimiter, approvalValidation, handleValidationErrors, expenseController.updateExpenseApproval);
-router.post('/bulk-import', expenseWriteLimiter, body('expenses').isArray().withMessage('Expenses must be an array'), handleValidationErrors, expenseController.bulkImportExpenses);
+
+router.get('/organization/:organizationId', 
+  expenseReadLimiter, 
+  param('organizationId').isMongoId(), 
+  requireOrganizationMatch('organizationId'),
+  handleValidationErrors, 
+  expenseController.getOrganizationExpenses
+);
+
+router.get('/:expenseId', 
+  expenseReadLimiter, 
+  param('expenseId').isMongoId(), 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.getExpenseById
+);
+
+router.put('/:expenseId', 
+  expenseWriteLimiter, 
+  updateValidation, 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.updateExpense
+);
+
+router.delete('/:expenseId', 
+  expenseWriteLimiter, 
+  param('expenseId').isMongoId(), 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.deleteExpense
+);
+
+router.put('/:expenseId/approval', 
+  expenseWriteLimiter, 
+  approvalValidation, 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.updateExpenseApproval
+);
+
+router.post('/bulk-import', 
+  expenseWriteLimiter, 
+  body('expenses').isArray().withMessage('Expenses must be an array'), 
+  handleValidationErrors, 
+  expenseController.bulkImportExpenses
+);
 
 module.exports = router;
