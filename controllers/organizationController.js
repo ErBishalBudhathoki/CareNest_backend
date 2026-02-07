@@ -266,7 +266,8 @@ class OrganizationController {
 
   switchOrganization = catchAsync(async (req, res) => {
     const { organizationId } = req.params;
-    const userId = req.user.id; // Using standard id
+    // AuthMiddleware sets req.user.userId
+    const userId = req.user.userId || req.user.id; 
 
     const result = await organizationService.switchOrganization(userId, organizationId);
 
@@ -294,7 +295,8 @@ class OrganizationController {
   });
 
   getMyOrganizations = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    // AuthMiddleware sets req.user.userId
+    const userId = req.user.userId || req.user.id; 
     const organizations = await organizationService.getUserOrganizations(userId);
     res.status(200).json({
       data: organizations

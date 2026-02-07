@@ -76,12 +76,18 @@ else if (require.main === module) {
 
   const startServer = async () => {
     try {
+      console.log('🏁 Starting server initialization...');
       // 1. Connect to Database
+      console.log('⏳ Connecting to MongoDB...');
       await connectMongoose();
+      console.log('✅ MongoDB Connected');
       
       // 2. Initialize Background Tasks
+      console.log('⏳ Starting schedulers...');
       startSchedulers();
+      console.log('⏳ Starting workers...');
       startWorkers();
+      console.log('✅ Background tasks initialized');
 
       // 3. Ensure Uploads Directory
       const uploadsDir = path.join(__dirname, 'uploads');
@@ -91,7 +97,9 @@ else if (require.main === module) {
       }
 
       // 4. Start Listening
+      console.log(`⏳ Attempting to bind to port ${PORT}...`);
       app.listen(PORT, '0.0.0.0', async () => {
+        console.log('✅ Server bound to port');
         logger.info(`🚀 ${environmentConfig.getConfig().app.name} running on port ${PORT}`);
         logger.info(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
         console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);

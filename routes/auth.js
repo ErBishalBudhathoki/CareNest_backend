@@ -472,16 +472,19 @@ router.use((error, req, res, _next) => {
 /**
  * @route POST /api/auth/assign-role
  * @desc Assign job role to user
- * @access Private (should be Admin only, but leaving public for now as per constraints)
+ * @access Private (Admin only)
  */
 router.post('/assign-role',
+  authenticateUser,
+  requireRoles(['admin', 'superadmin']),
   async (req, res) => {
     try {
       const result = await SecureAuthController.assignJobRole(req, res);
       return result;
     } catch (error) {
       logger.error('Assign role route error', {
-        error: error.message
+        error: error.message,
+        userId: req.user?.userId
       });
       return SecureErrorHandler.handleError(error, res);
     }

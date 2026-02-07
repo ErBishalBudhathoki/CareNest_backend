@@ -106,7 +106,7 @@ const userSchema = new mongoose.Schema({
   }]
 }, {
   timestamps: true,
-  collection: 'login',
+  collection: 'users',
   toJSON: {
     transform: function (doc, ret) {
       ret.id = ret._id.toString();
@@ -115,6 +115,13 @@ const userSchema = new mongoose.Schema({
       delete ret.password;
       delete ret.otp; // Security: Don't expose OTP
       delete ret.refreshTokens; // Security: Don't expose refresh tokens
+      
+      // Handle legacy 'role' field (singular) → 'roles' (array)
+      if (ret.role && (!ret.roles || ret.roles.length === 0)) {
+        ret.roles = [ret.role];
+      }
+      delete ret.role; // Remove legacy field
+      
       return ret;
     }
   }

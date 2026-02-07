@@ -5,6 +5,10 @@ const rateLimit = require('express-rate-limit');
 const { param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationQueryMatch 
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const historyLimiter = rateLimit({
@@ -33,6 +37,7 @@ const recentVisitsValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
 /**
  * Get visit history for a specific client
@@ -41,6 +46,7 @@ router.use(authenticateUser);
 router.get(
   '/history/:clientId', 
   historyLimiter, 
+  requireOrganizationQueryMatch('organizationId'),
   visitHistoryValidation,
   handleValidationErrors,
   workedTimeController.getVisitHistory
@@ -53,6 +59,7 @@ router.get(
 router.get(
   '/recent/:userEmail', 
   historyLimiter, 
+  requireOrganizationQueryMatch('organizationId'),
   recentVisitsValidation,
   handleValidationErrors,
   workedTimeController.getRecentVisits
@@ -71,6 +78,7 @@ const workedTimeValidation = [
 router.get(
   '/getWorkedTime/:userEmail/:clientEmail',
   historyLimiter,
+  requireOrganizationQueryMatch('organizationId'),
   workedTimeValidation,
   handleValidationErrors,
   workedTimeController.getWorkedTime
