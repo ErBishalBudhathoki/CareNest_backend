@@ -71,29 +71,39 @@ jobs:
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }} # Fallback if they have a dedicated key, but we can try to use the generated one if we set it up correctly. 
-          # Actually, since we generated service-account.json, let's use it.
-          # The setup-gcloud action doesn't take a file path for service_account_key directly in this version easily without reading it.
-          # But we can use gcloud auth activate-service-account manually if we don't provide input here, OR we can cat the file.
-        # Let's try the manual auth approach which is robust with the file we have.
-
+          # We use the generated key file in the next step
+          
       - name: Authenticate gcloud with generated key
         run: |
           gcloud auth activate-service-account --key-file=service-account.json
           gcloud config set project ${{ secrets.FIREBASE_PROJECT_ID }}
 
-      - name: Configure Docker
-        run: gcloud auth configure-docker
+      - name: Enable Artifact Registry API
+        run: gcloud services enable artifactregistry.googleapis.com
+
+      - name: Create Artifact Registry Repository
+        run: |
+          if ! gcloud artifacts repositories describe backend-repo --location=australia-southeast1; then
+            gcloud artifacts repositories create backend-repo \
+              --repository-format=docker \
+              --location=australia-southeast1 \
+              --description="Backend Container Repository"
+          fi
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev
 
       - name: Build and Push Container
         run: |
-          docker build -t gcr.io/${{ secrets.FIREBASE_PROJECT_ID }}/backend-dev:${{ github.sha }} .
-          docker push gcr.io/${{ secrets.FIREBASE_PROJECT_ID }}/backend-dev:${{ github.sha }}
+          IMAGE_URI="australia-southeast1-docker.pkg.dev/${{ secrets.FIREBASE_PROJECT_ID }}/backend-repo/backend-dev:${{ github.sha }}"
+          docker build -t $IMAGE_URI .
+          docker push $IMAGE_URI
 
       - name: Deploy to Cloud Run
         run: |
+          IMAGE_URI="australia-southeast1-docker.pkg.dev/${{ secrets.FIREBASE_PROJECT_ID }}/backend-repo/backend-dev:${{ github.sha }}"
           gcloud run deploy backend-dev \
-            --image gcr.io/${{ secrets.FIREBASE_PROJECT_ID }}/backend-dev:${{ github.sha }} \
+            --image $IMAGE_URI \
             --region australia-southeast1 \
             --platform managed \
             --allow-unauthenticated \
