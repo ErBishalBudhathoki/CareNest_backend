@@ -255,6 +255,8 @@ jobs:
         id: deploy
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
           
           # Deploy with production configuration
           gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -272,7 +274,7 @@ jobs:
             --update-env-vars NODE_ENV=production,ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }},ALLOWED_DOWNLOAD_HOSTS=${{ secrets.ALLOWED_DOWNLOAD_HOSTS }},DB_NAME=${{ secrets.PROD_DB_NAME }},JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }},R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }},R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }},R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }},SMTP_ADMIN_EMAIL=${{ secrets.SMTP_ADMIN_EMAIL }},FIREBASE_PROJECT_ID=${{ secrets.PROD_FIREBASE_PROJECT_ID }},FIREBASE_CLIENT_EMAIL=${{ secrets.PROD_FIREBASE_CLIENT_EMAIL }},FIREBASE_CLIENT_ID=${{ secrets.PROD_FIREBASE_CLIENT_ID }},FIREBASE_CLIENT_CERT_URL=${{ secrets.PROD_FIREBASE_CLIENT_CERT_URL }} \
             --update-secrets MONGODB_URI=prod-mongodb-uri:latest,REDIS_URL=prod-redis-url:latest,JWT_SECRET=prod-jwt-secret:latest,STRIPE_SECRET_KEY=prod-stripe-secret:latest,STRIPE_WEBHOOK_SECRET=prod-stripe-webhook:latest,SMTP_PASSWORD=prod-smtp-password:latest,APP_PASSWORD=prod-app-password:latest,R2_ACCESS_KEY_ID=prod-r2-access-key:latest,R2_SECRET_ACCESS_KEY=prod-r2-secret:latest,FIREBASE_PRIVATE_KEY=prod-firebase-private-key:latest,FIREBASE_PRIVATE_KEY_ID=prod-firebase-private-key-id:latest \
             --no-traffic \
-            --tag prod-${{ github.sha }}
+            --tag prod-${SHORT_SHA}
           
           # Get service URL
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
