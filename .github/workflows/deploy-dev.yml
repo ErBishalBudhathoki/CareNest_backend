@@ -55,7 +55,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -205,9 +205,7 @@ jobs:
     timeout-minutes: 15
     needs: build
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    environment:
-      name: development
-      url: https://${{ steps.deploy.outputs.url }}
+    environment: development
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -256,7 +254,8 @@ jobs:
             --format 'value(status.url)')
           
           echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "Deployed to: $SERVICE_URL"
+          echo "::add-mask::$SERVICE_URL"
+          echo "Deployment successful (URL hidden for security)"
 
       - name: Run smoke tests
         run: |
@@ -265,39 +264,33 @@ jobs:
           # Wait for service to be ready
           sleep 15
           
-          # Health check
+          # Health check (don't display URL)
           echo "Testing health endpoint..."
-          curl -f "$SERVICE_URL/health" || echo "::warning::Health check failed"
+          if curl -f -s "$SERVICE_URL/health" > /dev/null 2>&1; then
+            echo "✓ Health check passed"
+          else
+            echo "::warning::Health check failed"
+          fi
           
-          # Basic API test
+          # Basic API test (don't display URL)
           echo "Testing API health endpoint..."
-          curl -f "$SERVICE_URL/api/health" || echo "::warning::API health check failed"
+          if curl -f -s "$SERVICE_URL/api/health" > /dev/null 2>&1; then
+            echo "✓ API health check passed"
+          else
+            echo "::warning::API health check failed"
+          fi
 
-      - name: Gradual traffic migration
+      - name: Switch traffic to new revision
         if: github.ref == 'refs/heads/dev'
         run: |
-          echo "Starting gradual traffic migration..."
+          echo "Switching all traffic to latest revision..."
           
-          # Migrate traffic: 10% -> 50% -> 100%
+          # For dev, immediately switch 100% traffic to latest
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
-            --to-latest=10
+            --to-latest
           
-          echo "::notice::Traffic migrated to 10% - monitoring for 2 minutes"
-          sleep 120
-          
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --to-latest=50
-          
-          echo "::notice::Traffic migrated to 50% - monitoring for 2 minutes"
-          sleep 120
-          
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --to-latest=100
-          
-          echo "::notice::Traffic fully migrated to new version"
+          echo "✓ Traffic switched to latest revision"
 
       - name: Create deployment summary
         if: always()
@@ -310,9 +303,11 @@ jobs:
           **GCP Project:** ${{ env.GCP_PROJECT_ID }}
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
-          **Image:** \`${{ needs.build.outputs.image-uri }}\`
-          **URL:** ${{ steps.deploy.outputs.url }}
-          **Commit:** ${{ github.sha }}
+          **Image Digest:** \`${{ needs.build.outputs.image-digest }}\`
+          **Commit:** \`${{ github.sha }}\`
+          
+          > **Note:** Service URL is hidden for security. Access via GCP Console.
+          EOF
           
           ### Security Features Enabled
           - ✅ Workload Identity Federation (keyless auth)
