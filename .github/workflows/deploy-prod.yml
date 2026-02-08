@@ -163,8 +163,9 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure GCP project
+        run: gcloud config set project ${{ env.GCP_PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGISTRY }}
@@ -248,8 +249,9 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure GCP project
+        run: gcloud config set project ${{ env.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run
         id: deploy
