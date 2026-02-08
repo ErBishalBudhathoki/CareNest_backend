@@ -120,7 +120,7 @@ jobs:
       - name: Run unit tests
         env:
           NODE_ENV: test
-        run: npm test || echo "::warning::Tests not configured"
+        run: npm run test:unit
 
       - name: Run integration tests
         env:
@@ -128,7 +128,7 @@ jobs:
           MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
-        run: npm run test:integration || echo "::warning::Integration tests not configured"
+        run: npm run test:integration
 
   # Build and Push Docker Image
   build:

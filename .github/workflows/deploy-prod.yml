@@ -122,7 +122,7 @@ jobs:
       - name: Run unit tests with coverage
         env:
           NODE_ENV: test
-        run: npm test -- --coverage || echo "::warning::Tests not configured"
+        run: npm run test:unit -- --coverage
 
       - name: Run integration tests
         env:
@@ -130,7 +130,7 @@ jobs:
           MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
-        run: npm run test:integration || echo "::warning::Integration tests not configured"
+        run: npm run test:integration
 
       - name: Run E2E tests
         env:
@@ -138,7 +138,7 @@ jobs:
           MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
-        run: npm run test:e2e || echo "::warning::E2E tests not configured"
+        run: npm run test:e2e || echo "::notice::E2E tests not yet implemented - skipping"
 
   # Build and Push Docker Image
   build:

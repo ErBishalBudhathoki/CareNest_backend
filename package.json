@@ -9,9 +9,16 @@
     "start:prod": "cp .env.production .env && NODE_ENV=production node server.js",
     "dev": "cp .env.development .env && NODE_ENV=development nodemon server.js",
     "prod": "cp .env.production .env && NODE_ENV=production node server.js",
-    "test": "jest",
+    "test": "jest --testPathIgnorePatterns=integration",
+    "test:unit": "jest --testPathIgnorePatterns=integration",
+    "test:integration": "jest --testPathPattern=integration",
+    "test:e2e": "jest --testPathPattern=e2e",
+    "test:all": "jest",
     "health-check": "curl $BACKEND_URL/health || curl $PRODUCTION_URL/health || echo 'Server not responding'",
-    "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'"
+    "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'",
+    "db:init-fresh": "node scripts/init_fresh_database.js",
+    "db:verify": "node scripts/verify_database.js",
+    "db:seed": "node scripts/seed_reference_data.js"
   },
   "keywords": [
     "invoice",
