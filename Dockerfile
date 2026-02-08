@@ -58,6 +58,9 @@ COPY --from=build --chown=nodejs:nodejs /app/node_modules ./node_modules
 # Copy built application
 COPY --from=build --chown=nodejs:nodejs /app ./
 
+# Create firebase-admin-config.js from template (since actual file is gitignored)
+RUN cp firebase-admin-config.js.template firebase-admin-config.js
+
 # Create writable logs directory for the application
 RUN mkdir -p /app/logs && chown -R nodejs:nodejs /app/logs
 
