@@ -162,6 +162,17 @@ app.get('/health', (req, res) => {
   });
 });
 
+// API health endpoint (for compatibility with deployment checks)
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    service: environmentConfig.getConfig().app.name,
+    timestamp: new Date().toISOString(),
+    environment: environmentConfig.getEnvironment(),
+    api: 'available'
+  });
+});
+
 // Main API Routes
 app.use('/api', require('./routes'));
 
