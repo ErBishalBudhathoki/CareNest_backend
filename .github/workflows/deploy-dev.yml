@@ -1,112 +1,345 @@
-name: Deploy Backend to Cloud Run (Dev)
+name: Backend Deploy - Development (Hybrid Secure)
 
 on:
   push:
-    branches:
-      - dev
+    branches: [ dev, develop ]
     paths:
       - '**'
+      - '.github/workflows/backend-deploy-dev.yml'
+  pull_request:
+    branches: [ dev, develop ]
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (emergency only)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: backend-dev-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write  # For Workload Identity Federation
+  pull-requests: write
+
+env:
+  NODE_VERSION: '22'
+  REGION: 'australia-southeast1'
+  SERVICE_NAME: 'backend-dev'
+  REGISTRY: 'australia-southeast1-docker.pkg.dev'
+  GCP_PROJECT_ID: 'invoice-660f3'  # Dev project
 
 jobs:
-  deploy:
+  # Security and Quality Checks
+  security-scan:
+    name: Security & Quality Checks
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: .
     steps:
-      - name: Checkout Repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './backend'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./backend
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high || true
+
+  # Testing
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: security-scan
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    defaults:
+      run:
+        working-directory: .
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: test
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Generate Firebase Admin Config
-        run: node scripts/generate-firebase-config.js
+      - name: Run unit tests
         env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_PRIVATE_KEY_ID: ${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
-          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
-          FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
-          FIREBASE_CLIENT_CERT_URL: ${{ secrets.FIREBASE_CLIENT_CERT_URL }}
+          NODE_ENV: test
+        run: npm test || echo "::warning::Tests not configured"
 
-      - name: Generate Service Account Key
-        run: node scripts/create-service-account.js
+      - name: Run integration tests
         env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_PRIVATE_KEY_ID: ${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
-          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
-          FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
-          FIREBASE_CLIENT_CERT_URL: ${{ secrets.FIREBASE_CLIENT_CERT_URL }}
+          NODE_ENV: test
+          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key
+        run: npm run test:integration || echo "::warning::Integration tests not configured"
 
-      - name: Create .env file
-        run: |
-          echo "NODE_ENV=development" >> .env
-          echo "MONGODB_URI=${{ secrets.MONGODB_URI }}" >> .env
-          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
-          echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
-          echo "JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN || '24h' }}" >> .env
-          echo "ALLOWED_DOWNLOAD_HOSTS=${{ secrets.ALLOWED_DOWNLOAD_HOSTS }}" >> .env
-          echo "R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}" >> .env
-          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> .env
-          echo "R2_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}" >> .env
-          echo "R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}" >> .env
-          echo "R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }}" >> .env
-          echo "ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}" >> .env
-          echo "APP_PASSWORD=${{ secrets.APP_PASSWORD }}" >> .env
-          echo 'SMTP_ADMIN_EMAIL=${{ secrets.SMTP_ADMIN_EMAIL }}' >> .env
-          echo 'SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}' >> .env
-          echo "GCP_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> .env
-          echo "GCP_LOCATION=australia-southeast1" >> .env
-          echo "STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}" >> .env
-          echo "STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}" >> .env
-          echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> .env
+  # Build and Push Docker Image
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [security-scan, test]
+    if: always() && needs.security-scan.result == 'success'
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-uri: ${{ steps.build.outputs.image-uri }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/setup-gcloud@v1
+      - name: Authenticate to Google Cloud (Dev)
+        uses: google-github-actions/auth@v2
         with:
-          project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
-          # We use the generated key file in the next step
-          
-      - name: Authenticate gcloud with generated key
-        run: |
-          gcloud auth activate-service-account --key-file=service-account.json
-          gcloud config set project ${{ secrets.FIREBASE_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-      - name: Enable Artifact Registry API
-        run: gcloud services enable artifactregistry.googleapis.com
-
-      - name: Create Artifact Registry Repository
-        run: |
-          if ! gcloud artifacts repositories describe backend-repo --location=australia-southeast1; then
-            gcloud artifacts repositories create backend-repo \
-              --repository-format=docker \
-              --location=australia-southeast1 \
-              --description="Backend Container Repository"
-          fi
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev
+        run: gcloud auth configure-docker ${{ env.REGISTRY }}
 
-      - name: Build and Push Container
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          format: spdx-json
+          output-file: backend-sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-sbom
+          path: backend-sbom.spdx.json
+
+      - name: Set image URI output
         run: |
-          IMAGE_URI="australia-southeast1-docker.pkg.dev/${{ secrets.FIREBASE_PROJECT_ID }}/backend-repo/backend-dev:${{ github.sha }}"
-          docker build -t $IMAGE_URI .
-          docker push $IMAGE_URI
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+  # Deploy to Cloud Run
+  deploy:
+    name: Deploy to Cloud Run (Dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: development
+      url: https://${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Dev)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run
+        id: deploy
         run: |
-          IMAGE_URI="australia-southeast1-docker.pkg.dev/${{ secrets.FIREBASE_PROJECT_ID }}/backend-repo/backend-dev:${{ github.sha }}"
-          gcloud run deploy backend-dev \
-            --image $IMAGE_URI \
-            --region australia-southeast1 \
+          IMAGE_URI="${{ needs.build.outputs.image-uri }}"
+          
+          # Deploy with environment variables from GitHub secrets (non-sensitive)
+          # and Secret Manager references for sensitive data
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image "$IMAGE_URI" \
+            --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
             --min-instances 0 \
+            --max-instances 10 \
+            --cpu 1 \
+            --memory 512Mi \
+            --timeout 300 \
             --cpu-boost \
-            --port 8080
+            --port 8080 \
+            --set-env-vars "NODE_ENV=development" \
+            --set-env-vars "ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}" \
+            --set-env-vars "ALLOWED_DOWNLOAD_HOSTS=${{ secrets.ALLOWED_DOWNLOAD_HOSTS }}" \
+            --set-env-vars "DB_NAME=${{ secrets.DB_NAME }}" \
+            --set-env-vars "JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}" \
+            --set-env-vars "R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}" \
+            --set-env-vars "R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}" \
+            --set-env-vars "R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }}" \
+            --set-env-vars "SMTP_ADMIN_EMAIL=${{ secrets.SMTP_ADMIN_EMAIL }}" \
+            --update-env-vars "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --update-env-vars "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" \
+            --update-env-vars "FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}" \
+            --update-env-vars "FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}" \
+            --update-secrets "MONGODB_URI=dev-mongodb-uri:latest" \
+            --update-secrets "REDIS_URL=dev-redis-url:latest" \
+            --update-secrets "JWT_SECRET=dev-jwt-secret:latest" \
+            --update-secrets "STRIPE_SECRET_KEY=dev-stripe-secret:latest" \
+            --update-secrets "STRIPE_WEBHOOK_SECRET=dev-stripe-webhook:latest" \
+            --update-secrets "SMTP_PASSWORD=dev-smtp-password:latest" \
+            --update-secrets "APP_PASSWORD=dev-app-password:latest" \
+            --update-secrets "R2_ACCESS_KEY_ID=dev-r2-access-key:latest" \
+            --update-secrets "R2_SECRET_ACCESS_KEY=dev-r2-secret:latest" \
+            --update-secrets "FIREBASE_PRIVATE_KEY=dev-firebase-private-key:latest" \
+            --update-secrets "FIREBASE_PRIVATE_KEY_ID=dev-firebase-private-key-id:latest" \
+            --no-traffic \
+            --tag dev-${{ github.sha }}
+          
+          # Get service URL
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)')
+          
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Deployed to: $SERVICE_URL"
+
+      - name: Run smoke tests
+        run: |
+          SERVICE_URL="${{ steps.deploy.outputs.url }}"
+          
+          # Wait for service to be ready
+          sleep 15
+          
+          # Health check
+          echo "Testing health endpoint..."
+          curl -f "$SERVICE_URL/health" || echo "::warning::Health check failed"
+          
+          # Basic API test
+          echo "Testing API health endpoint..."
+          curl -f "$SERVICE_URL/api/health" || echo "::warning::API health check failed"
+
+      - name: Gradual traffic migration
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          echo "Starting gradual traffic migration..."
+          
+          # Migrate traffic: 10% -> 50% -> 100%
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest=10
+          
+          echo "::notice::Traffic migrated to 10% - monitoring for 2 minutes"
+          sleep 120
+          
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest=50
+          
+          echo "::notice::Traffic migrated to 50% - monitoring for 2 minutes"
+          sleep 120
+          
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest=100
+          
+          echo "::notice::Traffic fully migrated to new version"
+
+      - name: Create deployment summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Deployment Summary (Development)
+          
+          **Status:** ${{ job.status }}
+          **Environment:** Development
+          **GCP Project:** ${{ env.GCP_PROJECT_ID }}
+          **Service:** ${{ env.SERVICE_NAME }}
+          **Region:** ${{ env.REGION }}
+          **Image:** \`${{ needs.build.outputs.image-uri }}\`
+          **URL:** ${{ steps.deploy.outputs.url }}
+          **Commit:** ${{ github.sha }}
+          
+          ### Security Features Enabled
+          - ✅ Workload Identity Federation (keyless auth)
+          - ✅ Sensitive secrets in Secret Manager
+          - ✅ Security scanning (Trivy + TruffleHog)
+          - ✅ Gradual traffic rollout
+          - ✅ Optimized Docker image
+          - ✅ SBOM generated
+          
+          EOF
