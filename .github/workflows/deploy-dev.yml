@@ -307,14 +307,12 @@ jobs:
           **Commit:** \`${{ github.sha }}\`
           
           > **Note:** Service URL is hidden for security. Access via GCP Console.
-          EOF
           
           ### Security Features Enabled
           - ✅ Workload Identity Federation (keyless auth)
           - ✅ Sensitive secrets in Secret Manager
           - ✅ Security scanning (Trivy + TruffleHog)
-          - ✅ Gradual traffic rollout
+          - ✅ Immediate traffic switch
           - ✅ Optimized Docker image
           - ✅ SBOM generated
-          
           EOF
