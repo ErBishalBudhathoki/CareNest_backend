@@ -123,6 +123,7 @@ router.use('/support-items', supportItemsRoutes);
 router.use('/notes', notesRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
+router.use('/schedule', scheduleRoutes); // Mount schedule routes
 // router.use('/upload', uploadRoutes); // TODO: Add uploadRoutes import if needed
 
 module.exports = router;
