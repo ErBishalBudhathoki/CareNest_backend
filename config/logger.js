@@ -73,7 +73,7 @@ if (!isCloudRun && !fs.existsSync(logsDir)) {
 
 // Determine log directory (prefer /var/log/backend for Docker, fallback to local)
 // Skip entirely in Cloud Run
-const getLogDir = () =\u003e {
+const getLogDir = () => {
   if (isCloudRun) {
     return null; // No file logging in Cloud Run
   }
