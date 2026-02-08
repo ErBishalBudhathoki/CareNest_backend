@@ -50,13 +50,7 @@ service-account.json
 uploads/*
 !uploads/.gitkeep
 
-# Test files
-*.test.js
-test*.js
-*_test.js
-*.spec.js
-test/
-tests/
+# Individual test scripts at root (not the tests/ directory)
 check_test_user.js
 update_test_user.js
 
