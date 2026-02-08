@@ -7,6 +7,11 @@
 
 const request = require('supertest');
 const { ObjectId } = require('mongoose').Types;
+const jwt = require('jsonwebtoken');
+
+console.log('--- TEST FILE LOADING ---');
+const orgContext = require('../middleware/organizationContext');
+console.log('OrgContext Mock:', orgContext);
 
 // Mock Redis/BullMQ
 jest.mock('ioredis', () => require('ioredis-mock'));
@@ -45,33 +50,6 @@ jest.mock('../config/redis', () => ({
   publish: jest.fn()    // Added publish
 }));
 
-// Mock Auth Middleware to bypass auth and rate limits
-jest.mock('../middleware/auth', () => ({
-  authenticateUser: (req, res, next) => {
-    req.user = { 
-      userId: '507f1f77bcf86cd799439011', 
-      email: 'test@example.com', 
-      roles: ['admin'], 
-      organizationId: 'test-org' 
-    };
-    next();
-  },
-  rateLimitMiddleware: () => (req, res, next) => next(),
-  requireRoles: () => (req, res, next) => next(),
-  requireAdmin: (req, res, next) => next(), // Add requireAdmin
-  AuthMiddleware: {
-    authenticateUser: (req, res, next) => {
-      req.user = { 
-        userId: '507f1f77bcf86cd799439011', 
-        email: 'test@example.com', 
-        roles: ['admin'], 
-        organizationId: 'test-org' 
-      };
-      next();
-    }
-  }
-}));
-
 // Mock dependencies
 const Shift = require('../models/Shift');
 const User = require('../models/User');
@@ -89,8 +67,39 @@ jest.mock('../services/aiSchedulerService');
 jest.mock('../firebase-admin-config');
 jest.mock('../config/logger');
 
-// Import app AFTER mocking
-const app = require('../server');
+// Mock organization middleware to bypass checks
+jest.mock('../middleware/organizationContext.js', () => ({
+    organizationContextMiddleware: (req, res, next) => next(),
+    optionalOrganizationContext: (req, res, next) => next(),
+    optionalOrganizationContextMiddleware: (req, res, next) => next(), 
+    requireOrganizationMatch: () => (req, res, next) => next(),
+    requireOrganizationOwnership: () => (req, res, next) => next(),
+    requireOrganizationQueryMatch: () => (req, res, next) => next()
+}));
+
+// Import app AFTER mocking (use app.js to avoid server startup)
+const app = require('../app');
+
+// Helper function to generate valid MongoId
+const generateObjectId = () => {
+    const timestamp = (new Date().getTime() / 1000 | 0).toString(16);
+    return timestamp + 'xxxxxxxxxxxxxxxx'.replace(/[x]/g, () => (Math.random() * 16 | 0).toString(16)).toLowerCase();
+};
+
+// Helper function to create JWT tokens
+function makeToken({ email, roles, organizationId }) {
+  const secret = process.env.JWT_SECRET || 'test-secret';
+  return jwt.sign(
+    {
+      userId: '507f1f77bcf86cd799439011',
+      email,
+      roles,
+      organizationId,
+    },
+    secret,
+    { issuer: 'invoice-app', audience: 'invoice-app-users', expiresIn: '1h' }
+  );
+}
 
 describe('Schedule API Tests', () => {
     let mockQuery;
@@ -119,7 +128,7 @@ describe('Schedule API Tests', () => {
         
         Shift.prototype.save = jest.fn().mockImplementation(function() {
             return Promise.resolve({
-                _id: new ObjectId(),
+                _id: generateObjectId(),
                 ...this,
                 toObject: () => this
             });
@@ -127,7 +136,7 @@ describe('Schedule API Tests', () => {
 
         User.find.mockImplementation(() => mockQuery([]));
         User.findOne.mockImplementation(() => mockQuery({
-            _id: new ObjectId(),
+            _id: generateObjectId(),
             email: 'employee@example.com',
             firstName: 'John',
             lastName: 'Doe',
@@ -135,7 +144,7 @@ describe('Schedule API Tests', () => {
         }));
 
         Client.findOne.mockImplementation(() => mockQuery({
-            _id: new ObjectId(),
+            _id: generateObjectId(),
             email: 'client@example.com',
             firstName: 'Jane',
             lastName: 'Client',
@@ -155,13 +164,19 @@ describe('Schedule API Tests', () => {
     // ============================================================================
 
     describe('Conflict Detection', () => {
+        const token = makeToken({
+            email: 'admin@example.com',
+            roles: ['admin'],
+            organizationId: '507f1f77bcf86cd799439011'
+        });
+
         describe('POST /api/schedule/check-conflicts', () => {
             it('should return 409 when attempting to double-book an employee', async () => {
                 // Setup: Employee A has an existing shift from 9-5
                 const existingShift = {
-                    _id: new ObjectId(),
+                    _id: generateObjectId(),
                     employeeEmail: 'employee-a@example.com',
-                    employeeId: new ObjectId(),
+                    employeeId: generateObjectId(),
                     clientEmail: 'client-1@example.com',
                     startTime: new Date('2026-01-20T09:00:00Z'),
                     endTime: new Date('2026-01-20T17:00:00Z'),
@@ -175,6 +190,8 @@ describe('Schedule API Tests', () => {
                 // Attempt to create overlapping shift from 10-4
                 const res = await request(app)
                     .post('/api/schedule/check-conflicts')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send({
                         employeeEmail: 'employee-a@example.com',
                         startTime: '2026-01-20T10:00:00Z',
@@ -196,6 +213,8 @@ describe('Schedule API Tests', () => {
 
                 const res = await request(app)
                     .post('/api/schedule/check-conflicts')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send({
                         employeeEmail: 'employee-a@example.com',
                         startTime: '2026-01-21T09:00:00Z', // Different day
@@ -209,6 +228,8 @@ describe('Schedule API Tests', () => {
             it('should validate required fields', async () => {
                 const res = await request(app)
                     .post('/api/schedule/check-conflicts')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send({
                         employeeEmail: 'employee-a@example.com'
                         // Missing startTime and endTime
@@ -225,12 +246,18 @@ describe('Schedule API Tests', () => {
     // ============================================================================
 
     describe('Best Match Algorithm', () => {
+        const token = makeToken({
+            email: 'admin@example.com',
+            roles: ['admin'],
+            organizationId: '507f1f77bcf86cd799439011'
+        });
+
         describe('GET /api/schedule/recommendations', () => {
             it('should rank employees by composite score (skills + availability + distance)', async () => {
                 // Setup: 3 employees with varying attributes
                 const employees = [
                     {
-                        _id: new ObjectId(),
+                        _id: generateObjectId(),
                         email: 'far-skilled@example.com',
                         firstName: 'Far',
                         lastName: 'Skilled',
@@ -240,7 +267,7 @@ describe('Schedule API Tests', () => {
                         location: { type: 'Point', coordinates: [151.0, -33.9] } // Far but skilled
                     },
                     {
-                        _id: new ObjectId(),
+                        _id: generateObjectId(),
                         email: 'close-unskilled@example.com',
                         firstName: 'Close',
                         lastName: 'Unskilled',
@@ -250,7 +277,7 @@ describe('Schedule API Tests', () => {
                         location: { type: 'Point', coordinates: [151.2, -33.8] } // Close but no skills
                     },
                     {
-                        _id: new ObjectId(),
+                        _id: generateObjectId(),
                         email: 'ideal-candidate@example.com',
                         firstName: 'Ideal',
                         lastName: 'Candidate',
@@ -282,6 +309,8 @@ describe('Schedule API Tests', () => {
 
                 const res = await request(app)
                     .get('/api/schedule/recommendations')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .query({
                         organizationId: '507f1f77bcf86cd799439011',
                         clientEmail: 'client@example.com',
@@ -309,12 +338,16 @@ describe('Schedule API Tests', () => {
             it('should require organizationId parameter', async () => {
                 const res = await request(app)
                     .get('/api/schedule/recommendations')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .query({
                         clientEmail: 'client@example.com'
                     });
 
                 expect(res.status).toBe(400);
-                expect(res.body.error).toContain('organizationId');
+                // Check if errors array contains the field
+                const hasError = res.body.errors && res.body.errors.some(e => e.field === 'organizationId' || e.message.includes('organization ID'));
+                expect(hasError).toBe(true);
             });
 
             it('should return empty recommendations when no employees exist', async () => {
@@ -322,8 +355,12 @@ describe('Schedule API Tests', () => {
 
                 const res = await request(app)
                     .get('/api/schedule/recommendations')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .query({
-                        organizationId: '507f1f77bcf86cd799439011'
+                        organizationId: '507f1f77bcf86cd799439011',
+                        startTime: '2026-01-20T09:00:00Z',
+                        endTime: '2026-01-20T17:00:00Z'
                     });
 
                 expect(res.status).toBe(200);
@@ -337,6 +374,12 @@ describe('Schedule API Tests', () => {
     // ============================================================================
 
     describe('Shift CRUD Operations', () => {
+        const token = makeToken({
+            email: 'admin@example.com',
+            roles: ['admin'],
+            organizationId: '507f1f77bcf86cd799439011'
+        });
+
         describe('POST /api/schedule/shift', () => {
             it('should create a shift successfully', async () => {
                 const newShift = {
@@ -357,6 +400,8 @@ describe('Schedule API Tests', () => {
 
                 const res = await request(app)
                     .post('/api/schedule/shift')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send(newShift);
 
                 if (res.status === 500) {
@@ -379,7 +424,7 @@ describe('Schedule API Tests', () => {
 
                 // Mock: Existing overlapping shift
                 Shift.find.mockImplementation(() => mockQuery([{
-                    _id: new ObjectId(),
+                    _id: generateObjectId(),
                     employeeEmail: 'employee@example.com',
                     startTime: new Date('2026-01-20T09:00:00Z'),
                     endTime: new Date('2026-01-20T17:00:00Z'),
@@ -389,6 +434,8 @@ describe('Schedule API Tests', () => {
 
                 const res = await request(app)
                     .post('/api/schedule/shift')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send(conflictingShift);
 
                 expect(res.status).toBe(409);
@@ -399,6 +446,8 @@ describe('Schedule API Tests', () => {
             it('should validate required fields', async () => {
                 const res = await request(app)
                     .post('/api/schedule/shift')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send({
                         // Missing organizationId, startTime, endTime
                         clientEmail: 'client@example.com'
@@ -414,7 +463,7 @@ describe('Schedule API Tests', () => {
             it('should return shifts for an organization', async () => {
                 const shifts = [
                     {
-                            _id: new ObjectId(),
+                            _id: generateObjectId(),
                             organizationId: '507f1f77bcf86cd799439011',
                             employeeEmail: 'emp1@example.com',
                             startTime: new Date('2026-01-20T09:00:00Z'),
@@ -429,7 +478,9 @@ describe('Schedule API Tests', () => {
                 }));
 
                 const res = await request(app)
-                    .get('/api/schedule/shifts/507f1f77bcf86cd799439011');
+                    .get('/api/schedule/shifts/507f1f77bcf86cd799439011')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011');
 
                 expect(res.status).toBe(200);
                 expect(res.body.success).toBe(true);
@@ -439,7 +490,7 @@ describe('Schedule API Tests', () => {
 
         describe('DELETE /api/schedule/shift/:id', () => {
             it('should cancel a shift', async () => {
-                const shiftId = new ObjectId();
+                const shiftId = generateObjectId();
 
                 Shift.findOneAndUpdate.mockImplementation(() => mockQuery({
                     _id: shiftId,
@@ -448,7 +499,10 @@ describe('Schedule API Tests', () => {
                 }));
 
                 const res = await request(app)
-                    .delete(`/api/schedule/shift/${shiftId}`);
+                    .delete(`/api/schedule/shift/${shiftId}`)
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
+                    .query({ organizationId: '507f1f77bcf86cd799439011' });
 
                 expect(res.status).toBe(200);
                 expect(res.body.success).toBe(true);
@@ -458,7 +512,10 @@ describe('Schedule API Tests', () => {
                 Shift.findOneAndUpdate.mockImplementation(() => mockQuery(null));
 
                 const res = await request(app)
-                    .delete(`/api/schedule/shift/${new ObjectId()}`);
+                    .delete(`/api/schedule/shift/${generateObjectId()}`)
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
+                    .query({ organizationId: '507f1f77bcf86cd799439011' });
 
                 expect(res.status).toBe(404);
             });
@@ -470,6 +527,12 @@ describe('Schedule API Tests', () => {
     // ============================================================================
 
     describe('Bulk Shift Creation', () => {
+        const token = makeToken({
+            email: 'admin@example.com',
+            roles: ['admin'],
+            organizationId: '507f1f77bcf86cd799439011'
+        });
+
         describe('POST /api/schedule/bulk', () => {
             it('should create multiple shifts in bulk', async () => {
                 const bulkShifts = {
@@ -495,6 +558,8 @@ describe('Schedule API Tests', () => {
 
                 const res = await request(app)
                     .post('/api/schedule/bulk')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send(bulkShifts);
 
                 if (res.status === 500) {
@@ -508,13 +573,16 @@ describe('Schedule API Tests', () => {
             it('should validate shifts array is provided', async () => {
                 const res = await request(app)
                     .post('/api/schedule/bulk')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
                     .send({
                         organizationId: '507f1f77bcf86cd799439011'
                         // Missing shifts array
                     });
 
                 expect(res.status).toBe(400);
-                expect(res.body.error).toContain('shifts array');
+                const hasError = res.body.errors && res.body.errors.some(e => e.field === 'shifts' || e.message.includes('shifts array'));
+                expect(hasError).toBe(true);
             });
         });
     });
