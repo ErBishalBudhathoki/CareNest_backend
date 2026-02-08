@@ -268,32 +268,7 @@ jobs:
             --timeout 300 \
             --cpu-boost \
             --port 8080 \
-            --set-env-vars "NODE_ENV=production" \
-            --set-env-vars "ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}" \
-            --set-env-vars "ALLOWED_DOWNLOAD_HOSTS=${{ secrets.ALLOWED_DOWNLOAD_HOSTS }}" \
-            --set-env-vars "DB_NAME=${{ secrets.PROD_DB_NAME }}" \
-            --set-env-vars "JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}" \
-            --set-env-vars "R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}" \
-            --set-env-vars "R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}" \
-            --set-env-vars "R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }}" \
-            --set-env-vars "SMTP_ADMIN_EMAIL=${{ secrets.SMTP_ADMIN_EMAIL }}" \
-            --update-env-vars "FIREBASE_PROJECT_ID=${{ secrets.PROD_FIREBASE_PROJECT_ID }}" \
-            --update-env-vars "FIREBASE_CLIENT_EMAIL=${{ secrets.PROD_FIREBASE_CLIENT_EMAIL }}" \
-            --update-env-vars "FIREBASE_CLIENT_ID=${{ secrets.PROD_FIREBASE_CLIENT_ID }}" \
-            --update-env-vars "FIREBASE_CLIENT_CERT_URL=${{ secrets.PROD_FIREBASE_CLIENT_CERT_URL }}" \
-            --update-secrets "MONGODB_URI=prod-mongodb-uri:latest" \
-            --update-secrets "REDIS_URL=prod-redis-url:latest" \
-            --update-secrets "JWT_SECRET=prod-jwt-secret:latest" \
-            --update-secrets "STRIPE_SECRET_KEY=prod-stripe-secret:latest" \
-            --update-secrets "STRIPE_WEBHOOK_SECRET=prod-stripe-webhook:latest" \
-            --update-secrets "SMTP_PASSWORD=prod-smtp-password:latest" \
-            --update-secrets "APP_PASSWORD=prod-app-password:latest" \
-            --update-secrets "R2_ACCESS_KEY_ID=prod-r2-access-key:latest" \
-            --update-secrets "R2_SECRET_ACCESS_KEY=prod-r2-secret:latest" \
-            --update-secrets "FIREBASE_PRIVATE_KEY=prod-firebase-private-key:latest" \
-            --update-secrets "FIREBASE_PRIVATE_KEY_ID=prod-firebase-private-key-id:latest" \
-            --no-traffic \
-            --tag prod-${{ github.sha }}
+            --update-env-vars NODE_ENV=production,ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }},ALLOWED_DOWNLOAD_HOSTS=${{ secrets.ALLOWED_DOWNLOAD_HOSTS }},DB_NAME=${{ secrets.PROD_DB_NAME }},JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }},R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }},R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }},R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }},SMTP_ADMIN_EMAIL=${{ secrets.SMTP_ADMIN_EMAIL }},FIREBASE_PROJECT_ID=${{ secrets.PROD_FIREBASE_PROJECT_ID }},FIREBASE_CLIENT_EMAIL=${{ secrets.PROD_FIREBASE_CLIENT_EMAIL }},FIREBASE_CLIENT_ID=${{ secrets.PROD_FIREBASE_CLIENT_ID }},FIREBASE_CLIENT_CERT_URL=${{ secrets.PROD_FIREBASE_CLIENT_CERT_URL }} \\\n            --update-secrets MONGODB_URI=prod-mongodb-uri:latest,REDIS_URL=prod-redis-url:latest,JWT_SECRET=prod-jwt-secret:latest,STRIPE_SECRET_KEY=prod-stripe-secret:latest,STRIPE_WEBHOOK_SECRET=prod-stripe-webhook:latest,SMTP_PASSWORD=prod-smtp-password:latest,APP_PASSWORD=prod-app-password:latest,R2_ACCESS_KEY_ID=prod-r2-access-key:latest,R2_SECRET_ACCESS_KEY=prod-r2-secret:latest,FIREBASE_PRIVATE_KEY=prod-firebase-private-key:latest,FIREBASE_PRIVATE_KEY_ID=prod-firebase-private-key-id:latest \\\n            --no-traffic \\\n            --tag prod-${{ github.sha }}
           
           # Get service URL
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
