@@ -13,6 +13,10 @@ class Logger {
   }
 
   ensureLogDirectory() {
+    // Skip directory creation in Cloud Run (K_SERVICE is set by Cloud Run)
+    if (process.env.K_SERVICE) {
+      return;
+    }
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true });
     }
@@ -30,22 +34,33 @@ class Logger {
   }
 
   writeToFile(level, formattedMessage) {
+    // Skip file writing in Cloud Run - use stdout/stderr instead
+    if (process.env.K_SERVICE) {
+      return;
+    }
     const filename = `${level}-${new Date().toISOString().split('T')[0]}.log`;
     const filepath = path.join(this.logDir, filename);
     
-    fs.appendFileSync(filepath, formattedMessage + '\n', 'utf8');
+    try {
+      fs.appendFileSync(filepath, formattedMessage + '\n', 'utf8');
+    } catch (error) {
+      // Fallback to console if file write fails
+      console.error('Failed to write log to file:', error.message);
+    }
   }
 
   log(level, message, data = {}) {
     const formattedMessage = this.formatMessage(level, message, data);
     
-    // Console output for development
-    if (process.env.NODE_ENV === 'development') {
+    // Console output for development or Cloud Run
+    if (process.env.NODE_ENV === 'development' || process.env.K_SERVICE) {
       console.log(`[${level.toUpperCase()}] ${this.context}: ${message}`, data);
     }
     
-    // File output for all environments
-    this.writeToFile(level, formattedMessage);
+    // File output only for non-Cloud Run environments
+    if (!process.env.K_SERVICE) {
+      this.writeToFile(level, formattedMessage);
+    }
   }
 
   info(message, data = {}) {
