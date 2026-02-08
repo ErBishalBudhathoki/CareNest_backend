@@ -38,10 +38,14 @@ jest.mock('@google-cloud/vertexai', () => ({
   }))
 }));
 
-// Suppress logs
-global.console = {
-  ...console,
-  log: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-};
+// Suppress logs (except during debugging)
+if (process.env.JEST_DEBUG === 'true') {
+  console.log('DEBUG MODE ENABLED');
+} else {
+  global.console = {
+    ...console,
+    log: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  };
+}

@@ -77,7 +77,8 @@ jest.mock('../services/invoiceManagementService', () => {
   };
 });
 
-const app = require('../server');
+// Import app.js to avoid server startup during tests
+const app = require('../app');
 
 function makeToken({ email, roles, organizationId }) {
   const secret = process.env.JWT_SECRET;
@@ -106,8 +107,9 @@ describe('RBAC', () => {
     });
 
     const res = await request(app)
-      .get('/api/invoices/stats/507f1f77bcf86cd799439012')
-      .set('Authorization', `Bearer ${token}`);
+      .get('/api/api/invoices/stats/507f1f77bcf86cd799439012')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-organization-id', '507f1f77bcf86cd799439012');
 
     expect(res.status).toBe(403);
   });
@@ -120,8 +122,9 @@ describe('RBAC', () => {
     });
 
     const res = await request(app)
-      .get('/api/invoices/stats/507f1f77bcf86cd799439013') // Different valid ID
-      .set('Authorization', `Bearer ${token}`);
+      .get('/api/api/invoices/stats/507f1f77bcf86cd799439013') // Different valid ID
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-organization-id', '507f1f77bcf86cd799439013');
 
     expect(res.status).toBe(403);
   });
@@ -134,8 +137,9 @@ describe('RBAC', () => {
     });
 
     const res = await request(app)
-      .get('/api/invoices/stats/507f1f77bcf86cd799439012')
-      .set('Authorization', `Bearer ${token}`);
+      .get('/api/api/invoices/stats/507f1f77bcf86cd799439012')
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-organization-id', '507f1f77bcf86cd799439012');
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
