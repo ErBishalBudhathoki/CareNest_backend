@@ -3,9 +3,6 @@ name: Backend Deploy - Production (Hybrid Secure)
 on:
   push:
     branches: [ main ]
-    paths:
-      - '**'
-      - '.github/workflows/backend-deploy-prod.yml'
   workflow_dispatch:
     inputs:
       deploy_type:
