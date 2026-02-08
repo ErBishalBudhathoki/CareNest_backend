@@ -58,7 +58,7 @@ jobs:
           exit-code: '1'  # Fail on CRITICAL vulnerabilities
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -232,9 +232,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [build, approval]
-    environment:
-      name: production
-      url: https://${{ steps.deploy.outputs.url }}
+    environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -282,7 +280,8 @@ jobs:
             --format 'value(status.url)')
           
           echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "Deployed to: $SERVICE_URL"
+          echo "::add-mask::$SERVICE_URL"
+          echo "Deployment successful (URL hidden for security)"
 
       - name: Run smoke tests
         run: |
@@ -291,15 +290,25 @@ jobs:
           # Wait for service to be ready
           sleep 20
           
-          # Health check
+          # Health check (don't display URL)
           echo "Testing health endpoint..."
-          curl -f "$SERVICE_URL/health" || (echo "::error::Health check failed" && exit 1)
+          if curl -f -s "$SERVICE_URL/health" > /dev/null 2>&1; then
+            echo "✓ Health check passed"
+          else
+            echo "::error::Health check failed"
+            exit 1
+          fi
           
-          # API health check
+          # API health check (don't display URL)
           echo "Testing API health..."
-          curl -f "$SERVICE_URL/api/health" || (echo "::error::API health check failed" && exit 1)
+          if curl -f -s "$SERVICE_URL/api/health" > /dev/null 2>&1; then
+            echo "✓ API health check passed"
+          else
+            echo "::error::API health check failed"
+            exit 1
+          fi
           
-          echo "::notice::All smoke tests passed!"
+          echo "✓ All smoke tests passed"
 
       - name: Gradual traffic rollout
         run: |
@@ -307,61 +316,94 @@ jobs:
           
           echo "Starting $DEPLOY_TYPE deployment..."
           
+          # Get current and new revision names
+          LATEST_REVISION=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --limit=1 \
+            --format='value(name)')
+          
+          PREVIOUS_REVISION=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --limit=2 \
+            --format='value(name)' | tail -n 1)
+          
+          echo "Latest revision: $LATEST_REVISION"
+          echo "Previous revision: $PREVIOUS_REVISION"
+          
           if [ "$DEPLOY_TYPE" = "immediate" ]; then
             # Immediate 100% rollout (emergency only)
+            echo "⚠️  Immediate rollout - switching 100% traffic to latest"
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=100
-            echo "::notice::Traffic immediately migrated to 100%"
+              --to-latest
+            echo "✓ Traffic immediately migrated to 100%"
             
           elif [ "$DEPLOY_TYPE" = "canary" ]; then
             # Canary: 10% for 10 minutes, then 100%
+            echo "Canary deployment: 10% -> 100%"
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=10
-            echo "::notice::Canary deployed at 10% - monitoring for 10 minutes"
+              --to-revisions="$LATEST_REVISION=10,$PREVIOUS_REVISION=90"
+            echo "✓ Canary at 10% - monitoring for 10 minutes..."
             sleep 600
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=100
-            echo "::notice::Traffic fully migrated to new version"
+              --to-latest
+            echo "✓ Traffic fully migrated to new version"
             
           else
             # Gradual: 25% -> 50% -> 75% -> 100%
+            echo "Gradual rollout: 25% -> 50% -> 75% -> 100%"
+            
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=25
-            echo "::notice::Traffic at 25% - monitoring for 5 minutes"
+              --to-revisions="$LATEST_REVISION=25,$PREVIOUS_REVISION=75"
+            echo "✓ Traffic at 25% - monitoring for 5 minutes..."
             sleep 300
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=50
-            echo "::notice::Traffic at 50% - monitoring for 5 minutes"
+              --to-revisions="$LATEST_REVISION=50,$PREVIOUS_REVISION=50"
+            echo "✓ Traffic at 50% - monitoring for 5 minutes..."
             sleep 300
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=75
-            echo "::notice::Traffic at 75% - monitoring for 5 minutes"
+              --to-revisions="$LATEST_REVISION=75,$PREVIOUS_REVISION=25"
+            echo "✓ Traffic at 75% - monitoring for 5 minutes..."
             sleep 300
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=100
-            echo "::notice::Traffic fully migrated to new version"
+              --to-latest
+            echo "✓ Traffic fully migrated to new version"
           fi
 
       - name: Post-deployment validation
         run: |
           SERVICE_URL="${{ steps.deploy.outputs.url }}"
           
-          # Final health checks
-          curl -f "$SERVICE_URL/health" || (echo "::error::Post-deployment health check failed" && exit 1)
-          curl -f "$SERVICE_URL/api/health" || (echo "::error::Post-deployment API check failed" && exit 1)
+          # Final health checks (don't display URL)
+          echo "Running post-deployment validation..."
           
-          echo "::notice::✅ Production deployment validated successfully!"
+          if curl -f -s "$SERVICE_URL/health" > /dev/null 2>&1; then
+            echo "✓ Health check passed"
+          else
+            echo "::error::Post-deployment health check failed"
+            exit 1
+          fi
+          
+          if curl -f -s "$SERVICE_URL/api/health" > /dev/null 2>&1; then
+            echo "✓ API health check passed"
+          else
+            echo "::error::Post-deployment API check failed"
+            exit 1
+          fi
+          
+          echo "✅ Production deployment validated successfully!"
 
       - name: Create deployment summary
         if: always()
@@ -374,10 +416,11 @@ jobs:
           **GCP Project:** ${{ env.GCP_PROJECT_ID }}
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
-          **Image:** \`${{ needs.build.outputs.image-uri }}\`
-          **URL:** ${{ steps.deploy.outputs.url }}
-          **Commit:** ${{ github.sha }}
+          **Image Digest:** \`${{ needs.build.outputs.image-digest }}\`
+          **Commit:** \`${{ github.sha }}\`
           **Deployment Type:** ${{ github.event.inputs.deploy_type || 'gradual' }}
+          
+          > **Note:** Service URL is hidden for security. Access via GCP Console.
           
           ### Security Features
           - ✅ Manual approval required
