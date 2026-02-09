@@ -4,7 +4,7 @@ const logger = require('../utils/logger').createLogger('MongooseConfig');
 const connectMongoose = async () => {
   try {
     const uri = process.env.MONGODB_URI;
-    const dbName = process.env.DB_NAME || 'Invoice';
+    const dbName = process.env.DB_NAME || process.env.MONGODB_DATABASE || 'Invoice';
 
     if (!uri) {
       throw new Error('MONGODB_URI environment variable is not defined');

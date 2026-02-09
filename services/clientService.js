@@ -1,5 +1,6 @@
 const Client = require('../models/Client');
 const User = require('../models/User');
+const UserOrganization = require('../models/UserOrganization');
 const ClientAssignment = require('../models/ClientAssignment');
 const CustomPricing = require('../models/CustomPricing');
 const auditService = require('./auditService');
@@ -27,16 +28,32 @@ class ClientService {
     } = clientData;
 
     try {
-      // Verify user belongs to organization (if organizationId provided)
-      if (organizationId && userEmail) {
-        const user = await User.findOne({ 
-          email: userEmail,
-          organizationId: organizationId 
-        });
+      // CRITICAL: Require organizationId for multi-tenant isolation
+      if (!organizationId) {
+        throw new Error('Organization ID is required for client creation');
+      }
+
+      // Verify user belongs to organization
+      if (userEmail) {
+        const userOrg = await UserOrganization.findOne({
+          organizationId: organizationId,
+          isActive: true
+        }).populate('userId');
         
-        if (!user) {
+        if (!userOrg || userOrg.userId.email !== userEmail) {
           throw new Error('User not authorized for this organization');
         }
+      }
+      
+      // Check if client email already exists in this organization
+      const existingClient = await Client.findOne({
+        clientEmail: clientEmail,
+        organizationId: organizationId,
+        isActive: true
+      });
+      
+      if (existingClient) {
+        throw new Error('Client with this email already exists in your organization');
       }
       
       // Create client document with organization context
@@ -55,7 +72,7 @@ class ClientService {
         emergencyContact: emergencyContact || {},
         medicalConditions: medicalConditions || [],
         riskAssessment: riskAssessment || {},
-        organizationId: organizationId || null,
+        organizationId: organizationId, // Always required
         isActive: true
       };
       

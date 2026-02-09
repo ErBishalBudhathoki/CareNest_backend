@@ -411,6 +411,93 @@ class OrganizationService {
       throw error;
     }
   }
+
+  /**
+   * Update organization setup with detailed information
+   * @param {string} organizationId - Organization ID
+   * @param {object} setupData - Setup data (logo, ABN, address, etc.)
+   * @returns {Promise<object>} Updated organization
+   */
+  async updateOrganizationSetup(organizationId, setupData) {
+    try {
+      const {
+        logoUrl,
+        abn,
+        address,
+        contactDetails,
+        bankDetails,
+        ndisRegistration,
+        timesheetReminders,
+        defaultPricingSettings,
+        updatedBy
+      } = setupData;
+
+      // Find organization
+      const organization = await Organization.findById(organizationId);
+      
+      if (!organization) {
+        throw new Error('Organization not found');
+      }
+
+      // Update fields if provided
+      const updateFields = {};
+      
+      if (logoUrl !== undefined) updateFields.logoUrl = logoUrl;
+      if (abn !== undefined) updateFields.abn = abn;
+      if (address !== undefined) updateFields.address = address;
+      
+      if (contactDetails !== undefined) {
+        updateFields.contactDetails = {
+          ...organization.contactDetails,
+          ...contactDetails
+        };
+      }
+      
+      if (bankDetails !== undefined) {
+        updateFields.bankDetails = {
+          ...organization.bankDetails,
+          ...bankDetails
+        };
+      }
+      
+      if (ndisRegistration !== undefined) {
+        updateFields.ndisRegistration = {
+          ...organization.ndisRegistration,
+          ...ndisRegistration
+        };
+      }
+      
+      if (timesheetReminders !== undefined) {
+        updateFields.timesheetReminders = {
+          ...organization.timesheetReminders,
+          ...timesheetReminders
+        };
+      }
+      
+      if (defaultPricingSettings !== undefined) {
+        updateFields.defaultPricingSettings = {
+          ...organization.defaultPricingSettings,
+          ...defaultPricingSettings
+        };
+      }
+
+      updateFields.updatedAt = new Date();
+
+      // Update organization
+      const updatedOrganization = await Organization.findByIdAndUpdate(
+        organizationId,
+        { $set: updateFields },
+        { new: true, runValidators: true }
+      );
+
+      // Clear cache
+      await cacheService.del(`organization:${organizationId}`);
+
+      return updatedOrganization;
+    } catch (error) {
+      throw error;
+    }
+  }
 }
 
 module.exports = new OrganizationService();

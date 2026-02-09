@@ -1,0 +1,424 @@
+const JWTSecret = require('../models/JWTSecret');
+const crypto = require('crypto');
+
+/**
+ * JWT Key Rotation Service
+ * 
+ * Handles automatic and manual JWT secret rotation with zero-downtime support.
+ * Integrates with existing authentication middleware and controllers.
+ */
+class JWTKeyRotationService {
+  constructor() {
+    this.initialized = false;
+    this.rotationInterval = null;
+    this.activeKey = null;
+    this.validKeys = [];
+    this.cacheExpiry = 5 * 60 * 1000; // 5 minutes cache
+    this.lastCacheUpdate = 0;
+  }
+
+  /**
+   * Initialize the key rotation service
+   * - Ensures at least one active key exists
+   * - Starts automatic rotation if configured
+   */
+  async initialize(options = {}) {
+    try {
+      console.log('[JWT Key Rotation] Initializing service...');
+      
+      // Check if we have any keys in the database
+      const keyCount = await JWTSecret.countDocuments();
+      
+      if (keyCount === 0) {
+        console.log('[JWT Key Rotation] No keys found. Creating initial key...');
+        await this.createInitialKey(options);
+      } else {
+        // Verify we have an active key
+        const activeKey = await JWTSecret.findOne({ status: 'active' });
+        
+        if (!activeKey) {
+          console.log('[JWT Key Rotation] No active key found. Activating most recent key...');
+          const mostRecent = await JWTSecret.findOne({ 
+            status: 'valid',
+            expiresAt: { $gt: new Date() }
+          }).sort({ createdAt: -1 });
+          
+          if (mostRecent) {
+            await mostRecent.activate();
+            console.log(`[JWT Key Rotation] Activated key: ${mostRecent.keyId}`);
+          } else {
+            console.log('[JWT Key Rotation] No valid keys found. Creating new key...');
+            await this.createInitialKey(options);
+          }
+        }
+      }
+      
+      // Load keys into cache
+      await this.refreshKeyCache();
+      
+      this.initialized = true;
+      console.log('[JWT Key Rotation] Service initialized successfully');
+      
+      return { success: true, message: 'JWT Key Rotation Service initialized' };
+    } catch (error) {
+      console.error('[JWT Key Rotation] Initialization failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create the initial JWT secret key
+   * Uses JWT_SECRET from .env if available, otherwise generates a new one
+   */
+  async createInitialKey(options = {}) {
+    const envSecret = process.env.JWT_SECRET;
+    let secret;
+    let keyId;
+    
+    if (envSecret && envSecret.length >= 32 && !this.isWeakSecret(envSecret)) {
+      // Use existing JWT_SECRET from environment
+      secret = envSecret;
+      keyId = 'key_initial_env';
+      console.log('[JWT Key Rotation] Using JWT_SECRET from environment as initial key');
+    } else {
+      // Generate a new strong secret
+      secret = crypto.randomBytes(64).toString('base64');
+      keyId = `key_initial_${Date.now()}`;
+      console.log('[JWT Key Rotation] Generated new strong secret as initial key');
+      
+      if (envSecret) {
+        console.warn('[JWT Key Rotation] WARNING: JWT_SECRET in .env is weak or too short. Using generated secret instead.');
+      }
+    }
+    
+    const newKey = await JWTSecret.createKey({
+      keyId,
+      secret,
+      activate: true,
+      expiresAt: new Date(Date.now() + (options.keyLifetimeDays || 90) * 24 * 60 * 60 * 1000),
+      rotationType: 'initial',
+      createdBy: 'system'
+    });
+    
+    console.log(`[JWT Key Rotation] Created initial key: ${newKey.keyId}`);
+    return newKey;
+  }
+
+  /**
+   * Check if a secret is considered weak
+   */
+  isWeakSecret(secret) {
+    const weakSecrets = [
+      'secret',
+      'password',
+      'test',
+      'your-jwt-secret-key-here',
+      '123456',
+      'admin',
+      'default'
+    ];
+    
+    return weakSecrets.some(weak => secret.toLowerCase().includes(weak));
+  }
+
+  /**
+   * Refresh the key cache from database
+   */
+  async refreshKeyCache() {
+    try {
+      this.activeKey = await JWTSecret.getActiveKey();
+      this.validKeys = await JWTSecret.getValidKeys();
+      this.lastCacheUpdate = Date.now();
+      
+      console.log(`[JWT Key Rotation] Cache refreshed. Active key: ${this.activeKey.keyId}, Valid keys: ${this.validKeys.length}`);
+    } catch (error) {
+      console.error('[JWT Key Rotation] Failed to refresh key cache:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the current active key for signing tokens
+   * Uses cache to avoid database hits on every token generation
+   */
+  async getActiveKey() {
+    // Refresh cache if expired or not initialized
+    if (!this.initialized || Date.now() - this.lastCacheUpdate > this.cacheExpiry) {
+      await this.refreshKeyCache();
+    }
+    
+    if (!this.activeKey || !this.activeKey.isActive()) {
+      await this.refreshKeyCache();
+    }
+    
+    return this.activeKey;
+  }
+
+  /**
+   * Get all valid keys for token verification
+   * Uses cache to avoid database hits on every token verification
+   */
+  async getValidKeys() {
+    // Refresh cache if expired or not initialized
+    if (!this.initialized || Date.now() - this.lastCacheUpdate > this.cacheExpiry) {
+      await this.refreshKeyCache();
+    }
+    
+    return this.validKeys;
+  }
+
+  /**
+   * Get a specific key by keyId (from token header)
+   */
+  async getKeyById(keyId) {
+    const validKeys = await this.getValidKeys();
+    return validKeys.find(key => key.keyId === keyId);
+  }
+
+  /**
+   * Perform key rotation
+   * Creates a new active key and moves the old one to valid status
+   */
+  async rotateKeys(options = {}) {
+    try {
+      console.log('[JWT Key Rotation] Starting key rotation...');
+      
+      const rotationType = options.rotationType || 'automatic';
+      const createdBy = options.createdBy || 'system';
+      const keyLifetimeDays = options.keyLifetimeDays || 90;
+      
+      const result = await JWTSecret.rotateKeys({
+        expiresAt: new Date(Date.now() + keyLifetimeDays * 24 * 60 * 60 * 1000),
+        rotationType,
+        createdBy
+      });
+      
+      // Refresh cache with new keys
+      await this.refreshKeyCache();
+      
+      console.log(`[JWT Key Rotation] Rotation completed. New key: ${result.newKey.keyId}`);
+      
+      // Emit event for monitoring/logging
+      this.emitRotationEvent({
+        type: 'rotation_completed',
+        newKeyId: result.newKey.keyId,
+        previousKeyId: result.previousKey?.keyId,
+        rotationType,
+        timestamp: new Date()
+      });
+      
+      return result;
+    } catch (error) {
+      console.error('[JWT Key Rotation] Rotation failed:', error);
+      
+      this.emitRotationEvent({
+        type: 'rotation_failed',
+        error: error.message,
+        timestamp: new Date()
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Emergency key rotation (immediate revocation of all old keys)
+   * Use this when keys are compromised
+   */
+  async emergencyRotation(reason, options = {}) {
+    try {
+      console.log(`[JWT Key Rotation] EMERGENCY ROTATION: ${reason}`);
+      
+      // Get all current keys
+      const allKeys = await JWTSecret.find({ status: { $ne: 'revoked' } });
+      
+      // Revoke all existing keys
+      for (const key of allKeys) {
+        await JWTSecret.revokeKey(key.keyId, `Emergency rotation: ${reason}`);
+      }
+      
+      // Create new active key
+      const newKey = await JWTSecret.createKey({
+        activate: true,
+        expiresAt: new Date(Date.now() + (options.keyLifetimeDays || 90) * 24 * 60 * 60 * 1000),
+        rotationType: 'emergency',
+        createdBy: options.createdBy || 'system'
+      });
+      
+      // Refresh cache
+      await this.refreshKeyCache();
+      
+      console.log(`[JWT Key Rotation] Emergency rotation completed. New key: ${newKey.keyId}`);
+      console.warn('[JWT Key Rotation] WARNING: All previous tokens are now invalid. Users must re-authenticate.');
+      
+      this.emitRotationEvent({
+        type: 'emergency_rotation',
+        reason,
+        newKeyId: newKey.keyId,
+        revokedCount: allKeys.length,
+        timestamp: new Date()
+      });
+      
+      return {
+        newKey,
+        revokedCount: allKeys.length,
+        message: 'Emergency rotation completed. All previous tokens invalidated.'
+      };
+    } catch (error) {
+      console.error('[JWT Key Rotation] Emergency rotation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Start automatic key rotation on a schedule
+   */
+  async startAutomaticRotation(intervalDays = 30) {
+    if (this.rotationInterval) {
+      console.log('[JWT Key Rotation] Automatic rotation already running');
+      return;
+    }
+    
+    const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+    
+    console.log(`[JWT Key Rotation] Starting automatic rotation every ${intervalDays} days`);
+    
+    this.rotationInterval = setInterval(async () => {
+      try {
+        console.log('[JWT Key Rotation] Automatic rotation triggered');
+        await this.rotateKeys({ rotationType: 'automatic' });
+      } catch (error) {
+        console.error('[JWT Key Rotation] Automatic rotation failed:', error);
+      }
+    }, intervalMs);
+    
+    // Also schedule cleanup of old revoked keys
+    setInterval(async () => {
+      try {
+        const result = await JWTSecret.cleanupOldKeys(180); // Keep for 6 months
+        if (result.deletedCount > 0) {
+          console.log(`[JWT Key Rotation] Cleaned up ${result.deletedCount} old revoked keys`);
+        }
+      } catch (error) {
+        console.error('[JWT Key Rotation] Cleanup failed:', error);
+      }
+    }, 24 * 60 * 60 * 1000); // Run daily
+  }
+
+  /**
+   * Stop automatic key rotation
+   */
+  stopAutomaticRotation() {
+    if (this.rotationInterval) {
+      clearInterval(this.rotationInterval);
+      this.rotationInterval = null;
+      console.log('[JWT Key Rotation] Automatic rotation stopped');
+    }
+  }
+
+  /**
+   * Get rotation status and statistics
+   */
+  async getRotationStatus() {
+    const activeKey = await JWTSecret.findOne({ status: 'active' });
+    const validKeys = await JWTSecret.find({ status: 'valid' });
+    const revokedKeys = await JWTSecret.find({ status: 'revoked' });
+    
+    const now = new Date();
+    const daysUntilExpiry = activeKey 
+      ? Math.ceil((activeKey.expiresAt - now) / (24 * 60 * 60 * 1000))
+      : null;
+    
+    return {
+      activeKey: activeKey ? {
+        keyId: activeKey.keyId,
+        activatedAt: activeKey.activatedAt,
+        expiresAt: activeKey.expiresAt,
+        daysUntilExpiry,
+        algorithm: activeKey.algorithm
+      } : null,
+      validKeysCount: validKeys.length,
+      revokedKeysCount: revokedKeys.length,
+      automaticRotationEnabled: !!this.rotationInterval,
+      cacheLastUpdated: new Date(this.lastCacheUpdate),
+      initialized: this.initialized
+    };
+  }
+
+  /**
+   * Emit rotation events for monitoring/logging
+   * Override this method to integrate with your monitoring system
+   */
+  emitRotationEvent(event) {
+    // Log to console by default
+    console.log('[JWT Key Rotation Event]', JSON.stringify(event, null, 2));
+    
+    // TODO: Integrate with monitoring system (e.g., CloudWatch, DataDog, etc.)
+    // You can also emit to event bus, send notifications, etc.
+  }
+
+  /**
+   * Validate key health and check for issues
+   */
+  async healthCheck() {
+    const issues = [];
+    const warnings = [];
+    
+    try {
+      // Check for active key
+      const activeKey = await JWTSecret.findOne({ status: 'active' });
+      if (!activeKey) {
+        issues.push('No active key found');
+      } else {
+        // Check expiry
+        const now = new Date();
+        const daysUntilExpiry = Math.ceil((activeKey.expiresAt - now) / (24 * 60 * 60 * 1000));
+        
+        if (daysUntilExpiry < 0) {
+          issues.push(`Active key expired ${Math.abs(daysUntilExpiry)} days ago`);
+        } else if (daysUntilExpiry < 7) {
+          warnings.push(`Active key expires in ${daysUntilExpiry} days`);
+        }
+      }
+      
+      // Check for valid keys
+      const validKeys = await JWTSecret.find({ 
+        status: { $in: ['active', 'valid'] },
+        expiresAt: { $gt: new Date() }
+      });
+      
+      if (validKeys.length === 0) {
+        issues.push('No valid keys available');
+      }
+      
+      // Check cache freshness
+      const cacheAge = Date.now() - this.lastCacheUpdate;
+      if (cacheAge > this.cacheExpiry * 2) {
+        warnings.push('Key cache is stale');
+      }
+      
+      const healthy = issues.length === 0;
+      
+      return {
+        healthy,
+        issues,
+        warnings,
+        status: healthy ? 'OK' : 'CRITICAL',
+        timestamp: new Date()
+      };
+    } catch (error) {
+      return {
+        healthy: false,
+        issues: [`Health check failed: ${error.message}`],
+        warnings: [],
+        status: 'ERROR',
+        timestamp: new Date()
+      };
+    }
+  }
+}
+
+// Create singleton instance
+const keyRotationService = new JWTKeyRotationService();
+
+module.exports = keyRotationService;

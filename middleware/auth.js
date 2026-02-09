@@ -6,6 +6,7 @@ const { createLogger } = require('../utils/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
+const keyRotationService = require('../services/jwtKeyRotationService');
 
 const logger = createLogger('AuthMiddleware');
 
@@ -126,30 +127,71 @@ class AuthMiddleware {
         );
       }
 
-      // Verify JWT token using the same private key as login endpoint
-      const privateKey = process.env.JWT_SECRET;
-      if (!privateKey) {
-        logger.error('JWT_SECRET not properly configured in environment variables');
-        return res.status(500).json(
-          SecureErrorHandler.createErrorResponse(
-            'Server configuration error. Please contact administrator.',
-            500,
-            'MISSING_JWT_SECRET'
-          )
-        );
-      }
+      // Verify JWT token using key rotation service
+      // The service supports multiple keys for zero-downtime rotation
+      let decoded;
+      let verificationError;
       
-      /* Relaxed length check for dev environments
-      if (privateKey.length < 32) {
-         // Log warning but proceed
-         logger.warn('Weak JWT_SECRET in use', { length: privateKey.length });
+      try {
+        // Get all valid keys (active + previous valid keys)
+        const validKeys = await keyRotationService.getValidKeys();
+        
+        if (!validKeys || validKeys.length === 0) {
+          logger.error('No valid JWT keys available for verification');
+          return res.status(500).json(
+            SecureErrorHandler.createErrorResponse(
+              'Server configuration error. Please contact administrator.',
+              500,
+              'NO_VALID_KEYS'
+            )
+          );
+        }
+        
+        // Try to verify with each valid key (most recent first)
+        for (const key of validKeys) {
+          try {
+            decoded = jwt.verify(token, key.secret, {
+              issuer: 'invoice-app',
+              audience: 'invoice-app-users'
+            });
+            
+            // Successfully verified - add key metadata to decoded token
+            decoded._keyId = key.keyId;
+            break;
+          } catch (err) {
+            // Store the error but continue trying other keys
+            verificationError = err;
+            continue;
+          }
+        }
+        
+        // If no key worked, throw the last error
+        if (!decoded) {
+          throw verificationError || new Error('Token verification failed');
+        }
+      } catch (error) {
+        // If key rotation service fails, fallback to environment variable
+        logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
+          error: error.message
+        });
+        
+        const privateKey = process.env.JWT_SECRET;
+        if (!privateKey) {
+          logger.error('JWT_SECRET not properly configured in environment variables');
+          return res.status(500).json(
+            SecureErrorHandler.createErrorResponse(
+              'Server configuration error. Please contact administrator.',
+              500,
+              'MISSING_JWT_SECRET'
+            )
+          );
+        }
+        
+        decoded = jwt.verify(token, privateKey, {
+          issuer: 'invoice-app',
+          audience: 'invoice-app-users'
+        });
       }
-      */
-
-      const decoded = jwt.verify(token, privateKey, {
-        issuer: 'invoice-app',
-        audience: 'invoice-app-users'
-      });
 
       // Validate decoded token structure
       if (!decoded.userId || !decoded.email) {

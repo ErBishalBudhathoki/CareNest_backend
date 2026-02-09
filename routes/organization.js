@@ -77,4 +77,7 @@ router.get('/:organizationId/employees', orgLimiter, organizationContextMiddlewa
 router.get('/:organizationId/branding', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getBranding);
 router.put('/:organizationId/branding', strictLimiter, organizationContextMiddleware, organizationIdValidation, brandingValidation, handleValidationErrors, organizationController.updateBranding);
 
+// Complete Setup
+router.post('/:organizationId/complete-setup', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.completeSetup);
+
 module.exports = router;
