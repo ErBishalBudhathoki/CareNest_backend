@@ -60,6 +60,7 @@ const notesRoutes = require('./notesRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const employeeTrackingRoutes = require('./employeeTracking');
 const scheduleRoutes = require('./schedule'); // Import schedule routes
+const jwtKeyRotationRoutes = require('./jwtKeyRotation'); // JWT Key Rotation admin routes
 
 // Mount Routes
 
@@ -124,6 +125,7 @@ router.use('/notes', notesRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
 router.use('/schedule', scheduleRoutes); // Mount schedule routes
+router.use('/admin/jwt-keys', jwtKeyRotationRoutes); // JWT Key Rotation admin API
 // router.use('/upload', uploadRoutes); // TODO: Add uploadRoutes import if needed
 
 module.exports = router;

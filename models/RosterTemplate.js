@@ -58,7 +58,7 @@ const rosterTemplateSchema = new mongoose.Schema({
   createdBy: String
 }, {
   timestamps: true,
-  collection: 'rosterTemplates',
+  collection: 'roster_templates',
   toJSON: {
     transform: function (doc, ret) {
       ret.id = ret._id.toString();

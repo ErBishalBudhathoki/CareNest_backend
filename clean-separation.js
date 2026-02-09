@@ -6,8 +6,14 @@
  */
 
 const mongoose = require('mongoose');
+require('dotenv').config();
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://bishalkc331:REDACTED_MONGODB_PASSWORD_2@morethaninvoicecluster.xptftb5.mongodb.net/Invoice?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI;
+
+if (!MONGODB_URI) {
+    console.error('Error: MONGODB_URI environment variable is not defined.');
+    process.exit(1);
+}
 
 async function cleanSeparation() {
   try {

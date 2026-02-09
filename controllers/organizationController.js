@@ -302,6 +302,61 @@ class OrganizationController {
       data: organizations
     });
   });
+
+  /**
+   * Complete organization setup
+   * POST /api/organization/:organizationId/complete-setup
+   * Allows admin to update organization details after registration
+   */
+  completeSetup = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+    const {
+      logoUrl,
+      abn,
+      address,
+      contactDetails,
+      bankDetails,
+      ndisRegistration,
+      timesheetReminders,
+      defaultPricingSettings
+    } = req.body;
+
+    // Verify user has permission (must be owner or admin)
+    const userId = req.user?.userId || req.user?.id;
+    const userEmail = req.user?.email;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    // Update organization details
+    const result = await organizationService.updateOrganizationSetup(organizationId, {
+      logoUrl,
+      abn,
+      address,
+      contactDetails,
+      bankDetails,
+      ndisRegistration,
+      timesheetReminders,
+      defaultPricingSettings,
+      updatedBy: userEmail
+    });
+
+    logger.info('Organization setup completed', {
+      organizationId,
+      updatedBy: userEmail,
+      fields: Object.keys(req.body)
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Organization setup completed successfully',
+      data: result
+    });
+  });
 }
 
 module.exports = new OrganizationController();

@@ -46,6 +46,9 @@ service-account.json
 *.jks
 *.keystore
 
+# Secrets
+secrets.json
+
 # Uploads and user content
 uploads/*
 !uploads/.gitkeep

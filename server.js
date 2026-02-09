@@ -8,6 +8,9 @@
 const path = require('path');
 require("dotenv").config({ path: path.join(__dirname, '.env') });
 
+// Load secrets from Google Cloud Secret Manager or local secrets.json
+const { loadSecrets } = require('./config/secretLoader');
+
 const serverless = require("serverless-http");
 const fs = require("fs");
 const { environmentConfig } = require('./config/environment');
@@ -15,6 +18,7 @@ const connectMongoose = require('./config/mongoose');
 const logger = require('./config/logger');
 const { messaging } = require('./firebase-admin-config');
 const { keepAliveService } = require('./utils/keepAlive');
+const keyRotationService = require('./services/jwtKeyRotationService');
 const app = require('./app');
 
 // Global Error Handlers
@@ -77,26 +81,58 @@ else if (require.main === module) {
   const startServer = async () => {
     try {
       console.log('🏁 Starting server initialization...');
+      
+      // 0. Load secrets from Google Cloud Secret Manager or local file
+      console.log('⏳ Loading secrets...');
+      try {
+        await loadSecrets();
+        console.log('✅ Secrets loaded successfully');
+      } catch (error) {
+        logger.warn('⚠️  Failed to load consolidated secrets, using environment variables', {
+          error: error.message
+        });
+      }
+      
       // 1. Connect to Database
       console.log('⏳ Connecting to MongoDB...');
       await connectMongoose();
       console.log('✅ MongoDB Connected');
       
-      // 2. Initialize Background Tasks
+      // 2. Initialize JWT Key Rotation Service
+      console.log('⏳ Initializing JWT key rotation...');
+      try {
+        await keyRotationService.initialize({
+          keyLifetimeDays: process.env.JWT_KEY_LIFETIME_DAYS || 90
+        });
+        
+        // Start automatic rotation if enabled
+        if (process.env.JWT_AUTO_ROTATION_ENABLED !== 'false') {
+          const rotationInterval = parseInt(process.env.JWT_ROTATION_INTERVAL_DAYS || '30');
+          await keyRotationService.startAutomaticRotation(rotationInterval);
+          console.log(`✅ JWT key rotation initialized (auto-rotate every ${rotationInterval} days)`);
+        } else {
+          console.log('✅ JWT key rotation initialized (auto-rotation disabled)');
+        }
+      } catch (error) {
+        logger.error('JWT key rotation initialization failed', { error: error.message });
+        logger.warn('⚠️  Falling back to JWT_SECRET from environment');
+      }
+      
+      // 3. Initialize Background Tasks
       console.log('⏳ Starting schedulers...');
       startSchedulers();
       console.log('⏳ Starting workers...');
       startWorkers();
       console.log('✅ Background tasks initialized');
 
-      // 3. Ensure Uploads Directory
+      // 4. Ensure Uploads Directory
       const uploadsDir = path.join(__dirname, 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
         logger.info(`📁 Created uploads directory: ${uploadsDir}`);
       }
 
-      // 4. Start Listening
+      // 5. Start Listening
       console.log(`⏳ Attempting to bind to port ${PORT}...`);
       app.listen(PORT, '0.0.0.0', async () => {
         console.log('✅ Server bound to port');
@@ -104,7 +140,7 @@ else if (require.main === module) {
         logger.info(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
         console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
 
-        // 5. Post-Startup Checks
+        // 6. Post-Startup Checks
         try {
           await messaging.send({ token: 'dummy-token', data: { type: 'startup_check' } }, true)
             .catch(() => logger.info('Firebase Messaging verified'));
@@ -129,6 +165,15 @@ else if (require.main === module) {
   // Graceful Shutdown
   const shutdown = (signal) => {
     logger.info(`🛑 Received ${signal}, shutting down...`);
+    
+    // Stop key rotation
+    try {
+      keyRotationService.stopAutomaticRotation();
+      logger.info('✅ JWT key rotation stopped');
+    } catch (e) {
+      logger.warn('Failed to stop key rotation', { error: e.message });
+    }
+    
     if (keepAliveService) keepAliveService.stop();
     process.exit(0);
   };
