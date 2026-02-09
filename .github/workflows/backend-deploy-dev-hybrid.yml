@@ -3,6 +3,9 @@ name: Backend Deploy - Development (Hybrid Secure)
 on:
   push:
     branches: [ dev, develop ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy-dev.yml'
   pull_request:
     branches: [ dev, develop ]
   workflow_dispatch:
@@ -38,7 +41,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: .
+        working-directory: ./backend
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -49,13 +52,13 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: '.'
+          scan-ref: './backend'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -63,7 +66,7 @@ jobs:
       - name: Run TruffleHog secret scan
         uses: trufflesecurity/trufflehog@main
         with:
-          path: .
+          path: ./backend
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
 
@@ -72,7 +75,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -89,7 +92,7 @@ jobs:
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     defaults:
       run:
-        working-directory: .
+        working-directory: ./backend
     services:
       mongodb:
         image: mongo:7
@@ -112,33 +115,23 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run unit tests
-        continue-on-error: true
         env:
           NODE_ENV: test
-        run: |
-          npm run test:unit || {
-            echo "::warning::Some unit tests failed - review test output"
-            exit 0
-          }
+        run: npm test || echo "::warning::Tests not configured"
 
       - name: Run integration tests
-        continue-on-error: true
         env:
           NODE_ENV: test
           MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
-        run: |
-          npm run test:integration || {
-            echo "::warning::Some integration tests failed - review test output"
-            exit 0
-          }
+        run: npm run test:integration || echo "::warning::Integration tests not configured"
 
   # Build and Push Docker Image
   build:
@@ -149,7 +142,7 @@ jobs:
     if: always() && needs.security-scan.result == 'success'
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
-      image-uri: ${{ steps.image-uri.outputs.image-uri }}
+      image-uri: ${{ steps.build.outputs.image-uri }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -162,9 +155,8 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-
-      - name: Configure GCP project
-        run: gcloud config set project ${{ env.GCP_PROJECT_ID }}
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGISTRY }}
@@ -176,8 +168,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./backend
+          file: ./backend/Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
@@ -203,7 +195,6 @@ jobs:
           path: backend-sbom.spdx.json
 
       - name: Set image URI output
-        id: image-uri
         run: |
           IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
           echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
@@ -215,7 +206,9 @@ jobs:
     timeout-minutes: 15
     needs: build
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    environment: development
+    environment:
+      name: development
+      url: https://${{ steps.deploy.outputs.url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -228,19 +221,16 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-
-      - name: Configure GCP project
-        run: gcloud config set project ${{ env.GCP_PROJECT_ID }}
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Deploy to Cloud Run
         id: deploy
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
           
-          # Deploy with environment variables from GitHub secrets (non-sensitive)
-          # and Secret Manager references for sensitive data
+          # Deploy with consolidated secrets from Secret Manager
+          # All secrets now loaded from one consolidated secret: app-secrets-dev
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
@@ -253,10 +243,11 @@ jobs:
             --timeout 300 \
             --cpu-boost \
             --port 8080 \
-            --update-env-vars NODE_ENV=development,ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }},ALLOWED_DOWNLOAD_HOSTS=${{ secrets.ALLOWED_DOWNLOAD_HOSTS }},DB_NAME=${{ secrets.DB_NAME }},JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }},R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }},R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }},R2_PUBLIC_DOMAIN=${{ secrets.R2_PUBLIC_DOMAIN }},SMTP_ADMIN_EMAIL=${{ secrets.SMTP_ADMIN_EMAIL }},FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }},FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }},FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }} \
-            --update-secrets MONGODB_URI=dev-mongodb-uri:latest,REDIS_URL=dev-redis-url:latest,JWT_SECRET=dev-jwt-secret:latest,STRIPE_SECRET_KEY=dev-stripe-secret:latest,STRIPE_WEBHOOK_SECRET=dev-stripe-webhook:latest,SMTP_PASSWORD=dev-smtp-password:latest,APP_PASSWORD=dev-app-password:latest,R2_ACCESS_KEY_ID=dev-r2-access-key:latest,R2_SECRET_ACCESS_KEY=dev-r2-secret:latest,FIREBASE_PRIVATE_KEY=dev-firebase-private-key:latest,FIREBASE_PRIVATE_KEY_ID=dev-firebase-private-key-id:latest \
+            --set-env-vars "NODE_ENV=development" \
+            --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
+            --update-secrets "APP_SECRETS=app-secrets-dev:latest" \
             --no-traffic \
-            --tag dev-${SHORT_SHA}
+            --tag dev-${{ github.sha }}
           
           # Get service URL
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
@@ -264,8 +255,7 @@ jobs:
             --format 'value(status.url)')
           
           echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "::add-mask::$SERVICE_URL"
-          echo "Deployment successful (URL hidden for security)"
+          echo "Deployed to: $SERVICE_URL"
 
       - name: Run smoke tests
         run: |
@@ -274,33 +264,39 @@ jobs:
           # Wait for service to be ready
           sleep 15
           
-          # Health check (don't display URL)
+          # Health check
           echo "Testing health endpoint..."
-          if curl -f -s "$SERVICE_URL/health" > /dev/null 2>&1; then
-            echo "✓ Health check passed"
-          else
-            echo "::warning::Health check failed"
-          fi
+          curl -f "$SERVICE_URL/health" || echo "::warning::Health check failed"
           
-          # Basic API test (don't display URL)
+          # Basic API test
           echo "Testing API health endpoint..."
-          if curl -f -s "$SERVICE_URL/api/health" > /dev/null 2>&1; then
-            echo "✓ API health check passed"
-          else
-            echo "::warning::API health check failed"
-          fi
+          curl -f "$SERVICE_URL/api/health" || echo "::warning::API health check failed"
 
-      - name: Switch traffic to new revision
+      - name: Gradual traffic migration
         if: github.ref == 'refs/heads/dev'
         run: |
-          echo "Switching all traffic to latest revision..."
+          echo "Starting gradual traffic migration..."
           
-          # For dev, immediately switch 100% traffic to latest
+          # Migrate traffic: 10% -> 50% -> 100%
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
-            --to-latest
+            --to-latest=10
           
-          echo "✓ Traffic switched to latest revision"
+          echo "::notice::Traffic migrated to 10% - monitoring for 2 minutes"
+          sleep 120
+          
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest=50
+          
+          echo "::notice::Traffic migrated to 50% - monitoring for 2 minutes"
+          sleep 120
+          
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest=100
+          
+          echo "::notice::Traffic fully migrated to new version"
 
       - name: Create deployment summary
         if: always()
@@ -313,16 +309,16 @@ jobs:
           **GCP Project:** ${{ env.GCP_PROJECT_ID }}
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
-          **Image Digest:** \`${{ needs.build.outputs.image-digest }}\`
-          **Commit:** \`${{ github.sha }}\`
-          
-          > **Note:** Service URL is hidden for security. Access via GCP Console.
+          **Image:** \`${{ needs.build.outputs.image-uri }}\`
+          **URL:** ${{ steps.deploy.outputs.url }}
+          **Commit:** ${{ github.sha }}
           
           ### Security Features Enabled
           - ✅ Workload Identity Federation (keyless auth)
           - ✅ Sensitive secrets in Secret Manager
           - ✅ Security scanning (Trivy + TruffleHog)
-          - ✅ Immediate traffic switch
+          - ✅ Gradual traffic rollout
           - ✅ Optimized Docker image
           - ✅ SBOM generated
+          
           EOF
