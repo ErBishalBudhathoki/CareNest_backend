@@ -5,9 +5,11 @@ const logger = require('../config/logger');
 const User = require('../models/User');
 const FcmToken = require('../models/FcmToken');
 const UserOrganization = require('../models/UserOrganization');
+const Organization = require('../models/Organization');
 const authService = require('../services/authService');
 const SecureErrorHandler = require('../utils/errorHandler');
 const { messaging } = require('../firebase-admin-config');
+const keyRotationService = require('../services/jwtKeyRotationService');
 
 /**
  * Secure Authentication Controller
@@ -32,7 +34,7 @@ class SecureAuthController {
       );
     }
 
-    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, phone } = req.body;
+    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, organizationName, isOwner, phone } = req.body;
 
     // 2. LOGIC CHECK
     if (password !== confirmPassword) {
@@ -66,11 +68,75 @@ class SecureAuthController {
       organizationCode,
       organizationId: organizationId || null,
       phone: phone || null,
-      role: 'user'
+      role: isOwner ? 'admin' : 'user'
     });
 
+    let createdOrganization = null;
+
+    // 5. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
+    if (isOwner || (!organizationId && !organizationCode)) {
+      try {
+        // Generate unique 6-character organization code
+        const generateOrgCode = () => {
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+          let code = '';
+          for (let i = 0; i < 6; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          return code;
+        };
+
+        let orgCode = generateOrgCode();
+        // Ensure uniqueness
+        while (await Organization.findOne({ code: orgCode })) {
+          orgCode = generateOrgCode();
+        }
+
+        createdOrganization = await Organization.create({
+          name: organizationName || `${firstName} ${lastName}'s Organization`,
+          code: orgCode,
+          ownerEmail: email,
+          contactDetails: {
+            email: email,
+            phone: phone || null
+          },
+          isActive: true,
+          createdAt: new Date()
+        });
+
+        // Update user with organization ID
+        newUser.organizationId = createdOrganization._id.toString();
+        newUser.organizationCode = orgCode;
+        newUser.role = 'admin';
+        await newUser.save();
+
+        // Create UserOrganization with owner role
+        await UserOrganization.create({
+          userId: newUser._id.toString(),
+          organizationId: createdOrganization._id.toString(),
+          role: 'owner',
+          permissions: ['all'],
+          isActive: true,
+          joinedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+
+        logger.info('Auto-created organization for new owner', {
+          userId: newUser._id.toString(),
+          organizationId: createdOrganization._id.toString(),
+          organizationCode: orgCode
+        });
+      } catch (orgError) {
+        logger.error('Failed to auto-create organization', {
+          userId: newUser._id.toString(),
+          error: orgError.message
+        });
+        // Don't fail registration, but log the error
+      }
+    }
     // 5. CREATE USER ORGANIZATION RECORD (Zero-Trust requirement)
-    if (organizationId) {
+    else if (organizationId) {
       try {
         await UserOrganization.create({
           userId: newUser._id.toString(),
@@ -111,7 +177,15 @@ class SecureAuthController {
           userId: newUser._id.toString(),
           email: newUser.email,
           firstName: newUser.firstName,
-          lastName: newUser.lastName
+          lastName: newUser.lastName,
+          ...(createdOrganization && {
+            organization: {
+              id: createdOrganization._id.toString(),
+              name: createdOrganization.name,
+              code: createdOrganization.code
+            }
+          }),
+          organizationId: newUser.organizationId
         },
         'User registered successfully. Please verify your email.'
       )
@@ -416,15 +490,42 @@ class SecureAuthController {
       organizationId: user.organizationId
     };
 
-    const token = jwt.sign(
-      tokenPayload,
-      process.env.JWT_SECRET,
-      {
-        expiresIn: process.env.JWT_EXPIRES_IN || '24h',
-        issuer: 'invoice-app',
-        audience: 'invoice-app-users'
-      }
-    );
+    // Use key rotation service to get the current active key
+    let token;
+    try {
+      const activeKey = await keyRotationService.getActiveKey();
+      
+      token = jwt.sign(
+        tokenPayload,
+        activeKey.secret,
+        {
+          expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+          issuer: 'invoice-app',
+          audience: 'invoice-app-users',
+          keyid: activeKey.keyId // Add key ID to JWT header for identification
+        }
+      );
+      
+      logger.info('Token generated with key rotation', {
+        keyId: activeKey.keyId,
+        userId: user._id?.toString()
+      });
+    } catch (error) {
+      // Fallback to environment variable if key rotation service fails
+      logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
+        error: error.message
+      });
+      
+      token = jwt.sign(
+        tokenPayload,
+        process.env.JWT_SECRET,
+        {
+          expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+          issuer: 'invoice-app',
+          audience: 'invoice-app-users'
+        }
+      );
+    }
 
     logger.business('User logged in', {
       action: 'USER_LOGIN',
