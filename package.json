@@ -26,7 +26,9 @@
     "secrets:list:prod": "node scripts/upload-secrets.js list-prod",
     "secrets:cleanup:dev": "node scripts/cleanup-old-secrets.js dev",
     "secrets:cleanup:prod": "node scripts/cleanup-old-secrets.js prod",
-    "secrets:cleanup:all": "node scripts/cleanup-old-secrets.js all"
+    "secrets:cleanup:all": "node scripts/cleanup-old-secrets.js all",
+    "secrets:restore:dev": "node scripts/restore-individual-secrets.js dev",
+    "secrets:restore:prod": "node scripts/restore-individual-secrets.js prod"
   },
   "keywords": [
     "invoice",
