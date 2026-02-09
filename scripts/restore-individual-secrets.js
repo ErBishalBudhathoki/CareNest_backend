@@ -107,6 +107,49 @@ async function checkGcloudAuth(projectId) {
   }
 }
 
+// Legacy secret name mapping (Cloud Run expects these specific names)
+const LEGACY_NAME_MAPPING = {
+  // Database
+  'MONGODB_URI': 'dev-mongodb-uri',
+  'MONGOD_URI': 'dev-mongodb-uri', // Handle alternative key name
+  'REDIS_URL': 'dev-redis-url',
+  
+  // Auth
+  'JWT_SECRET': 'dev-jwt-secret',
+  
+  // Payment
+  'STRIPE_SECRET_KEY': 'dev-stripe-secret',
+  'STRIPE_WEBHOOK_SECRET': 'dev-stripe-webhook',
+  
+  // Email
+  'SMTP_PASSWORD': 'dev-smtp-password',
+  'APP_PASSWORD': 'dev-app-password',
+  
+  // Storage
+  'R2_ACCESS_KEY_ID': 'dev-r2-access-key',
+  'R2_SECRET_ACCESS_KEY': 'dev-r2-secret',
+  
+  // Firebase
+  'FIREBASE_PRIVATE_KEY': 'dev-firebase-private-key',
+  'FIREBASE_PRIVATE_KEY_ID': 'dev-firebase-private-key-id'
+};
+
+// Production mapping (assumed pattern, adjust if needed)
+const PROD_LEGACY_NAME_MAPPING = {
+  'MONGODB_URI': 'prod-mongodb-uri',
+  'MONGOD_URI': 'prod-mongodb-uri', // Handle alternative key name
+  'REDIS_URL': 'prod-redis-url',
+  'JWT_SECRET': 'prod-jwt-secret',
+  'STRIPE_SECRET_KEY': 'prod-stripe-secret',
+  'STRIPE_WEBHOOK_SECRET': 'prod-stripe-webhook',
+  'SMTP_PASSWORD': 'prod-smtp-password',
+  'APP_PASSWORD': 'prod-app-password',
+  'R2_ACCESS_KEY_ID': 'prod-r2-access-key',
+  'R2_SECRET_ACCESS_KEY': 'prod-r2-secret',
+  'FIREBASE_PRIVATE_KEY': 'prod-firebase-private-key',
+  'FIREBASE_PRIVATE_KEY_ID': 'prod-firebase-private-key-id'
+};
+
 /**
  * Check if a secret exists
  */
@@ -226,16 +269,31 @@ async function restoreSecretsForEnvironment(environment, secrets) {
   const secretKeys = Object.keys(envSecrets);
   const secretCount = secretKeys.length;
   
-  log(`\nFound ${secretCount} secrets to restore. Starting process...`, 'blue');
+  // Determine which mapping to use
+  const mapping = environment === 'development' ? LEGACY_NAME_MAPPING : PROD_LEGACY_NAME_MAPPING;
+  
+  log(`\nFound ${secretCount} secrets in secrets.json.`, 'blue');
+  log(`Restoring ONLY the ${Object.keys(mapping).length} legacy secrets required by Cloud Run...`, 'blue');
   
   let successCount = 0;
   let failCount = 0;
+  let skippedCount = 0;
 
   for (const key of secretKeys) {
     const value = envSecrets[key];
     
+    // Check if this secret has a legacy mapping
+    const legacyName = mapping[key];
+    
+    if (!legacyName) {
+        // Not a legacy secret, skip it
+        continue;
+    }
+    
+    log(`Restoring ${key} -> ${legacyName}...`, 'cyan');
+
     // 1. Create Secret (if not exists)
-    const created = await createSecret(key, config.projectId);
+    const created = await createSecret(legacyName, config.projectId);
     if (!created) {
         failCount++;
         continue;
@@ -244,24 +302,25 @@ async function restoreSecretsForEnvironment(environment, secrets) {
     // 2. Add Version
     if (value === '' || value === null || value === undefined) {
         log(`Skipping empty secret: ${key}`, 'yellow');
-        successCount++; // Treat as success (skipped)
+        skippedCount++; 
         continue;
     }
 
-    const versionAdded = await addSecretVersion(key, value, config.projectId);
+    const versionAdded = await addSecretVersion(legacyName, value, config.projectId);
     if (!versionAdded) {
         failCount++;
         continue;
     }
 
     // 3. Grant Access
-    await grantSecretAccess(key, config.projectId);
+    await grantSecretAccess(legacyName, config.projectId);
     
     successCount++;
   }
   
   log(`\n\nResults:`, 'bright');
   log(`✓ Successfully restored: ${successCount}`, 'green');
+  if (skippedCount > 0) log(`- Skipped (empty): ${skippedCount}`, 'yellow');
   if (failCount > 0) {
     log(`✗ Failed: ${failCount}`, 'red');
   }
