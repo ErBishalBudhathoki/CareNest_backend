@@ -224,6 +224,13 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Restore Individual Secrets (Compatibility)
+        run: |
+          # Restore individual secrets to support legacy Cloud Run bindings
+          # This ensures deployment succeeds even if the service expects old secret format
+          npm run secrets:restore:dev
+        continue-on-error: true
+
       - name: Deploy to Cloud Run
         id: deploy
         run: |
