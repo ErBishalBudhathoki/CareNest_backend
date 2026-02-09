@@ -195,6 +195,11 @@ class SecretLoader {
         process.env[key] = String(value);
       }
     }
+    
+    // Normalize keys (handle legacy variable names)
+    if (!process.env.MONGODB_URI && process.env.MONGOD_URI) {
+      process.env.MONGODB_URI = process.env.MONGOD_URI;
+    }
   }
 
   /**
