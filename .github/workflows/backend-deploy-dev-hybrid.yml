@@ -291,28 +291,11 @@ jobs:
       - name: Gradual traffic migration
         if: github.ref == 'refs/heads/dev'
         run: |
-          echo "Starting gradual traffic migration..."
-          
-          # Migrate traffic: 10% -> 50% -> 100%
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
-            --to-latest=10
-          
-          echo "::notice::Traffic migrated to 10% - monitoring for 2 minutes"
-          sleep 120
-          
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --to-latest=50
-          
-          echo "::notice::Traffic migrated to 50% - monitoring for 2 minutes"
-          sleep 120
-          
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --to-latest=100
-          
-          echo "::notice::Traffic fully migrated to new version"
+            --to-latest
+
+          echo "::notice::Traffic migrated to latest revision"
 
       - name: Create deployment summary
         if: always()
