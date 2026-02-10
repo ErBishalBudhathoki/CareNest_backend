@@ -243,7 +243,7 @@ jobs:
       - name: Verify consolidated Secret Manager secret exists
         shell: bash
         env:
-          GHA_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          GHA_SERVICE_ACCOUNT: github-actions-dev@invoice-660f3.iam.gserviceaccount.com
         run: |
           set -euo pipefail
           if gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
