@@ -80,17 +80,6 @@ else if (require.main === module) {
   const startServer = async () => {
     try {
       console.log('🏁 Starting server initialization...');
-      
-      // 0. Load secrets from Google Cloud Secret Manager or local file
-      console.log('⏳ Loading secrets...');
-      try {
-        await loadSecrets();
-        console.log('✅ Secrets loaded successfully');
-      } catch (error) {
-        logger.warn('⚠️  Failed to load consolidated secrets, using environment variables', {
-          error: error.message
-        });
-      }
 
       const uploadsDir = path.join(__dirname, 'uploads');
       if (!fs.existsSync(uploadsDir)) {
@@ -107,6 +96,16 @@ else if (require.main === module) {
       });
 
       (async () => {
+        console.log('⏳ Loading secrets...');
+        try {
+          await loadSecrets();
+          console.log('✅ Secrets loaded successfully');
+        } catch (error) {
+          logger.warn('⚠️  Failed to load consolidated secrets, using environment variables', {
+            error: error.message
+          });
+        }
+
         const maxDelayMs = 30000;
         let attempt = 0;
 
