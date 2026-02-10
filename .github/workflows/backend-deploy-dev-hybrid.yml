@@ -223,6 +223,23 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Sync consolidated secret from DEV_SECRETS_JSON (optional)
+        shell: bash
+        env:
+          DEV_SECRETS_JSON: ${{ secrets.DEV_SECRETS_JSON }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEV_SECRETS_JSON}" ]; then
+            echo "DEV_SECRETS_JSON not set; skipping secret sync"
+            exit 0
+          fi
+
+          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1 || \
+            gcloud secrets create "${CONSOLIDATED_SECRET_NAME}" --replication-policy="automatic" --project="${GCP_PROJECT_ID}"
+
+          printf '%s' "${DEV_SECRETS_JSON}" | gcloud secrets versions add "${CONSOLIDATED_SECRET_NAME}" --data-file=- --project="${GCP_PROJECT_ID}"
+
       - name: Verify consolidated Secret Manager secret exists
         shell: bash
         run: |
