@@ -57,7 +57,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -122,7 +122,7 @@ jobs:
       - name: Run unit tests
         env:
           NODE_ENV: test
-        run: npm test || echo "::warning::Tests not configured"
+        run: npm run test:unit
 
       - name: Run integration tests
         env:
@@ -130,7 +130,7 @@ jobs:
           MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
-        run: npm run test:integration || echo "::warning::Integration tests not configured"
+        run: npm run test:integration
 
   # Build and Push Docker Image
   build:
@@ -208,7 +208,6 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     environment:
       name: development
-      url: ${{ steps.deploy.outputs.url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -226,8 +225,6 @@ jobs:
 
       - name: Verify consolidated Secret Manager secret exists
         shell: bash
-        env:
-          GHA_SERVICE_ACCOUNT: github-actions-dev@invoice-660f3.iam.gserviceaccount.com
         run: |
           set -euo pipefail
           gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
@@ -246,12 +243,13 @@ jobs:
         id: deploy
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
+          PREVIEW_TAG="preview"
           
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
             --platform managed \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
             --min-instances 0 \
             --max-instances 10 \
@@ -264,30 +262,46 @@ jobs:
             --set-env-vars "NODE_ENV=development" \
             --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+            --tag "$PREVIEW_TAG" \
             --no-traffic
           
           # Get service URL
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
             --format 'value(status.url)')
+
+          PREVIEW_URL="${SERVICE_URL/https:\/\//https:\/\/${PREVIEW_TAG}---}"
           
           echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "Deployed to: $SERVICE_URL"
+          echo "preview-url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+          echo "Deployed service URL resolved"
+
+      - name: Grant GitHub deployer invocation access (Dev)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services add-iam-policy-binding "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.REGION }}" \
+            --member="serviceAccount:${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --role="roles/run.invoker"
 
       - name: Run smoke tests
         run: |
-          SERVICE_URL="${{ steps.deploy.outputs.url }}"
+          PREVIEW_URL="${{ steps.deploy.outputs.preview-url }}"
           
           # Wait for service to be ready
           sleep 15
+
+          TOKEN=$(gcloud auth print-identity-token --audiences="$PREVIEW_URL")
           
           # Health check
           echo "Testing health endpoint..."
-          curl -f "$SERVICE_URL/health" || echo "::warning::Health check failed"
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$PREVIEW_URL/health"
           
           # Basic API test
           echo "Testing API health endpoint..."
-          curl -f "$SERVICE_URL/api/health" || echo "::warning::API health check failed"
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$PREVIEW_URL/api/health"
 
       - name: Gradual traffic migration
         if: github.ref == 'refs/heads/dev'
@@ -334,7 +348,7 @@ jobs:
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
           **Image:** \`${{ needs.build.outputs.image-uri }}\`
-          **URL:** ${{ steps.deploy.outputs.url }}
+          **URL:** (Cloud Run service is IAM-protected; URL omitted)
           **Commit:** ${{ github.sha }}
           
           ### Security Features Enabled
