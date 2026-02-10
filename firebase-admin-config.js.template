@@ -6,7 +6,8 @@ require('dotenv').config();
 
 // Environment-based logging configuration
 const isProduction = environmentConfig.isProductionEnvironment();
-const shouldLogSensitive = environmentConfig.shouldLogSensitiveData();
+const runningInCloudRun = !!process.env.K_SERVICE;
+const shouldLogSensitive = environmentConfig.shouldLogSensitiveData() && !runningInCloudRun;
 
 // Safe logging function that respects environment
 function safeLog(message, data = null, level = 'info') {
@@ -25,14 +26,7 @@ function safeLog(message, data = null, level = 'info') {
 safeLog('Firebase config - Current directory:', process.cwd());
 safeLog(`Firebase config - Environment: ${environmentConfig.getEnvironment()}`);
 
-// Debug information for troubleshooting (development only)
-if (shouldLogSensitive) {
-  safeLog('DEBUG: process.env.FIREBASE_PRIVATE_KEY (length):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.length : 0, 'debug');
-  safeLog('DEBUG: process.env.FIREBASE_PRIVATE_KEY (first 50 chars):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.substring(0, 50) : 'undefined', 'debug');
-  safeLog('DEBUG: process.env.FIREBASE_PRIVATE_KEY (last 50 chars):', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.slice(-50) : 'undefined', 'debug');
-} else {
-  safeLog('Firebase private key configuration: [CONFIGURED]');
-}
+safeLog('Firebase private key length:', process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.length : 0);
 
 // Check if environment variables are set
 const envCheck = {
@@ -88,6 +82,8 @@ function formatPrivateKey(key) {
   return key;
 }
 
+let firebaseInitError;
+
 // Initialize Firebase Admin SDK
 try {
   if (process.env.FIREBASE_PRIVATE_KEY) {
@@ -124,14 +120,29 @@ try {
   
   safeLog('Firebase Admin SDK initialized successfully');
 } catch (error) {
+  firebaseInitError = error;
   console.error('Error initializing Firebase Admin SDK:', error.message);
-  throw error; // Re-throw to fail the application startup if Firebase is critical
 }
 
 // Set up messaging service
-safeLog('Setting up FCM messaging service...');
-const messaging = admin.messaging();
-safeLog('FCM messaging service initialized successfully');
+let messaging;
+if (!firebaseInitError) {
+  safeLog('Setting up FCM messaging service...');
+  messaging = admin.messaging();
+  safeLog('FCM messaging service initialized successfully');
+} else {
+  messaging = {
+    send: async () => {
+      throw new Error('Firebase Admin SDK is not initialized');
+    },
+    sendEachForMulticast: async () => {
+      throw new Error('Firebase Admin SDK is not initialized');
+    },
+    sendMulticast: async () => {
+      throw new Error('Firebase Admin SDK is not initialized');
+    }
+  };
+}
 
 // Export both admin and messaging for use in other modules
 module.exports = { admin, messaging };
