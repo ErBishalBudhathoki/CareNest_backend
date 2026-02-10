@@ -16,7 +16,6 @@ const fs = require("fs");
 const { environmentConfig } = require('./config/environment');
 const connectMongoose = require('./config/mongoose');
 const logger = require('./config/logger');
-const { messaging } = require('./firebase-admin-config');
 const { keepAliveService } = require('./utils/keepAlive');
 const keyRotationService = require('./services/jwtKeyRotationService');
 const app = require('./app');
@@ -92,67 +91,84 @@ else if (require.main === module) {
           error: error.message
         });
       }
-      
-      // 1. Connect to Database
-      console.log('⏳ Connecting to MongoDB...');
-      await connectMongoose();
-      console.log('✅ MongoDB Connected');
-      
-      // 2. Initialize JWT Key Rotation Service
-      console.log('⏳ Initializing JWT key rotation...');
-      try {
-        await keyRotationService.initialize({
-          keyLifetimeDays: process.env.JWT_KEY_LIFETIME_DAYS || 90
-        });
-        
-        // Start automatic rotation if enabled
-        if (process.env.JWT_AUTO_ROTATION_ENABLED !== 'false') {
-          const rotationInterval = parseInt(process.env.JWT_ROTATION_INTERVAL_DAYS || '30');
-          await keyRotationService.startAutomaticRotation(rotationInterval);
-          console.log(`✅ JWT key rotation initialized (auto-rotate every ${rotationInterval} days)`);
-        } else {
-          console.log('✅ JWT key rotation initialized (auto-rotation disabled)');
-        }
-      } catch (error) {
-        logger.error('JWT key rotation initialization failed', { error: error.message });
-        logger.warn('⚠️  Falling back to JWT_SECRET from environment');
-      }
-      
-      // 3. Initialize Background Tasks
-      console.log('⏳ Starting schedulers...');
-      startSchedulers();
-      console.log('⏳ Starting workers...');
-      startWorkers();
-      console.log('✅ Background tasks initialized');
 
-      // 4. Ensure Uploads Directory
       const uploadsDir = path.join(__dirname, 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
         logger.info(`📁 Created uploads directory: ${uploadsDir}`);
       }
-
-      // 5. Start Listening
+      
       console.log(`⏳ Attempting to bind to port ${PORT}...`);
       app.listen(PORT, '0.0.0.0', async () => {
         console.log('✅ Server bound to port');
         logger.info(`🚀 ${environmentConfig.getConfig().app.name} running on port ${PORT}`);
         logger.info(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
         console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
+      });
 
-        // 6. Post-Startup Checks
+      (async () => {
+        const maxDelayMs = 30000;
+        let attempt = 0;
+
+        while (true) {
+          try {
+            attempt += 1;
+            console.log('⏳ Connecting to MongoDB...');
+            await connectMongoose();
+            console.log('✅ MongoDB Connected');
+            break;
+          } catch (error) {
+            const delayMs = Math.min(maxDelayMs, 1000 * Math.pow(2, attempt));
+            logger.error('MongoDB connection failed; retrying', {
+              attempt,
+              delayMs,
+              error: error.message
+            });
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
+        }
+
+        console.log('⏳ Initializing JWT key rotation...');
         try {
+          await keyRotationService.initialize({
+            keyLifetimeDays: process.env.JWT_KEY_LIFETIME_DAYS || 90
+          });
+
+          if (process.env.JWT_AUTO_ROTATION_ENABLED !== 'false') {
+            const rotationInterval = parseInt(process.env.JWT_ROTATION_INTERVAL_DAYS || '30');
+            await keyRotationService.startAutomaticRotation(rotationInterval);
+            console.log(`✅ JWT key rotation initialized (auto-rotate every ${rotationInterval} days)`);
+          } else {
+            console.log('✅ JWT key rotation initialized (auto-rotation disabled)');
+          }
+        } catch (error) {
+          logger.error('JWT key rotation initialization failed', { error: error.message });
+          logger.warn('⚠️  Falling back to JWT_SECRET from environment');
+        }
+
+        console.log('⏳ Starting schedulers...');
+        startSchedulers();
+        console.log('⏳ Starting workers...');
+        startWorkers();
+        console.log('✅ Background tasks initialized');
+
+        try {
+          const { messaging } = require('./firebase-admin-config');
           await messaging.send({ token: 'dummy-token', data: { type: 'startup_check' } }, true)
             .catch(() => logger.info('Firebase Messaging verified'));
-          
+        } catch (e) {
+          logger.warn('Firebase messaging verification skipped', { error: e.message });
+        }
+
+        try {
           if (!environmentConfig.isDevelopmentEnvironment()) {
             const serverUrl = process.env.RENDER_EXTERNAL_URL || 'https://more-than-invoice.onrender.com';
             keepAliveService.initialize(serverUrl);
           }
         } catch (e) {
-          logger.warn('Startup verification warning', { error: e.message });
+          logger.warn('Keep-alive initialization skipped', { error: e.message });
         }
-      });
+      })();
 
     } catch (error) {
       logger.error('Server startup failed', { error: error.message, stack: error.stack });
