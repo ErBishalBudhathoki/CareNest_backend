@@ -224,12 +224,16 @@ jobs:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Sync consolidated secret from GitHub Secret (DEV_SECRETS_JSON)
-        if: ${{ secrets.DEV_SECRETS_JSON != '' }}
         shell: bash
         env:
           DEV_SECRETS_JSON: ${{ secrets.DEV_SECRETS_JSON }}
         run: |
           set -euo pipefail
+
+          if [ -z "${DEV_SECRETS_JSON}" ]; then
+            echo "DEV_SECRETS_JSON not set; skipping secret sync"
+            exit 0
+          fi
 
           gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1 || \
             gcloud secrets create "${CONSOLIDATED_SECRET_NAME}" --replication-policy="automatic" --project="${GCP_PROJECT_ID}"
