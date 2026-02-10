@@ -223,27 +223,11 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Write scripts/secrets.json from GitHub Secret (optional)
-        if: ${{ secrets.DEV_SECRETS_JSON != '' }}
+      - name: Verify consolidated Secret Manager secret exists
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scripts
-          cat > scripts/secrets.json <<'EOF'
-          ${{ secrets.DEV_SECRETS_JSON }}
-          EOF
-
-      - name: Ensure consolidated Secret Manager secret exists
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ ! -f "scripts/secrets.json" ]; then
-            echo "::error::Missing scripts/secrets.json and secrets.DEV_SECRETS_JSON. Provide one to create/update ${CONSOLIDATED_SECRET_NAME}."
-            exit 1
-          fi
-
-          node scripts/upload-secrets.js dev
+          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
 
       - name: Grant Cloud Run runtime access to consolidated secret
         shell: bash
