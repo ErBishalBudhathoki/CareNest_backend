@@ -260,6 +260,7 @@ jobs:
             --timeout 300 \
             --cpu-boost \
             --port 8080 \
+            --remove-secrets APP_SECRETS \
             --set-env-vars "NODE_ENV=development" \
             --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
