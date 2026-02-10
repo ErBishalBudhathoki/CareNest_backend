@@ -263,8 +263,7 @@ jobs:
             --set-env-vars "NODE_ENV=development" \
             --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
-            --no-traffic \
-            --tag dev-${{ github.sha }}
+            --no-traffic
           
           # Get service URL
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
