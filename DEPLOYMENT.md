@@ -31,41 +31,40 @@ Go to your GitHub Repository > **Settings** > **Secrets and variables** > **Acti
 
 Add the following secrets:
 
-### Deployment Secrets
-| Secret Name | Value |
-|-------------|-------|
-| `GCP_PROJECT_ID` | Your Google Cloud Project ID (e.g., `invoice-backend-123`) |
-| `GCP_SA_KEY` | Paste the entire content of the JSON Key file downloaded in Step 1 |
+### Deployment Secrets (Workload Identity Federation)
 
-### Application Environment Secrets
-These secrets will be injected into the application environment at runtime.
+This repo deploys with **keyless auth** using Workload Identity Federation (no JSON keys stored in GitHub).
 
 | Secret Name | Description |
 |-------------|-------------|
-| `MONGODB_URI` | Connection string for your production MongoDB |
-| `JWT_SECRET` | Strong secret key for signing tokens |
-| `REDIS_URL` | URL for your Redis instance (required for rate limiting) |
-| `BACKEND_URL` | The URL of your deployed service (e.g. `https://invoice-backend-xyz.a.run.app`) |
-| `FIREBASE_PROJECT_ID` | Your Firebase Project ID |
-| `FIREBASE_CLIENT_EMAIL`| Firebase Service Account Email |
-| `FIREBASE_PRIVATE_KEY` | Firebase Private Key (include `-----BEGIN PRIVATE KEY-----`) |
-| `SMTP_PASSWORD` | Password/App Password for email service |
-| `R2_ACCOUNT_ID` | (Optional) Cloudflare R2 Account ID |
-| `R2_ACCESS_KEY_ID` | (Optional) Cloudflare R2 Access Key |
-| `R2_SECRET_ACCESS_KEY` | (Optional) Cloudflare R2 Secret Key |
-| `R2_BUCKET_NAME` | (Optional) R2 Bucket Name |
-| `R2_PUBLIC_DOMAIN` | (Optional) R2 Public Domain |
+| `WIF_PROVIDER` | Workload identity provider resource for dev deployments |
+| `WIF_SERVICE_ACCOUNT` | Service account email used by GitHub Actions for dev |
+| `PROD_WIF_PROVIDER` | Workload identity provider resource for production deployments |
+| `PROD_WIF_SERVICE_ACCOUNT` | Service account email used by GitHub Actions for production |
+
+### Application Secrets
+
+Application secrets are stored in **Google Secret Manager** as a single JSON blob per environment:
+
+- `app-secrets-dev` in project `invoice-660f3`
+- `app-secrets-prod` in project `carenest-prod`
+
+Cloud Run receives `CONSOLIDATED_SECRET_NAME` + `GCP_PROJECT_ID` and loads secrets at runtime.
 
 ## 3. Deployment Workflow
 
 The deployment is automated via GitHub Actions:
 
-1.  **Trigger**: Push code to the `main` branch.
+1.  **Trigger**: Push code to the `dev` branch (development) or `main` (production).
 2.  **Process**:
     *   Code is checked out.
     *   Docker image is built using `backend/Dockerfile`.
     *   Image is pushed to Google Artifact Registry.
     *   Service is deployed to Cloud Run.
+
+### Dev URL access
+
+Development is configured as **IAM-protected** (not publicly invokable). Smoke tests use an identity token to validate the tagged revision.
 
 ### Scale to Zero
 The service is configured with `--min-instances=0`. This means:

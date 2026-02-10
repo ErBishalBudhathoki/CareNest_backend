@@ -150,7 +150,7 @@ jobs:
     needs: [security-scan, test]
     if: needs.security-scan.result == 'success' && needs.test.result == 'success'
     outputs:
-      image-uri: ${{ steps.build.outputs.image-uri }}
+      image-uri: ${{ steps.set_image_uri.outputs.image-uri }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -211,6 +211,7 @@ jobs:
           exit-code: '1'  # Block on vulnerabilities
 
       - name: Set image URI output
+        id: set_image_uri
         run: |
           IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
           echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
