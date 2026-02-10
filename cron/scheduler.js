@@ -5,11 +5,9 @@ const { InvoiceStatus, PaymentStatus } = require('../models/invoiceSchema');
 // const emailService = require('../services/emailService'); // Assuming this exists
 const logger = require('../config/logger');
 
-const uri = process.env.MONGODB_URI;
-
 class Scheduler {
   constructor() {
-    this.client = new MongoClient(uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+    this.client = null;
   }
 
   start() {
@@ -36,6 +34,13 @@ class Scheduler {
   }
 
   async getDb() {
+    if (!this.client) {
+      const uri = process.env.MONGODB_URI;
+      if (!uri) {
+        throw new Error('MONGODB_URI is not configured');
+      }
+      this.client = new MongoClient(uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+    }
     if (!this.client.topology || !this.client.topology.isConnected()) {
       await this.client.connect();
     }
@@ -185,9 +190,17 @@ class Scheduler {
   }
 }
 
-const schedulerInstance = new Scheduler();
+let schedulerInstance;
 
-// Export instance and individual methods for Cloud Scheduler
-module.exports = schedulerInstance;
-module.exports.processRecurringInvoices = schedulerInstance.processRecurringInvoices.bind(schedulerInstance);
-module.exports.processOverdueReminders = schedulerInstance.processOverdueReminders.bind(schedulerInstance);
+function getScheduler() {
+  if (!schedulerInstance) {
+    schedulerInstance = new Scheduler();
+  }
+  return schedulerInstance;
+}
+
+module.exports = {
+  start: () => getScheduler().start(),
+  processRecurringInvoices: () => getScheduler().processRecurringInvoices(),
+  processOverdueReminders: () => getScheduler().processOverdueReminders()
+};
