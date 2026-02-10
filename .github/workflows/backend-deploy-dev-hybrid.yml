@@ -242,9 +242,19 @@ jobs:
 
       - name: Verify consolidated Secret Manager secret exists
         shell: bash
+        env:
+          GHA_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
-          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
+          if gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          echo "::error::Cannot access ${CONSOLIDATED_SECRET_NAME} in ${GCP_PROJECT_ID}." \
+            "It either does not exist or ${GHA_SERVICE_ACCOUNT} lacks Secret Manager permissions."
+          echo "::error::Fix: grant ${GHA_SERVICE_ACCOUNT} the role roles/secretmanager.admin (dev)" \
+            "and set DEV_SECRETS_JSON (dev secrets payload) OR create ${CONSOLIDATED_SECRET_NAME} manually."
+          exit 1
 
       - name: Grant Cloud Run runtime access to consolidated secret
         shell: bash
