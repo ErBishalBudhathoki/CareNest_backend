@@ -223,52 +223,23 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Sync consolidated secret from GitHub Secret (DEV_SECRETS_JSON)
-        shell: bash
-        env:
-          DEV_SECRETS_JSON: ${{ secrets.DEV_SECRETS_JSON }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${DEV_SECRETS_JSON}" ]; then
-            echo "DEV_SECRETS_JSON not set; skipping secret sync"
-            exit 0
-          fi
-
-          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1 || \
-            gcloud secrets create "${CONSOLIDATED_SECRET_NAME}" --replication-policy="automatic" --project="${GCP_PROJECT_ID}"
-
-          printf '%s' "${DEV_SECRETS_JSON}" | gcloud secrets versions add "${CONSOLIDATED_SECRET_NAME}" --data-file=- --project="${GCP_PROJECT_ID}"
-
-          gcloud secrets add-iam-policy-binding "${CONSOLIDATED_SECRET_NAME}" \
-            --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
-            --role="roles/secretmanager.secretAccessor" \
-            --project="${GCP_PROJECT_ID}" || true
-
       - name: Verify consolidated Secret Manager secret exists
         shell: bash
         env:
           GHA_SERVICE_ACCOUNT: github-actions-dev@invoice-660f3.iam.gserviceaccount.com
         run: |
           set -euo pipefail
-          if gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
-            exit 0
-          fi
-
-          echo "::error::Cannot access ${CONSOLIDATED_SECRET_NAME} in ${GCP_PROJECT_ID}." \
-            "It either does not exist or ${GHA_SERVICE_ACCOUNT} lacks Secret Manager permissions."
-          echo "::error::Fix: grant ${GHA_SERVICE_ACCOUNT} the role roles/secretmanager.admin (dev)" \
-            "and set DEV_SECRETS_JSON (dev secrets payload) OR create ${CONSOLIDATED_SECRET_NAME} manually."
-          exit 1
+          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
 
       - name: Grant Cloud Run runtime access to consolidated secret
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           gcloud secrets add-iam-policy-binding "${CONSOLIDATED_SECRET_NAME}" \
             --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
             --role="roles/secretmanager.secretAccessor" \
-            --project="${GCP_PROJECT_ID}" || true
+            --project="${GCP_PROJECT_ID}"
 
       - name: Deploy to Cloud Run
         id: deploy
