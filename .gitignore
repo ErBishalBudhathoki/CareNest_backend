@@ -48,6 +48,9 @@ service-account.json
 
 # Secrets
 secrets.json
+scripts/secrets.json
+
+scripts/restore-individual-secrets.js
 
 # Uploads and user content
 uploads/*

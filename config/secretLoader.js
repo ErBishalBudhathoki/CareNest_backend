@@ -18,8 +18,17 @@ class SecretLoader {
     this.client = null;
     this.secrets = {};
     this.loaded = false;
-    this.environment = process.env.NODE_ENV || 'development';
+    this.environment = this.normalizeEnvironment(process.env.NODE_ENV || 'development');
     this.isCloudRun = !!process.env.K_SERVICE; // Cloud Run sets this variable
+  }
+
+  normalizeEnvironment(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return 'development';
+    if (normalized === 'prod') return 'production';
+    if (normalized === 'dev') return 'development';
+    if (normalized === 'stage' || normalized === 'staging') return 'development';
+    return normalized;
   }
 
   /**
@@ -81,7 +90,9 @@ class SecretLoader {
    */
   loadFromLocalFile() {
     try {
-      const secretsFile = path.join(__dirname, '..', 'secrets.json');
+      const secretsFile = process.env.LOCAL_SECRETS_FILE
+        ? path.resolve(process.env.LOCAL_SECRETS_FILE)
+        : path.join(__dirname, '..', 'scripts', 'secrets.json');
       
       if (!fs.existsSync(secretsFile)) {
         console.warn('[SecretLoader] secrets.json not found at:', secretsFile);
@@ -129,18 +140,30 @@ class SecretLoader {
    * Get Secret Manager configuration based on environment
    */
   getSecretManagerConfig() {
-    const configs = {
-      development: {
-        projectId: process.env.GCP_PROJECT_ID || 'invoice-660f3',
-        secretName: 'app-secrets-dev'
-      },
-      production: {
-        projectId: process.env.GCP_PROJECT_ID || 'carenest-prod',
-        secretName: 'app-secrets-prod'
-      }
-    };
+    const projectId =
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      process.env.GCLOUD_PROJECT ||
+      process.env.GCP_PROJECT_ID;
 
-    return configs[this.environment];
+    const secretNameFromEnv = process.env.CONSOLIDATED_SECRET_NAME;
+    if (projectId && secretNameFromEnv) {
+      return {
+        projectId,
+        secretName: secretNameFromEnv
+      };
+    }
+
+    if (projectId) {
+      return {
+        projectId,
+        secretName: this.environment === 'production' ? 'app-secrets-prod' : 'app-secrets-dev'
+      };
+    }
+
+    return {
+      projectId: this.environment === 'production' ? 'carenest-prod' : 'invoice-660f3',
+      secretName: this.environment === 'production' ? 'app-secrets-prod' : 'app-secrets-dev'
+    };
   }
 
   /**

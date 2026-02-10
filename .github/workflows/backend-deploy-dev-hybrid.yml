@@ -3,9 +3,6 @@ name: Backend Deploy - Development (Hybrid Secure)
 on:
   push:
     branches: [ dev, develop ]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/backend-deploy-dev.yml'
   pull_request:
     branches: [ dev, develop ]
   workflow_dispatch:
@@ -32,6 +29,8 @@ env:
   SERVICE_NAME: 'backend-dev'
   REGISTRY: 'australia-southeast1-docker.pkg.dev'
   GCP_PROJECT_ID: 'invoice-660f3'  # Dev project
+  CONSOLIDATED_SECRET_NAME: 'app-secrets-dev'
+  CLOUD_RUN_SERVICE_ACCOUNT: 'invoice-660f3@appspot.gserviceaccount.com'
 
 jobs:
   # Security and Quality Checks
@@ -41,7 +40,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: ./backend
+        working-directory: .
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,7 +51,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: './backend'
+          scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
@@ -66,7 +65,7 @@ jobs:
       - name: Run TruffleHog secret scan
         uses: trufflesecurity/trufflehog@main
         with:
-          path: ./backend
+          path: .
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
 
@@ -75,7 +74,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -92,7 +91,7 @@ jobs:
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     defaults:
       run:
-        working-directory: ./backend
+        working-directory: .
     services:
       mongodb:
         image: mongo:7
@@ -115,7 +114,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -168,8 +167,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
@@ -208,7 +207,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     environment:
       name: development
-      url: https://${{ steps.deploy.outputs.url }}
+      url: ${{ steps.deploy.outputs.url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -224,25 +223,48 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Restore Individual Secrets (Compatibility)
+      - name: Write scripts/secrets.json from GitHub Secret (optional)
+        if: ${{ secrets.DEV_SECRETS_JSON != '' }}
+        shell: bash
         run: |
-          # Restore individual secrets to support legacy Cloud Run bindings
-          # This ensures deployment succeeds even if the service expects old secret format
-          npm run secrets:restore:dev
-        continue-on-error: true
+          set -euo pipefail
+          mkdir -p scripts
+          cat > scripts/secrets.json <<'EOF'
+          ${{ secrets.DEV_SECRETS_JSON }}
+          EOF
+
+      - name: Ensure consolidated Secret Manager secret exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "scripts/secrets.json" ]; then
+            echo "::error::Missing scripts/secrets.json and secrets.DEV_SECRETS_JSON. Provide one to create/update ${CONSOLIDATED_SECRET_NAME}."
+            exit 1
+          fi
+
+          node scripts/upload-secrets.js dev
+
+      - name: Grant Cloud Run runtime access to consolidated secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud secrets add-iam-policy-binding "${CONSOLIDATED_SECRET_NAME}" \
+            --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project="${GCP_PROJECT_ID}" || true
 
       - name: Deploy to Cloud Run
         id: deploy
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
           
-          # Deploy with consolidated secrets from Secret Manager
-          # All secrets now loaded from one consolidated secret: app-secrets-dev
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
+            --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
             --min-instances 0 \
             --max-instances 10 \
             --cpu 1 \
@@ -252,7 +274,7 @@ jobs:
             --port 8080 \
             --set-env-vars "NODE_ENV=development" \
             --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
-            --update-secrets "APP_SECRETS=app-secrets-dev:latest" \
+            --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --no-traffic \
             --tag dev-${{ github.sha }}
           
