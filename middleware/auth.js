@@ -10,38 +10,33 @@ const keyRotationService = require('../services/jwtKeyRotationService');
 
 const logger = createLogger('AuthMiddleware');
 
-/**
- * Validate critical environment variables on startup
- * Throws error if JWT_SECRET is not properly configured
- */
-function validateSecurityConfig() {
+function validateSecurityConfig({ throwOnMissing = false } = {}) {
   const jwtSecret = process.env.JWT_SECRET;
-  
+
   if (!jwtSecret) {
     logger.error('CRITICAL: JWT_SECRET environment variable is not set');
-    throw new Error('JWT_SECRET must be configured. Application cannot start.');
+    if (throwOnMissing) {
+      throw new Error('JWT_SECRET must be configured.');
+    }
+    return { ok: false, reason: 'missing' };
   }
-  
+
   if (jwtSecret.length < 32) {
-    // Downgrade to warning to allow legacy/dev secrets
     logger.warn('WARNING: JWT_SECRET is too short (less than 32 chars). usage is discouraged for production.', { length: jwtSecret.length });
-    // throw new Error('JWT_SECRET must be at least 32 characters long for security.');
   }
-  
-  // Warn if using default or weak secrets
+
   const weakSecrets = ['secret', 'password', 'changeme', 'test', 'dev', 'default'];
   if (weakSecrets.some(weak => jwtSecret.toLowerCase().includes(weak))) {
     logger.warn('WARNING: JWT_SECRET appears to be a weak or default value. Use a strong random secret in production.');
   }
-  
+
   logger.info('Security configuration validated successfully', {
     jwtSecretLength: jwtSecret.length,
     environment: process.env.NODE_ENV || 'development'
   });
-}
 
-// Validate configuration on module load
-validateSecurityConfig();
+  return { ok: true };
+}
 
 /**
  * Secure authentication middleware with comprehensive security features
@@ -80,6 +75,10 @@ class AuthMiddleware {
       const path = req.originalUrl || req.path;
       if (publicEndpoints.some(endpoint => path.startsWith(endpoint))) {
         return next();
+      }
+
+      if (process.env.NODE_ENV === 'production') {
+        validateSecurityConfig({ throwOnMissing: true });
       }
       
       // Check if IP is blocked
