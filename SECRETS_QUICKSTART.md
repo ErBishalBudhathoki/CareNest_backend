@@ -59,23 +59,24 @@ That's it! Your app now uses consolidated secrets automatically.
 
 **NEW** (1 consolidated secret):
 ```yaml
---update-secrets "APP_SECRETS=app-secrets-dev:latest" \
---set-env-vars "GCP_PROJECT_ID=invoice-660f3"
+--set-env-vars "NODE_ENV=development" \
+--set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
+--set-env-vars "CONSOLIDATED_SECRET_NAME=app-secrets-dev"
 ```
 
 ### Application Startup
 
 The app now:
 1. Loads consolidated secret from Secret Manager (in Cloud Run)
-2. Falls back to `secrets.json` (local development)
+2. Falls back to `scripts/secrets.json` (local development)
 3. Falls back to `.env` (legacy support)
 
 ## Files Created
 
-1. **`backend/scripts/upload-secrets.js`** - Upload script
-2. **`backend/config/secretLoader.js`** - Runtime loader
-3. **Updated `backend/server.js`** - Loads secrets on startup
-4. **Updated GitHub Actions** - Simplified deployments
+1. **`scripts/upload-secrets.js`** - Upload script
+2. **`config/secretLoader.js`** - Runtime loader
+3. **`server.js`** - Loads secrets on startup
+4. **`.github/workflows/*`** - Deploy workflows
 
 ## Available Commands
 
@@ -92,13 +93,17 @@ npm run secrets:list:prod       # List prod secret versions
 
 ## Updating Secrets
 
-1. Edit `backend/secrets.json`
+1. Edit `scripts/secrets.json` (local only)
 2. Run `npm run secrets:upload:all`
 3. Push to trigger deployment (or manually restart Cloud Run)
 
+CI/CD option (recommended): store JSON in GitHub Actions secrets:
+- `DEV_SECRETS_JSON` for `dev`
+- `PROD_SECRETS_JSON` for `main`
+
 ## Local Development
 
-No changes needed! The app automatically loads from `secrets.json`:
+No changes needed! The app automatically loads from `scripts/secrets.json`:
 
 ```bash
 npm run dev  # Works exactly as before
@@ -165,8 +170,8 @@ gcloud logs read --limit 50 --project=invoice-660f3
 ### Local development issues
 
 ```bash
-# Verify secrets.json exists and is valid JSON
-cat backend/secrets.json | jq .
+# Verify scripts/secrets.json exists and is valid JSON
+cat scripts/secrets.json | jq .
 
 # Check the app loads it
 npm run dev
@@ -175,7 +180,7 @@ npm run dev
 
 ## Security Notes
 
-- ✅ `secrets.json` is in `.gitignore` - never commit it!
+- ✅ `scripts/secrets.json` is in `.gitignore` - never commit it!
 - ✅ Secrets stay in Google Cloud Secret Manager
 - ✅ Different secrets for dev/prod environments
 - ✅ Automatic access control via IAM
