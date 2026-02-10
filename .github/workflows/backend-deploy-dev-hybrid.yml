@@ -310,6 +310,10 @@ jobs:
 
           echo "Latest created revision: ${REVISION}"
 
+          gcloud run revisions describe "${REVISION}" \
+            --region "${{ env.REGION }}" \
+            --format yaml || true
+
           gcloud logging read \
             "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }} AND resource.labels.revision_name=${REVISION}" \
             --project "${{ env.GCP_PROJECT_ID }}" \
