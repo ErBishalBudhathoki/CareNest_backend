@@ -210,6 +210,28 @@ See comprehensive documentation:
 
 **⚠️ IMPORTANT**: Only delete old secrets AFTER verifying the new approach works!
 
+### Emergency cleanup (keep only the consolidated secret)
+
+If your project has many stray secrets (for example, individual keys like `JWT_SECRET`, `REDIS_URL`, etc.), and you want to keep **only** the consolidated secret:
+
+```bash
+# Dev project: keep only app-secrets-dev
+PROJECT=invoice-660f3
+KEEP='^app-secrets-dev$'
+
+gcloud secrets list --project="$PROJECT" --format='value(name)' | sort | grep -v -E "$KEEP" \
+  | while read -r name; do
+      [ -z "$name" ] && continue
+      gcloud secrets delete "$name" --project="$PROJECT" --quiet
+    done
+
+gcloud secrets list --project="$PROJECT" --format='value(name)' | sort
+```
+
+After cleanup, the dev project should typically contain only:
+
+- `app-secrets-dev`
+
 ### Safe Deletion Process
 
 1. **Preview what will be deleted** (dry run):
