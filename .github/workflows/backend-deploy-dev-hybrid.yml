@@ -297,6 +297,26 @@ jobs:
 
           echo "::notice::Traffic migrated to latest revision"
 
+      - name: Dump latest Cloud Run revision logs
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REVISION=$(gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.REGION }}" \
+            --format 'value(status.latestCreatedRevisionName)')
+
+          echo "Latest created revision: ${REVISION}"
+
+          gcloud logs read \
+            --project "${{ env.GCP_PROJECT_ID }}" \
+            --limit 200 \
+            --freshness=2h \
+            --format 'value(textPayload)' \
+            --filter "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }} AND resource.labels.revision_name=${REVISION}" || true
+
       - name: Create deployment summary
         if: always()
         run: |
