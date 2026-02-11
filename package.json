@@ -79,13 +79,10 @@
     "eslint": "^9.39.2",
     "firebase-tools": "^15.1.0",
     "globals": "^17.0.0",
-    "hono": "^4.11.3",
     "ioredis-mock": "^8.13.1",
     "jest": "^30.2.0",
     "nodemon": "^3.0.2",
-    "picomatch": "^4.0.3",
-    "supertest": "^7.1.4",
-    "typescript": "^5.9.3"
+    "supertest": "^7.1.4"
   },
   "overrides": {
     "test-exclude": "^7.0.0",
