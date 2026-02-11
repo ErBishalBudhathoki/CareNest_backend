@@ -270,6 +270,10 @@ Interactive API documentation is available at:
 The OpenAPI specification file is available at:
 - **[openapi.yaml](./openapi.yaml)** - Complete API specification
 
+Postman assets are available at:
+- **[postman_collection.json](./postman_collection.json)** - API request collection
+- **[postman_environment.json](./postman_environment.json)** - Environment variables for local testing
+
 ---
 
 **Note**: This documentation is automatically updated when API changes are made. For the most current information, refer to the interactive Swagger documentation.
