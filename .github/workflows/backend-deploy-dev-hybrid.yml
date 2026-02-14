@@ -286,15 +286,23 @@ jobs:
             --member="serviceAccount:${{ secrets.WIF_SERVICE_ACCOUNT }}" \
             --role="roles/run.invoker"
 
+      - name: Generate ID token for smoke tests
+        id: smoke_auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.deploy.outputs.preview-url }}
+
       - name: Run smoke tests
-        continue-on-error: true
         run: |
           PREVIEW_URL="${{ steps.deploy.outputs.preview-url }}"
           
           # Wait for service to be ready
           sleep 15
 
-          TOKEN=$(gcloud auth print-access-token)
+          TOKEN="${{ steps.smoke_auth.outputs.id_token }}"
           
           # Health check
           echo "Testing health endpoint..."
