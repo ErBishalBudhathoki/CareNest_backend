@@ -7,6 +7,12 @@ class EmailService {
   }
 
   initTransporter() {
+    if (process.env.NODE_ENV === 'test') {
+      // Avoid outbound SMTP calls during tests.
+      this.transporter = null;
+      return;
+    }
+
     try {
       console.log('SMTP Debug - User:', process.env.SMTP_ADMIN_EMAIL);
       if (process.env.SMTP_PASSWORD) {
