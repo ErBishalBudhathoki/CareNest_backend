@@ -1,7 +1,8 @@
+const EventEmitter = require('events');
 const Redis = require('ioredis');
 const logger = require('./logger');
 
-// Check if we should use mock Redis (Test only)
+// Check if we should use mock Redis (test only)
 const useMockRedis = process.env.NODE_ENV === 'test';
 
 let RedisClass = Redis;
@@ -14,79 +15,156 @@ if (useMockRedis) {
   }
 }
 
-const redisConfig = process.env.REDIS_URL || {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  maxRetriesPerRequest: null,  // Required for BullMQ compatibility
-  retryStrategy: (times) => {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  }
-};
+const isCloudRun = Boolean(process.env.K_SERVICE);
+const hasRedisUrl = Boolean(process.env.REDIS_URL);
+const hasRedisHostConfig = Boolean(
+  process.env.REDIS_HOST || process.env.REDIS_PORT || process.env.REDIS_PASSWORD
+);
+const shouldUseLocalDefaults = !hasRedisUrl && !hasRedisHostConfig && !isCloudRun;
 
-// If using a URL string, ioredis handles parsing automatically
-// If REDIS_URL starts with rediss://, it implies TLS
-let redis;
-if (typeof redisConfig === 'string') {
-  // Redis Cloud requires rediss:// for TLS connection
-  if (redisConfig.startsWith('rediss://')) {
-    redis = new RedisClass(redisConfig);
-  } else if (redisConfig.startsWith('redis://')) {
-    // For development/testing with local Redis
-    redis = new RedisClass(redisConfig);
-  } else {
-    // Assume it's just a hostname:port format
-    redis = new RedisClass(redisConfig);
+const parsedRedisPort = Number.parseInt(process.env.REDIS_PORT || '6379', 10);
+const redisPort = Number.isNaN(parsedRedisPort) ? 6379 : parsedRedisPort;
+
+let redisConfig = null;
+if (hasRedisUrl) {
+  redisConfig = process.env.REDIS_URL;
+} else if (hasRedisHostConfig || shouldUseLocalDefaults) {
+  redisConfig = {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: redisPort,
+    password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null, // Required for BullMQ compatibility
+    retryStrategy: (times) => Math.min(times * 50, 2000)
+  };
+}
+
+class DisabledRedisClient extends EventEmitter {
+  constructor() {
+    super();
+    this.options = {};
+    this.status = 'disabled';
+    this.isConfigured = false;
   }
+
+  duplicate() {
+    return new DisabledRedisClient();
+  }
+
+  async call() {
+    return null;
+  }
+
+  async get() {
+    return null;
+  }
+
+  async set() {
+    return 'OK';
+  }
+
+  async del() {
+    return 0;
+  }
+
+  async exists() {
+    return 0;
+  }
+
+  async scan() {
+    return ['0', []];
+  }
+
+  scanStream() {
+    const stream = new EventEmitter();
+    setImmediate(() => stream.emit('end'));
+    return stream;
+  }
+
+  async publish() {
+    return 0;
+  }
+
+  async subscribe(_channel, callback) {
+    if (typeof callback === 'function') {
+      callback(null, 0);
+    }
+    return 0;
+  }
+
+  async config() {
+    return ['maxmemory-policy', 'noeviction'];
+  }
+
+  async quit() {
+    return 'OK';
+  }
+
+  disconnect() {}
+}
+
+let redis;
+if (!redisConfig) {
+  logger.warn(
+    'Redis is not configured. Redis-backed features will use in-memory or no-op behavior.',
+    { isCloudRun, nodeEnv: process.env.NODE_ENV || 'development' }
+  );
+  redis = new DisabledRedisClient();
+} else if (typeof redisConfig === 'string') {
+  // REDIS_URL supports redis:// and rediss://
+  redis = new RedisClass(redisConfig, {
+    maxRetriesPerRequest: null
+  });
 } else {
   redis = new RedisClass(redisConfig);
 }
 
-redis.on('connect', () => {
-  // Mask password in connection details log
-  const maskedConfig = typeof redisConfig === 'string'
-    ? redisConfig.replace(/:([^@]+)@/, ':****@')
-    : { ...redisConfig, password: '****' };
+const redisConfigured = Boolean(redisConfig);
+redis.isConfigured = redisConfigured;
 
-  logger.info('Redis connection established', {
-    config: maskedConfig,
-    status: 'connected'
+if (redisConfigured) {
+  redis.on('connect', () => {
+    // Mask password in connection details log
+    const maskedConfig = typeof redisConfig === 'string'
+      ? redisConfig.replace(/:([^@]+)@/, ':****@')
+      : { ...redisConfig, password: redisConfig.password ? '****' : undefined };
+
+    logger.info('Redis connection established', {
+      config: maskedConfig,
+      status: 'connected'
+    });
   });
-});
 
-redis.on('ready', () => {
-  logger.info('Redis client is ready to accept commands');
+  redis.on('ready', () => {
+    logger.info('Redis client is ready to accept commands');
 
-  // Check maxmemory-policy
-  redis.config('GET', 'maxmemory-policy').then((result) => {
-    // result is usually array: ['maxmemory-policy', 'volatile-lru']
-    const policy = result[1];
-    if (policy !== 'noeviction') {
-      // This is informational - managed Redis (Cloud) may not allow changing this
-      logger.info(`Redis maxmemory-policy is '${policy}'. For BullMQ job queues, 'noeviction' is recommended. Contact your Redis provider to change if needed.`);
-    }
-  }).catch(err => {
-    // Ignore config get errors (e.g. if command renamed or restricted)
-    logger.debug('Could not check redis config', { error: err.message });
+    // Check maxmemory-policy
+    redis.config('GET', 'maxmemory-policy').then((result) => {
+      const policy = result && result[1];
+      if (policy && policy !== 'noeviction') {
+        logger.info(`Redis maxmemory-policy is '${policy}'. For BullMQ job queues, 'noeviction' is recommended. Contact your Redis provider to change if needed.`);
+      }
+    }).catch((err) => {
+      // Ignore config get errors (e.g. if command renamed or restricted)
+      logger.debug('Could not check redis config', { error: err.message });
+    });
   });
-});
 
-redis.on('error', (err) => {
-  logger.error('Redis connection error', {
-    error: err.message,
-    stack: err.stack
+  redis.on('error', (err) => {
+    logger.error('Redis connection error', {
+      error: err.message,
+      stack: err.stack
+    });
   });
-});
 
-redis.on('close', () => {
-  logger.warn('Redis connection closed');
-});
-
-redis.on('reconnecting', (time) => {
-  logger.warn('Redis reconnecting...', {
-    delay: time
+  redis.on('close', () => {
+    logger.warn('Redis connection closed');
   });
-});
+
+  redis.on('reconnecting', (time) => {
+    logger.warn('Redis reconnecting...', {
+      delay: time
+    });
+  });
+}
 
 module.exports = redis;
