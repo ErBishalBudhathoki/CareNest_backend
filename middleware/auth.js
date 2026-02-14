@@ -658,13 +658,17 @@ function rateLimitMiddleware(type) {
     }
   };
 
-  // Always use Redis store (assuming Redis is available via REDIS_URL)
-  // Fallback to memory store only for tests if needed
   if (process.env.NODE_ENV !== 'test') {
-    rateLimitOptions.store = new RedisStore({
-      sendCommand: (...args) => redis.call(...args),
-      prefix: `rl:${type}:`, // Unique prefix for each rate limiter type
-    });
+    if (redis.isConfigured !== false) {
+      rateLimitOptions.store = new RedisStore({
+        sendCommand: (...args) => redis.call(...args),
+        prefix: `rl:${type}:`, // Unique prefix for each rate limiter type
+      });
+      // Keep auth endpoints available even during transient Redis issues.
+      rateLimitOptions.passOnStoreError = true;
+    } else {
+      logger.warn('Redis not configured; using in-memory rate limiter store', { type });
+    }
   }
 
   return rateLimit(rateLimitOptions);
