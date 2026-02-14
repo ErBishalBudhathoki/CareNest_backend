@@ -6,8 +6,13 @@ class QueueManager {
   constructor() {
     this.queues = {};
     this.workers = {};
+    this.redisEnabled = redis.isConfigured !== false;
     // Reuse the existing Redis connection configuration
-    this.connection = redis.options; 
+    this.connection = this.redisEnabled ? redis.options : null;
+
+    if (!this.redisEnabled) {
+      logger.warn('QueueManager is disabled because Redis is not configured');
+    }
   }
 
   /**
@@ -15,6 +20,10 @@ class QueueManager {
    * @param {string} name - Queue name
    */
   getQueue(name) {
+    if (!this.redisEnabled) {
+      return null;
+    }
+
     if (!this.queues[name]) {
       this.queues[name] = new Queue(name, { connection: this.connection });
       logger.info(`Queue initialized: ${name}`);
@@ -30,7 +39,15 @@ class QueueManager {
    * @param {Object} opts 
    */
   async addJob(queueName, jobName, data, opts = {}) {
+    if (!this.redisEnabled) {
+      logger.warn(`Skipped job enqueue for ${queueName}/${jobName} because Redis is unavailable`);
+      return null;
+    }
+
     const queue = this.getQueue(queueName);
+    if (!queue) {
+      return null;
+    }
     return await queue.add(jobName, data, opts);
   }
 
@@ -40,6 +57,11 @@ class QueueManager {
    * @param {Function} processor 
    */
   registerWorker(queueName, processor) {
+    if (!this.redisEnabled) {
+      logger.warn(`Skipped worker registration for ${queueName} because Redis is unavailable`);
+      return;
+    }
+
     if (this.workers[queueName]) {
       logger.warn(`Worker for ${queueName} already exists`);
       return;

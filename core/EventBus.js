@@ -5,14 +5,35 @@ const logger = require('../config/logger');
 class EventBus extends EventEmitter {
   constructor() {
     super();
+    this.channel = 'app_events';
+    this.redisEnabled = redis.isConfigured !== false;
+    this.pubClient = null;
+    this.subClient = null;
+
+    if (!this.redisEnabled) {
+      logger.warn('EventBus is running in local-only mode because Redis is unavailable');
+      return;
+    }
+
     this.pubClient = redis.duplicate();
     this.subClient = redis.duplicate();
-    this.channel = 'app_events';
-    
+
+    this.pubClient.on('error', (error) => {
+      logger.error('EventBus publisher Redis error', {
+        error: error.message
+      });
+    });
+
+    this.subClient.on('error', (error) => {
+      logger.error('EventBus subscriber Redis error', {
+        error: error.message
+      });
+    });
+
     // Subscribe to Redis channel for distributed events
     this.subClient.subscribe(this.channel, (err, count) => {
       if (err) {
-        logger.error('Failed to subscribe to Redis channel', err);
+        logger.error('Failed to subscribe to Redis channel', { error: err.message });
       } else {
         logger.info(`Subscribed to ${count} Redis channel(s)`);
       }
@@ -26,7 +47,7 @@ class EventBus extends EventEmitter {
           // For now, we just emit to local listeners
           super.emit(event, payload, { source, remote: true });
         } catch (error) {
-          logger.error('Error parsing distributed event', error);
+          logger.error('Error parsing distributed event', { error: error.message });
         }
       }
     });
@@ -45,13 +66,18 @@ class EventBus extends EventEmitter {
     super.emit(event, payload, { source: 'local', remote: false });
 
     // 2. Publish to Redis for other services/instances
-    if (!options.localOnly) {
+    if (!options.localOnly && this.redisEnabled && this.pubClient) {
       const message = JSON.stringify({
         event,
         payload,
         source: process.env.SERVICE_NAME || 'backend-core'
       });
-      this.pubClient.publish(this.channel, message);
+      this.pubClient.publish(this.channel, message).catch((error) => {
+        logger.error('Failed to publish distributed event', {
+          event,
+          error: error.message
+        });
+      });
     }
   }
 

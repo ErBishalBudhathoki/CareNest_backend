@@ -18,7 +18,35 @@ const connectMongoose = require('./config/mongoose');
 const logger = require('./config/logger');
 const { keepAliveService } = require('./utils/keepAlive');
 const keyRotationService = require('./services/jwtKeyRotationService');
-const app = require('./app');
+
+let appInstance = null;
+let bootstrapPromise = null;
+let serverlessHandler = null;
+
+const initializeApplication = async () => {
+  if (appInstance) {
+    return appInstance;
+  }
+
+  if (!bootstrapPromise) {
+    bootstrapPromise = (async () => {
+      console.log('⏳ Loading secrets...');
+      try {
+        await loadSecrets();
+        console.log('✅ Secrets loaded successfully');
+      } catch (error) {
+        logger.warn('⚠️  Failed to load consolidated secrets, using environment variables', {
+          error: error.message
+        });
+      }
+
+      appInstance = require('./app');
+      return appInstance;
+    })();
+  }
+
+  return bootstrapPromise;
+};
 
 // Global Error Handlers
 process.on('unhandledRejection', (reason, promise) => {
@@ -70,8 +98,15 @@ const startWorkers = () => {
 
 // Export for Serverless
 if (process.env.SERVERLESS === 'true') {
-  connectMongoose(); // Ensure DB connection in lambda
-  module.exports.handler = serverless(app);
+  module.exports.handler = async (event, context) => {
+    if (!serverlessHandler) {
+      const app = await initializeApplication();
+      await connectMongoose(); // Ensure DB connection in lambda
+      serverlessHandler = serverless(app);
+    }
+
+    return serverlessHandler(event, context);
+  };
 } 
 // Local Server Startup
 else if (require.main === module) {
@@ -86,6 +121,8 @@ else if (require.main === module) {
         fs.mkdirSync(uploadsDir, { recursive: true });
         logger.info(`📁 Created uploads directory: ${uploadsDir}`);
       }
+
+      const app = await initializeApplication();
       
       console.log(`⏳ Attempting to bind to port ${PORT}...`);
       app.listen(PORT, '0.0.0.0', async () => {
@@ -96,16 +133,6 @@ else if (require.main === module) {
       });
 
       (async () => {
-        console.log('⏳ Loading secrets...');
-        try {
-          await loadSecrets();
-          console.log('✅ Secrets loaded successfully');
-        } catch (error) {
-          logger.warn('⚠️  Failed to load consolidated secrets, using environment variables', {
-            error: error.message
-          });
-        }
-
         const maxDelayMs = 30000;
         let attempt = 0;
 
@@ -197,5 +224,5 @@ else if (require.main === module) {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 } else {
   // Export app for testing
-  module.exports = app;
+  module.exports = appInstance || require('./app');
 }
