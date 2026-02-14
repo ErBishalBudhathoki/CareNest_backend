@@ -32,29 +32,13 @@ class JWTKeyRotationService {
       if (keyCount === 0) {
         console.log('[JWT Key Rotation] No keys found. Creating initial key...');
         await this.createInitialKey(options);
-      } else {
-        // Verify we have an active key
-        const activeKey = await JWTSecret.findOne({ status: 'active' });
-        
-        if (!activeKey) {
-          console.log('[JWT Key Rotation] No active key found. Activating most recent key...');
-          const mostRecent = await JWTSecret.findOne({ 
-            status: 'valid',
-            expiresAt: { $gt: new Date() }
-          }).sort({ createdAt: -1 });
-          
-          if (mostRecent) {
-            await mostRecent.activate();
-            console.log(`[JWT Key Rotation] Activated key: ${mostRecent.keyId}`);
-          } else {
-            console.log('[JWT Key Rotation] No valid keys found. Creating new key...');
-            await this.createInitialKey(options);
-          }
-        }
       }
+
+      // Ensure there is an active and unexpired key.
+      await this.ensureUsableActiveKey(options);
       
       // Load keys into cache
-      await this.refreshKeyCache();
+      await this.refreshKeyCache({ allowSelfHeal: true, initOptions: options });
       
       this.initialized = true;
       console.log('[JWT Key Rotation] Service initialized successfully');
@@ -78,7 +62,7 @@ class JWTKeyRotationService {
     if (envSecret && envSecret.length >= 32 && !this.isWeakSecret(envSecret)) {
       // Use existing JWT_SECRET from environment
       secret = envSecret;
-      keyId = 'key_initial_env';
+      keyId = `key_initial_env_${Date.now()}`;
       console.log('[JWT Key Rotation] Using JWT_SECRET from environment as initial key');
     } else {
       // Generate a new strong secret
@@ -105,6 +89,60 @@ class JWTKeyRotationService {
   }
 
   /**
+   * Ensure there is one active and unexpired key.
+   * Handles the case where an "active" key exists but is already expired.
+   */
+  async ensureUsableActiveKey(options = {}) {
+    const now = new Date();
+
+    // Revoke expired active keys so they do not block self-healing.
+    const revokeResult = await JWTSecret.updateMany(
+      {
+        status: 'active',
+        expiresAt: { $lte: now }
+      },
+      {
+        $set: {
+          status: 'revoked',
+          revokedAt: now,
+          revocationReason: 'Expired active key auto-revoked during initialization'
+        }
+      }
+    );
+
+    const revokedCount = revokeResult.modifiedCount || revokeResult.nModified || 0;
+    if (revokedCount > 0) {
+      console.warn(`[JWT Key Rotation] Revoked ${revokedCount} expired active key(s)`);
+    }
+
+    // Check for currently usable active key.
+    const activeKey = await JWTSecret.findOne({
+      status: 'active',
+      expiresAt: { $gt: now }
+    }).sort({ activatedAt: -1, createdAt: -1 });
+
+    if (activeKey) {
+      return activeKey;
+    }
+
+    // Promote most recent valid key if available.
+    const mostRecentValid = await JWTSecret.findOne({
+      status: 'valid',
+      expiresAt: { $gt: now }
+    }).sort({ createdAt: -1 });
+
+    if (mostRecentValid) {
+      await mostRecentValid.activate();
+      console.log(`[JWT Key Rotation] Activated key: ${mostRecentValid.keyId}`);
+      return mostRecentValid;
+    }
+
+    // Last resort: create a fresh initial key.
+    console.log('[JWT Key Rotation] No usable keys found. Creating new key...');
+    return this.createInitialKey(options);
+  }
+
+  /**
    * Check if a secret is considered weak
    */
   isWeakSecret(secret) {
@@ -124,7 +162,8 @@ class JWTKeyRotationService {
   /**
    * Refresh the key cache from database
    */
-  async refreshKeyCache() {
+  async refreshKeyCache(options = {}) {
+    const { allowSelfHeal = false, initOptions = {} } = options;
     try {
       this.activeKey = await JWTSecret.getActiveKey();
       this.validKeys = await JWTSecret.getValidKeys();
@@ -132,6 +171,16 @@ class JWTKeyRotationService {
       
       console.log(`[JWT Key Rotation] Cache refreshed. Active key: ${this.activeKey.keyId}, Valid keys: ${this.validKeys.length}`);
     } catch (error) {
+      if (allowSelfHeal && error.message && error.message.includes('No active JWT secret found')) {
+        console.warn('[JWT Key Rotation] No active key in cache refresh; attempting self-heal...');
+        await this.ensureUsableActiveKey(initOptions);
+        this.activeKey = await JWTSecret.getActiveKey();
+        this.validKeys = await JWTSecret.getValidKeys();
+        this.lastCacheUpdate = Date.now();
+        console.log(`[JWT Key Rotation] Cache refreshed after self-heal. Active key: ${this.activeKey.keyId}, Valid keys: ${this.validKeys.length}`);
+        return;
+      }
+
       console.error('[JWT Key Rotation] Failed to refresh key cache:', error);
       throw error;
     }
@@ -320,7 +369,10 @@ class JWTKeyRotationService {
    * Get rotation status and statistics
    */
   async getRotationStatus() {
-    const activeKey = await JWTSecret.findOne({ status: 'active' });
+    const activeKey = await JWTSecret.findOne({
+      status: 'active',
+      expiresAt: { $gt: new Date() }
+    });
     const validKeys = await JWTSecret.find({ status: 'valid' });
     const revokedKeys = await JWTSecret.find({ status: 'revoked' });
     
@@ -366,7 +418,10 @@ class JWTKeyRotationService {
     
     try {
       // Check for active key
-      const activeKey = await JWTSecret.findOne({ status: 'active' });
+      const activeKey = await JWTSecret.findOne({
+        status: 'active',
+        expiresAt: { $gt: new Date() }
+      });
       if (!activeKey) {
         issues.push('No active key found');
       } else {
