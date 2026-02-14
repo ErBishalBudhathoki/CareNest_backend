@@ -277,7 +277,6 @@ jobs:
           echo "Deployed service URL resolved"
 
       - name: Grant GitHub deployer invocation access (Dev)
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -293,24 +292,45 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
           token_format: id_token
-          id_token_audience: ${{ steps.deploy.outputs.preview-url }}
+          # For tagged URLs, Cloud Run expects audience to be the base service URL.
+          id_token_audience: ${{ steps.deploy.outputs.url }}
 
       - name: Run smoke tests
         run: |
+          set -euo pipefail
           PREVIEW_URL="${{ steps.deploy.outputs.preview-url }}"
           
-          # Wait for service to be ready
-          sleep 15
-
           TOKEN="${{ steps.smoke_auth.outputs.id_token }}"
-          
-          # Health check
-          echo "Testing health endpoint..."
-          curl -fsS -H "Authorization: Bearer $TOKEN" "$PREVIEW_URL/health"
-          
-          # Basic API test
-          echo "Testing API health endpoint..."
-          curl -fsS -H "Authorization: Bearer $TOKEN" "$PREVIEW_URL/api/health"
+
+          # IAM bindings can take a short time to propagate.
+          for attempt in $(seq 1 8); do
+            echo "Smoke test attempt ${attempt}/8..."
+
+            HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" \
+              "$PREVIEW_URL/health" || true)
+
+            API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" \
+              "$PREVIEW_URL/api/health" || true)
+
+            if [[ "$HEALTH_STATUS" == "200" && "$API_STATUS" == "200" ]]; then
+              echo "Smoke tests passed."
+              cat /tmp/health.out
+              cat /tmp/api_health.out
+              exit 0
+            fi
+
+            echo "Health=$HEALTH_STATUS API=$API_STATUS; retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Smoke tests failed after retries."
+          echo "Final /health response:"
+          cat /tmp/health.out || true
+          echo "Final /api/health response:"
+          cat /tmp/api_health.out || true
+          exit 1
 
       - name: Gradual traffic migration
         if: github.ref == 'refs/heads/dev'
