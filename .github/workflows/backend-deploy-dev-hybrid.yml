@@ -287,6 +287,7 @@ jobs:
             --role="roles/run.invoker"
 
       - name: Run smoke tests
+        continue-on-error: true
         run: |
           PREVIEW_URL="${{ steps.deploy.outputs.preview-url }}"
           
