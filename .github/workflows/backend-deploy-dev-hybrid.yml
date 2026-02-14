@@ -293,7 +293,7 @@ jobs:
           # Wait for service to be ready
           sleep 15
 
-          TOKEN=$(gcloud auth print-identity-token --audiences="$PREVIEW_URL")
+          TOKEN=$(gcloud auth print-access-token)
           
           # Health check
           echo "Testing health endpoint..."
