@@ -72,12 +72,20 @@ class EventBus extends EventEmitter {
         payload,
         source: process.env.SERVICE_NAME || 'backend-core'
       });
-      this.pubClient.publish(this.channel, message).catch((error) => {
+      try {
+        const publishResult = this.pubClient.publish(this.channel, message);
+        Promise.resolve(publishResult).catch((error) => {
+          logger.error('Failed to publish distributed event', {
+            event,
+            error: error.message
+          });
+        });
+      } catch (error) {
         logger.error('Failed to publish distributed event', {
           event,
           error: error.message
         });
-      });
+      }
     }
   }
 
