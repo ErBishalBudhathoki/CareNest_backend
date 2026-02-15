@@ -160,4 +160,111 @@ router.get(
   analyticsController.getPricingComplianceReport
 );
 
+/**
+ * @route GET /api/analytics/churn-prediction
+ * @desc Get Worker Churn Predictions
+ * @access Private
+ */
+router.get(
+  '/churn-prediction',
+  analyticsLimiter,
+  authenticateUser,
+  [query('organizationId').isString().withMessage('Organization ID required')],
+  handleValidationErrors,
+  analyticsController.getChurnPrediction
+);
+
+/**
+ * @route GET /api/analytics/demand-forecast
+ * @desc Get Demand Forecast
+ * @access Private
+ */
+router.get(
+  '/demand-forecast',
+  analyticsLimiter,
+  authenticateUser,
+  [
+    query('organizationId').isString().withMessage('Organization ID required'),
+    query('daysAhead').optional().isInt({ min: 1, max: 90 }).withMessage('Days ahead must be between 1 and 90')
+  ],
+  handleValidationErrors,
+  analyticsController.getDemandForecast
+);
+
+/**
+ * @route GET /api/analytics/compliance-risk
+ * @desc Get Compliance Risk Assessment
+ * @access Private
+ */
+router.get(
+  '/compliance-risk',
+  analyticsLimiter,
+  authenticateUser,
+  [query('organizationId').isString().withMessage('Organization ID required')],
+  handleValidationErrors,
+  analyticsController.getComplianceRisk
+);
+
+/**
+ * @route GET /api/analytics/client-risk
+ * @desc Get Client Risk Predictions
+ * @access Private
+ */
+router.get(
+  '/client-risk',
+  analyticsLimiter,
+  authenticateUser,
+  [query('organizationId').isString().withMessage('Organization ID required')],
+  handleValidationErrors,
+  analyticsController.getClientRisk
+);
+
+/**
+ * @route GET /api/analytics/service-demand
+ * @desc Get Service Demand Predictions
+ * @access Private
+ */
+router.get(
+  '/service-demand',
+  analyticsLimiter,
+  authenticateUser,
+  [
+    query('organizationId').isString().withMessage('Organization ID required'),
+    query('daysAhead').optional().isInt({ min: 1, max: 90 }).withMessage('Days ahead must be between 1 and 90')
+  ],
+  handleValidationErrors,
+  analyticsController.getServiceDemand
+);
+
+/**
+ * @route POST /api/analytics/scenario-model
+ * @desc Run Scenario Model
+ * @access Private
+ */
+router.post(
+  '/scenario-model',
+  analyticsLimiter,
+  authenticateUser,
+  [
+    body('organizationId').isString().withMessage('Organization ID required'),
+    body('scenario').isObject().withMessage('Scenario parameters required')
+  ],
+  handleValidationErrors,
+  analyticsController.runScenarioModel
+);
+
+/**
+ * @route GET /api/analytics/recommendations
+ * @desc Get AI Recommendations
+ * @access Private
+ */
+router.get(
+  '/recommendations',
+  analyticsLimiter,
+  authenticateUser,
+  [query('organizationId').isString().withMessage('Organization ID required')],
+  handleValidationErrors,
+  analyticsController.getRecommendations
+);
+
 module.exports = router;

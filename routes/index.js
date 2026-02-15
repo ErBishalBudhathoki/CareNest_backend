@@ -61,6 +61,17 @@ const notificationRoutes = require('./notificationRoutes');
 const employeeTrackingRoutes = require('./employeeTracking');
 const scheduleRoutes = require('./schedule'); // Import schedule routes
 const jwtKeyRotationRoutes = require('./jwtKeyRotation'); // JWT Key Rotation admin routes
+const integrationRoutes = require('./integrations'); // Integration routes
+const dashboardRoutes = require('./dashboardRoutes'); // Dashboard routes
+const bulkActionsRoutes = require('./bulkActionsRoutes'); // Bulk actions routes
+const schedulingRoutes = require('./schedulingRoutes'); // Scheduling routes (Phase 2)
+const invoiceAIRoutes = require('./invoiceAIRoutes'); // Invoice AI routes (Phase 2)
+const complianceAutomationRoutes = require('./complianceAutomationRoutes'); // Compliance automation (Phase 3)
+const smartExpenseRoutes = require('./smartExpenseRoutes'); // Smart expenses (Phase 3)
+const offlineSyncRoutes = require('./offlineSyncRoutes'); // Offline sync (Phase 3)
+const clientPortalEnhancedRoutes = require('./clientPortalRoutes'); // Client portal (Phase 4)
+const advancedPayrollRoutes = require('./advancedPayrollRoutes'); // Advanced payroll (Phase 4)
+const communicationHubRoutes = require('./communicationHubRoutes'); // Communication hub (Phase 4)
 
 // Mount Routes
 
@@ -126,6 +137,17 @@ router.use('/notifications', notificationRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
 router.use('/schedule', scheduleRoutes); // Mount schedule routes
 router.use('/admin/jwt-keys', jwtKeyRotationRoutes); // JWT Key Rotation admin API
+router.use('/integrations', integrationRoutes); // Integration API
+router.use('/dashboard', dashboardRoutes); // Dashboard API
+router.use('/bulk', bulkActionsRoutes); // Bulk actions API
+router.use('/scheduling', schedulingRoutes); // Scheduling API (Phase 2)
+router.use('/invoice-ai', invoiceAIRoutes); // Invoice AI API (Phase 2)
+router.use('/compliance', complianceAutomationRoutes); // Compliance automation API (Phase 3)
+router.use('/expenses', smartExpenseRoutes); // Smart expenses API (Phase 3)
+router.use('/offline', offlineSyncRoutes); // Offline sync API (Phase 3)
+router.use('/client-portal-enhanced', clientPortalEnhancedRoutes); // Client portal API (Phase 4)
+router.use('/payroll-advanced', advancedPayrollRoutes); // Advanced payroll API (Phase 4)
+router.use('/communication-hub', communicationHubRoutes); // Communication hub API (Phase 4)
 // router.use('/upload', uploadRoutes); // TODO: Add uploadRoutes import if needed
 
 module.exports = router;
