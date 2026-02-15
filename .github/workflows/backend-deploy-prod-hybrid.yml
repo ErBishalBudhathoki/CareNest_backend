@@ -236,7 +236,6 @@ jobs:
     needs: [build, approval]
     environment:
       name: production
-      url: ${{ steps.deploy.outputs.url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -289,32 +288,53 @@ jobs:
             --set-env-vars "GCP_PROJECT_ID=carenest-prod" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --no-traffic \
-            --tag prod-${{ github.sha }}
+            --tag prod-${{ github.sha }} \
+            --quiet
           
-          # Get service URL
-          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --format 'value(status.url)')
-          
-          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "Deployed to: $SERVICE_URL"
+          # DO NOT capture or output URL for security
+          echo "deployment-status=success" >> $GITHUB_OUTPUT
+          echo "::notice::Production deployment completed successfully (URL hidden for security)"
 
       - name: Run smoke tests
         run: |
-          SERVICE_URL="${{ steps.deploy.outputs.url }}"
+          set -euo pipefail
           
-          # Wait for service to be ready
-          sleep 20
+          # Use gcloud proxy to test without exposing URL
+          echo "Starting secure proxy for smoke tests..."
+          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --port 8080 &
+          PROXY_PID=$!
+          
+          # Wait for proxy to be ready
+          sleep 15
           
           # Health check
           echo "Testing health endpoint..."
-          curl -f "$SERVICE_URL/health" || (echo "::error::Health check failed" && exit 1)
+          HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
+            "http://localhost:8080/health" || true)
+          
+          if [[ "$HEALTH_STATUS" != "200" ]]; then
+            echo "::error::Health check failed with status $HEALTH_STATUS"
+            cat /tmp/health.out || true
+            kill $PROXY_PID || true
+            exit 1
+          fi
           
           # API health check
           echo "Testing API health..."
-          curl -f "$SERVICE_URL/api/health" || (echo "::error::API health check failed" && exit 1)
+          API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
+            "http://localhost:8080/api/health" || true)
           
-          echo "::notice::All smoke tests passed!"
+          if [[ "$API_STATUS" != "200" ]]; then
+            echo "::error::API health check failed with status $API_STATUS"
+            cat /tmp/api_health.out || true
+            kill $PROXY_PID || true
+            exit 1
+          fi
+          
+          echo "::notice::All smoke tests passed via secure proxy!"
+          kill $PROXY_PID || true
 
       - name: Gradual traffic rollout
         run: |
@@ -370,12 +390,23 @@ jobs:
 
       - name: Post-deployment validation
         run: |
-          SERVICE_URL="${{ steps.deploy.outputs.url }}"
+          set -euo pipefail
+          
+          # Use gcloud proxy for validation without exposing URL
+          echo "Starting secure proxy for validation..."
+          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --port 8080 &
+          PROXY_PID=$!
+          
+          sleep 10
           
           # Final health checks
-          curl -f "$SERVICE_URL/health" || (echo "::error::Post-deployment health check failed" && exit 1)
-          curl -f "$SERVICE_URL/api/health" || (echo "::error::Post-deployment API check failed" && exit 1)
+          echo "Running post-deployment validation..."
+          curl -f "http://localhost:8080/health" || (echo "::error::Post-deployment health check failed" && kill $PROXY_PID || true && exit 1)
+          curl -f "http://localhost:8080/api/health" || (echo "::error::Post-deployment API check failed" && kill $PROXY_PID || true && exit 1)
           
+          kill $PROXY_PID || true
           echo "::notice::✅ Production deployment validated successfully!"
 
       - name: Create deployment summary
@@ -390,9 +421,12 @@ jobs:
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
           **Image:** \`${{ needs.build.outputs.image-uri }}\`
-          **URL:** ${{ steps.deploy.outputs.url }}
           **Commit:** ${{ github.sha }}
           **Deployment Type:** ${{ github.event.inputs.deploy_type || 'gradual' }}
+          **Deployed by:** ${{ github.actor }}
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ⚠️ **Backend URL is confidential and not displayed for security**
           
           ### Security Features
           - ✅ Manual approval required
@@ -403,6 +437,16 @@ jobs:
           - ✅ Gradual traffic rollout
           - ✅ Post-deployment validation
           - ✅ SBOM generated
+          - ✅ URL hidden from logs and summaries
+          
+          ### Access Backend
+          - Use Firebase Auth tokens for API calls
+          - URL stored securely in Secret Manager
+          - Contact DevOps for direct access
+          
+          ### Monitoring
+          - [Cloud Run Logs](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/logs?project=${{ env.GCP_PROJECT_ID }})
+          - [Cloud Run Metrics](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/metrics?project=${{ env.GCP_PROJECT_ID }})
           
           ### Rollback Command
           If needed, rollback with:
@@ -420,7 +464,11 @@ jobs:
             --title "Production Release v${{ github.run_number }}" \
             --notes "Deployed commit ${{ github.sha }} to production
             
-            Image: ${{ needs.build.outputs.image-uri }}
-            Service URL: ${{ steps.deploy.outputs.url }}"
+            **Image:** \`${{ needs.build.outputs.image-uri }}\`
+            **Service:** ${{ env.SERVICE_NAME }}
+            **Region:** ${{ env.REGION }}
+            **Deployment Type:** ${{ github.event.inputs.deploy_type || 'gradual' }}
+            
+            ⚠️ Backend URL is confidential and not included for security"
         env:
           GH_TOKEN: ${{ github.token }}
