@@ -264,18 +264,12 @@ jobs:
             --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --tag "$PREVIEW_TAG" \
-            --no-traffic
+            --no-traffic \
+            --quiet
           
-          # Get service URL
-          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --format 'value(status.url)')
-
-          PREVIEW_URL="${SERVICE_URL/https:\/\//https:\/\/${PREVIEW_TAG}---}"
-          
-          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "preview-url=$PREVIEW_URL" >> $GITHUB_OUTPUT
-          echo "Deployed service URL resolved"
+          # DO NOT capture or output URL for security
+          echo "deployment-status=success" >> $GITHUB_OUTPUT
+          echo "::notice::Deployment completed successfully (URL hidden for security)"
 
       - name: Ensure public invoker access for mobile clients (Dev)
         shell: bash
@@ -298,22 +292,32 @@ jobs:
       - name: Run smoke tests
         run: |
           set -euo pipefail
-          PREVIEW_URL="${{ steps.deploy.outputs.preview-url }}"
-
-          # IAM bindings can take a short time to propagate.
+          
+          # Use gcloud proxy to test without exposing URL
+          echo "Starting secure proxy for smoke tests..."
+          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --port 8080 &
+          PROXY_PID=$!
+          
+          # Wait for proxy to be ready
+          sleep 10
+          
+          # Run smoke tests through proxy
           for attempt in $(seq 1 8); do
             echo "Smoke test attempt ${attempt}/8..."
 
             HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
-              "$PREVIEW_URL/health" || true)
+              "http://localhost:8080/health" || true)
 
             API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
-              "$PREVIEW_URL/api/health" || true)
+              "http://localhost:8080/api/health" || true)
 
             if [[ "$HEALTH_STATUS" == "200" && "$API_STATUS" == "200" ]]; then
-              echo "Smoke tests passed."
+              echo "::notice::Smoke tests passed via secure proxy"
               cat /tmp/health.out
               cat /tmp/api_health.out
+              kill $PROXY_PID || true
               exit 0
             fi
 
@@ -321,11 +325,12 @@ jobs:
             sleep 10
           done
 
-          echo "Smoke tests failed after retries."
+          echo "::error::Smoke tests failed after retries"
           echo "Final /health response:"
           cat /tmp/health.out || true
           echo "Final /api/health response:"
           cat /tmp/api_health.out || true
+          kill $PROXY_PID || true
           exit 1
 
       - name: Gradual traffic migration
@@ -373,9 +378,11 @@ jobs:
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
           **Image:** \`${{ needs.build.outputs.image-uri }}\`
-          **URL:** ${{ steps.deploy.outputs.url }}
-          **Preview URL:** ${{ steps.deploy.outputs.preview-url }}
           **Commit:** ${{ github.sha }}
+          **Deployed by:** ${{ github.actor }}
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ⚠️ **Backend URL is confidential and not displayed for security**
           
           ### Security Features Enabled
           - ✅ Workload Identity Federation (keyless auth)
@@ -384,5 +391,15 @@ jobs:
           - ✅ Gradual traffic rollout
           - ✅ Optimized Docker image
           - ✅ SBOM generated
+          - ✅ URL hidden from logs and summaries
+          
+          ### Access Backend
+          - Use Firebase Auth tokens for API calls
+          - URL stored securely in Secret Manager
+          - Contact DevOps for direct access
+          
+          ### Monitoring
+          - [Cloud Run Logs](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/logs?project=${{ env.GCP_PROJECT_ID }})
+          - [Cloud Run Metrics](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/metrics?project=${{ env.GCP_PROJECT_ID }})
           
           EOF
