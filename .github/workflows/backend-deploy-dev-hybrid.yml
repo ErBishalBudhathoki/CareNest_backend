@@ -249,8 +249,9 @@ jobs:
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
             --platform managed \
-            --no-allow-unauthenticated \
+            --allow-unauthenticated \
             --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
+            --ingress all \
             --min-instances 0 \
             --max-instances 10 \
             --cpu 1 \
@@ -276,6 +277,15 @@ jobs:
           echo "preview-url=$PREVIEW_URL" >> $GITHUB_OUTPUT
           echo "Deployed service URL resolved"
 
+      - name: Ensure public invoker access for mobile clients (Dev)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services add-iam-policy-binding "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.REGION }}" \
+            --member="allUsers" \
+            --role="roles/run.invoker"
+
       - name: Grant GitHub deployer invocation access (Dev)
         shell: bash
         run: |
@@ -285,33 +295,19 @@ jobs:
             --member="serviceAccount:${{ secrets.WIF_SERVICE_ACCOUNT }}" \
             --role="roles/run.invoker"
 
-      - name: Generate ID token for smoke tests
-        id: smoke_auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-          token_format: id_token
-          # For tagged URLs, Cloud Run expects audience to be the base service URL.
-          id_token_audience: ${{ steps.deploy.outputs.url }}
-
       - name: Run smoke tests
         run: |
           set -euo pipefail
           PREVIEW_URL="${{ steps.deploy.outputs.preview-url }}"
-          
-          TOKEN="${{ steps.smoke_auth.outputs.id_token }}"
 
           # IAM bindings can take a short time to propagate.
           for attempt in $(seq 1 8); do
             echo "Smoke test attempt ${attempt}/8..."
 
             HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
-              -H "Authorization: Bearer $TOKEN" \
               "$PREVIEW_URL/health" || true)
 
             API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
-              -H "Authorization: Bearer $TOKEN" \
               "$PREVIEW_URL/api/health" || true)
 
             if [[ "$HEALTH_STATUS" == "200" && "$API_STATUS" == "200" ]]; then
@@ -377,7 +373,8 @@ jobs:
           **Service:** ${{ env.SERVICE_NAME }}
           **Region:** ${{ env.REGION }}
           **Image:** \`${{ needs.build.outputs.image-uri }}\`
-          **URL:** (Cloud Run service is IAM-protected; URL omitted)
+          **URL:** ${{ steps.deploy.outputs.url }}
+          **Preview URL:** ${{ steps.deploy.outputs.preview-url }}
           **Commit:** ${{ github.sha }}
           
           ### Security Features Enabled
