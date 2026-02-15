@@ -69,7 +69,7 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Firebase-AppCheck', 'x-correlation-id'],
   credentials: true,
   maxAge: 86400 // 24 hours - cache preflight requests
 };
