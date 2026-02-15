@@ -161,9 +161,10 @@ else if (require.main === module) {
           });
 
           if (process.env.JWT_AUTO_ROTATION_ENABLED !== 'false') {
-            const rotationInterval = parseInt(process.env.JWT_ROTATION_INTERVAL_DAYS || '30');
-            await keyRotationService.startAutomaticRotation(rotationInterval);
-            console.log(`✅ JWT key rotation initialized (auto-rotate every ${rotationInterval} days)`);
+            const configuredInterval = process.env.JWT_ROTATION_INTERVAL_DAYS || '30';
+            const rotationConfig = await keyRotationService.startAutomaticRotation(configuredInterval);
+            const activeIntervalDays = rotationConfig?.intervalDays || configuredInterval;
+            console.log(`✅ JWT key rotation initialized (auto-rotate every ${activeIntervalDays} days)`);
           } else {
             console.log('✅ JWT key rotation initialized (auto-rotation disabled)');
           }
