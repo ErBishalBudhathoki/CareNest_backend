@@ -783,6 +783,542 @@ const getPricingComplianceReport = catchAsync(async (req, res) => {
     });
 });
 
+/**
+ * Get Worker Churn Predictions
+ * GET /api/analytics/churn-prediction
+ */
+const getChurnPrediction = catchAsync(async (req, res) => {
+    const orgId = req.query.organizationId;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    const predictionService = require('../services/predictionService');
+    
+    // Get worker data for the organization
+    const workers = await User.find({
+      organizationId: orgId,
+      role: { $in: ['employee', 'worker'] },
+      isActive: true
+    });
+
+    // Get historical data for predictions
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+    // Get worked time data
+    const workedTimeData = await WorkedTime.aggregate([
+      {
+        $match: {
+          shiftDate: { $gte: thirtyDaysAgoStr, $lte: todayStr }
+        }
+      },
+      {
+        $lookup: {
+          from: 'clientAssignments',
+          localField: 'assignedClientId',
+          foreignField: '_id',
+          as: 'assignment'
+        }
+      },
+      { $unwind: { path: '$assignment', preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          $or: [
+            { organizationId: orgId },
+            { 'assignment.organizationId': orgId }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: '$userEmail',
+          totalShifts: { $sum: 1 },
+          noShows: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'no-show'] }, 1, 0]
+            }
+          }
+        }
+      }
+    ]);
+
+    // Get scheduled shifts data
+    const scheduledShifts = await ClientAssignment.aggregate([
+      {
+        $match: {
+          organizationId: orgId,
+          isActive: true
+        }
+      },
+      {
+        $addFields: {
+          schedule: {
+            $cond: {
+              if: { $and: [{ $isArray: "$schedule" }, { $gt: [{ $size: "$schedule" }, 0] }] },
+              then: "$schedule",
+              else: {
+                $map: {
+                  input: { $range: [0, { $size: { $ifNull: ["$dateList", []] } }] },
+                  as: "idx",
+                  in: {
+                    date: { $arrayElemAt: ["$dateList", "$idx"] },
+                    startTime: { $arrayElemAt: ["$startTimeList", "$idx"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      { $unwind: "$schedule" },
+      {
+        $match: {
+          "schedule.date": { $gte: thirtyDaysAgoStr, $lte: todayStr }
+        }
+      },
+      {
+        $group: {
+          _id: '$userEmail',
+          offeredShifts: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create lookup maps
+    const workedTimeMap = new Map(workedTimeData.map(w => [w._id, w]));
+    const scheduledMap = new Map(scheduledShifts.map(s => [s._id, s]));
+
+    // Calculate churn predictions for each worker
+    const predictions = [];
+    
+    for (const worker of workers) {
+      const workedData = workedTimeMap.get(worker.email) || { totalShifts: 0, noShows: 0 };
+      const scheduledData = scheduledMap.get(worker.email) || { offeredShifts: 0 };
+      
+      const workerMetrics = {
+        email: worker.email,
+        totalShifts: workedData.totalShifts,
+        noShows: workedData.noShows,
+        offeredShifts: scheduledData.offeredShifts,
+        daysSinceLastShift: 0, // Would need to calculate from last shift date
+        rating: worker.rating || 0
+      };
+
+      const prediction = predictionService.predictWorkerChurn(workerMetrics, worker);
+      
+      // Only include workers with medium or high risk
+      if (prediction.churnScore >= 40) {
+        predictions.push(prediction);
+      }
+    }
+
+    // Sort by churn score (highest first)
+    predictions.sort((a, b) => b.churnScore - a.churnScore);
+
+    logger.business('Churn Prediction Generated', {
+      event: 'churn_prediction_generated',
+      organizationId: orgId,
+      totalWorkers: workers.length,
+      atRiskWorkers: predictions.length,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: predictions
+    });
+});
+
+/**
+ * Get Demand Forecast
+ * GET /api/analytics/demand-forecast
+ */
+const getDemandForecast = catchAsync(async (req, res) => {
+    const orgId = req.query.organizationId;
+    const daysAhead = parseInt(req.query.daysAhead) || 7;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    const predictionService = require('../services/predictionService');
+
+    // Get historical appointment data (last 90 days)
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const ninetyDaysAgoStr = ninetyDaysAgo.toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Get historical worked time data
+    const historicalData = await WorkedTime.aggregate([
+      {
+        $match: {
+          shiftDate: { $gte: ninetyDaysAgoStr, $lte: todayStr }
+        }
+      },
+      {
+        $lookup: {
+          from: 'clientAssignments',
+          localField: 'assignedClientId',
+          foreignField: '_id',
+          as: 'assignment'
+        }
+      },
+      { $unwind: { path: '$assignment', preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          $or: [
+            { organizationId: orgId },
+            { 'assignment.organizationId': orgId }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: {
+            date: '$shiftDate',
+            serviceType: { $ifNull: ['$assignment.serviceType', 'General'] }
+          },
+          count: { $sum: 1 },
+          hours: {
+            $push: {
+              $toInt: {
+                $arrayElemAt: [
+                  { $split: ['$startTime', ':'] },
+                  0
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.date',
+          serviceTypes: {
+            $push: {
+              type: '$_id.serviceType',
+              count: '$count'
+            }
+          },
+          totalCount: { $sum: '$count' },
+          allHours: { $push: '$hours' }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Generate forecast
+    const forecast = predictionService.forecastDemand(historicalData, daysAhead);
+
+    logger.business('Demand Forecast Generated', {
+      event: 'demand_forecast_generated',
+      organizationId: orgId,
+      daysAhead,
+      historicalDataPoints: historicalData.length,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: forecast
+    });
+});
+
+/**
+ * Get Compliance Risk Assessment
+ * GET /api/analytics/compliance-risk
+ */
+const getComplianceRisk = catchAsync(async (req, res) => {
+    const orgId = req.query.organizationId;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    const predictionService = require('../services/predictionService');
+
+    // Get all workers in the organization
+    const workers = await User.find({
+      organizationId: orgId,
+      role: { $in: ['employee', 'worker'] },
+      isActive: true
+    });
+
+    // Get organization data
+    const Organization = require('../models/Organization');
+    const organization = await Organization.findOne({ organizationId: orgId });
+
+    // Collect compliance data
+    const complianceData = {
+      organizationId: orgId,
+      workers: workers.map(w => ({
+        id: w._id.toString(),
+        name: `${w.firstName} ${w.lastName}`,
+        email: w.email,
+        certifications: w.certifications || [],
+        documents: w.documents || [],
+        trainings: w.trainings || [],
+        lastAudit: w.lastComplianceAudit || null
+      })),
+      organizationSettings: {
+        requiredCertifications: organization?.requiredCertifications || [
+          'First Aid',
+          'CPR',
+          'NDIS Worker Screening'
+        ],
+        requiredDocuments: organization?.requiredDocuments || [
+          'Police Check',
+          'Working with Children Check',
+          'Insurance Certificate'
+        ],
+        requiredTrainings: organization?.requiredTrainings || [
+          'Manual Handling',
+          'Infection Control',
+          'Privacy & Confidentiality'
+        ]
+      }
+    };
+
+    // Assess compliance risk
+    const riskAssessment = predictionService.assessComplianceRisk(complianceData);
+
+    logger.business('Compliance Risk Assessment Generated', {
+      event: 'compliance_risk_assessment',
+      organizationId: orgId,
+      overallScore: riskAssessment.overallScore,
+      riskLevel: riskAssessment.riskLevel,
+      totalIssues: riskAssessment.issues.length,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: riskAssessment
+    });
+});
+
+/**
+ * Get Client Risk Predictions
+ * GET /api/analytics/client-risk
+ */
+const getClientRisk = catchAsync(async (req, res) => {
+    const orgId = req.params.organizationId || req.query.organizationId;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    // Get all clients for the organization
+    const clients = await ClientAssignment.find({ organizationId: orgId })
+      .populate('clientId')
+      .lean();
+
+    if (!clients || clients.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    const clientRiskPredictions = [];
+
+    // Calculate risk for each client
+    for (const assignment of clients) {
+      if (!assignment.clientId) continue;
+
+      const clientId = assignment.clientId._id.toString();
+      const clientName = assignment.clientId.name || 'Unknown Client';
+
+      // Get client metrics (mock data for now - replace with actual queries)
+      const metrics = {
+        totalInvoices: Math.floor(Math.random() * 50) + 10,
+        latePayments: Math.floor(Math.random() * 10),
+        totalAppointments: Math.floor(Math.random() * 100) + 20,
+        cancellations: Math.floor(Math.random() * 15),
+        complaints: Math.floor(Math.random() * 3),
+        escalations: Math.floor(Math.random() * 2),
+        avgResponseTime: Math.floor(Math.random() * 72) + 12,
+        recentAppointments: Math.floor(Math.random() * 30) + 10,
+        historicalAverage: 25,
+        monthsAsClient: Math.floor(Math.random() * 24) + 3
+      };
+
+      const clientData = {
+        _id: assignment.clientId._id,
+        name: clientName
+      };
+
+      const riskPrediction = predictionService.predictClientRisk(clientData, metrics);
+      clientRiskPredictions.push(riskPrediction);
+    }
+
+    // Sort by risk score (highest first)
+    clientRiskPredictions.sort((a, b) => b.riskScore - a.riskScore);
+
+    // Limit to top 20 at-risk clients
+    const topRisks = clientRiskPredictions.filter(c => c.riskScore > 30).slice(0, 20);
+
+    logger.business('Client Risk Predictions Generated', {
+      event: 'client_risk_prediction',
+      organizationId: orgId,
+      totalClients: clientRiskPredictions.length,
+      highRiskClients: topRisks.filter(c => c.riskLevel === 'high').length,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: topRisks
+    });
+});
+
+/**
+ * Get Service Demand Predictions
+ * GET /api/analytics/service-demand
+ */
+const getServiceDemand = catchAsync(async (req, res) => {
+    const orgId = req.params.organizationId || req.query.organizationId;
+    const daysAhead = parseInt(req.query.daysAhead) || 30;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    // Get historical appointment data by service type (last 60 days)
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
+    const historicalData = await ClientAssignment.aggregate([
+      {
+        $match: {
+          organizationId: orgId,
+          createdAt: { $gte: sixtyDaysAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            serviceType: "$serviceType"
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $group: {
+          _id: "$_id.date",
+          serviceTypes: {
+            $push: {
+              type: "$_id.serviceType",
+              count: "$count"
+            }
+          }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Predict service demand
+    const demandPrediction = predictionService.predictServiceDemand(historicalData, daysAhead);
+
+    logger.business('Service Demand Predictions Generated', {
+      event: 'service_demand_prediction',
+      organizationId: orgId,
+      daysAhead,
+      serviceTypes: demandPrediction.predictions.length,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: demandPrediction
+    });
+});
+
+/**
+ * Run Scenario Model
+ * POST /api/analytics/scenario-model
+ */
+const runScenarioModel = catchAsync(async (req, res) => {
+    const orgId = req.params.organizationId || req.body.organizationId;
+    const scenario = req.body.scenario;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    if (!scenario) {
+      return res.status(400).json({ success: false, message: 'Scenario parameters are required' });
+    }
+
+    // Get baseline data (mock for now - replace with actual queries)
+    const baselineData = {
+      currentRevenue: 50000,
+      currentExpenses: 35000,
+      workerCount: 20,
+      clientCount: 50,
+      utilizationRate: 0.75
+    };
+
+    // Run scenario model
+    const results = predictionService.runScenarioModel(baselineData, scenario);
+
+    logger.business('Scenario Model Executed', {
+      event: 'scenario_model',
+      organizationId: orgId,
+      scenarioName: scenario.name,
+      revenueChange: results.changes.revenueChange,
+      profitChange: results.changes.profitChange,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: results
+    });
+});
+
+/**
+ * Get AI Recommendations
+ * GET /api/analytics/recommendations
+ */
+const getRecommendations = catchAsync(async (req, res) => {
+    const orgId = req.params.organizationId || req.query.organizationId;
+
+    if (!orgId) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    // Gather all analytics data (simplified - in production, call actual endpoints)
+    const analyticsData = {
+      churnPredictions: [],
+      clientRisks: [],
+      serviceDemand: { predictions: [], recommendations: [] },
+      complianceRisk: { riskLevel: 'low', overallScore: 85 },
+      revenueForecast: []
+    };
+
+    // Generate recommendations
+    const recommendations = predictionService.generateRecommendations(analyticsData);
+
+    logger.business('AI Recommendations Generated', {
+      event: 'ai_recommendations',
+      organizationId: orgId,
+      recommendationCount: recommendations.length,
+      timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({
+      success: true,
+      data: recommendations
+    });
+});
+
 module.exports = {
   getFinancialMetrics,
   getUtilizationMetrics,
@@ -791,5 +1327,12 @@ module.exports = {
   getCrossOrgMetrics,
   getRevenueForecast,
   getPricingAnalytics,
-  getPricingComplianceReport
+  getPricingComplianceReport,
+  getChurnPrediction,
+  getDemandForecast,
+  getComplianceRisk,
+  getClientRisk,
+  getServiceDemand,
+  runScenarioModel,
+  getRecommendations
 };

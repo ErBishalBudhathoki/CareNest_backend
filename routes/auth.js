@@ -2,6 +2,7 @@ const express = require('express');
 const SecureAuthController = require('../controllers/secureAuthController');
 const AdminAuthController = require('../controllers/adminAuthController');
 const { authenticateUser, rateLimitMiddleware, requireRoles } = require('../middleware/auth');
+const { requireAppCheck } = require('../middleware/appCheck');
 const SecureErrorHandler = require('../utils/errorHandler');
 const { createLogger } = require('../utils/logger');
 const { securityMonitor } = require('../utils/securityMonitor');
@@ -27,6 +28,7 @@ const logger = createLogger('AuthRoutes');
  * @access Public
  */
 router.post('/register',
+  requireAppCheck,
   rateLimitMiddleware('register'),
   registerValidators,
   async (req, res) => {
@@ -49,6 +51,7 @@ router.post('/register',
  * @access Public
  */
 router.post('/login',
+  requireAppCheck,
   rateLimitMiddleware('login'),
   loginValidators,
   async (req, res) => {
@@ -71,6 +74,7 @@ router.post('/login',
  * @access Public
  */
 router.post('/register-fcm-token',
+  requireAppCheck,
   async (req, res) => {
     try {
       const result = await SecureAuthController.registerFcmToken(req, res);
@@ -91,6 +95,7 @@ router.post('/register-fcm-token',
  * @access Public
  */
 router.post('/secure-login',
+  requireAppCheck,
   rateLimitMiddleware('login'),
   loginValidators,
   async (req, res) => {
@@ -114,6 +119,7 @@ router.post('/secure-login',
  * @access Public
  */
 router.post('/verify-email',
+  requireAppCheck,
   rateLimitMiddleware('verify'),
   verifyEmailValidators,
   async (req, res) => {
@@ -136,6 +142,7 @@ router.post('/verify-email',
  * @access Public
  */
 router.post('/forgot-password',
+  requireAppCheck,
   rateLimitMiddleware('forgot'),
   emailValidators,
   async (req, res) => {
@@ -158,6 +165,7 @@ router.post('/forgot-password',
  * @access Public
  */
 router.post('/reset-password',
+  requireAppCheck,
   rateLimitMiddleware('reset'),
   resetPasswordValidators,
   async (req, res) => {

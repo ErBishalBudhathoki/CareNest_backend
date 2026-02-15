@@ -285,7 +285,7 @@ jobs:
             --timeout 300 \
             --cpu-boost \
             --port 8080 \
-            --set-env-vars "NODE_ENV=production" \
+            --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
             --set-env-vars "GCP_PROJECT_ID=carenest-prod" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --no-traffic \

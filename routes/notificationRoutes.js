@@ -52,6 +52,17 @@ router.use(authenticateUser);
 router.get('/settings', notificationReadLimiter, NotificationController.getSettings);
 router.put('/settings', notificationWriteLimiter, NotificationController.updateSettings);
 
+// Preferences routes (NEW)
+router.get('/preferences/:userId', notificationReadLimiter, NotificationController.getPreferences);
+router.put('/preferences/:userId', notificationWriteLimiter, NotificationController.updatePreferences);
+
+// Smart timing routes (NEW)
+router.post('/smart-timing/optimal-time', notificationWriteLimiter, NotificationController.getOptimalSendTime);
+router.post('/smart-timing/record-engagement', notificationWriteLimiter, NotificationController.recordEngagement);
+
+// Geofence routes (NEW)
+router.post('/geofence/event', notificationWriteLimiter, NotificationController.handleGeofenceEvent);
+
 // History routes
 router.get('/history', notificationReadLimiter, getHistoryValidation, handleValidationErrors, NotificationController.getHistory);
 router.put('/:id/read', notificationWriteLimiter, markAsReadValidation, handleValidationErrors, NotificationController.markAsRead);

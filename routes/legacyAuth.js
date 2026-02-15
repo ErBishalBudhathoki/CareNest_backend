@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const AuthController = require('../controllers/authController');
+const { requireAppCheck } = require('../middleware/appCheck');
 
 // Rate limiting
 const authLimiter = rateLimit({
@@ -43,14 +44,14 @@ const passwordValidation = [
 ];
 
 // Mount legacy routes at root
-router.post('/sendOTP', authLimiter, AuthController.sendOTP);
-router.post('/verifyOTP', authLimiter, AuthController.verifyOTP);
-router.post('/updatePassword', authLimiter, passwordValidation, handleValidationErrors, AuthController.updatePassword);
+router.post('/sendOTP', requireAppCheck, authLimiter, AuthController.sendOTP);
+router.post('/verifyOTP', requireAppCheck, authLimiter, AuthController.verifyOTP);
+router.post('/updatePassword', requireAppCheck, authLimiter, passwordValidation, handleValidationErrors, AuthController.updatePassword);
 
 // Add /hello/:email alias if needed here or keep in initRoutes
 // keeping hello in initRoutes is fine as it's GET.
 
 // Add legacy photo route to match frontend expectation
-router.get('/getUserPhoto/:email', authLimiter, AuthController.getUserPhoto);
+router.get('/getUserPhoto/:email', requireAppCheck, authLimiter, AuthController.getUserPhoto);
 
 module.exports = router;

@@ -1,298 +1,206 @@
-const User = require('../models/User');
 const clientPortalService = require('../services/clientPortalService');
-const clientAuthService = require('../services/clientAuthService');
-const catchAsync = require('../utils/catchAsync');
-const jwt = require('jsonwebtoken');
-const logger = require('../config/logger');
+
+/**
+ * Client Portal Controller
+ * Handles client portal API endpoints
+ */
 
 class ClientPortalController {
-  // --- Auth ---
-  activate = catchAsync(async (req, res) => {
-    const { email, password } = req.body;
-    
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Email and password are required'
-      });
-    }
-    
-    const result = await clientAuthService.activateClientAccount(email, password);
-    
-    logger.business('Client account activated', {
-      action: 'client_portal_activate',
-      email: result.email
-    });
-    
-    res.status(201).json({
-      success: true,
-      code: 'ACCOUNT_ACTIVATED',
-      message: 'Account activated',
-      user: { email: result.email }
-    });
-  });
-
-  login = catchAsync(async (req, res) => {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Email and password are required'
-      });
-    }
-
-    const user = await User.findOne({ email, role: 'client' }).select('+password');
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        code: 'INVALID_CREDENTIALS',
-        message: 'Invalid credentials'
-      });
-    }
-
-    const isValid = await user.comparePassword(password);
-    if (!isValid) {
-      return res.status(401).json({
-        success: false,
-        code: 'INVALID_CREDENTIALS',
-        message: 'Invalid credentials'
-      });
-    }
-
-    // Generate Token
-    const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-        roles: ['client'],
-        clientId: user.clientId,
-        organizationId: user.organizationId
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '24h', issuer: 'invoice-app', audience: 'invoice-app-users' }
-    );
-
-    logger.business('Client portal login', {
-      action: 'client_portal_login',
-      email: user.email,
-      clientId: user.clientId
-    });
-
-    res.status(200).json({
-      success: true,
-      code: 'LOGIN_SUCCESS',
-      token,
-      user: {
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: 'client',
-        clientId: user.clientId
+  /**
+   * Get client dashboard
+   * GET /api/client-portal/dashboard/:clientId
+   */
+  async getClientDashboard(req, res) {
+    try {
+      const { clientId } = req.params;
+      
+      if (!clientId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Client ID is required'
+        });
       }
-    });
-  });
-
-  // --- Invoices ---
-  getInvoices = catchAsync(async (req, res) => {
-    const userEmail = req.user.email;
-    const { page, limit, status } = req.query;
-    
-    const profile = await clientAuthService.getClientProfile(req.user.userId);
-    const result = await clientPortalService.getInvoices(profile.client._id, userEmail, { page, limit, status });
-
-    logger.business('Client retrieved invoices', {
-      action: 'client_portal_invoices_list',
-      clientId: profile.client._id,
-      email: userEmail
-    });
-
-    res.status(200).json({
-      success: true,
-      code: 'INVOICES_RETRIEVED',
-      data: result
-    });
-  });
-
-  getInvoiceDetail = catchAsync(async (req, res) => {
-    const { id } = req.params;
-    
-    if (!id) {
-      return res.status(400).json({
+      
+      const result = await clientPortalService.getClientDashboard(clientId);
+      
+      if (result.success) {
+        return res.status(200).json(result);
+      } else {
+        return res.status(500).json(result);
+      }
+    } catch (error) {
+      console.error('Error in getClientDashboard controller:', error);
+      return res.status(500).json({
         success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Invoice ID is required'
+        message: 'Internal server error',
+        error: error.message
       });
     }
-    
-    const profile = await clientAuthService.getClientProfile(req.user.userId);
-    const result = await clientPortalService.getInvoiceDetail(id, profile.client._id, req.user.email);
-    
-    logger.business('Client retrieved invoice detail', {
-      action: 'client_portal_invoice_detail',
-      invoiceId: id,
-      clientId: profile.client._id
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'INVOICE_RETRIEVED',
-      data: result
-    });
-  });
-
-  approveInvoice = catchAsync(async (req, res) => {
-    const { id } = req.params;
-    
-    if (!id) {
-      return res.status(400).json({
+  }
+  
+  /**
+   * Get worker location
+   * GET /api/client-portal/worker-location/:appointmentId
+   */
+  async getWorkerLocation(req, res) {
+    try {
+      const { appointmentId } = req.params;
+      
+      if (!appointmentId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Appointment ID is required'
+        });
+      }
+      
+      const result = await clientPortalService.getWorkerLocation(appointmentId);
+      
+      if (result.success) {
+        return res.status(200).json(result);
+      } else {
+        return res.status(500).json(result);
+      }
+    } catch (error) {
+      console.error('Error in getWorkerLocation controller:', error);
+      return res.status(500).json({
         success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Invoice ID is required'
+        message: 'Internal server error',
+        error: error.message
       });
     }
-    
-    const result = await clientPortalService.approveInvoice(id, req.user.userId, req.user.email);
-    
-    logger.business('Client approved invoice', {
-      action: 'client_portal_invoice_approve',
-      invoiceId: id,
-      userId: req.user.userId
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'INVOICE_APPROVED',
-      message: 'Invoice approved',
-      result
-    });
-  });
-
-  disputeInvoice = catchAsync(async (req, res) => {
-    const { id } = req.params;
-    const { reason } = req.body;
-    
-    if (!id) {
-      return res.status(400).json({
+  }
+  
+  /**
+   * Get appointment status
+   * GET /api/client-portal/appointment-status/:appointmentId
+   */
+  async getAppointmentStatus(req, res) {
+    try {
+      const { appointmentId } = req.params;
+      
+      if (!appointmentId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Appointment ID is required'
+        });
+      }
+      
+      const result = await clientPortalService.getAppointmentStatus(appointmentId);
+      
+      if (result.success) {
+        return res.status(200).json(result);
+      } else {
+        return res.status(500).json(result);
+      }
+    } catch (error) {
+      console.error('Error in getAppointmentStatus controller:', error);
+      return res.status(500).json({
         success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Invoice ID is required'
+        message: 'Internal server error',
+        error: error.message
       });
     }
-    
-    const result = await clientPortalService.disputeInvoice(id, req.user.userId, req.user.email, reason);
-    
-    logger.business('Client disputed invoice', {
-      action: 'client_portal_invoice_dispute',
-      invoiceId: id,
-      userId: req.user.userId,
-      reason
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'INVOICE_DISPUTED',
-      message: 'Invoice disputed',
-      result
-    });
-  });
-
-  // --- Appointments ---
-  getAppointments = catchAsync(async (req, res) => {
-    const result = await clientPortalService.getAppointments(req.user.email);
-    
-    logger.business('Client retrieved appointments', {
-      action: 'client_portal_appointments_list',
-      email: req.user.email,
-      count: result?.length || 0
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'APPOINTMENTS_RETRIEVED',
-      data: result
-    });
-  });
-
-  getAppointmentDetail = catchAsync(async (req, res) => {
-    const { assignmentId, scheduleId } = req.params;
-    
-    if (!assignmentId || !scheduleId) {
-      return res.status(400).json({
+  }
+  
+  /**
+   * Send client message
+   * POST /api/client-portal/message
+   * Body: { clientId, workerId, appointmentId, message, messageType }
+   */
+  async sendClientMessage(req, res) {
+    try {
+      const messageData = req.body;
+      
+      if (!messageData.clientId || !messageData.workerId || !messageData.message) {
+        return res.status(400).json({
+          success: false,
+          message: 'Client ID, worker ID, and message are required'
+        });
+      }
+      
+      const result = await clientPortalService.sendClientMessage(messageData);
+      
+      if (result.success) {
+        return res.status(200).json(result);
+      } else {
+        return res.status(400).json(result);
+      }
+    } catch (error) {
+      console.error('Error in sendClientMessage controller:', error);
+      return res.status(500).json({
         success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'assignmentId and scheduleId are required'
+        message: 'Internal server error',
+        error: error.message
       });
     }
-    
-    const result = await clientPortalService.getAppointmentDetail(assignmentId, scheduleId, req.user.email);
-    
-    logger.business('Client retrieved appointment detail', {
-      action: 'client_portal_appointment_detail',
-      assignmentId,
-      scheduleId
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'APPOINTMENT_RETRIEVED',
-      data: result
-    });
-  });
-
-  requestAppointment = catchAsync(async (req, res) => {
-    const { type, details, note } = req.body;
-    
-    if (!type) {
-      return res.status(400).json({
+  }
+  
+  /**
+   * Submit service feedback
+   * POST /api/client-portal/feedback
+   * Body: { clientId, appointmentId, rating, comments, categories }
+   */
+  async submitServiceFeedback(req, res) {
+    try {
+      const feedbackData = req.body;
+      
+      if (!feedbackData.clientId || !feedbackData.appointmentId || !feedbackData.rating) {
+        return res.status(400).json({
+          success: false,
+          message: 'Client ID, appointment ID, and rating are required'
+        });
+      }
+      
+      const result = await clientPortalService.submitServiceFeedback(feedbackData);
+      
+      if (result.success) {
+        return res.status(200).json(result);
+      } else {
+        return res.status(400).json(result);
+      }
+    } catch (error) {
+      console.error('Error in submitServiceFeedback controller:', error);
+      return res.status(500).json({
         success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Appointment type is required'
+        message: 'Internal server error',
+        error: error.message
       });
     }
-    
-    const result = await clientPortalService.requestAppointment(req.user.email, req.user.userId, type, details, note);
-    
-    logger.business('Client requested appointment', {
-      action: 'client_portal_appointment_request',
-      email: req.user.email,
-      type
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'APPOINTMENT_REQUESTED',
-      message: 'Request submitted',
-      data: result
-    });
-  });
-
-  changePassword = catchAsync(async (req, res) => {
-    const { currentPassword, newPassword } = req.body;
-    
-    if (!newPassword) {
-      return res.status(400).json({
+  }
+  
+  /**
+   * Get service history
+   * GET /api/client-portal/service-history/:clientId?limit=10
+   */
+  async getServiceHistory(req, res) {
+    try {
+      const { clientId } = req.params;
+      const { limit } = req.query;
+      
+      if (!clientId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Client ID is required'
+        });
+      }
+      
+      const limitNum = limit ? parseInt(limit) : 10;
+      const result = await clientPortalService.getServiceHistory(clientId, limitNum);
+      
+      if (result.success) {
+        return res.status(200).json(result);
+      } else {
+        return res.status(500).json(result);
+      }
+    } catch (error) {
+      console.error('Error in getServiceHistory controller:', error);
+      return res.status(500).json({
         success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'New password is required'
+        message: 'Internal server error',
+        error: error.message
       });
     }
-
-    await clientAuthService.changePassword(req.user.email, currentPassword, newPassword);
-    
-    logger.business('Client changed password', {
-      action: 'client_portal_password_change',
-      email: req.user.email
-    });
-    
-    res.status(200).json({
-      success: true,
-      code: 'PASSWORD_CHANGED',
-      message: 'Password changed successfully'
-    });
-  });
+  }
 }
 
 module.exports = new ClientPortalController();
