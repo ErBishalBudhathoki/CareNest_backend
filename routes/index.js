@@ -72,6 +72,7 @@ const offlineSyncRoutes = require('./offlineSyncRoutes'); // Offline sync (Phase
 const clientPortalEnhancedRoutes = require('./clientPortalRoutes'); // Client portal (Phase 4)
 const advancedPayrollRoutes = require('./advancedPayrollRoutes'); // Advanced payroll (Phase 4)
 const communicationHubRoutes = require('./communicationHubRoutes'); // Communication hub (Phase 4)
+const firebaseAuthRoutes = require('./firebaseAuth'); // Firebase authentication
 
 // Mount Routes
 
@@ -148,6 +149,7 @@ router.use('/offline', offlineSyncRoutes); // Offline sync API (Phase 3)
 router.use('/client-portal-enhanced', clientPortalEnhancedRoutes); // Client portal API (Phase 4)
 router.use('/payroll-advanced', advancedPayrollRoutes); // Advanced payroll API (Phase 4)
 router.use('/communication-hub', communicationHubRoutes); // Communication hub API (Phase 4)
+router.use('/firebase-auth', firebaseAuthRoutes); // Firebase authentication API
 // router.use('/upload', uploadRoutes); // TODO: Add uploadRoutes import if needed
 
 module.exports = router;

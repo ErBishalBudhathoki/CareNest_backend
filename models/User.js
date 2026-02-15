@@ -13,7 +13,10 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required'],
+    required: function() {
+      // Password not required if using Firebase Auth
+      return !this.firebaseUid;
+    },
     minlength: [8, 'Password must be at least 8 characters'],
     select: false
   },
@@ -60,6 +63,27 @@ const userSchema = new mongoose.Schema({
     match: [/^\+?[1-9]\d{1,14}$/, 'Invalid phone number']
   },
   profilePic: String,
+
+  // Firebase Authentication Fields
+  firebaseUid: {
+    type: String,
+    unique: true,
+    sparse: true, // Allows null values while maintaining uniqueness
+    index: true
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  photoURL: {
+    type: String
+  },
+  firebaseSyncedAt: {
+    type: Date
+  },
+  lastLoginAt: {
+    type: Date
+  },
 
   // Payroll & Rates
   payRate: { type: Number, default: 0 },
