@@ -143,6 +143,7 @@ jwtSecretSchema.statics.createKey = async function(options = {}) {
   const keyId = options.keyId || `key_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
   const secret = options.secret || crypto.randomBytes(64).toString('base64');
   const status = options.activate ? 'active' : 'valid';
+  const session = options.session;
   
   // Default expiration: 90 days from now
   const expiresAt = options.expiresAt || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
@@ -158,10 +159,15 @@ jwtSecretSchema.statics.createKey = async function(options = {}) {
     rotationType: options.rotationType || 'automatic'
   });
   
-  await newKey.save();
+  if (session) {
+    await newKey.save({ session });
+  } else {
+    await newKey.save();
+  }
   
   // If activating, deactivate all other keys
   if (options.activate) {
+    const updateOptions = session ? { session } : {};
     await this.updateMany(
       { 
         _id: { $ne: newKey._id },
@@ -172,7 +178,8 @@ jwtSecretSchema.statics.createKey = async function(options = {}) {
           status: 'valid',
           deactivatedAt: new Date()
         }
-      }
+      },
+      updateOptions
     );
   }
   
@@ -184,50 +191,52 @@ jwtSecretSchema.statics.createKey = async function(options = {}) {
  */
 jwtSecretSchema.statics.rotateKeys = async function(options = {}) {
   const session = await mongoose.startSession();
-  session.startTransaction();
   
   try {
-    // Get current active key
-    const currentActive = await this.findOne({ status: 'active' }).session(session);
-    
-    // Create new active key
-    const newKey = await this.createKey({
-      ...options,
-      activate: true
+    let currentActive = null;
+    let newKey = null;
+
+    await session.withTransaction(async () => {
+      const now = new Date();
+
+      // Read current active key for metadata before rotating.
+      currentActive = await this.findOne({
+        status: 'active',
+        expiresAt: { $gt: now }
+      })
+        .sort({ activatedAt: -1, createdAt: -1 })
+        .session(session);
+
+      // Create new active key and atomically demote any previously active key.
+      newKey = await this.createKey({
+        ...options,
+        activate: true,
+        session
+      });
+
+      // Auto-revoke expired keys.
+      await this.updateMany(
+        {
+          expiresAt: { $lt: now },
+          status: { $ne: 'revoked' }
+        },
+        {
+          $set: {
+            status: 'revoked',
+            revokedAt: now,
+            revocationReason: 'Expired automatically'
+          }
+        },
+        { session }
+      );
     });
-    
-    // Move old active key to valid (if exists)
-    if (currentActive) {
-      currentActive.status = 'valid';
-      currentActive.deactivatedAt = new Date();
-      await currentActive.save({ session });
-    }
-    
-    // Auto-revoke expired keys
-    await this.updateMany(
-      {
-        expiresAt: { $lt: new Date() },
-        status: { $ne: 'revoked' }
-      },
-      {
-        $set: {
-          status: 'revoked',
-          revokedAt: new Date(),
-          revocationReason: 'Expired automatically'
-        }
-      },
-      { session }
-    );
-    
-    await session.commitTransaction();
-    
+
     return {
       newKey,
       previousKey: currentActive,
       message: 'Key rotation completed successfully'
     };
   } catch (error) {
-    await session.abortTransaction();
     throw error;
   } finally {
     session.endSession();

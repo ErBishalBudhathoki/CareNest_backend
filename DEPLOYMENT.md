@@ -64,7 +64,7 @@ The deployment is automated via GitHub Actions:
 
 ### Dev URL access
 
-Development is configured as **IAM-protected** (not publicly invokable). Smoke tests use an identity token to validate the tagged revision.
+Development is configured as **publicly invokable** so mobile clients can call the API directly. Smoke tests validate the tagged preview revision over public HTTPS.
 
 ### Scale to Zero
 The service is configured with `--min-instances=0`. This means:

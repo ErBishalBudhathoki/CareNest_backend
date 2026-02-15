@@ -11,6 +11,9 @@ class JWTKeyRotationService {
   constructor() {
     this.initialized = false;
     this.rotationInterval = null;
+    this.cleanupInterval = null;
+    this.rotationIntervalDays = null;
+    this.rotationInProgress = false;
     this.activeKey = null;
     this.validKeys = [];
     this.cacheExpiry = 5 * 60 * 1000; // 5 minutes cache
@@ -229,18 +232,50 @@ class JWTKeyRotationService {
    * Creates a new active key and moves the old one to valid status
    */
   async rotateKeys(options = {}) {
+    if (this.rotationInProgress) {
+      const conflictError = new Error('JWT key rotation already in progress');
+      conflictError.statusCode = 409;
+      conflictError.code = 'ROTATION_IN_PROGRESS';
+      throw conflictError;
+    }
+
+    this.rotationInProgress = true;
     try {
       console.log('[JWT Key Rotation] Starting key rotation...');
       
       const rotationType = options.rotationType || 'automatic';
       const createdBy = options.createdBy || 'system';
       const keyLifetimeDays = options.keyLifetimeDays || 90;
-      
-      const result = await JWTSecret.rotateKeys({
-        expiresAt: new Date(Date.now() + keyLifetimeDays * 24 * 60 * 60 * 1000),
-        rotationType,
-        createdBy
-      });
+
+      const maxRetries = 3;
+      let result;
+      let lastError;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+        try {
+          result = await JWTSecret.rotateKeys({
+            expiresAt: new Date(Date.now() + keyLifetimeDays * 24 * 60 * 60 * 1000),
+            rotationType,
+            createdBy
+          });
+          break;
+        } catch (error) {
+          lastError = error;
+          if (!this._isWriteConflictError(error) || attempt === maxRetries) {
+            throw error;
+          }
+
+          const delayMs = attempt * 250;
+          console.warn(
+            `[JWT Key Rotation] WriteConflict during rotation, retrying (${attempt}/${maxRetries}) in ${delayMs}ms`
+          );
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+
+      if (!result) {
+        throw lastError || new Error('JWT key rotation failed: no result');
+      }
       
       // Refresh cache with new keys
       await this.refreshKeyCache();
@@ -267,6 +302,8 @@ class JWTKeyRotationService {
       });
       
       throw error;
+    } finally {
+      this.rotationInProgress = false;
     }
   }
 
@@ -325,24 +362,58 @@ class JWTKeyRotationService {
   async startAutomaticRotation(intervalDays = 30) {
     if (this.rotationInterval) {
       console.log('[JWT Key Rotation] Automatic rotation already running');
-      return;
+      return {
+        started: false,
+        intervalDays: this.rotationIntervalDays
+      };
     }
-    
-    const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-    
-    console.log(`[JWT Key Rotation] Starting automatic rotation every ${intervalDays} days`);
-    
+
+    const fallbackIntervalDays = 30;
+    const minIntervalDaysRaw = process.env.JWT_ROTATION_MIN_INTERVAL_DAYS || '1';
+    const minIntervalDays = Number(minIntervalDaysRaw);
+    const effectiveMinIntervalDays = Number.isFinite(minIntervalDays) && minIntervalDays > 0
+      ? minIntervalDays
+      : 1;
+
+    let parsedIntervalDays = Number(intervalDays);
+    if (!Number.isFinite(parsedIntervalDays) || parsedIntervalDays <= 0) {
+      console.warn(
+        `[JWT Key Rotation] Invalid rotation interval "${intervalDays}". Falling back to ${fallbackIntervalDays} days.`
+      );
+      parsedIntervalDays = fallbackIntervalDays;
+    }
+
+    if (parsedIntervalDays < effectiveMinIntervalDays) {
+      console.warn(
+        `[JWT Key Rotation] Rotation interval ${parsedIntervalDays} day(s) is below minimum ${effectiveMinIntervalDays} day(s). Using minimum.`
+      );
+      parsedIntervalDays = effectiveMinIntervalDays;
+    }
+
+    const intervalMs = Math.round(parsedIntervalDays * 24 * 60 * 60 * 1000);
+    this.rotationIntervalDays = parsedIntervalDays;
+
+    console.log(`[JWT Key Rotation] Starting automatic rotation every ${parsedIntervalDays} days`);
+
     this.rotationInterval = setInterval(async () => {
       try {
         console.log('[JWT Key Rotation] Automatic rotation triggered');
         await this.rotateKeys({ rotationType: 'automatic' });
       } catch (error) {
+        if (error.code === 'ROTATION_IN_PROGRESS') {
+          console.warn('[JWT Key Rotation] Automatic rotation skipped (rotation already in progress)');
+          return;
+        }
         console.error('[JWT Key Rotation] Automatic rotation failed:', error);
       }
     }, intervalMs);
-    
+
+    if (typeof this.rotationInterval.unref === 'function') {
+      this.rotationInterval.unref();
+    }
+
     // Also schedule cleanup of old revoked keys
-    setInterval(async () => {
+    this.cleanupInterval = setInterval(async () => {
       try {
         const result = await JWTSecret.cleanupOldKeys(180); // Keep for 6 months
         if (result.deletedCount > 0) {
@@ -352,6 +423,15 @@ class JWTKeyRotationService {
         console.error('[JWT Key Rotation] Cleanup failed:', error);
       }
     }, 24 * 60 * 60 * 1000); // Run daily
+
+    if (typeof this.cleanupInterval.unref === 'function') {
+      this.cleanupInterval.unref();
+    }
+
+    return {
+      started: true,
+      intervalDays: parsedIntervalDays
+    };
   }
 
   /**
@@ -363,6 +443,20 @@ class JWTKeyRotationService {
       this.rotationInterval = null;
       console.log('[JWT Key Rotation] Automatic rotation stopped');
     }
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.rotationIntervalDays = null;
+  }
+
+  _isWriteConflictError(error) {
+    if (!error) return false;
+    if (error.code === 112) return true;
+    if (typeof error.message === 'string' && error.message.includes('WriteConflict')) {
+      return true;
+    }
+    return false;
   }
 
   /**
