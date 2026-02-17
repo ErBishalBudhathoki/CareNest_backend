@@ -1,0 +1,9 @@
+{
+  "phaseName": "invoices",
+  "displayName": "Invoices",
+  "description": "Invoice generation and payments",
+  "entities": ["invoice", "payment"],
+  "dependencies": ["organizations", "clients", "shifts"],
+  "testSuites": [],
+  "priority": "high"
+}

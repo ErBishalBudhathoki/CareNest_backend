@@ -1,0 +1,15 @@
+{
+  "name": "development",
+  "apiBaseUrl": "http://localhost:8080",
+  "database": {
+    "connectionString": "mongodb+srv://bishalkc331:REDACTED_MONGODB_PASSWORD_2@morethaninvoicecluster.xptftb5.mongodb.net/Invoice?retryWrites=true&w=majority&appName=morethaninvoiceCluster",
+    "name": "Invoice"
+  },
+  "auth": {
+    "testUserEmail": "test@carenest.dev",
+    "testUserPassword": "TestPassword123!"
+  },
+  "safetyChecks": false,
+  "timeout": 30000,
+  "retries": 2
+}

@@ -1,0 +1,25 @@
+{
+  "phaseName": "realtime-portal",
+  "displayName": "Real-Time Portal",
+  "description": "Live tracking, secure messaging, service confirmation, and family access",
+  "entities": [
+    "workerLocations",
+    "messages",
+    "serviceConfirmations",
+    "familyAccess",
+    "geofences"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers",
+    "clients"
+  ],
+  "testSuites": [
+    "live-tracking",
+    "secure-messaging",
+    "service-confirmation",
+    "family-access"
+  ],
+  "priority": "medium"
+}

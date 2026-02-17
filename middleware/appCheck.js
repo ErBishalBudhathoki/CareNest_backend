@@ -20,7 +20,21 @@ function isAppCheckEnforced() {
   return process.env.NODE_ENV === 'production';
 }
 
+function isIOSPlatform(req) {
+  const platform = req.header('X-Platform');
+  return platform && platform.toLowerCase() === 'ios';
+}
+
 async function requireAppCheck(req, res, next) {
+  // Skip App Check for iOS - requires Apple Developer account for App Attest
+  if (isIOSPlatform(req)) {
+    logger.debug('Skipping App Check for iOS platform', {
+      path: req.originalUrl,
+      method: req.method
+    });
+    return next();
+  }
+
   if (!isAppCheckEnforced()) {
     return next();
   }
