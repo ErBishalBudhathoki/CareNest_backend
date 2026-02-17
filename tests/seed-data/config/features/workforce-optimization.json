@@ -1,0 +1,26 @@
+{
+  "phaseName": "workforce-optimization",
+  "displayName": "Workforce Optimization",
+  "description": "Workforce planning, resource allocation, performance analytics, and quality assurance",
+  "entities": [
+    "workforcePlans",
+    "resourceAllocations",
+    "performanceMetrics",
+    "qualityAssessments",
+    "businessIntelligence",
+    "mlPredictions"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers",
+    "shifts"
+  ],
+  "testSuites": [
+    "workforce-planning",
+    "resource-allocation",
+    "performance-analytics",
+    "quality-assurance"
+  ],
+  "priority": "high"
+}

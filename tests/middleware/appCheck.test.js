@@ -9,10 +9,11 @@ jest.mock('../../firebase-admin-config', () => ({
 
 const { requireAppCheck, isAppCheckEnforced } = require('../../middleware/appCheck');
 
-function createReq(token) {
+function createReq(token, platform = 'android') {
   return {
     header: jest.fn((name) => {
       if (name === 'X-Firebase-AppCheck') return token;
+      if (name === 'X-Platform') return platform;
       return undefined;
     }),
     originalUrl: '/api/auth/forgot-password',
@@ -62,10 +63,36 @@ describe('App Check middleware', () => {
     expect(isAppCheckEnforced()).toBe(true);
   });
 
+  test('skips App Check for iOS platform', async () => {
+    process.env.APP_CHECK_ENFORCEMENT = 'true';
+
+    const req = createReq(undefined, 'ios');
+    const res = createRes();
+    const next = jest.fn();
+
+    await requireAppCheck(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(200);
+  });
+
+  test('skips App Check for iOS platform regardless of case', async () => {
+    process.env.APP_CHECK_ENFORCEMENT = 'true';
+
+    const req = createReq(undefined, 'iOS');
+    const res = createRes();
+    const next = jest.fn();
+
+    await requireAppCheck(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(200);
+  });
+
   test('returns 401 when token is missing and enforcement is enabled', async () => {
     process.env.APP_CHECK_ENFORCEMENT = 'true';
 
-    const req = createReq(undefined);
+    const req = createReq(undefined, 'android');
     const res = createRes();
     const next = jest.fn();
 
@@ -80,7 +107,7 @@ describe('App Check middleware', () => {
     process.env.APP_CHECK_ENFORCEMENT = 'true';
     process.env.APP_CHECK_DEBUG_TOKEN = 'debug-token';
 
-    const req = createReq('debug-token');
+    const req = createReq('debug-token', 'android');
     const res = createRes();
     const next = jest.fn();
 
@@ -94,7 +121,7 @@ describe('App Check middleware', () => {
     process.env.APP_CHECK_ENFORCEMENT = 'true';
     mockVerifyToken.mockResolvedValueOnce({ sub: 'app-id' });
 
-    const req = createReq('valid-token');
+    const req = createReq('valid-token', 'android');
     const res = createRes();
     const next = jest.fn();
 
@@ -109,7 +136,7 @@ describe('App Check middleware', () => {
     process.env.APP_CHECK_ENFORCEMENT = 'true';
     mockVerifyToken.mockRejectedValueOnce(new Error('invalid token'));
 
-    const req = createReq('bad-token');
+    const req = createReq('bad-token', 'android');
     const res = createRes();
     const next = jest.fn();
 

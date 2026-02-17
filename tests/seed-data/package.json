@@ -1,0 +1,39 @@
+{
+  "name": "e2e-testing-seed-data",
+  "version": "1.0.0",
+  "description": "E2E Testing and Seed Data Generation System for CareNest",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "seed:generate": "node src/cli/index.js generate",
+    "seed:cleanup": "node src/cli/index.js cleanup",
+    "seed:reset": "node src/cli/index.js reset",
+    "seed:status": "node src/cli/index.js status",
+    "test:e2e": "node src/cli/index.js test",
+    "test:coverage": "node src/cli/index.js coverage",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
+  },
+  "keywords": [
+    "testing",
+    "seed-data",
+    "e2e",
+    "integration-testing"
+  ],
+  "author": "CareNest Team",
+  "license": "MIT",
+  "dependencies": {
+    "@faker-js/faker": "^8.4.1",
+    "axios": "^1.11.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "dotenv": "^16.5.0",
+    "mongodb": "^6.12.0",
+    "ora": "^8.0.1",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "fast-check": "^3.15.0",
+    "jest": "^30.2.0"
+  }
+}

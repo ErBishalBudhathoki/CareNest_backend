@@ -1,0 +1,16 @@
+{
+  "name": "production-like",
+  "apiBaseUrl": "${PROD_LIKE_API_URL}",
+  "database": {
+    "connectionString": "${PROD_LIKE_MONGODB_URI}",
+    "name": "carenest-prod-like"
+  },
+  "auth": {
+    "testUserEmail": "${PROD_LIKE_TEST_USER_EMAIL}",
+    "testUserPassword": "${PROD_LIKE_TEST_USER_PASSWORD}"
+  },
+  "safetyChecks": true,
+  "requireConfirmation": true,
+  "timeout": 90000,
+  "retries": 3
+}

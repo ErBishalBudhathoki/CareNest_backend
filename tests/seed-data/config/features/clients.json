@@ -1,0 +1,9 @@
+{
+  "phaseName": "clients",
+  "displayName": "Clients",
+  "description": "Client profiles and care information",
+  "entities": ["client"],
+  "dependencies": ["organizations"],
+  "testSuites": [],
+  "priority": "critical"
+}

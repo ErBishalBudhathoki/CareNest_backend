@@ -1,0 +1,26 @@
+{
+  "phaseName": "care-intelligence",
+  "displayName": "Care Intelligence",
+  "description": "Care plans, medications, incidents, and risk assessments",
+  "entities": [
+    "carePlans",
+    "medications",
+    "incidents",
+    "riskAssessments",
+    "behaviorSupports",
+    "careGoals"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "clients",
+    "workers"
+  ],
+  "testSuites": [
+    "care-plan-management",
+    "medication-tracking",
+    "incident-reporting",
+    "risk-assessment"
+  ],
+  "priority": "high"
+}
