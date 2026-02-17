@@ -1,0 +1,15 @@
+{
+  "name": "staging",
+  "apiBaseUrl": "https://staging-api.carenest.com",
+  "database": {
+    "connectionString": "${STAGING_MONGODB_URI}",
+    "name": "carenest-staging"
+  },
+  "auth": {
+    "testUserEmail": "${STAGING_TEST_USER_EMAIL}",
+    "testUserPassword": "${STAGING_TEST_USER_PASSWORD}"
+  },
+  "safetyChecks": true,
+  "timeout": 60000,
+  "retries": 3
+}

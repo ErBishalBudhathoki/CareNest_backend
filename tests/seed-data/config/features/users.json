@@ -1,0 +1,9 @@
+{
+  "phaseName": "users",
+  "displayName": "Users",
+  "description": "User accounts and authentication",
+  "entities": ["auth"],
+  "dependencies": ["organizations"],
+  "testSuites": [],
+  "priority": "critical"
+}

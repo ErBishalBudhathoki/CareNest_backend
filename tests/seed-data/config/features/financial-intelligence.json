@@ -1,0 +1,26 @@
+{
+  "phaseName": "financial-intelligence",
+  "displayName": "Financial Intelligence",
+  "description": "Financial management, invoicing, payments, budgets, and forecasting",
+  "entities": [
+    "invoices",
+    "payments",
+    "budgets",
+    "forecasts",
+    "lineItems",
+    "transactions",
+    "financialReports"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "clients"
+  ],
+  "testSuites": [
+    "invoice-generation",
+    "payment-processing",
+    "budget-management",
+    "financial-reporting"
+  ],
+  "priority": "high"
+}

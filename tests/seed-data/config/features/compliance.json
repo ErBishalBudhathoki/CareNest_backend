@@ -1,0 +1,24 @@
+{
+  "phaseName": "compliance",
+  "displayName": "Compliance Automation",
+  "description": "Compliance tracking, certifications, and audit logs",
+  "entities": [
+    "complianceRecords",
+    "certifications",
+    "auditLogs",
+    "expiryAlerts",
+    "complianceReports"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers"
+  ],
+  "testSuites": [
+    "certification-tracking",
+    "expiry-checking",
+    "audit-logging",
+    "compliance-reporting"
+  ],
+  "priority": "high"
+}

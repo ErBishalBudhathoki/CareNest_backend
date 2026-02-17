@@ -1,0 +1,25 @@
+{
+  "phaseName": "client-portal",
+  "displayName": "Client Portal",
+  "description": "Client dashboard, appointments, invoices, and documents",
+  "entities": [
+    "clientDashboards",
+    "appointments",
+    "clientInvoices",
+    "documents",
+    "feedback"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "clients",
+    "workers"
+  ],
+  "testSuites": [
+    "client-dashboard",
+    "appointment-management",
+    "invoice-viewing",
+    "document-access"
+  ],
+  "priority": "medium"
+}
