@@ -1,0 +1,15 @@
+{
+  "name": "development",
+  "apiBaseUrl": "http://localhost:8080",
+  "database": {
+    "connectionString": "Set MONGODB_URI environment variable",
+    "name": "Invoice"
+  },
+  "auth": {
+    "testUserEmail": "test@carenest.dev",
+    "testUserPassword": "Set TEST_USER_PASSWORD environment variable"
+  },
+  "safetyChecks": false,
+  "timeout": 30000,
+  "retries": 2
+}
