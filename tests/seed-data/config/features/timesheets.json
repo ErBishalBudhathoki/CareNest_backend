@@ -1,0 +1,9 @@
+{
+  "phaseName": "timesheets",
+  "displayName": "Timesheets",
+  "description": "Timesheet tracking and management",
+  "entities": ["timesheet"],
+  "dependencies": ["organizations", "workers", "shifts"],
+  "testSuites": [],
+  "priority": "high"
+}

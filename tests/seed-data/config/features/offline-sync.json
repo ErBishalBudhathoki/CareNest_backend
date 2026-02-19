@@ -1,0 +1,22 @@
+{
+  "phaseName": "offline-sync",
+  "displayName": "Offline Sync",
+  "description": "Offline data synchronization and conflict resolution",
+  "entities": [
+    "offlineData",
+    "syncLogs",
+    "conflicts",
+    "resolutions"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers"
+  ],
+  "testSuites": [
+    "offline-data-creation",
+    "sync-to-server",
+    "conflict-resolution"
+  ],
+  "priority": "medium"
+}

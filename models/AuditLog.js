@@ -14,7 +14,13 @@ const auditLogSchema = new mongoose.Schema({
       'LOGOUT',
       'EXPORT',
       'IMPORT',
-      'VIEW'
+      'VIEW',
+      'USER_CREATED',
+      'USER_LOGIN',
+      'PHOTO_UPLOADED',
+      'OTP_GENERATED',
+      'OTP_VERIFIED',
+      'PASSWORD_UPDATED'
     ]
   },
   entityType: {

@@ -65,7 +65,9 @@ class EnvironmentConfig {
     
     // Production-specific settings
     this.config.logging.enableVerboseLogging = false;
-    this.config.security.corsOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+    this.config.security.corsOrigins = process.env.ALLOWED_ORIGINS 
+      ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) 
+      : [];
     this.config.features.enableApiDocs = false;
   }
 
@@ -74,7 +76,16 @@ class EnvironmentConfig {
     
     // Development-specific settings
     this.config.logging.enableVerboseLogging = true;
-    this.config.security.corsOrigins = ['http://localhost:3000', 'http://localhost:8080'];
+    
+    // Use environment variable if set, otherwise default to localhost
+    const envOrigins = process.env.ALLOWED_ORIGINS 
+      ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) 
+      : [];
+    const defaultOrigins = ['http://localhost:3000', 'http://localhost:8080'];
+    
+    // Merge and deduplicate
+    this.config.security.corsOrigins = [...new Set([...envOrigins, ...defaultOrigins])];
+    
     this.config.features.enableApiDocs = true;
   }
 

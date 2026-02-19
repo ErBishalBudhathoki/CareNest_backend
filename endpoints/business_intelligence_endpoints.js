@@ -1,31 +1,25 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { Invoice } = require('../models/Invoice');
+const InvoiceLineItem = require('../models/InvoiceLineItem');
 const logger = require('../config/logger');
-const uri = process.env.MONGODB_URI;
 
 /**
  * Get Business Intelligence Dashboard
  */
 async function getBusinessIntelligenceDashboard(req, res) {
-  let client;
   try {
     const { organizationId } = req.params;
-    // const { period = 'monthly' } = req.query;
-
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
 
     // 1. Revenue Trends
-    const revenueForecast = await generateRevenueForecast(db, organizationId, {}, 3);
-    
+    const revenueForecast = await generateRevenueForecast(organizationId, {}, 3);
+
     // 2. Operational Efficiency
-    const efficiency = await getOperationalEfficiencyInsights(db, organizationId, {});
-    
+    const efficiency = await getOperationalEfficiencyInsights(organizationId, {});
+
     // 3. Risk Factors
-    const riskFactors = await identifyRevenueRiskFactors(db, organizationId);
+    const riskFactors = await identifyRevenueRiskFactors(organizationId);
 
     // 4. Seasonality
-    const seasonality = await analyzeSeasonalityPatterns(db, organizationId);
+    const seasonality = await analyzeSeasonalityPatterns(organizationId);
 
     // 5. Recommendations
     const recommendations = [
@@ -51,8 +45,6 @@ async function getBusinessIntelligenceDashboard(req, res) {
       organizationId: req.params.organizationId
     });
     res.status(500).json({ success: false, error: 'Internal server error' });
-  } finally {
-    if (client) await client.close();
   }
 }
 
@@ -60,16 +52,11 @@ async function getBusinessIntelligenceDashboard(req, res) {
  * Get Revenue Forecast Analysis
  */
 async function getRevenueForecastAnalysis(req, res) {
-  let client;
   try {
     const { organizationId } = req.params;
     const { periods = 6, confidence = 0.95 } = req.query;
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
-    const forecast = await generateDetailedRevenueForecast(db, organizationId, parseInt(periods), parseFloat(confidence));
+    const forecast = await generateDetailedRevenueForecast(organizationId, parseInt(periods), parseFloat(confidence));
 
     res.json({
       success: true,
@@ -83,8 +70,6 @@ async function getRevenueForecastAnalysis(req, res) {
       organizationId: req.params.organizationId
     });
     res.status(500).json({ success: false, error: 'Internal server error' });
-  } finally {
-    if (client) await client.close();
   }
 }
 
@@ -92,16 +77,11 @@ async function getRevenueForecastAnalysis(req, res) {
  * Get Operational Efficiency Report
  */
 async function getOperationalEfficiencyReport(req, res) {
-  let client;
   try {
     const { organizationId } = req.params;
 
-    client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    await client.connect();
-    const db = client.db('Invoice');
-
-    const efficiency = await getOperationalEfficiencyInsights(db, organizationId, {});
-    const bottlenecks = await identifyPerformanceBottlenecks(db, organizationId, {});
+    const efficiency = await getOperationalEfficiencyInsights(organizationId, {});
+    const bottlenecks = await identifyPerformanceBottlenecks(organizationId, {});
     const suggestions = generateOptimizationSuggestions(efficiency, bottlenecks);
     const benchmarks = generateEfficiencyBenchmarks(efficiency);
 
@@ -122,20 +102,18 @@ async function getOperationalEfficiencyReport(req, res) {
       organizationId: req.params.organizationId
     });
     res.status(500).json({ success: false, error: 'Internal server error' });
-  } finally {
-    if (client) await client.close();
   }
 }
 
 // --- Helper Functions ---
 
-async function generateRevenueForecast(db, organizationId, dateFilter, _periods) {
+async function generateRevenueForecast(organizationId, dateFilter, _periods) {
   // Basic linear regression forecast
-  const historicalData = await db.collection('invoiceLineItems').aggregate([
+  const historicalData = await InvoiceLineItem.aggregate([
     { $match: { organizationId, ...dateFilter } },
     {
       $group: {
-        _id: { 
+        _id: {
           year: { $year: '$createdAt' },
           month: { $month: '$createdAt' }
         },
@@ -143,18 +121,18 @@ async function generateRevenueForecast(db, organizationId, dateFilter, _periods)
       }
     },
     { $sort: { '_id.year': 1, '_id.month': 1 } }
-  ]).toArray();
+  ]);
 
   const dataPoints = historicalData.map((d, i) => ({ x: i, y: d.revenue }));
   const n = dataPoints.length;
-  
+
   let slope = 0, intercept = 0;
   if (n > 1) {
     const sumX = dataPoints.reduce((sum, p) => sum + p.x, 0);
     const sumY = dataPoints.reduce((sum, p) => sum + p.y, 0);
     const sumXY = dataPoints.reduce((sum, p) => sum + p.x * p.y, 0);
     const sumXX = dataPoints.reduce((sum, p) => sum + p.x * p.x, 0);
-    
+
     slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
     intercept = (sumY - slope * sumX) / n;
   }
@@ -180,12 +158,12 @@ async function generateRevenueForecast(db, organizationId, dateFilter, _periods)
   };
 }
 
-async function getOperationalEfficiencyInsights(db, organizationId, _dateFilter) {
+async function getOperationalEfficiencyInsights(organizationId, _dateFilter) {
   // Mock efficiency calculation based on invoice processing time or similar
-  const invoices = await db.collection('invoices').find({ organizationId }).toArray();
+  const invoices = await Invoice.find({ organizationId }).lean();
   const totalInvoices = invoices.length;
   const processedInvoices = invoices.filter(i => i.status === 'processed').length;
-  
+
   return {
     overallMetrics: {
       utilizationRate: 85, // Mock value
@@ -197,7 +175,7 @@ async function getOperationalEfficiencyInsights(db, organizationId, _dateFilter)
   };
 }
 
-async function identifyPerformanceBottlenecks(_db, _organizationId, _dateFilter) {
+async function identifyPerformanceBottlenecks(_organizationId, _dateFilter) {
   return [
     { type: 'process', description: 'Invoice approval delay detected' }
   ];
@@ -206,11 +184,11 @@ async function identifyPerformanceBottlenecks(_db, _organizationId, _dateFilter)
 /**
  * Generate detailed revenue forecast
  */
-async function generateDetailedRevenueForecast(db, organizationId, periods, confidence) {
+async function generateDetailedRevenueForecast(organizationId, periods, confidence) {
   // Reuse the base logic but add more detail
   const dateFilter = {}; // Use all history for detailed forecast
-  const baseForecast = await generateRevenueForecast(db, organizationId, dateFilter, periods);
-  
+  const baseForecast = await generateRevenueForecast(organizationId, dateFilter, periods);
+
   // Add confidence intervals
   const stdDev = Math.sqrt(
     baseForecast.historicalData.reduce((sum, d) => {
@@ -218,10 +196,10 @@ async function generateDetailedRevenueForecast(db, organizationId, periods, conf
       return sum + Math.pow(d.revenue - mean, 2);
     }, 0) / (baseForecast.historicalData.length || 1)
   );
-  
+
   const zScore = confidence === 0.99 ? 2.576 : confidence === 0.95 ? 1.96 : 1.645;
   const marginOfError = zScore * (stdDev / Math.sqrt(baseForecast.historicalData.length || 1));
-  
+
   const predictions = [];
   for (let i = 1; i <= periods; i++) {
     const predictedRevenue = baseForecast.forecast.slope * (baseForecast.historicalData.length + i) + baseForecast.forecast.intercept;
@@ -232,7 +210,7 @@ async function generateDetailedRevenueForecast(db, organizationId, periods, conf
       upperBound: predictedRevenue + marginOfError
     });
   }
-  
+
   return {
     ...baseForecast,
     predictions,
@@ -244,8 +222,8 @@ async function generateDetailedRevenueForecast(db, organizationId, periods, conf
 /**
  * Analyze seasonality patterns
  */
-async function analyzeSeasonalityPatterns(db, organizationId) {
-  const historicalData = await db.collection('invoiceLineItems').aggregate([
+async function analyzeSeasonalityPatterns(organizationId) {
+  const historicalData = await InvoiceLineItem.aggregate([
     {
       $match: { organizationId }
     },
@@ -257,8 +235,8 @@ async function analyzeSeasonalityPatterns(db, organizationId) {
       }
     },
     { $sort: { '_id.month': 1 } }
-  ]).toArray();
-  
+  ]);
+
   const totalRevenue = historicalData.reduce((sum, h) => sum + h.revenue, 0);
   const avgRevenue = totalRevenue / (historicalData.length || 1);
 
@@ -267,7 +245,7 @@ async function analyzeSeasonalityPatterns(db, organizationId) {
     index: avgRevenue > 0 ? d.revenue / avgRevenue : 1,
     avgRevenue: d.revenue
   }));
-  
+
   return {
     hasSeasonality: seasonalIndices.some(s => s.index > 1.2 || s.index < 0.8),
     seasonalIndices,
@@ -279,11 +257,11 @@ async function analyzeSeasonalityPatterns(db, organizationId) {
 /**
  * Identify revenue risk factors
  */
-async function identifyRevenueRiskFactors(db, organizationId) {
+async function identifyRevenueRiskFactors(organizationId) {
   const risks = [];
-  
+
   // Check client concentration
-  const clientRevenue = await db.collection('invoiceLineItems').aggregate([
+  const clientRevenue = await InvoiceLineItem.aggregate([
     { $match: { organizationId } },
     {
       $group: {
@@ -292,8 +270,8 @@ async function identifyRevenueRiskFactors(db, organizationId) {
       }
     },
     { $sort: { revenue: -1 } }
-  ]).toArray();
-  
+  ]);
+
   const totalRevenue = clientRevenue.reduce((sum, c) => sum + c.revenue, 0);
   if (clientRevenue.length > 0 && totalRevenue > 0) {
     const topClientShare = clientRevenue[0].revenue / totalRevenue;
@@ -305,7 +283,7 @@ async function identifyRevenueRiskFactors(db, organizationId) {
       });
     }
   }
-  
+
   return risks;
 }
 
@@ -314,7 +292,7 @@ async function identifyRevenueRiskFactors(db, organizationId) {
  */
 function generateForecastRecommendations(forecast, seasonality, riskFactors) {
   const recommendations = [];
-  
+
   if (forecast.trendAnalysis.direction === 'decreasing') {
     recommendations.push({
       priority: 'high',
@@ -322,7 +300,7 @@ function generateForecastRecommendations(forecast, seasonality, riskFactors) {
       action: 'Immediate action required to reverse declining revenue trend'
     });
   }
-  
+
   if (seasonality.hasSeasonality) {
     recommendations.push({
       priority: 'medium',
@@ -330,7 +308,7 @@ function generateForecastRecommendations(forecast, seasonality, riskFactors) {
       action: `Prepare for peak demand in months: ${seasonality.peakMonths.join(', ')}`
     });
   }
-  
+
   riskFactors.forEach(risk => {
     recommendations.push({
       priority: risk.severity === 'high' ? 'high' : 'medium',
@@ -338,22 +316,22 @@ function generateForecastRecommendations(forecast, seasonality, riskFactors) {
       action: `Mitigate risk: ${risk.description}`
     });
   });
-  
+
   return recommendations;
 }
 
 /**
  * Calculate operational efficiency (Alias to getOperationalEfficiencyInsights for consistency)
  */
-async function calculateOperationalEfficiency(db, organizationId, dateFilter) {
-  return getOperationalEfficiencyInsights(db, organizationId, dateFilter);
+async function calculateOperationalEfficiency(organizationId, dateFilter) {
+  return getOperationalEfficiencyInsights(organizationId, dateFilter);
 }
 
 /**
  * Identify operational bottlenecks (Alias to identifyPerformanceBottlenecks for consistency)
  */
-async function identifyOperationalBottlenecks(db, organizationId, dateFilter) {
-  return identifyPerformanceBottlenecks(db, organizationId, dateFilter);
+async function identifyOperationalBottlenecks(organizationId, dateFilter) {
+  return identifyPerformanceBottlenecks(organizationId, dateFilter);
 }
 
 /**
@@ -361,7 +339,7 @@ async function identifyOperationalBottlenecks(db, organizationId, dateFilter) {
  */
 function generateOptimizationSuggestions(efficiency, bottlenecks) {
   const suggestions = [];
-  
+
   // Suggestion based on utilization
   const utilization = efficiency.overallMetrics?.utilizationRate || 0;
   if (utilization < 70) {
@@ -379,7 +357,7 @@ function generateOptimizationSuggestions(efficiency, bottlenecks) {
       potentialImpact: 'Sustainable growth'
     });
   }
-  
+
   // Suggestion based on bottlenecks
   bottlenecks.forEach(bottleneck => {
     suggestions.push({
@@ -397,7 +375,7 @@ function generateOptimizationSuggestions(efficiency, bottlenecks) {
       action: 'Review operational processes and employee productivity'
     });
   }
-  
+
   return suggestions;
 }
 

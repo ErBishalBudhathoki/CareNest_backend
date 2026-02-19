@@ -5,9 +5,12 @@
 
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param, query } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 
 const {
-    // processAllExpenseReminders,
     getExpensesMissingReceipts,
     getOrganizationExpenseReminderSettings,
     updateOrganizationExpenseReminderSettings,
@@ -19,11 +22,55 @@ const {
     manualTriggerExpenseReminders
 } = require('../expense_reminder_scheduler');
 
+// Rate limiting
+const reminderLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { success: false, message: 'Too many reminder requests.' }
+});
+
+const strictLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 50,
+    message: { success: false, message: 'Too many requests.' }
+});
+
+const triggerLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { success: false, message: 'Too many trigger requests.' }
+});
+
+// Validation rules
+const organizationIdParamValidation = [
+    param('organizationId').isMongoId().withMessage('Valid organization ID is required')
+];
+
+const expenseIdParamValidation = [
+    param('expenseId').isMongoId().withMessage('Valid expense ID is required')
+];
+
+const triggerValidation = [
+    body('organizationId').optional().isMongoId().withMessage('Invalid organization ID')
+];
+
+const settingsValidation = [
+    param('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+    body('enabled').optional().isBoolean().withMessage('Enabled must be a boolean'),
+    body('reminderIntervalDays').optional().isInt({ min: 1, max: 30 }).withMessage('Reminder interval must be between 1 and 30 days'),
+    body('maxReminders').optional().isInt({ min: 1, max: 10 }).withMessage('Max reminders must be between 1 and 10'),
+    body('notifyManagers').optional().isBoolean().withMessage('notifyManagers must be a boolean'),
+    body('excludeCategories').optional().isArray().withMessage('excludeCategories must be an array')
+];
+
+// Apply authentication to all routes
+router.use(authenticateUser);
+
 /**
  * GET /api/reminders/expense/status
  * Get expense reminder scheduler status
  */
-router.get('/expense/status', async (req, res) => {
+router.get('/expense/status', reminderLimiter, async (req, res) => {
     try {
         const status = getExpenseSchedulerStatus();
         res.status(200).json({
@@ -44,7 +91,7 @@ router.get('/expense/status', async (req, res) => {
  * POST /api/reminders/expense/trigger
  * Manually trigger expense reminders (for testing)
  */
-router.post('/expense/trigger', async (req, res) => {
+router.post('/expense/trigger', requireRoles(['admin']), triggerLimiter, triggerValidation, handleValidationErrors, async (req, res) => {
     try {
         const { organizationId } = req.body;
 
@@ -68,7 +115,7 @@ router.post('/expense/trigger', async (req, res) => {
  * GET /api/reminders/expense/missing/:organizationId
  * Get expenses missing receipts for an organization
  */
-router.get('/expense/missing/:organizationId', async (req, res) => {
+router.get('/expense/missing/:organizationId', reminderLimiter, organizationIdParamValidation, handleValidationErrors, async (req, res) => {
     try {
         const { organizationId } = req.params;
 
@@ -104,7 +151,7 @@ router.get('/expense/missing/:organizationId', async (req, res) => {
  * GET /api/reminders/expense/:expenseId/status
  * Get reminder status for a specific expense
  */
-router.get('/expense/:expenseId/status', async (req, res) => {
+router.get('/expense/:expenseId/status', reminderLimiter, expenseIdParamValidation, handleValidationErrors, async (req, res) => {
     try {
         const { expenseId } = req.params;
 
@@ -125,7 +172,7 @@ router.get('/expense/:expenseId/status', async (req, res) => {
  * GET /api/reminders/expense/settings/:organizationId
  * Get expense reminder settings for an organization
  */
-router.get('/expense/settings/:organizationId', async (req, res) => {
+router.get('/expense/settings/:organizationId', reminderLimiter, organizationIdParamValidation, handleValidationErrors, async (req, res) => {
     try {
         const { organizationId } = req.params;
 
@@ -149,7 +196,7 @@ router.get('/expense/settings/:organizationId', async (req, res) => {
  * PUT /api/reminders/expense/settings/:organizationId
  * Update expense reminder settings for an organization
  */
-router.put('/expense/settings/:organizationId', async (req, res) => {
+router.put('/expense/settings/:organizationId', strictLimiter, requireRoles(['admin']), settingsValidation, handleValidationErrors, async (req, res) => {
     try {
         const { organizationId } = req.params;
         const settings = req.body;

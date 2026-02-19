@@ -1,0 +1,9 @@
+{
+  "phaseName": "organizations",
+  "displayName": "Organizations",
+  "description": "Base organization entities",
+  "entities": ["organization"],
+  "dependencies": [],
+  "testSuites": [],
+  "priority": "critical"
+}

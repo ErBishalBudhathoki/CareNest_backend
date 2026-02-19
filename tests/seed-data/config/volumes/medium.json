@@ -1,0 +1,14 @@
+{
+  "preset": "medium",
+  "description": "Standard testing with realistic data volume",
+  "entityCounts": {
+    "organization": 5,
+    "auth": 80,
+    "client": 20,
+    "shift": 150,
+    "invoice": 80,
+    "timesheet": 120,
+    "expense": 60
+  },
+  "relationshipDensity": 0.75
+}

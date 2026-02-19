@@ -261,6 +261,7 @@ class EmployeeTrackingService {
         allEmployees: employees,
         activeTimers: activeTimersWithDuration,
         recentShifts: workedTimeRecords.slice(0, 50), // Limit to 50 most recent
+        assignments: assignments, // ADDED THIS to fix missing field in response
         summary: {
           totalActiveTimers: activeTimers.length,
           totalRecentShifts: workedTimeRecords.length,

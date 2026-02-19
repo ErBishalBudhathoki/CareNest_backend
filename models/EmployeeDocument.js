@@ -26,7 +26,25 @@ const employeeDocumentSchema = new mongoose.Schema({
   verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, {
   timestamps: true,
-  collection: 'employee_documents'
+  collection: 'employee_documents',
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      if (ret.userId) ret.userId = ret.userId.toString();
+      if (ret.verifiedBy) ret.verifiedBy = ret.verifiedBy.toString();
+      
+      if (ret.expiryDate) ret.expiryDate = ret.expiryDate.toISOString();
+      if (ret.uploadedAt) ret.uploadedAt = ret.uploadedAt.toISOString();
+      if (ret.verifiedAt) ret.verifiedAt = ret.verifiedAt.toISOString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      
+      return ret;
+    }
+  }
 });
 
 module.exports = mongoose.model('EmployeeDocument', employeeDocumentSchema);
