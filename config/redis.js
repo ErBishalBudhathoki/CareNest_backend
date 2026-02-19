@@ -33,10 +33,17 @@ if (hasRedisUrl) {
     host: process.env.REDIS_HOST || 'localhost',
     port: redisPort,
     password: process.env.REDIS_PASSWORD || undefined,
-    maxRetriesPerRequest: null, // Required for BullMQ compatibility
+    maxRetriesPerRequest: null,
     retryStrategy: (times) => Math.min(times * 50, 2000)
   };
 }
+
+// Circuit breaker state
+let connectionFailures = 0;
+let circuitOpen = false;
+let circuitOpenTime = 0;
+const CIRCUIT_BREAK_THRESHOLD = 5;
+const CIRCUIT_BREAK_RESET_MS = 60000; // 1 minute
 
 class DisabledRedisClient extends EventEmitter {
   constructor() {
@@ -102,6 +109,215 @@ class DisabledRedisClient extends EventEmitter {
   disconnect() {}
 }
 
+class CircuitBreakerRedisClient extends EventEmitter {
+  constructor(url, options) {
+    super();
+    this.url = url;
+    this.baseOptions = options;
+    this.client = null;
+    this.isConfigured = true;
+    this.status = 'initializing';
+    
+    this._initializeClient();
+  }
+
+  _initializeClient() {
+    // Check circuit breaker
+    if (circuitOpen) {
+      const elapsed = Date.now() - circuitOpenTime;
+      if (elapsed < CIRCUIT_BREAK_RESET_MS) {
+        logger.warn('Redis circuit breaker is open, using fallback');
+        this.status = 'circuit-open';
+        return;
+      }
+      // Try to reset circuit
+      logger.info('Attempting to reset Redis circuit breaker');
+      circuitOpen = false;
+      connectionFailures = 0;
+    }
+
+    try {
+      this.client = new RedisClass(this.url, this.baseOptions);
+      
+      this.client.on('connect', () => {
+        this.status = 'connected';
+        connectionFailures = 0;
+        const maskedUrl = this.url.replace(/:([^@]+)@/, ':****@');
+        logger.info('Redis connection established', { config: maskedUrl });
+      });
+
+      this.client.on('ready', () => {
+        this.status = 'ready';
+        logger.info('Redis client is ready to accept commands');
+        
+        this.client.config('GET', 'maxmemory-policy').then((result) => {
+          const policy = result && result[1];
+          if (policy && policy !== 'noeviction') {
+            logger.info(`Redis maxmemory-policy is '${policy}'. For BullMQ, 'noeviction' is recommended.`);
+          }
+        }).catch(() => {});
+      });
+
+      this.client.on('error', (err) => {
+        if (err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET')) {
+          connectionFailures++;
+          logger.error('Redis connection error', { error: err.message, failures: connectionFailures });
+          
+          if (connectionFailures >= CIRCUIT_BREAK_THRESHOLD) {
+            circuitOpen = true;
+            circuitOpenTime = Date.now();
+            logger.error('Redis circuit breaker opened due to repeated failures');
+          }
+        }
+      });
+
+      this.client.on('close', () => {
+        this.status = 'disconnected';
+        logger.warn('Redis connection closed');
+      });
+
+      this.client.on('reconnecting', (delay) => {
+        this.status = 'reconnecting';
+        logger.warn('Redis reconnecting...', { delay });
+      });
+
+    } catch (err) {
+      logger.error('Failed to initialize Redis client', { error: err.message });
+      this.status = 'error';
+    }
+  }
+
+  get options() {
+    return this.client?.options || {};
+  }
+
+  duplicate() {
+    return new CircuitBreakerRedisClient(this.url, this.baseOptions);
+  }
+
+  async call(...args) {
+    if (!this.client || circuitOpen) return null;
+    try {
+      return await this.client.call(...args);
+    } catch (err) {
+      this._handleCommandError(err);
+      return null;
+    }
+  }
+
+  async get(key) {
+    if (!this.client || circuitOpen) return null;
+    try {
+      return await this.client.get(key);
+    } catch (err) {
+      this._handleCommandError(err);
+      return null;
+    }
+  }
+
+  async set(key, value, ...args) {
+    if (!this.client || circuitOpen) return 'OK';
+    try {
+      return await this.client.set(key, value, ...args);
+    } catch (err) {
+      this._handleCommandError(err);
+      return 'OK';
+    }
+  }
+
+  async del(...keys) {
+    if (!this.client || circuitOpen) return 0;
+    try {
+      return await this.client.del(...keys);
+    } catch (err) {
+      this._handleCommandError(err);
+      return 0;
+    }
+  }
+
+  async exists(...keys) {
+    if (!this.client || circuitOpen) return 0;
+    try {
+      return await this.client.exists(...keys);
+    } catch (err) {
+      this._handleCommandError(err);
+      return 0;
+    }
+  }
+
+  async scan(cursor, ...args) {
+    if (!this.client || circuitOpen) return ['0', []];
+    try {
+      return await this.client.scan(cursor, ...args);
+    } catch (err) {
+      this._handleCommandError(err);
+      return ['0', []];
+    }
+  }
+
+  scanStream(...args) {
+    if (!this.client || circuitOpen) {
+      const stream = new EventEmitter();
+      setImmediate(() => stream.emit('end'));
+      return stream;
+    }
+    return this.client.scanStream(...args);
+  }
+
+  async publish(channel, message) {
+    if (!this.client || circuitOpen) return 0;
+    try {
+      return await this.client.publish(channel, message);
+    } catch (err) {
+      this._handleCommandError(err);
+      return 0;
+    }
+  }
+
+  async subscribe(channel, callback) {
+    if (!this.client || circuitOpen) {
+      if (typeof callback === 'function') callback(null, 0);
+      return 0;
+    }
+    try {
+      return await this.client.subscribe(channel, callback);
+    } catch (err) {
+      this._handleCommandError(err);
+      if (typeof callback === 'function') callback(null, 0);
+      return 0;
+    }
+  }
+
+  async quit() {
+    if (this.client) {
+      try {
+        return await this.client.quit();
+      } catch {
+        return 'OK';
+      }
+    }
+    return 'OK';
+  }
+
+  disconnect() {
+    if (this.client) {
+      this.client.disconnect();
+    }
+  }
+
+  _handleCommandError(err) {
+    if (err.message.includes('timed out') || err.message.includes('ETIMEDOUT')) {
+      connectionFailures++;
+      if (connectionFailures >= CIRCUIT_BREAK_THRESHOLD) {
+        circuitOpen = true;
+        circuitOpenTime = Date.now();
+        logger.error('Redis circuit breaker opened due to command timeouts');
+      }
+    }
+    logger.warn('Redis command failed', { error: err.message });
+  }
+}
+
 let redis;
 if (!redisConfig) {
   logger.warn(
@@ -110,83 +326,40 @@ if (!redisConfig) {
   );
   redis = new DisabledRedisClient();
 } else if (typeof redisConfig === 'string') {
-  // REDIS_URL supports redis:// and rediss:// (SSL)
-  // Redis Cloud uses rediss:// for secure connections
+  // Increased timeouts for Redis Cloud over internet
   const connectionOptions = {
     maxRetriesPerRequest: null,
-    connectTimeout: 10000, // 10 seconds timeout
-    commandTimeout: 5000, // 5 seconds for commands
+    connectTimeout: 15000, // 15 seconds for connection
+    commandTimeout: 10000, // 10 seconds for commands
+    keepAlive: 10000, // Keep connection alive
     retryStrategy: (times) => {
       if (times > 3) {
         logger.error('Redis connection retry limit exceeded', { attempts: times });
-        return null; // Stop retrying
+        return null;
       }
-      return Math.min(times * 1000, 3000);
+      return Math.min(times * 2000, 10000);
     },
     tls: redisConfig.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined
   };
-  redis = new RedisClass(redisConfig, connectionOptions);
   
-  // Store options for duplicate() to inherit
+  redis = new CircuitBreakerRedisClient(redisConfig, connectionOptions);
   redis.connectionOptions = connectionOptions;
   redis.redisUrl = redisConfig;
 } else {
   const connectionOptions = {
     ...redisConfig,
-    connectTimeout: 10000,
-    commandTimeout: 5000
+    connectTimeout: 15000,
+    commandTimeout: 10000,
+    keepAlive: 10000
   };
   redis = new RedisClass(connectionOptions);
   redis.connectionOptions = connectionOptions;
-}
-
-const redisConfigured = Boolean(redisConfig);
-redis.isConfigured = redisConfigured;
-
-if (redisConfigured) {
-  redis.on('connect', () => {
-    // Mask password in connection details log
-    const maskedConfig = typeof redisConfig === 'string'
-      ? redisConfig.replace(/:([^@]+)@/, ':****@')
-      : { ...redisConfig, password: redisConfig.password ? '****' : undefined };
-
-    logger.info('Redis connection established', {
-      config: maskedConfig,
-      status: 'connected'
-    });
-  });
-
-  redis.on('ready', () => {
-    logger.info('Redis client is ready to accept commands');
-
-    // Check maxmemory-policy
-    redis.config('GET', 'maxmemory-policy').then((result) => {
-      const policy = result && result[1];
-      if (policy && policy !== 'noeviction') {
-        logger.info(`Redis maxmemory-policy is '${policy}'. For BullMQ job queues, 'noeviction' is recommended. Contact your Redis provider to change if needed.`);
-      }
-    }).catch((err) => {
-      // Ignore config get errors (e.g. if command renamed or restricted)
-      logger.debug('Could not check redis config', { error: err.message });
-    });
-  });
-
+  
   redis.on('error', (err) => {
-    logger.error('Redis connection error', {
-      error: err.message,
-      stack: err.stack
-    });
-  });
-
-  redis.on('close', () => {
-    logger.warn('Redis connection closed');
-  });
-
-  redis.on('reconnecting', (time) => {
-    logger.warn('Redis reconnecting...', {
-      delay: time
-    });
+    logger.error('Redis connection error', { error: err.message });
   });
 }
+
+redis.isConfigured = Boolean(redisConfig);
 
 module.exports = redis;

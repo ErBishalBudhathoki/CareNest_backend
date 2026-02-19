@@ -2,7 +2,7 @@
   "name": "development",
   "apiBaseUrl": "http://localhost:8080",
   "database": {
-    "connectionString": "mongodb+srv://bishalkc331:REDACTED_MONGODB_PASSWORD_2@morethaninvoicecluster.xptftb5.mongodb.net/Invoice?retryWrites=true&w=majority&appName=morethaninvoiceCluster",
+    "connectionString": "${MONGODB_URI}",
     "name": "Invoice"
   },
   "auth": {
