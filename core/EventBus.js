@@ -7,59 +7,96 @@ class EventBus extends EventEmitter {
   constructor() {
     super();
     this.channel = 'app_events';
-    this.redisEnabled = redis.isConfigured !== false;
+    this.redisEnabled = false;
     this.pubClient = null;
     this.subClient = null;
+    this.connectionErrors = 0;
+    this.maxConnectionErrors = 5;
 
-    if (!this.redisEnabled) {
+    // Check if Redis is available
+    if (!redis.isConfigured || redis.status === 'circuit-open') {
       logger.warn('EventBus is running in local-only mode because Redis is unavailable');
       return;
     }
 
-    // Use stored connection options for duplicate connections
-    const connectionOptions = redis.connectionOptions || {};
-    const redisUrl = redis.redisUrl;
-    
-    if (redisUrl) {
-      // Create new connections with same options
-      this.pubClient = new Redis(redisUrl, connectionOptions);
-      this.subClient = new Redis(redisUrl, connectionOptions);
-    } else {
-      this.pubClient = redis.duplicate();
-      this.subClient = redis.duplicate();
-    }
+    this._initializeClients();
+  }
 
-    this.pubClient.on('error', (error) => {
-      logger.error('EventBus publisher Redis error', {
-        error: error.message
-      });
-    });
-
-    this.subClient.on('error', (error) => {
-      logger.error('EventBus subscriber Redis error', {
-        error: error.message
-      });
-    });
-
-    // Subscribe to Redis channel for distributed events
-    this.subClient.subscribe(this.channel, (err, count) => {
-      if (err) {
-        logger.error('Failed to subscribe to Redis channel', { error: err.message });
-      } else {
-        logger.info(`Subscribed to ${count} Redis channel(s)`);
+  _initializeClients() {
+    const connectionOptions = {
+      ...(redis.connectionOptions || {}),
+      maxRetriesPerRequest: null,
+      connectTimeout: 15000,
+      commandTimeout: 10000,
+      retryStrategy: (times) => {
+        if (times > 3) {
+          logger.error('EventBus Redis retry limit exceeded');
+          return null;
+        }
+        return Math.min(times * 2000, 10000);
       }
-    });
+    };
 
-    this.subClient.on('message', (channel, message) => {
+    const redisUrl = redis.redisUrl;
+
+    try {
+      if (redisUrl) {
+        this.pubClient = new Redis(redisUrl, connectionOptions);
+        this.subClient = new Redis(redisUrl, connectionOptions);
+      } else {
+        this.pubClient = redis.duplicate();
+        this.subClient = redis.duplicate();
+      }
+
+      this._setupClientHandlers();
+      this.redisEnabled = true;
+      
+    } catch (err) {
+      logger.error('Failed to initialize EventBus Redis clients', { error: err.message });
+      this.redisEnabled = false;
+    }
+  }
+
+  _setupClientHandlers() {
+    const handleError = (clientName) => (error) => {
+      this.connectionErrors++;
+      
+      if (error.message.includes('ETIMEDOUT') || 
+          error.message.includes('ECONNRESET') ||
+          error.message.includes('ECONNREFUSED')) {
+        logger.error(`EventBus ${clientName} connection error`, { 
+          error: error.message,
+          errors: this.connectionErrors 
+        });
+        
+        if (this.connectionErrors >= this.maxConnectionErrors) {
+          logger.error('EventBus disabling Redis due to repeated errors');
+          this.redisEnabled = false;
+        }
+      }
+    };
+
+    this.pubClient?.on('error', handleError('publisher'));
+    this.subClient?.on('error', handleError('subscriber'));
+
+    this.subClient?.on('message', (channel, message) => {
       if (channel === this.channel) {
         try {
           const { event, payload, source } = JSON.parse(message);
-          // Emit locally, but mark as remote to avoid loops if needed
-          // For now, we just emit to local listeners
           super.emit(event, payload, { source, remote: true });
         } catch (error) {
           logger.error('Error parsing distributed event', { error: error.message });
         }
+      }
+    });
+
+    // Subscribe with error handling
+    this.subClient?.subscribe(this.channel, (err, count) => {
+      if (err) {
+        logger.error('Failed to subscribe to Redis channel', { error: err.message });
+        this.redisEnabled = false;
+      } else {
+        logger.info(`Subscribed to ${count} Redis channel(s)`);
       }
     });
   }
@@ -71,28 +108,30 @@ class EventBus extends EventEmitter {
    * @param {Object} options - Options (e.g., { localOnly: false })
    */
   publish(event, payload, options = { localOnly: false }) {
-    logger.info(`Event Published: ${event}`, { payload });
-    
-    // 1. Emit locally immediately
+    // Always emit locally first
     super.emit(event, payload, { source: 'local', remote: false });
 
-    // 2. Publish to Redis for other services/instances
+    // Log event
+    logger.info(`Event Published: ${event}`, { payload });
+
+    // Publish to Redis for distributed events
     if (!options.localOnly && this.redisEnabled && this.pubClient) {
       const message = JSON.stringify({
         event,
         payload,
         source: process.env.SERVICE_NAME || 'backend-core'
       });
+      
       try {
         const publishResult = this.pubClient.publish(this.channel, message);
         Promise.resolve(publishResult).catch((error) => {
-          logger.error('Failed to publish distributed event', {
+          logger.warn('Failed to publish distributed event', {
             event,
             error: error.message
           });
         });
       } catch (error) {
-        logger.error('Failed to publish distributed event', {
+        logger.warn('Failed to publish distributed event', {
           event,
           error: error.message
         });
@@ -108,6 +147,18 @@ class EventBus extends EventEmitter {
   subscribe(event, handler) {
     logger.info(`Subscribed to event: ${event}`);
     this.on(event, handler);
+  }
+
+  /**
+   * Close connections
+   */
+  async close() {
+    try {
+      await this.pubClient?.quit?.();
+      await this.subClient?.quit?.();
+    } catch {
+      // Ignore errors on close
+    }
   }
 }
 

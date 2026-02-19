@@ -6,16 +6,38 @@ class QueueManager {
   constructor() {
     this.queues = {};
     this.workers = {};
-    this.redisEnabled = redis.isConfigured !== false;
-    // Use connection options with proper timeouts for BullMQ
-    this.connection = this.redisEnabled ? {
-      ...redis.options,
-      ...redis.connectionOptions,
-      maxRetriesPerRequest: null
-    } : null;
+    this.redisEnabled = redis.isConfigured !== false && redis.status !== 'circuit-open';
+    this.connection = null;
 
     if (!this.redisEnabled) {
-      logger.warn('QueueManager is disabled because Redis is not configured');
+      logger.warn('QueueManager is disabled because Redis is unavailable');
+    } else {
+      // Build connection options for BullMQ
+      const baseOptions = redis.connectionOptions || {};
+      this.connection = {
+        host: redis.options?.host,
+        port: redis.options?.port,
+        ...baseOptions,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        // Increase timeouts for remote Redis
+        connectTimeout: 15000,
+        commandTimeout: 10000,
+      };
+      
+      // If using URL, extract host/port
+      if (redis.redisUrl) {
+        try {
+          const url = new URL(redis.redisUrl.replace('redis://', 'http://'));
+          this.connection.host = url.hostname;
+          this.connection.port = url.port || 6379;
+          if (url.password) {
+            this.connection.password = url.password;
+          }
+        } catch {
+          // Fallback to options
+        }
+      }
     }
   }
 
@@ -29,8 +51,30 @@ class QueueManager {
     }
 
     if (!this.queues[name]) {
-      this.queues[name] = new Queue(name, { connection: this.connection });
-      logger.info(`Queue initialized: ${name}`);
+      try {
+        this.queues[name] = new Queue(name, { 
+          connection: this.connection,
+          defaultJobOptions: {
+            removeOnComplete: 100,
+            removeOnFail: 50,
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 1000
+            }
+          }
+        });
+        
+        this.queues[name].on('error', (err) => {
+          logger.error(`Queue ${name} error`, { error: err.message });
+        });
+        
+        logger.info(`Queue initialized: ${name}`);
+      } catch (err) {
+        logger.error(`Failed to initialize queue ${name}`, { error: err.message });
+        this.redisEnabled = false;
+        return null;
+      }
     }
     return this.queues[name];
   }
@@ -48,11 +92,16 @@ class QueueManager {
       return null;
     }
 
-    const queue = this.getQueue(queueName);
-    if (!queue) {
+    try {
+      const queue = this.getQueue(queueName);
+      if (!queue) {
+        return null;
+      }
+      return await queue.add(jobName, data, opts);
+    } catch (err) {
+      logger.error(`Failed to add job ${queueName}/${jobName}`, { error: err.message });
       return null;
     }
-    return await queue.add(jobName, data, opts);
   }
 
   /**
@@ -71,18 +120,60 @@ class QueueManager {
       return;
     }
 
-    this.workers[queueName] = new Worker(queueName, async (job) => {
-      logger.info(`Processing job ${job.name} in ${queueName}`);
-      try {
-        await processor(job);
-        logger.info(`Job ${job.name} completed`);
-      } catch (error) {
-        logger.error(`Job ${job.name} failed`, error);
-        throw error;
-      }
-    }, { connection: this.connection });
+    try {
+      this.workers[queueName] = new Worker(queueName, async (job) => {
+        logger.info(`Processing job ${job.name} in ${queueName}`);
+        try {
+          await processor(job);
+          logger.info(`Job ${job.name} completed`);
+        } catch (error) {
+          logger.error(`Job ${job.name} failed`, { error: error.message });
+          throw error;
+        }
+      }, { 
+        connection: this.connection,
+        autorun: true
+      });
 
-    logger.info(`Worker registered for ${queueName}`);
+      this.workers[queueName].on('error', (err) => {
+        logger.error(`Worker ${queueName} error`, { error: err.message });
+        // If too many errors, disable queue
+        if (err.message.includes('ECONNREFUSED') || err.message.includes('ETIMEDOUT')) {
+          logger.error(`Disabling queue ${queueName} due to connection errors`);
+          this.redisEnabled = false;
+        }
+      });
+
+      logger.info(`Worker registered for ${queueName}`);
+    } catch (err) {
+      logger.error(`Failed to register worker for ${queueName}`, { error: err.message });
+    }
+  }
+
+  /**
+   * Close all queues and workers
+   */
+  async closeAll() {
+    const closePromises = [];
+    
+    for (const [name, worker] of Object.entries(this.workers)) {
+      closePromises.push(
+        worker.close().catch(err => 
+          logger.error(`Failed to close worker ${name}`, { error: err.message })
+        )
+      );
+    }
+    
+    for (const [name, queue] of Object.entries(this.queues)) {
+      closePromises.push(
+        queue.close().catch(err => 
+          logger.error(`Failed to close queue ${name}`, { error: err.message })
+        )
+      );
+    }
+    
+    await Promise.allSettled(closePromises);
+    logger.info('All queues and workers closed');
   }
 }
 
