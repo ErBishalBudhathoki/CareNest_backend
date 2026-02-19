@@ -22,12 +22,14 @@ class EventBus extends EventEmitter {
     this._initializeClients();
   }
 
-  _initializeClients() {
-    const connectionOptions = {
-      ...(redis.connectionOptions || {}),
+  _buildConnectionOptions() {
+    const redisUrl = redis.redisUrl;
+    
+    const baseOptions = {
       maxRetriesPerRequest: null,
-      connectTimeout: 15000,
-      commandTimeout: 10000,
+      connectTimeout: 20000,
+      commandTimeout: 15000,
+      keepAlive: 10000,
       retryStrategy: (times) => {
         if (times > 3) {
           logger.error('EventBus Redis retry limit exceeded');
@@ -36,13 +38,54 @@ class EventBus extends EventEmitter {
         return Math.min(times * 2000, 10000);
       }
     };
+    
+    if (redisUrl) {
+      try {
+        // Parse URL to extract connection details
+        let urlToParse = redisUrl;
+        if (redisUrl.startsWith('redis://')) {
+          urlToParse = redisUrl.replace('redis://', 'http://');
+        } else if (redisUrl.startsWith('rediss://')) {
+          urlToParse = redisUrl.replace('rediss://', 'https://');
+        }
+        
+        const parsed = new URL(urlToParse);
+        
+        const options = {
+          ...baseOptions,
+          host: parsed.hostname,
+          port: parseInt(parsed.port, 10) || 6379,
+        };
+        
+        // Handle password (Redis Cloud: redis://default:PASSWORD@host:port)
+        if (parsed.password) {
+          options.password = decodeURIComponent(parsed.password);
+        }
+        
+        // TLS for rediss://
+        if (redisUrl.startsWith('rediss://')) {
+          options.tls = { rejectUnauthorized: false };
+        }
+        
+        return { url: redisUrl, options };
+      } catch (err) {
+        logger.error('Failed to parse Redis URL for EventBus', { error: err.message });
+        return { url: redisUrl, options: baseOptions };
+      }
+    }
+    
+    return { options: { ...baseOptions, ...(redis.connectionOptions || {}) } };
+  }
 
-    const redisUrl = redis.redisUrl;
-
+  _initializeClients() {
+    const connectionConfig = this._buildConnectionOptions();
+    
     try {
-      if (redisUrl) {
-        this.pubClient = new Redis(redisUrl, connectionOptions);
-        this.subClient = new Redis(redisUrl, connectionOptions);
+      const { url, options } = connectionConfig;
+      
+      if (url) {
+        this.pubClient = new Redis(url, options);
+        this.subClient = new Redis(url, options);
       } else {
         this.pubClient = redis.duplicate();
         this.subClient = redis.duplicate();
@@ -63,7 +106,9 @@ class EventBus extends EventEmitter {
       
       if (error.message.includes('ETIMEDOUT') || 
           error.message.includes('ECONNRESET') ||
-          error.message.includes('ECONNREFUSED')) {
+          error.message.includes('ECONNREFUSED') ||
+          error.message.includes('WRONGPASS') ||
+          error.message.includes('Command timed out')) {
         logger.error(`EventBus ${clientName} connection error`, { 
           error: error.message,
           errors: this.connectionErrors 
