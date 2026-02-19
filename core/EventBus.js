@@ -1,4 +1,5 @@
 const EventEmitter = require('events');
+const Redis = require('ioredis');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 
@@ -15,8 +16,18 @@ class EventBus extends EventEmitter {
       return;
     }
 
-    this.pubClient = redis.duplicate();
-    this.subClient = redis.duplicate();
+    // Use stored connection options for duplicate connections
+    const connectionOptions = redis.connectionOptions || {};
+    const redisUrl = redis.redisUrl;
+    
+    if (redisUrl) {
+      // Create new connections with same options
+      this.pubClient = new Redis(redisUrl, connectionOptions);
+      this.subClient = new Redis(redisUrl, connectionOptions);
+    } else {
+      this.pubClient = redis.duplicate();
+      this.subClient = redis.duplicate();
+    }
 
     this.pubClient.on('error', (error) => {
       logger.error('EventBus publisher Redis error', {
