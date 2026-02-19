@@ -1,10 +1,10 @@
-#!/usr/bin/env node
+#!/usr/bin/env node 
 
 import bcrypt from 'bcryptjs';
 import { faker } from '@faker-js/faker';
 import { MongoClient } from 'mongodb';
 
-const MONGO_URI = 'mongodb+srv://erbishalb331:REDACTED_MONGODB_PASSWORD@carenest.mzabftn.mongodb.net/Invoice?retryWrites=true&w=majority';
+const MONGO_URI = process.env.MONGODB_URI || process.env.TEST_MONGODB_URI || 'mongodb://localhost:27017/invoice_test';
 
 async function generateSeedData() {
   const client = new MongoClient(MONGO_URI);
@@ -205,46 +205,6 @@ async function generateSeedData() {
       }
     }
 
-    // Add the Firebase user (your account) - only if not exists
-    const existingFirebase = await db.collection('login').findOne({ email: 'deverbishal331@gmail.com' });
-    if (!existingFirebase) {
-    const firebaseUser = {
-      email: 'deverbishal331@gmail.com',
-      password: bcrypt.hashSync('FirebaseUser123!', 12),
-      firstName: 'Bishal',
-      lastName: 'Budhathoki',
-      role: 'admin',
-      roles: ['admin', 'user'],
-      organizationId: '697f1fd6191a1decde9344e9',
-      organizationCode: 'DEV01',
-      isActive: true,
-      jobRole: 'Super Admin',
-      phone: '+61 412 345 678',
-      profilePic: 'https://via.placeholder.com/150',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      isSeedData: true,
-      isFirebaseUser: true
-    };
-    allLoginUsers.push(firebaseUser);
-    allProfileUsers.push({
-      email: firebaseUser.email,
-      firstName: firebaseUser.firstName,
-      lastName: firebaseUser.lastName,
-      role: firebaseUser.role,
-      roles: firebaseUser.roles,
-      organizationId: firebaseUser.organizationId,
-      organizationCode: firebaseUser.organizationCode,
-      isActive: firebaseUser.isActive,
-      jobRole: firebaseUser.jobRole,
-      phone: firebaseUser.phone,
-      profilePic: firebaseUser.profilePic,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      isSeedData: true
-    });
-    } // Close the if (!existingFirebase) block
-
     // Insert all users
     console.log('\nInserting users into database...');
     await db.collection('login').insertMany(allLoginUsers);
@@ -260,7 +220,7 @@ async function generateSeedData() {
     console.log('\n=== SEED DATA SUMMARY ===');
     console.log(`Total Organizations: ${orgs.length}`);
     console.log(`Total Users: ${loginCount}`);
-    console.log(`  - Admins: ${orgs.length + 1} (including your Firebase account)`);
+    console.log(`  - Admins: ${orgs.length}`);
     console.log(`  - Workers: ${orgs.length * 5}`);
     console.log(`  - Clients: ${orgs.length * 10}`);
     console.log(`  - Family: ${orgs.length * 3}`);
@@ -276,11 +236,6 @@ async function generateSeedData() {
     console.log('  Admin: admin@care01.app / Admin123!');
     console.log('  Workers: worker1@care01.app - worker5@care01.app / Worker123!');
     console.log('  Clients: client1@care01.app - client10@care01.app / Client123!');
-    
-    console.log('\nYour Firebase Account:');
-    console.log('  Email: deverbishal331@gmail.com (logged in via Firebase)');
-    console.log('  Role: Admin');
-    console.log('  Organization: DEV01 (CareNest Development)');
     
   } catch (error) {
     console.error('Error:', error.message);
