@@ -126,12 +126,18 @@ if (!redisConfig) {
     tls: redisConfig.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined
   };
   redis = new RedisClass(redisConfig, connectionOptions);
+  
+  // Store options for duplicate() to inherit
+  redis.connectionOptions = connectionOptions;
+  redis.redisUrl = redisConfig;
 } else {
-  redis = new RedisClass({
+  const connectionOptions = {
     ...redisConfig,
     connectTimeout: 10000,
     commandTimeout: 5000
-  });
+  };
+  redis = new RedisClass(connectionOptions);
+  redis.connectionOptions = connectionOptions;
 }
 
 const redisConfigured = Boolean(redisConfig);
