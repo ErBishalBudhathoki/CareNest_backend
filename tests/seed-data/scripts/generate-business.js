@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env node 
 
 import { faker } from '@faker-js/faker';
 import { MongoClient } from 'mongodb';
 
-const MONGO_URI = 'mongodb+srv://erbishalb331:REDACTED_MONGODB_PASSWORD@carenest.mzabftn.mongodb.net/Invoice?retryWrites=true&w=majority';
+const MONGO_URI = process.env.MONGODB_URI || process.env.TEST_MONGODB_URI || 'mongodb://localhost:27017/invoice_test';
 
 async function generateBusinessData() {
   const client = new MongoClient(MONGO_URI);
