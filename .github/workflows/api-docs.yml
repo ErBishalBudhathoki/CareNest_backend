@@ -33,7 +33,7 @@ jobs:
           node-version: '20'
 
       - name: Install tools
-        run: npm install -g @apidevtools/swagger-cli spectral-cli
+        run: npm install -g @apidevtools/swagger-cli @stoplight/spectral-cli
 
       - name: Validate spec
         run: swagger-cli validate docs/api/openapi.yaml
