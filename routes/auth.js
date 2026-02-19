@@ -46,6 +46,55 @@ router.post('/register',
 );
 
 /**
+ * @route GET /api/auth/verify-organization/:code
+ * @desc Verify organization code (public - for signup flow)
+ * @access Public
+ */
+router.get('/verify-organization/:code',
+  rateLimitMiddleware('login'),
+  async (req, res) => {
+    try {
+      const { param } = require('express-validator');
+      const organizationService = require('../services/organizationService');
+      
+      const { code } = req.params;
+      
+      if (!code || !/^[A-Z0-9]{6,8}$/i.test(code)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid organization code format'
+        });
+      }
+      
+      const organization = await organizationService.verifyOrganizationCode(code.toUpperCase());
+      
+      if (!organization) {
+        return res.status(404).json({
+          success: false,
+          message: 'Organization not found'
+        });
+      }
+      
+      res.json({
+        success: true,
+        organizationId: organization._id?.toString() || organization.organizationId,
+        organizationName: organization.name || organization.organizationName,
+        organizationCode: organization.code || code.toUpperCase()
+      });
+    } catch (error) {
+      logger.error('Verify organization code error', {
+        error: error.message,
+        code: req.params.code
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to verify organization code'
+      });
+    }
+  }
+);
+
+/**
  * @route POST /api/auth/login
  * @desc Authenticate user and return token
  * @access Public
