@@ -1,140 +1,124 @@
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const Request = require('../models/Request');
+const User = require('../models/User');
+const FcmToken = require('../models/FcmToken');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { messaging } = require('../firebase-admin-config');
-const LeaveBalanceService = require('./leaveBalanceService'); // Import LeaveBalanceService
-
-const uri = process.env.MONGODB_URI;
+const LeaveBalanceService = require('./leaveBalanceService');
+const AppointmentService = require('./appointmentService');
+const HolidayService = require('./holidayService');
+const mongoose = require('mongoose');
 
 class RequestService {
-  constructor() {
-    this.client = null;
-  }
-
-  async connect() {
-    if (!this.client) {
-      this.client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-      await this.client.connect();
-    }
-    return this.client.db('Invoice');
-  }
 
   async createRequest(requestData, userEmail) {
-    const db = await this.connect();
     const {
       organizationId,
       userId,
-      type, // 'Shift' or 'TimeOff'
-      details, // Object containing specific fields
+      type, // 'Shift', 'TimeOff', 'SHIFT_SWAP_OFFER'
+      details,
       note
     } = requestData;
 
     // Validate Balance for TimeOff
     if (type === 'TimeOff' && details && details.leaveType && details.totalHours) {
-        // Validate hours against dates
-        if (details.startDate && details.endDate) {
-            try {
-                const calculated = await this.calculateLeaveHours(details.startDate, details.endDate, organizationId);
-                // Allow small tolerance for floating point
-                if (details.totalHours > calculated.totalHours + 0.1) {
-                    throw new Error(`Total hours cannot exceed ${calculated.totalHours} for the selected dates.`);
-                }
-            } catch (e) {
-                if (e.message.includes('Total hours cannot exceed')) throw e;
-                console.error("Error verifying leave hours:", e);
-            }
-        }
-
+      if (details.startDate && details.endDate) {
         try {
-            const hasBalance = await LeaveBalanceService.checkBalance(userEmail, details.leaveType, details.totalHours);
-            if (!hasBalance) {
-                // We could throw error, but maybe we just allow it and let manager reject?
-                // PRD says "Prevent requests that exceed available balance"
-                throw new Error(`Insufficient ${details.leaveType} balance.`);
-            }
+          const calculated = await this.calculateLeaveHours(details.startDate, details.endDate, organizationId);
+          if (details.totalHours > calculated.totalHours + 0.1) {
+            throw new Error(`Total hours cannot exceed ${calculated.totalHours} for the selected dates.`);
+          }
         } catch (e) {
-            console.error("Balance check failed:", e);
-             // If user not found or balance service error, maybe block or warn. 
-             // If "Insufficient...", rethrow.
-             if (e.message.includes('Insufficient')) throw e;
+          if (e.message.includes('Total hours cannot exceed')) throw e;
+          console.error("Error verifying leave hours:", e);
         }
+      }
+
+      try {
+        const hasBalance = await LeaveBalanceService.checkBalance(userEmail, details.leaveType, details.totalHours);
+        if (!hasBalance) {
+          throw new Error(`Insufficient ${details.leaveType} balance.`);
+        }
+      } catch (e) {
+        console.error("Balance check failed:", e);
+        if (e.message.includes('Insufficient')) throw e;
+      }
     }
 
     let storedUserId = userId;
+    // Resolve email to User ID if needed
     if (typeof storedUserId === 'string' && storedUserId.includes('@')) {
-      const userDoc = await db.collection('login').findOne(
-        { email: storedUserId },
-        { projection: { _id: 1 } }
-      );
-      if (userDoc?._id) {
+      const userDoc = await User.findOne({ email: storedUserId }).select('_id');
+      if (userDoc) {
         storedUserId = userDoc._id.toString();
       }
     }
 
-    const requestDoc = {
-      _id: new ObjectId(),
+    const requestDoc = new Request({
       organizationId,
       userId: storedUserId,
       createdBy: userEmail,
       type,
-      status: 'Pending', // Pending, Approved, Declined
+      status: 'Pending',
       details,
       note,
-      createdAt: new Date(),
-      updatedAt: new Date(),
       history: [{
         action: 'created',
         performedBy: userEmail,
         timestamp: new Date()
       }]
-    };
+    });
 
-    await db.collection('requests').insertOne(requestDoc);
+    await requestDoc.save();
 
     // Notify admins
     try {
-      // Get admins with their FCM tokens directly from login collection
-      const admins = await db.collection('login').find({
+      // Find admins
+      // Query User model
+      const adminQuery = {
         organizationId: organizationId,
-        isActive: { $ne: false },
+        isActive: true,
         $or: [
           { role: { $regex: /^admin$/i } },
           { roles: { $elemMatch: { $regex: /^admin$/i } } },
           { jobRole: { $regex: /^admin$/i } },
-        ],
-      }).project({ email: 1, fcmToken: 1, role: 1, roles: 1, jobRole: 1 }).toArray();
+        ]
+      };
+
+      const admins = await User.find(adminQuery).select('email fcmToken jobRole role roles');
 
       console.log('Admin users found in RequestService query:', {
         count: admins.length,
-        details: admins.map(u => ({
-          email: u.email,
-          role: u.role,
-          roles: u.roles,
-          jobRole: u.jobRole,
-          hasToken: !!u.fcmToken
-        }))
+        details: admins.map(u => ({ email: u.email, hasToken: !!u.fcmToken }))
       });
 
       const adminEmails = admins.map((admin) => admin.email).filter(Boolean);
 
+      // Collect tokens from User profile
       let tokens = admins
         .map((admin) => admin.fcmToken)
         .filter((token) => token && token.trim() !== '');
 
-      const tokenDocs = adminEmails.length > 0
-        ? await db.collection('fcmTokens').find({
-          organizationId: organizationId,
-          userEmail: { $in: adminEmails },
-          fcmToken: { $exists: true, $nin: [null, ''] }
-        }).project({ fcmToken: 1 }).toArray()
-        : [];
+      // Collect tokens from FcmToken collection
+      if (adminEmails.length > 0) {
+        const tokenDocs = await FcmToken.find({
+          organizationId: organizationId, // FcmToken schema doesn't strict check orgId maybe? But let's keep logic
+          // FcmToken schema has userEmail. Check schema again. 
+          // Schema has: userEmail, fcmToken. doesn't seem to have organizationId?
+          // Let's assume FcmToken MIGHT NOT HAVE organizationId if shared?
+          // Previous code queried { organizationId, userEmail: { $in... } }
+          // If schema doesn't have organizationId, that query would fail or return empty in Strict mode?
+          // Wait, FcmToken.js I viewed earlier showed: userEmail, fcmToken, updatedAt... 
+          // NO organizationId in FcmToken schema I saw!
+          // But maybe previous code worked because native driver ignores schema?
+          // I will query by userEmail only.
+          userEmail: { $in: adminEmails }
+        }).select('fcmToken');
 
-      tokens = tokens.concat(tokenDocs.map((doc) => doc.fcmToken).filter(Boolean));
+        tokens = tokens.concat(tokenDocs.map((doc) => doc.fcmToken).filter(Boolean));
+      }
 
-      // Deduplicate tokens
       tokens = [...new Set(tokens)];
-
-      console.log(`Found ${tokens.length} admin FCM tokens for organization ${organizationId}`);
 
       if (tokens.length > 0) {
         const message = {
@@ -142,7 +126,7 @@ class RequestService {
             title: 'New Request',
             body: `${userEmail || 'A user'} has submitted a new ${type} request.`
           },
-          tokens: tokens, // Use tokens for multicast
+          tokens: tokens,
           data: {
             type: 'request_created',
             requestId: requestDoc._id.toString(),
@@ -153,20 +137,10 @@ class RequestService {
             click_action: 'FLUTTER_NOTIFICATION_CLICK',
             timestamp: new Date().toISOString(),
           },
-          android: {
-            priority: 'high',
-            notification: {
-              channel_id: 'message',
-              sound: 'default',
-            },
-          },
-          apns: {
-            payload: { aps: { sound: 'default', 'content-available': 1 } },
-            headers: { 'apns-priority': '10' },
-          },
+          android: { priority: 'high', notification: { channel_id: 'message', sound: 'default' } },
+          apns: { payload: { aps: { sound: 'default', 'content-available': 1 } }, headers: { 'apns-priority': '10' } },
         };
         await messaging.sendEachForMulticast(message);
-        console.log(`Notification sent to ${tokens.length} admins`);
       }
     } catch (error) {
       console.error('Error sending admin notification:', error);
@@ -176,7 +150,6 @@ class RequestService {
   }
 
   async getRequests(organizationId, filters = {}) {
-    const db = await this.connect();
     const query = { organizationId };
 
     if (filters.userId) {
@@ -188,12 +161,10 @@ class RequestService {
           { 'details.claimantEmail': filterUserId }
         ];
       } else {
-        if (ObjectId.isValid(filterUserId)) {
-          const userDoc = await db.collection('login').findOne(
-            { _id: new ObjectId(filterUserId) },
-            { projection: { email: 1 } }
-          );
-          const email = userDoc?.email?.toString();
+        // Resolve ObjectId if possible
+        if (mongoose.Types.ObjectId.isValid(filterUserId)) {
+          const userDoc = await User.findById(filterUserId).select('email');
+          const email = userDoc?.email;
           if (email) {
             query.$or = [
               { userId: filterUserId },
@@ -203,31 +174,22 @@ class RequestService {
               { 'details.claimantEmail': email }
             ];
           } else {
-            query.$or = [
-              { userId: filterUserId },
-              { 'details.claimantId': filterUserId }
-            ];
+            query.$or = [{ userId: filterUserId }, { 'details.claimantId': filterUserId }];
           }
         } else {
-          query.$or = [
-            { userId: filterUserId },
-            { 'details.claimantId': filterUserId }
-          ];
+          query.$or = [{ userId: filterUserId }, { 'details.claimantId': filterUserId }];
         }
       }
     }
     if (filters.status) query.status = filters.status;
     if (filters.type) query.type = filters.type;
 
-    return await db.collection('requests').find(query).sort({ createdAt: -1 }).toArray();
+    return await Request.find(query).sort({ createdAt: -1 });
   }
 
   async claimRequest(requestId, claimantId, claimantName, claimantEmail) {
-    const db = await this.connect();
-
-    // 1. Verify request is pending and type is SHIFT_SWAP_OFFER
-    const request = await db.collection('requests').findOne({
-      _id: new ObjectId(requestId),
+    const request = await Request.findOne({
+      _id: requestId,
       status: 'Pending',
       type: 'SHIFT_SWAP_OFFER'
     });
@@ -236,18 +198,12 @@ class RequestService {
       throw new Error('Request not found or not available for claim');
     }
 
-    // 2. Update request with claim details
     const update = {
       $set: {
         'details.claimantId': claimantId,
         'details.claimantName': claimantName,
         'details.claimantEmail': claimantEmail,
-        status: 'Claimed', // Intermediate status awaiting admin approval? Or Pending Approval?
-        // Let's use 'Pending Approval' if admin needs to approve. 
-        // Or if 'Claimed' means it waits for admin. 
-        // Implementation plan said "Admin approval workflow".
-        // So let's set status to 'Pending Approval' or keep 'Claimed' and admin filters by 'Claimed'.
-        // Let's use 'Claimed' as a status distinct from 'Pending' (Open) and 'Approved' (Final).
+        status: 'Claimed',
         updatedAt: new Date()
       },
       $push: {
@@ -259,37 +215,29 @@ class RequestService {
       }
     };
 
-    const result = await db.collection('requests').findOneAndUpdate(
-      { _id: new ObjectId(requestId) },
+    const result = await Request.findOneAndUpdate(
+      { _id: requestId },
       update,
-      { returnDocument: 'after' }
+      { new: true }
     );
 
-    // Notify Admin? (Should be handled by separate notification logic or here)
-    // For now we return result.
     return result;
   }
 
   async updateRequestStatus(requestId, status, userEmail, reason) {
-    const db = await this.connect();
-
-    // 1. Get the original request to find the requester
-    const originalRequest = await db.collection('requests').findOne({ _id: new ObjectId(requestId) });
+    const originalRequest = await Request.findById(requestId);
     if (!originalRequest) {
       throw new Error('Request not found');
     }
 
-    // SIDE EFFECTS - Execute BEFORE updating status to ensure consistency
+    // SIDE EFFECTS
     if (status === 'Approved' && originalRequest.type === 'SHIFT_SWAP_OFFER') {
       try {
-        const AppointmentService = require('./appointmentService');
         const details = originalRequest.details;
-
-        // Reassign the shift
         await AppointmentService.reassignShift(
           originalRequest.organizationId,
-          originalRequest.createdBy, // Old user (requester) - Use createdBy which is email
-          details.claimantEmail, // New user (claimant) - MUST be present if claimed
+          originalRequest.createdBy,
+          details.claimantEmail,
           details.clientEmail,
           {
             date: details.date,
@@ -307,33 +255,26 @@ class RequestService {
       }
     }
 
-    // Handle Leave Balance Deduction on Approval
     if (status === 'Approved' && originalRequest.type === 'TimeOff') {
-        try {
-            const details = originalRequest.details;
-            if (details && details.leaveType && details.totalHours) {
-                // Determine userEmail for deduction
-                // originalRequest.createdBy is userEmail
-                await LeaveBalanceService.updateBalance(
-                    originalRequest.createdBy, 
-                    details.leaveType, 
-                    -Math.abs(details.totalHours), 
-                    `Leave Request Approved: ${requestId}`
-                );
-                console.log(`Deducted ${details.totalHours} hours from ${originalRequest.createdBy} for ${details.leaveType}`);
-            }
-        } catch (err) {
-            console.error('Failed to deduct leave balance', err);
-            // Should we block approval? Probably yes.
-            throw new Error(`Failed to update leave balance: ${err.message}`);
+      try {
+        const details = originalRequest.details;
+        if (details && details.leaveType && details.totalHours) {
+          await LeaveBalanceService.updateBalance(
+            originalRequest.createdBy,
+            details.leaveType,
+            -Math.abs(details.totalHours),
+            `Leave Request Approved: ${requestId}`
+          );
         }
+      } catch (err) {
+        console.error('Failed to deduct leave balance', err);
+        throw new Error(`Failed to update leave balance: ${err.message}`);
+      }
     }
 
     let finalStatus = status;
     let unsetFields = {};
 
-    // Special handling for Declining a SHIFT_SWAP_OFFER that was already Claimed
-    // Instead of closing the request, we reset it to Pending so others can claim it
     if (originalRequest.type === 'SHIFT_SWAP_OFFER' && status === 'Declined' && originalRequest.status === 'Claimed') {
       finalStatus = 'Pending';
       unsetFields = {
@@ -360,61 +301,42 @@ class RequestService {
       }
     };
 
-    // Apply the unset if needed
     if (Object.keys(unsetFields).length > 0) {
       update.$unset = unsetFields;
     }
 
-    const result = await db.collection('requests').findOneAndUpdate(
-      { _id: new ObjectId(requestId) },
-      update,
-      { returnDocument: 'after' }
-    );
+    const result = await Request.findByIdAndUpdate(requestId, update, { new: true });
 
-    // 2. Send Notification to the User (Existing logic)
+    // Notification
     if (result) {
       try {
-        console.log('Request status updated, processing notification for request:', requestId);
-        // Find user to get FCM token
         const requesterId = originalRequest.userId?.toString();
-        let user = null;
         let requesterEmail = null;
+        let user = null;
+
         if (requesterId) {
           if (requesterId.includes('@')) {
-            user = await db.collection('login').findOne({ email: requesterId });
             requesterEmail = requesterId;
-          } else if (ObjectId.isValid(requesterId)) {
-            user = await db.collection('login').findOne({ _id: new ObjectId(requesterId) });
-            requesterEmail = user?.email?.toString() || null;
+            user = await User.findOne({ email: requesterEmail });
+          } else if (mongoose.Types.ObjectId.isValid(requesterId)) {
+            user = await User.findById(requesterId);
+            requesterEmail = user?.email;
           }
         }
 
-        const organizationId = originalRequest.organizationId;
-
-        // Primary: Get FCM token directly from login collection
         let userTokens = [];
         if (user && user.fcmToken) {
-          userTokens = [user.fcmToken];
-          console.log(`Found FCM token in login collection for ${requesterEmail}`);
+          userTokens.push(user.fcmToken);
         }
 
-        // Fallback: Check fcmTokens collection if no token in login
         if (userTokens.length === 0 && requesterEmail) {
-          const userTokenDocs = await db.collection('fcmTokens').find({
-            organizationId: organizationId,
-            userEmail: requesterEmail,
-            fcmToken: { $exists: true, $nin: [null, ''] }
-          }).project({ fcmToken: 1 }).toArray();
+          const userTokenDocs = await FcmToken.find({
+            userEmail: requesterEmail
+          }).select('fcmToken');
           userTokens = userTokenDocs.map(doc => doc.fcmToken).filter(Boolean);
-          if (userTokens.length > 0) {
-            console.log(`Found FCM token in fcmTokens collection for ${requesterEmail}`);
-          }
         }
 
-        // Deduplicate tokens
         userTokens = [...new Set(userTokens)];
-
-        console.log(`Total FCM tokens found for user ${requesterEmail || requesterId}: ${userTokens.length}`);
 
         if (userTokens.length > 0) {
           const message = {
@@ -433,89 +355,57 @@ class RequestService {
               click_action: 'FLUTTER_NOTIFICATION_CLICK',
               timestamp: new Date().toISOString(),
             },
-            android: {
-              priority: 'high',
-              notification: {
-                channel_id: 'message',
-                sound: 'default',
-              },
-            },
-            apns: {
-              payload: { aps: { sound: 'default', 'content-available': 1 } },
-              headers: { 'apns-priority': '10' },
-            },
+            android: { priority: 'high', notification: { channel_id: 'message', sound: 'default' } },
+            apns: { payload: { aps: { sound: 'default', 'content-available': 1 } }, headers: { 'apns-priority': '10' } },
           };
 
           await messaging.sendEachForMulticast(message);
-          console.log(`Notification sent to ${requesterEmail || requesterId}`);
-        } else {
-          console.log(`No FCM token found for user ${requesterId}`);
         }
       } catch (error) {
         console.error('Error sending notification:', error);
-        // Don't fail the request update if notification fails
       }
     }
 
-    return result.value;
+    return result;
   }
 
   async getLeaveForecast(userEmail, targetDate) {
-    // 1. Get Current Balance from Service
-    // We assume forecast is mainly for Annual Leave
     const balances = await LeaveBalanceService.getBalances(userEmail);
     const currentBalance = balances.annualLeave || 0;
 
     const target = new Date(targetDate);
     const now = new Date();
-    
+
     // 2. Calculate Future Accrual
     // Rule: 20 days per year = 1.66 days/month.
     // Assuming 7.6 hours per day = 12.66 hours/month.
     const ACCRUAL_RATE_HOURS_PER_MONTH = 12.66;
-    
-    // Calculate months difference
+
     const getMonthsDiff = (d1, d2) => {
-        let months;
-        months = (d2.getFullYear() - d1.getFullYear()) * 12;
-        months -= d1.getMonth();
-        months += d2.getMonth();
-        return months <= 0 ? 0 : months;
+      let months;
+      months = (d2.getFullYear() - d1.getFullYear()) * 12;
+      months -= d1.getMonth();
+      months += d2.getMonth();
+      return months <= 0 ? 0 : months;
     };
 
     const monthsToTarget = getMonthsDiff(now, target);
     const forecastAccrual = monthsToTarget * ACCRUAL_RATE_HOURS_PER_MONTH;
-    
-    // 3. Calculate Approved Future Leave (not yet taken but approved)
-    // If LeaveBalanceService.updateBalance is called on Approval, then currentBalance ALREADY reflects approved leave?
-    // My implementation deducts on Approval. So currentBalance is already reduced by approved leave.
-    // So we don't need to subtract again.
-    // However, if the approved leave is in the *future*, it is still deducted from balance.
-    // So currentBalance = Available Balance.
-    
-    // 4. Forecast
     const forecastBalance = currentBalance + forecastAccrual;
-    
+
     return {
-        accrued: parseFloat((balances.accruedHours || 0).toFixed(2)), // We might not track this perfectly in simple service yet
-        taken: parseFloat((balances.usedHours || 0).toFixed(2)),
-        balance: parseFloat(currentBalance.toFixed(2)),
-        forecast: parseFloat(forecastBalance.toFixed(2)),
-        targetDate: target
+      accrued: parseFloat((balances.accruedHours || 0).toFixed(2)),
+      taken: parseFloat((balances.usedHours || 0).toFixed(2)),
+      balance: parseFloat(currentBalance.toFixed(2)),
+      forecast: parseFloat(forecastBalance.toFixed(2)),
+      targetDate: target
     };
   }
 
-  /**
-   * Calculate leave hours excluding weekends and public holidays
-   * @param {string} startDate - ISO date string
-   * @param {string} endDate - ISO date string
-   * @param {string} organizationId - Organization ID
-   * @param {number} dailyHours - Hours per day (default 7.6)
-   */
   async calculateLeaveHours(startDate, endDate, organizationId, dailyHours = 7.6) {
     const start = new Date(startDate);
     const end = new Date(endDate);
-    
+
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       throw new Error("Invalid date format");
     }
@@ -524,14 +414,11 @@ class RequestService {
       throw new Error("End date must be after start date");
     }
 
-    // 1. Get Holidays
-    const HolidayService = require('./holidayService');
     const allHolidays = await HolidayService.getAllHolidays(organizationId);
-    
-    // Convert holidays to a Set of date strings (DD-MM-YYYY or YYYY-MM-DD - DB uses DD-MM-YYYY)
-    const holidayDates = new Set(allHolidays.map(h => h.Date)); // DB stores as "DD-MM-YYYY" string based on schema check
-    
-    // Helper to format date as DD-MM-YYYY
+
+    // DB stores as "DD-MM-YYYY" string based on schema check
+    const holidayDates = new Set(allHolidays.map(h => h.Date));
+
     const formatDate = (date) => {
       const d = date.getDate().toString().padStart(2, '0');
       const m = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -543,13 +430,12 @@ class RequestService {
     let workingDays = 0;
     let weekendDays = 0;
     let holidayDays = 0;
-    
-    // Iterate loop
+
     const current = new Date(start);
     while (current <= end) {
       const dayOfWeek = current.getDay(); // 0 = Sun, 6 = Sat
       const dateStr = formatDate(current);
-      
+
       if (dayOfWeek === 0 || dayOfWeek === 6) {
         weekendDays++;
       } else if (holidayDates.has(dateStr)) {
@@ -558,8 +444,6 @@ class RequestService {
         workingDays++;
         totalHours += dailyHours;
       }
-      
-      // Next day
       current.setDate(current.getDate() + 1);
     }
 

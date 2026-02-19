@@ -35,7 +35,6 @@ coverage/
 .nyc_output
 
 # Firebase files
-firebase-admin-config.js
 firebase-service-account.json
 google-services.json
 GoogleService-Info.plist
@@ -46,17 +45,17 @@ service-account.json
 *.jks
 *.keystore
 
+# Secrets
+secrets.json
+scripts/secrets.json
+
+scripts/restore-individual-secrets.js
+
 # Uploads and user content
 uploads/*
 !uploads/.gitkeep
 
-# Test files
-*.test.js
-test*.js
-*_test.js
-*.spec.js
-test/
-tests/
+# Individual test scripts at root (not the tests/ directory)
 check_test_user.js
 update_test_user.js
 
@@ -112,3 +111,4 @@ build/
 
 # uploads folder where user uploaded img, files stays
 uploads/
+bfg-1.15.0.jar

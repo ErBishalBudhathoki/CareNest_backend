@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # Backend API server
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: invoice-api
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - MONGODB_URI=mongodb://mongo:27017/Invoice
+      - JWT_SECRET=your-development-jwt-secret
+      - BACKEND_URL=http://localhost:3000
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+    depends_on:
+      - mongo
+    networks:
+      - invoice-network
+    command: npm run dev
+
+  # MongoDB database
+  mongo:
+    image: mongo:7.0
+    container_name: invoice-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=Invoice
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - invoice-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/Invoice --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Swagger UI with custom styling (using our enhanced swagger.js)
+  # Note: The enhanced UI is served directly from the API at /api-docs
+  # This container is kept for reference/alternative access
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.10.3
+    container_name: invoice-swagger
+    ports:
+      - "8080:8080"
+    environment:
+      - API_URL=http://localhost:3000/api-docs/docs.json
+      - SWAGGER_JSON=/app/openapi.json
+      - VALIDATOR_URL=null
+      - SUPPORTED_SUBMIT_METHODS=['get', 'post', 'put', 'delete', 'patch']
+      - DOC_EXPANSION=list
+      - DEFAULT_MODELS_EXPAND_DEPTH=1
+      - DEFAULT_MODEL_EXPAND_DEPTH=1
+      - DISPLAY_OPERATION_ID=true
+      - FILTER=true
+      - SHOW_EXTENSIONS=true
+      - SHOW_COMMON_EXTENSIONS=true
+      - DEEP_LINKING=true
+      - DISPLAY_REQUEST_DURATION=true
+    volumes:
+      - ../backend/docs/openapi.json:/app/openapi.json:ro
+    depends_on:
+      - api
+    networks:
+      - invoice-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.swagger.rule=Host(`swagger.localhost`)"
+
+  # Swagger Editor (for editing OpenAPI spec)
+  swagger-editor:
+    image: swaggerapi/swagger-editor:v5.0.0-alpha.81
+    container_name: invoice-swagger-editor
+    ports:
+      - "8081:8080"
+    environment:
+      - URL=/openapi.json
+    volumes:
+      - ../backend/docs/openapi.json:/usr/share/nginx/html/openapi.json:ro
+      - ../swagger.yaml:/usr/share/nginx/html/swagger.yaml:ro
+    networks:
+      - invoice-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.editor.rule=Host(`editor.localhost`)"
+
+volumes:
+  mongo-data:
+    driver: local
+
+networks:
+  invoice-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

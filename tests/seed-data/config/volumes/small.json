@@ -1,0 +1,14 @@
+{
+  "preset": "small",
+  "description": "Quick testing with minimal data",
+  "entityCounts": {
+    "organization": 2,
+    "auth": 15,
+    "client": 5,
+    "shift": 20,
+    "invoice": 10,
+    "timesheet": 15,
+    "expense": 10
+  },
+  "relationshipDensity": 0.6
+}

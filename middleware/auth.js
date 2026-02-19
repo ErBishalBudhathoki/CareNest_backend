@@ -6,8 +6,37 @@ const { createLogger } = require('../utils/logger');
 const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
+const keyRotationService = require('../services/jwtKeyRotationService');
 
 const logger = createLogger('AuthMiddleware');
+
+function validateSecurityConfig({ throwOnMissing = false } = {}) {
+  const jwtSecret = process.env.JWT_SECRET;
+
+  if (!jwtSecret) {
+    logger.error('CRITICAL: JWT_SECRET environment variable is not set');
+    if (throwOnMissing) {
+      throw new Error('JWT_SECRET must be configured.');
+    }
+    return { ok: false, reason: 'missing' };
+  }
+
+  if (jwtSecret.length < 32) {
+    logger.warn('WARNING: JWT_SECRET is too short (less than 32 chars). usage is discouraged for production.', { length: jwtSecret.length });
+  }
+
+  const weakSecrets = ['secret', 'password', 'changeme', 'test', 'dev', 'default'];
+  if (weakSecrets.some(weak => jwtSecret.toLowerCase().includes(weak))) {
+    logger.warn('WARNING: JWT_SECRET appears to be a weak or default value. Use a strong random secret in production.');
+  }
+
+  logger.info('Security configuration validated successfully', {
+    jwtSecretLength: jwtSecret.length,
+    environment: process.env.NODE_ENV || 'development'
+  });
+
+  return { ok: true };
+}
 
 /**
  * Secure authentication middleware with comprehensive security features
@@ -26,6 +55,32 @@ class AuthMiddleware {
    */
   static async authenticateUser(req, res, next) {
     try {
+      // Public endpoints that don't require authentication
+      const publicEndpoints = [
+        '/api/auth/login',
+        '/api/auth/register',
+        '/api/auth/secure-login',
+        '/api/auth/forgot-password',
+        '/api/auth/reset-password',
+        '/api/auth/verify-email',
+        '/api/auth/health',
+        '/api/auth/v2/register',
+        '/api/auth/v2/login',
+        '/api/health',
+        '/api-docs',
+        '/api-docs.json'
+      ];
+      
+      // Check if this is a public endpoint (use originalUrl for full path)
+      const path = req.originalUrl || req.path;
+      if (publicEndpoints.some(endpoint => path.startsWith(endpoint))) {
+        return next();
+      }
+
+      if (process.env.NODE_ENV === 'production') {
+        validateSecurityConfig({ throwOnMissing: true });
+      }
+      
       // Check if IP is blocked
       if (AuthMiddleware.isIPBlocked(req.ip)) {
         logger.security('Blocked IP attempted access', { ip: req.ip, path: req.path });
@@ -71,22 +126,71 @@ class AuthMiddleware {
         );
       }
 
-      // Verify JWT token using the same private key as login endpoint
-      const privateKey = process.env.JWT_SECRET || process.env.PRIVATE_KEY;
-      if (!privateKey) {
-        logger.error('JWT_SECRET not configured in environment variables');
-        return res.status(500).json(
-          SecureErrorHandler.createErrorResponse(
-            'Server configuration error. Please contact administrator.',
-            500,
-            'MISSING_JWT_SECRET'
-          )
-        );
+      // Verify JWT token using key rotation service
+      // The service supports multiple keys for zero-downtime rotation
+      let decoded;
+      let verificationError;
+      
+      try {
+        // Get all valid keys (active + previous valid keys)
+        const validKeys = await keyRotationService.getValidKeys();
+        
+        if (!validKeys || validKeys.length === 0) {
+          logger.error('No valid JWT keys available for verification');
+          return res.status(500).json(
+            SecureErrorHandler.createErrorResponse(
+              'Server configuration error. Please contact administrator.',
+              500,
+              'NO_VALID_KEYS'
+            )
+          );
+        }
+        
+        // Try to verify with each valid key (most recent first)
+        for (const key of validKeys) {
+          try {
+            decoded = jwt.verify(token, key.secret, {
+              issuer: 'invoice-app',
+              audience: 'invoice-app-users'
+            });
+            
+            // Successfully verified - add key metadata to decoded token
+            decoded._keyId = key.keyId;
+            break;
+          } catch (err) {
+            // Store the error but continue trying other keys
+            verificationError = err;
+            continue;
+          }
+        }
+        
+        // If no key worked, throw the last error
+        if (!decoded) {
+          throw verificationError || new Error('Token verification failed');
+        }
+      } catch (error) {
+        // If key rotation service fails, fallback to environment variable
+        logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
+          error: error.message
+        });
+        
+        const privateKey = process.env.JWT_SECRET;
+        if (!privateKey) {
+          logger.error('JWT_SECRET not properly configured in environment variables');
+          return res.status(500).json(
+            SecureErrorHandler.createErrorResponse(
+              'Server configuration error. Please contact administrator.',
+              500,
+              'MISSING_JWT_SECRET'
+            )
+          );
+        }
+        
+        decoded = jwt.verify(token, privateKey, {
+          issuer: 'invoice-app',
+          audience: 'invoice-app-users'
+        });
       }
-      const decoded = jwt.verify(token, privateKey, {
-        issuer: 'invoice-app',
-        audience: 'invoice-app-users'
-      });
 
       // Validate decoded token structure
       if (!decoded.userId || !decoded.email) {
@@ -495,12 +599,26 @@ function rateLimitMiddleware(type) {
 
   const config = configs[type] || configs.default;
 
-  return rateLimit({
-    store: new RedisStore({
-      sendCommand: (...args) => redis.call(...args),
-    }),
+  // Key generator that prefers email for auth-related actions
+  const keyGenerator = (req, res) => {
+    // If user is authenticated, use their ID or email
+    if (req.user && req.user.email) return req.user.email;
+    
+    // For public auth endpoints, use email from body if available
+    if (req.body && req.body.email && [
+      'login', 'register', 'verify', 'forgot', 'reset', 'resend'
+    ].includes(type)) {
+      return req.body.email;
+    }
+    
+    // Fallback to undefined - let express-rate-limit use default IP handling
+    return undefined;
+  };
+
+  const rateLimitOptions = {
     windowMs: config.windowMs,
     max: config.max,
+    keyGenerator: keyGenerator,
     message: {
       success: false,
       message: config.message,
@@ -538,13 +656,29 @@ function rateLimitMiddleware(type) {
         timestamp: new Date().toISOString()
       });
     }
-  });
+  };
+
+  if (process.env.NODE_ENV !== 'test') {
+    if (redis.isConfigured !== false) {
+      rateLimitOptions.store = new RedisStore({
+        sendCommand: (...args) => redis.call(...args),
+        prefix: `rl:${type}:`, // Unique prefix for each rate limiter type
+      });
+      // Keep auth endpoints available even during transient Redis issues.
+      rateLimitOptions.passOnStoreError = true;
+    } else {
+      logger.warn('Redis not configured; using in-memory rate limiter store', { type });
+    }
+  }
+
+  return rateLimit(rateLimitOptions);
 }
 
 module.exports = {
   AuthMiddleware,
   authenticateUser: AuthMiddleware.authenticateUser,
   requireRoles: AuthMiddleware.requireRoles,
+  requireAdmin: AuthMiddleware.requireRoles(['admin']), // Add requireAdmin alias
   authenticateAPIKey: AuthMiddleware.authenticateAPIKey,
   rateLimitMiddleware,
   rateLimit: rateLimitMiddleware,

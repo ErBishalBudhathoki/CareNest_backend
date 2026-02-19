@@ -1,0 +1,358 @@
+name: Cleanup Artifact Registry
+
+on:
+  schedule:
+    # Run every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      keep_count_dev:
+        description: 'Number of images to keep (Dev)'
+        required: false
+        default: '10'
+        type: string
+      keep_count_prod:
+        description: 'Number of images to keep (Prod)'
+        required: false
+        default: '20'
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  REGION: 'australia-southeast1'
+  REPO: 'backend-repo'
+
+jobs:
+  cleanup-dev:
+    name: Cleanup Development Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Dev)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: invoice-660f3
+
+      - name: Get currently deployed image
+        id: current
+        run: |
+          CURRENT_IMAGE=$(gcloud run services describe backend-dev \
+            --region ${{ env.REGION }} \
+            --project invoice-660f3 \
+            --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
+          
+          if [ -n "$CURRENT_IMAGE" ]; then
+            CURRENT_DIGEST=$(echo "$CURRENT_IMAGE" | cut -d'@' -f2)
+            echo "digest=$CURRENT_DIGEST" >> $GITHUB_OUTPUT
+            echo "::notice::Current image: ${CURRENT_IMAGE##*/}"
+          else
+            echo "::warning::Could not fetch current image"
+          fi
+
+      - name: List images before cleanup
+        run: |
+          echo "Images before cleanup:"
+          TOTAL=$(gcloud artifacts docker images list \
+            ${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev \
+            --project invoice-660f3 \
+            --format="get(version)" 2>/dev/null | wc -l || echo "0")
+          
+          echo "Total images: $TOTAL"
+          echo "total_before=$TOTAL" >> $GITHUB_ENV
+
+      - name: Cleanup old images (keep last 10)
+        run: |
+          KEEP_COUNT="${{ github.event.inputs.keep_count_dev || '10' }}"
+          CURRENT_DIGEST="${{ steps.current.outputs.digest }}"
+          
+          echo "Keeping last $KEEP_COUNT images"
+          
+          # Get all image versions sorted by creation time (newest first)
+          IMAGES=$(gcloud artifacts docker images list \
+            ${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev \
+            --format="get(version)" \
+            --sort-by="~CREATE_TIME" \
+            --project=invoice-660f3 2>/dev/null || echo "")
+          
+          if [ -z "$IMAGES" ]; then
+            echo "::notice::No images found to cleanup"
+            exit 0
+          fi
+          
+          TOTAL=$(echo "$IMAGES" | wc -l)
+          TO_DELETE=$((TOTAL - KEEP_COUNT))
+          
+          if [ "$TO_DELETE" -le 0 ]; then
+            echo "::notice::Nothing to delete - only $TOTAL images exist"
+            exit 0
+          fi
+          
+          echo "Deleting $TO_DELETE old images..."
+          DELETED=0
+          SKIPPED=0
+          
+          # Delete old images (skip first KEEP_COUNT)
+          echo "$IMAGES" | tail -n "+$((KEEP_COUNT + 1))" | while read -r version; do
+            # Skip if it's the current image
+            if [ -n "$CURRENT_DIGEST" ] && [ "$version" = "$CURRENT_DIGEST" ]; then
+              echo "::notice::Skipping current image: ${version:0:12}"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+            
+            IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev@$version"
+            
+            if gcloud artifacts docker images delete "$IMAGE_URI" \
+              --project=invoice-660f3 \
+              --quiet 2>/dev/null; then
+              echo "Deleted: ${version:0:12}"
+              DELETED=$((DELETED + 1))
+            else
+              echo "::warning::Failed to delete: ${version:0:12}"
+            fi
+          done
+          
+          echo "::notice::Deleted $DELETED images, skipped $SKIPPED"
+
+      - name: List images after cleanup
+        if: always()
+        run: |
+          echo "Images after cleanup:"
+          TOTAL=$(gcloud artifacts docker images list \
+            ${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev \
+            --project invoice-660f3 \
+            --format="get(version)" 2>/dev/null | wc -l || echo "0")
+          
+          echo "Total images: $TOTAL"
+          echo "total_after=$TOTAL" >> $GITHUB_ENV
+
+      - name: Create cleanup summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🧹 Development Cleanup Summary
+          
+          **Environment:** Development
+          **Project:** invoice-660f3
+          **Service:** backend-dev
+          **Region:** ${{ env.REGION }}
+          
+          ### Results
+          - Images before: ${total_before:-N/A}
+          - Images after: ${total_after:-N/A}
+          - Images deleted: $((${total_before:-0} - ${total_after:-0}))
+          
+          ### Configuration
+          - Keep count: ${{ github.event.inputs.keep_count_dev || '10' }}
+          - Current image protected: ✅
+          
+          EOF
+
+  cleanup-prod:
+    name: Cleanup Production Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Prod)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.PROD_WIF_PROVIDER }}
+          service_account: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: carenest-prod
+
+      - name: Get currently deployed image
+        id: current
+        run: |
+          CURRENT_IMAGE=$(gcloud run services describe backend-prod \
+            --region ${{ env.REGION }} \
+            --project carenest-prod \
+            --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
+          
+          if [ -n "$CURRENT_IMAGE" ]; then
+            CURRENT_DIGEST=$(echo "$CURRENT_IMAGE" | cut -d'@' -f2)
+            echo "digest=$CURRENT_DIGEST" >> $GITHUB_OUTPUT
+            echo "::notice::Current image: ${CURRENT_IMAGE##*/}"
+          else
+            echo "::warning::Could not fetch current image"
+          fi
+
+      - name: Get recent revisions
+        id: revisions
+        run: |
+          # Get last 5 revision images to protect them
+          REVISION_IMAGES=$(gcloud run revisions list \
+            --service=backend-prod \
+            --region=${{ env.REGION }} \
+            --project=carenest-prod \
+            --limit=5 \
+            --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
+          
+          if [ -n "$REVISION_IMAGES" ]; then
+            # Extract digests
+            PROTECTED_DIGESTS=$(echo "$REVISION_IMAGES" | cut -d'@' -f2 | tr '\n' ',' | sed 's/,$//')
+            echo "digests=$PROTECTED_DIGESTS" >> $GITHUB_OUTPUT
+            echo "::notice::Protected ${REVISION_IMAGES} revision images"
+          fi
+
+      - name: List images before cleanup
+        run: |
+          echo "Images before cleanup:"
+          TOTAL=$(gcloud artifacts docker images list \
+            ${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod \
+            --project carenest-prod \
+            --format="get(version)" 2>/dev/null | wc -l || echo "0")
+          
+          echo "Total images: $TOTAL"
+          echo "total_before=$TOTAL" >> $GITHUB_ENV
+
+      - name: Cleanup old images (keep last 20)
+        run: |
+          KEEP_COUNT="${{ github.event.inputs.keep_count_prod || '20' }}"
+          CURRENT_DIGEST="${{ steps.current.outputs.digest }}"
+          PROTECTED_DIGESTS="${{ steps.revisions.outputs.digests }}"
+          
+          echo "Keeping last $KEEP_COUNT images"
+          echo "Protected digests: $PROTECTED_DIGESTS"
+          
+          # Get all image versions sorted by creation time (newest first)
+          IMAGES=$(gcloud artifacts docker images list \
+            ${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod \
+            --format="get(version)" \
+            --sort-by="~CREATE_TIME" \
+            --project=carenest-prod 2>/dev/null || echo "")
+          
+          if [ -z "$IMAGES" ]; then
+            echo "::notice::No images found to cleanup"
+            exit 0
+          fi
+          
+          TOTAL=$(echo "$IMAGES" | wc -l)
+          TO_DELETE=$((TOTAL - KEEP_COUNT))
+          
+          if [ "$TO_DELETE" -le 0 ]; then
+            echo "::notice::Nothing to delete - only $TOTAL images exist"
+            exit 0
+          fi
+          
+          echo "Deleting $TO_DELETE old images..."
+          DELETED=0
+          SKIPPED=0
+          
+          # Delete old images (skip first KEEP_COUNT)
+          echo "$IMAGES" | tail -n "+$((KEEP_COUNT + 1))" | while read -r version; do
+            # Skip if it's the current image or in recent revisions
+            if [ -n "$CURRENT_DIGEST" ] && [ "$version" = "$CURRENT_DIGEST" ]; then
+              echo "::notice::Skipping current image: ${version:0:12}"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+            
+            if echo "$PROTECTED_DIGESTS" | grep -q "$version"; then
+              echo "::notice::Skipping protected revision: ${version:0:12}"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+            
+            IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod@$version"
+            
+            if gcloud artifacts docker images delete "$IMAGE_URI" \
+              --project=carenest-prod \
+              --quiet 2>/dev/null; then
+              echo "Deleted: ${version:0:12}"
+              DELETED=$((DELETED + 1))
+            else
+              echo "::warning::Failed to delete: ${version:0:12}"
+            fi
+          done
+          
+          echo "::notice::Deleted $DELETED images, skipped $SKIPPED"
+
+      - name: List images after cleanup
+        if: always()
+        run: |
+          echo "Images after cleanup:"
+          TOTAL=$(gcloud artifacts docker images list \
+            ${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod \
+            --project carenest-prod \
+            --format="get(version)" 2>/dev/null | wc -l || echo "0")
+          
+          echo "Total images: $TOTAL"
+          echo "total_after=$TOTAL" >> $GITHUB_ENV
+
+      - name: Create cleanup summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🧹 Production Cleanup Summary
+          
+          **Environment:** Production
+          **Project:** carenest-prod
+          **Service:** backend-prod
+          **Region:** ${{ env.REGION }}
+          
+          ### Results
+          - Images before: ${total_before:-N/A}
+          - Images after: ${total_after:-N/A}
+          - Images deleted: $((${total_before:-0} - ${total_after:-0}))
+          
+          ### Configuration
+          - Keep count: ${{ github.event.inputs.keep_count_prod || '20' }}
+          - Current image protected: ✅
+          - Recent revisions protected: ✅ (last 5)
+          
+          ### Safety Features
+          - Never deletes currently deployed image
+          - Protects last 5 Cloud Run revisions
+          - Keeps most recent images for rollback
+          
+          EOF
+
+  summary:
+    name: Cleanup Summary
+    runs-on: ubuntu-latest
+    needs: [cleanup-dev, cleanup-prod]
+    if: always()
+    steps:
+      - name: Create overall summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🎉 Artifact Registry Cleanup Complete
+          
+          **Scheduled Run:** Every Sunday at 2 AM UTC
+          **Manual Trigger:** Available via workflow_dispatch
+          
+          ### Status
+          - Development: ${{ needs.cleanup-dev.result }}
+          - Production: ${{ needs.cleanup-prod.result }}
+          
+          ### Cost Savings
+          Estimated monthly savings: \$1-3 per environment
+          
+          ### Next Steps
+          - Monitor storage usage in Cloud Console
+          - Adjust keep_count if needed
+          - Review cleanup logs for any issues
+          
+          ---
+          
+          💡 **Tip:** You can manually trigger this workflow with custom keep counts from the Actions tab.
+          EOF

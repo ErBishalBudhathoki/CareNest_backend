@@ -34,7 +34,28 @@ const shiftSchema = new mongoose.Schema({
   createdBy: String
 }, {
   timestamps: true,
-  collection: 'shifts'
+  collection: 'shifts',
+  toJSON: {
+    transform: function (doc, ret) {
+      // Transform _id to id (Flutter expects 'id' as string)
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      // Transform ObjectId refs to strings for Flutter
+      if (ret.employeeId) ret.employeeId = ret.employeeId.toString();
+      if (ret.clientId) ret.clientId = ret.clientId.toString();
+      if (ret.recurringTemplateId) ret.recurringTemplateId = ret.recurringTemplateId.toString();
+      
+      // Transform dates to ISO 8601 strings
+      if (ret.startTime) ret.startTime = ret.startTime.toISOString();
+      if (ret.endTime) ret.endTime = ret.endTime.toISOString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      
+      return ret;
+    }
+  }
 });
 
 // Indexes
