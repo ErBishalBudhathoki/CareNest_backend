@@ -4,11 +4,21 @@ const ClientAssignment = require('../models/ClientAssignment');
 
 class UserService {
   /**
-   * Get all users
+   * Get all users for a specific organization
+   * Fixed IDOR vulnerability and removed password leak
    */
-  async getAllUsers() {
+  async getAllUsers(organizationId) {
     try {
-      const users = await User.find({});
+      const query = {};
+      
+      // If organizationId is provided, filter by it.
+      // If explicit null/undefined is passed (e.g. by superadmin in future), it might return all, 
+      // but we will enforce organizationId presence in the controller.
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const users = await User.find(query);
       
       if (!users || users.length === 0) {
         return [];
@@ -19,7 +29,10 @@ class UserService {
         firstName: user.firstName || "",
         lastName: user.lastName || "",
         email: user.email || "",
-        password: user.password || ""
+        // REMOVED PASSWORD FIELD FOR SECURITY
+        organizationId: user.organizationId,
+        role: user.role,
+        isActive: user.isActive
       }));
       
       return formattedUsers;

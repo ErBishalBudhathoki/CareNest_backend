@@ -1,71 +1,83 @@
 const express = require('express');
-const organizationController = require('../controllers/organizationController');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
+const organizationController = require('../controllers/organizationController');
+const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  optionalOrganizationContext 
+} = require('../middleware/organizationContext');
 
-/**
- * Create a new organization
- * POST /organization/create
- */
-router.post('/create', organizationController.createOrganization);
+// Rate limiting
+const orgLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many requests.' }
+});
 
-/**
- * Create a new organization (legacy endpoint)
- * POST /createOrganization
- */
-router.post('/createOrganization', organizationController.createOrganizationLegacy);
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, message: 'Too many requests.' }
+});
 
-/**
- * Verify organization code
- * POST /organization/verify-code
- */
-router.post('/verify-code', organizationController.verifyOrganizationCode);
+// Validation
+const createValidation = [
+  body('organizationName').trim().notEmpty().withMessage('Organization name is required'),
+  body('ownerEmail').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('plan').optional().isIn(['free', 'basic', 'pro', 'enterprise']).withMessage('Invalid plan type')
+];
 
-/**
- * Verify organization code (frontend endpoint)
- * GET /organization/verify/:organizationCode
- */
-router.get('/verify/:organizationCode', organizationController.verifyOrganizationCodeGet);
+const verifyCodeValidation = [
+  body('organizationCode').trim().notEmpty().withMessage('Organization code is required')
+];
 
-/**
- * Verify organization code (legacy endpoint)
- * GET /verifyOrganizationCode/:code
- */
-router.get('/verifyOrganizationCode/:code', organizationController.verifyOrganizationCodeLegacy);
+const updateOrgValidation = [
+  body('organizationName').optional().trim().notEmpty().withMessage('Organization name cannot be empty'),
+  body('address').optional().trim(),
+  body('phone').optional().trim(),
+  body('website').optional().trim().isURL().withMessage('Invalid website URL'),
+  body('logoUrl').optional().trim().isURL().withMessage('Invalid logo URL'),
+  body('timezone').optional().trim()
+];
 
-/**
- * Get organization details
- * GET /organization/:organizationId
- */
-router.get('/:organizationId', organizationController.getOrganizationById);
+const brandingValidation = [
+  body('primaryColor').optional().matches(/^#[0-9A-Fa-f]{6}$/).withMessage('Invalid color format'),
+  body('secondaryColor').optional().matches(/^#[0-9A-Fa-f]{6}$/).withMessage('Invalid color format'),
+  body('logoUrl').optional().trim().isURL().withMessage('Invalid logo URL'),
+  body('faviconUrl').optional().trim().isURL().withMessage('Invalid favicon URL')
+];
 
-/**
- * Update organization details
- * PUT /organization/:organizationId
- */
-router.put('/:organizationId', organizationController.updateOrganizationDetails);
+const organizationIdValidation = [
+  param('organizationId').isMongoId().withMessage('Invalid organization ID')
+];
 
-/**
- * Get organization members
- * GET /organization/:organizationId/members
- */
-router.get('/:organizationId/members', organizationController.getOrganizationMembers);
+// Protected routes
+router.use(authenticateUser);
 
-/**
- * Get organization businesses
- * GET /organization/:organizationId/businesses
- */
-router.get('/:organizationId/businesses', organizationController.getOrganizationBusinesses);
+// General
+router.post('/create', orgLimiter, optionalOrganizationContext, createValidation, handleValidationErrors, organizationController.createOrganization);
+router.get('/user/my-organizations', orgLimiter, optionalOrganizationContext, organizationController.getMyOrganizations);
+router.post('/verify-code', orgLimiter, optionalOrganizationContext, verifyCodeValidation, handleValidationErrors, organizationController.verifyOrganizationCode);
+router.post('/switch/:organizationId', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.switchOrganization);
 
-/**
- * Get organization clients
- * GET /organization/:organizationId/clients
- */
-router.get('/:organizationId/clients', organizationController.getOrganizationClients);
+// By ID
+router.get('/:organizationId', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationById);
+router.put('/:organizationId', strictLimiter, organizationContextMiddleware, organizationIdValidation, updateOrgValidation, handleValidationErrors, organizationController.updateOrganizationDetails);
 
-/**
- * Get organization employees
- * GET /organization/:organizationId/employees
- */
-router.get('/:organizationId/employees', organizationController.getOrganizationEmployees);
+// Sub-resources
+router.get('/:organizationId/members', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationMembers);
+router.get('/:organizationId/businesses', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationBusinesses);
+router.get('/:organizationId/clients', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationClients);
+router.get('/:organizationId/employees', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationEmployees);
+
+// Branding
+router.get('/:organizationId/branding', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getBranding);
+router.put('/:organizationId/branding', strictLimiter, organizationContextMiddleware, organizationIdValidation, brandingValidation, handleValidationErrors, organizationController.updateBranding);
+
+// Complete Setup
+router.post('/:organizationId/complete-setup', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.completeSetup);
 
 module.exports = router;

@@ -61,12 +61,12 @@ class LeaveService {
     // Check balance before submitting
     const normalizedType = leaveType.toLowerCase().replace('leave', '').trim();
     const balance = await LeaveBalance.findOne({ userId: user._id, leaveType: normalizedType });
-    
+
     if (!balance || (balance.currentBalance < totalHours)) {
-       // Optional: Allow negative balance up to a limit
-       if (!balance || (balance.currentBalance - totalHours < -40)) {
-         throw new Error(`Insufficient ${leaveType} balance.`);
-       }
+      // Optional: Allow negative balance up to a limit
+      if (!balance || (balance.currentBalance - totalHours < -40)) {
+        throw new Error(`Insufficient ${leaveType} balance.`);
+      }
     }
 
     const request = new LeaveRequest({
@@ -110,12 +110,12 @@ class LeaveService {
     const balances = await this.getLeaveBalances(userEmail);
     const target = new Date(targetDate);
     const now = new Date();
-    
+
     if (target <= now) return { forecast: balances, accrualRate: {} };
 
     // Simple accrual logic (can be made more complex based on employment type)
     const monthsDiff = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
-    
+
     const ACCRUAL_RATES = {
       annual: 12.66,
       sick: 6.33,
@@ -150,6 +150,44 @@ class LeaveService {
     };
 
     return await PublicHoliday.find(query).sort({ date: 1 });
+  }
+
+  /**
+   * Update leave balance (add or subtract)
+   * @param {string} userEmail 
+   * @param {string} leaveType 
+   * @param {number} hours (positive to add, negative to subtract)
+   * @param {string} reason 
+   */
+  async updateLeaveBalance(userEmail, leaveType, hours, reason) {
+    const user = await User.findOne({ email: userEmail });
+    if (!user) throw new Error('User not found');
+
+    // Normalize leave type
+    const normalizedType = leaveType.toLowerCase().replace('leave', '').trim();
+
+    let balance = await LeaveBalance.findOne({ userId: user._id, leaveType: normalizedType });
+    if (!balance) {
+      balance = new LeaveBalance({
+        userId: user._id,
+        userEmail: userEmail,
+        leaveType: normalizedType,
+        currentBalance: 0
+      });
+    }
+
+    balance.currentBalance += hours;
+    if (hours > 0) {
+      balance.accruedHours += hours;
+    } else {
+      balance.usedHours += Math.abs(hours);
+    }
+
+    // Add to history if we want to track manual adjustments
+    // (Optional: add a manual adjustment request/history record)
+
+    await balance.save();
+    return balance;
   }
 }
 

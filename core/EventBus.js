@@ -1,18 +1,50 @@
 const EventEmitter = require('events');
+const Redis = require('ioredis');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 
 class EventBus extends EventEmitter {
   constructor() {
     super();
-    this.pubClient = redis.duplicate();
-    this.subClient = redis.duplicate();
     this.channel = 'app_events';
+    this.redisEnabled = redis.isConfigured !== false;
+    this.pubClient = null;
+    this.subClient = null;
+
+    if (!this.redisEnabled) {
+      logger.warn('EventBus is running in local-only mode because Redis is unavailable');
+      return;
+    }
+
+    // Use stored connection options for duplicate connections
+    const connectionOptions = redis.connectionOptions || {};
+    const redisUrl = redis.redisUrl;
     
+    if (redisUrl) {
+      // Create new connections with same options
+      this.pubClient = new Redis(redisUrl, connectionOptions);
+      this.subClient = new Redis(redisUrl, connectionOptions);
+    } else {
+      this.pubClient = redis.duplicate();
+      this.subClient = redis.duplicate();
+    }
+
+    this.pubClient.on('error', (error) => {
+      logger.error('EventBus publisher Redis error', {
+        error: error.message
+      });
+    });
+
+    this.subClient.on('error', (error) => {
+      logger.error('EventBus subscriber Redis error', {
+        error: error.message
+      });
+    });
+
     // Subscribe to Redis channel for distributed events
     this.subClient.subscribe(this.channel, (err, count) => {
       if (err) {
-        logger.error('Failed to subscribe to Redis channel', err);
+        logger.error('Failed to subscribe to Redis channel', { error: err.message });
       } else {
         logger.info(`Subscribed to ${count} Redis channel(s)`);
       }
@@ -26,7 +58,7 @@ class EventBus extends EventEmitter {
           // For now, we just emit to local listeners
           super.emit(event, payload, { source, remote: true });
         } catch (error) {
-          logger.error('Error parsing distributed event', error);
+          logger.error('Error parsing distributed event', { error: error.message });
         }
       }
     });
@@ -45,13 +77,26 @@ class EventBus extends EventEmitter {
     super.emit(event, payload, { source: 'local', remote: false });
 
     // 2. Publish to Redis for other services/instances
-    if (!options.localOnly) {
+    if (!options.localOnly && this.redisEnabled && this.pubClient) {
       const message = JSON.stringify({
         event,
         payload,
         source: process.env.SERVICE_NAME || 'backend-core'
       });
-      this.pubClient.publish(this.channel, message);
+      try {
+        const publishResult = this.pubClient.publish(this.channel, message);
+        Promise.resolve(publishResult).catch((error) => {
+          logger.error('Failed to publish distributed event', {
+            event,
+            error: error.message
+          });
+        });
+      } catch (error) {
+        logger.error('Failed to publish distributed event', {
+          event,
+          error: error.message
+        });
+      }
     }
   }
 

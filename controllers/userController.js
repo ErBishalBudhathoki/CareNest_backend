@@ -1,4 +1,5 @@
 const userService = require('../services/userService');
+const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 
 class UserController {
@@ -6,95 +7,108 @@ class UserController {
    * Get all users
    * GET /getUsers/
    */
-  async getAllUsers(req, res) {
-    try {
-      const users = await userService.getAllUsers();
-      res.status(200).json(users);
-    } catch (error) {
-      logger.error('Error fetching users', {
-        error: error.message,
-        stack: error.stack
-      });
-      res.status(500).json({ error: "Internal server error" });
+  getAllUsers = catchAsync(async (req, res) => {
+    // Security: Filter by authenticated user's organization
+    // Only superadmins might be allowed to see all, but for now we restrict to org
+    const organizationId = req.user.organizationId;
+    
+    // If no organization ID in token (shouldn't happen for valid users), return empty or error
+    if (!organizationId) {
+       // Check if superadmin, maybe allow? For now, safer to return empty or specific error
+       // Assuming standard user flow
+       return res.status(403).json({
+         success: false,
+         code: 'FORBIDDEN',
+         message: 'Organization context required'
+       });
     }
-  }
+
+    const users = await userService.getAllUsers(organizationId);
+    
+    logger.business('Retrieved all users', {
+      action: 'user_list_all',
+      count: users.length,
+      organizationId
+    });
+    
+    res.status(200).json({
+      success: true,
+      code: 'USERS_RETRIEVED',
+      users
+    });
+  });
 
   /**
    * Get all employees for a specific organization
    * GET /organization/:organizationId/employees
    */
-  async getOrganizationEmployees(req, res) {
-    try {
-      const { organizationId } = req.params;
-      
-      const employees = await userService.getOrganizationEmployees(organizationId);
-      
-      if (employees.length > 0) {
-        res.status(200).json({
-          success: true,
-          employees: employees
-        });
-      } else {
-        res.status(404).json({
-          success: false,
-          message: "No users (employees) were found for this organization."
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching organization employees', {
-        error: error.message,
-        stack: error.stack,
-        organizationId: req.params.organizationId
-      });
-      res.status(500).json({
+  getOrganizationEmployees = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+    
+    if (!organizationId) {
+      return res.status(400).json({
         success: false,
-        message: "Error fetching employees"
+        code: 'VALIDATION_ERROR',
+        message: 'Organization ID is required'
       });
     }
-  }
+    
+    const employees = await userService.getOrganizationEmployees(organizationId);
+    
+    if (employees.length === 0) {
+      return res.status(404).json({
+        success: false,
+        code: 'NO_EMPLOYEES_FOUND',
+        message: 'No users (employees) were found for this organization.'
+      });
+    }
+    
+    logger.business('Retrieved organization employees', {
+      action: 'user_list_organization',
+      organizationId,
+      count: employees.length
+    });
+    
+    res.status(200).json({
+      success: true,
+      code: 'EMPLOYEES_RETRIEVED',
+      employees
+    });
+  });
 
   /**
    * Fix client organizationId for existing records
    * POST /fixClientOrganizationId
    */
-  async fixClientOrganizationId(req, res) {
-    try {
-      const { userEmail, organizationId } = req.body;
-      
-      if (!userEmail || !organizationId) {
-        return res.status(400).json({
-          success: false,
-          error: 'userEmail and organizationId are required'
-        });
-      }
-      
-      const result = await userService.fixClientOrganizationId(userEmail, organizationId);
-      
-      res.status(200).json({
-        success: true,
-        message: 'Organization ID fixed successfully',
-        clientsUpdated: result.clientsUpdated,
-        assignmentsUpdated: result.assignmentsUpdated
+  fixClientOrganizationId = catchAsync(async (req, res) => {
+    const { userEmail, organizationId } = req.body;
+    
+    if (!userEmail || !organizationId) {
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'userEmail and organizationId are required'
       });
-    } catch (error) {
-      logger.error('Error fixing organizationId', {
-        error: error.message,
-        stack: error.stack
-      });
-      
-      if (error.message === 'User not authorized for this organization') {
-        res.status(403).json({
-          success: false,
-          error: error.message
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          error: 'Failed to fix organization ID'
-        });
-      }
     }
-  }
+    
+    const result = await userService.fixClientOrganizationId(userEmail, organizationId);
+    
+    logger.business('Fixed client organizationId', {
+      action: 'user_fix_org_id',
+      userEmail,
+      organizationId,
+      clientsUpdated: result.clientsUpdated,
+      assignmentsUpdated: result.assignmentsUpdated
+    });
+    
+    res.status(200).json({
+      success: true,
+      code: 'ORGANIZATION_ID_FIXED',
+      message: 'Organization ID fixed successfully',
+      clientsUpdated: result.clientsUpdated,
+      assignmentsUpdated: result.assignmentsUpdated
+    });
+  });
 }
 
 module.exports = new UserController();

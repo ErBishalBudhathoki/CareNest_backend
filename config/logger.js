@@ -54,10 +54,12 @@ const consoleFormat = winston.format.combine(
   })
 );
 
-// Create logs directory if it doesn't exist
+// Create logs directory if it doesn't exist (skip in Cloud Run)
 const logsDir = '/var/log/backend';
 const fs = require('fs');
-if (!fs.existsSync(logsDir)) {
+const isCloudRun = !!process.env.K_SERVICE;
+
+if (!isCloudRun && !fs.existsSync(logsDir)) {
   try {
     fs.mkdirSync(logsDir, { recursive: true });
   } catch {
@@ -70,7 +72,11 @@ if (!fs.existsSync(logsDir)) {
 }
 
 // Determine log directory (prefer /var/log/backend for Docker, fallback to local)
+// Skip entirely in Cloud Run
 const getLogDir = () => {
+  if (isCloudRun) {
+    return null; // No file logging in Cloud Run
+  }
   try {
     fs.accessSync('/var/log/backend', fs.constants.W_OK);
     return '/var/log/backend';
@@ -81,13 +87,12 @@ const getLogDir = () => {
 
 const logDir = getLogDir();
 
-// Create winston logger
-const logger = winston.createLogger({
-  levels: logLevels,
-  level: process.env.LOG_LEVEL || 'info',
-  format: structuredFormat,
-  defaultMeta: { service: 'invoice-backend' },
-  transports: [
+// Build transports array - console only in Cloud Run, files + console elsewhere
+const transports = [];
+
+// Add file transports only if not in Cloud Run
+if (!isCloudRun && logDir) {
+  transports.push(
     // Error logs
     new winston.transports.File({
       filename: path.join(logDir, 'error.log'),
@@ -96,7 +101,6 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     }),
-
     // Combined logs
     new winston.transports.File({
       filename: path.join(logDir, 'combined.log'),
@@ -104,7 +108,6 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     }),
-
     // Application logs
     new winston.transports.File({
       filename: path.join(logDir, 'application.log'),
@@ -113,7 +116,6 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     }),
-
     // Access logs (for HTTP requests)
     new winston.transports.File({
       filename: path.join(logDir, 'access.log'),
@@ -122,34 +124,60 @@ const logger = winston.createLogger({
       maxFiles: 5,
       tailable: true
     })
-  ],
+  );
+}
 
-  // Handle uncaught exceptions
-  exceptionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logDir, 'exceptions.log'),
-      maxsize: 10485760, // 10MB
-      maxFiles: 3
-    })
-  ],
-
-  // Handle unhandled promise rejections
-  rejectionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logDir, 'rejections.log'),
-      maxsize: 10485760, // 10MB
-      maxFiles: 3
-    })
-  ]
-});
-
-// Add console transport for development
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: consoleFormat,
+// Always add console transport in Cloud Run or development
+if (isCloudRun || process.env.NODE_ENV !== 'production') {
+  transports.push(new winston.transports.Console({
+    format: isCloudRun ? structuredFormat : consoleFormat,
     level: 'debug'
   }));
 }
+
+// Build exception handlers - console only in Cloud Run
+const exceptionHandlers = [];
+if (!isCloudRun && logDir) {
+  exceptionHandlers.push(new winston.transports.File({
+    filename: path.join(logDir, 'exceptions.log'),
+    maxsize: 10485760, // 10MB
+    maxFiles: 3
+  }));
+}
+if (isCloudRun) {
+  exceptionHandlers.push(new winston.transports.Console({
+    format: structuredFormat
+  }));
+}
+
+// Build rejection handlers - console only in Cloud Run
+const rejectionHandlers = [];
+if (!isCloudRun && logDir) {
+  rejectionHandlers.push(new winston.transports.File({
+    filename: path.join(logDir, 'rejections.log'),
+    maxsize: 10485760, // 10MB
+    maxFiles: 3
+  }));
+}
+if (isCloudRun) {
+  rejectionHandlers.push(new winston.transports.Console({
+    format: structuredFormat
+  }));
+}
+
+// Create winston logger
+const logger = winston.createLogger({
+  levels: logLevels,
+  level: process.env.LOG_LEVEL || 'info',
+  format: structuredFormat,
+  defaultMeta: { service: 'invoice-backend' },
+  transports,
+  exceptionHandlers,
+  rejectionHandlers
+});
+
+// Note: Console transport is already added in transports array above
+// No need to add it again here
 
 // Helper functions for structured logging
 const createLogMethods = (logger) => {
@@ -221,7 +249,21 @@ const createLogMethods = (logger) => {
 const loggerWithHelpers = {
   ...createLogMethods(logger),
   winston: logger,
-  logDir
+  logDir,
+  // Add createLogger compatibility method
+  createLogger: (serviceName) => {
+    // Return a child logger or wrapper that includes the service name in metadata
+    // For simplicity, we'll just return the main logger but with a bound method to add serviceName
+    const childLogger = logger.child({ service: serviceName });
+    return {
+      ...createLogMethods(childLogger),
+      winston: childLogger,
+      // Security logger method
+      security: (message, metadata = {}) => childLogger.warn(message, { metadata: { ...metadata, type: 'SECURITY' } })
+    };
+  },
+  // Add security logger to main export
+  security: (message, metadata = {}) => logger.warn(message, { metadata: { ...metadata, type: 'SECURITY' } })
 };
 
 // Export logger with helper methods

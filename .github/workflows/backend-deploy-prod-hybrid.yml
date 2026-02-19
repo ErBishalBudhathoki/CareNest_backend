@@ -1,0 +1,474 @@
+name: Backend Deploy - Production (Hybrid Secure)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      deploy_type:
+        description: 'Deployment type'
+        required: true
+        default: 'gradual'
+        type: choice
+        options:
+          - gradual
+          - immediate
+          - canary
+
+concurrency:
+  group: backend-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+  pull-requests: write
+
+env:
+  NODE_VERSION: '22'
+  REGION: 'australia-southeast1'
+  SERVICE_NAME: 'backend-prod'
+  REGISTRY: 'australia-southeast1-docker.pkg.dev'
+  GCP_PROJECT_ID: 'carenest-prod'  # Prod project
+  CONSOLIDATED_SECRET_NAME: 'app-secrets-prod'
+  CLOUD_RUN_SERVICE_ACCOUNT: 'carenest-prod@appspot.gserviceaccount.com'
+
+jobs:
+  # Enhanced Security Checks for Production
+  security-scan:
+    name: Security & Quality Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Fail on CRITICAL vulnerabilities
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: .
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=critical
+
+  # Comprehensive Testing for Production
+  test:
+    name: Run Tests with Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: security-scan
+    defaults:
+      run:
+        working-directory: .
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: test
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests with coverage
+        env:
+          NODE_ENV: test
+        run: npm run test:unit -- --coverage
+
+      - name: Run integration tests
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key
+        run: npm run test:integration
+
+      - name: Run E2E tests
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key
+        run: npm run test:e2e
+
+  # Build and Push Docker Image
+  build:
+    name: Build Production Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [security-scan, test]
+    if: needs.security-scan.result == 'success' && needs.test.result == 'success'
+    outputs:
+      image-uri: ${{ steps.set_image_uri.outputs.image-uri }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Prod)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.PROD_WIF_PROVIDER }}
+          service_account: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          format: spdx-json
+          output-file: backend-sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-sbom-prod
+          path: backend-sbom.spdx.json
+
+      - name: Scan production image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          exit-code: '1'  # Block on vulnerabilities
+
+      - name: Set image URI output
+        id: set_image_uri
+        run: |
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+  # Manual Approval Gate
+  approval:
+    name: Production Approval
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: production-approval
+    steps:
+      - name: Approval checkpoint
+        run: |
+          echo "::notice::Production deployment approved for image ${{ needs.build.outputs.image-uri }}"
+
+  # Deploy to Cloud Run Production
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [build, approval]
+    environment:
+      name: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Prod)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.PROD_WIF_PROVIDER }}
+          service_account: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Verify consolidated Secret Manager secret exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
+
+      - name: Grant Cloud Run runtime access to consolidated secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud secrets add-iam-policy-binding "${CONSOLIDATED_SECRET_NAME}" \
+            --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project="${GCP_PROJECT_ID}" || true
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        run: |
+          IMAGE_URI="${{ needs.build.outputs.image-uri }}"
+          
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image "$IMAGE_URI" \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
+            --min-instances 1 \
+            --max-instances 50 \
+            --cpu 2 \
+            --memory 1Gi \
+            --timeout 300 \
+            --cpu-boost \
+            --port 8080 \
+            --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
+            --set-env-vars "GCP_PROJECT_ID=carenest-prod" \
+            --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+            --no-traffic \
+            --tag prod-${{ github.sha }} \
+            --quiet
+          
+          # DO NOT capture or output URL for security
+          echo "deployment-status=success" >> $GITHUB_OUTPUT
+          echo "::notice::Production deployment completed successfully (URL hidden for security)"
+
+      - name: Run smoke tests
+        run: |
+          set -euo pipefail
+          
+          # Use gcloud proxy to test without exposing URL
+          echo "Starting secure proxy for smoke tests..."
+          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --port 8080 &
+          PROXY_PID=$!
+          
+          # Wait for proxy to be ready
+          sleep 15
+          
+          # Health check
+          echo "Testing health endpoint..."
+          HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
+            "http://localhost:8080/health" || true)
+          
+          if [[ "$HEALTH_STATUS" != "200" ]]; then
+            echo "::error::Health check failed with status $HEALTH_STATUS"
+            cat /tmp/health.out || true
+            kill $PROXY_PID || true
+            exit 1
+          fi
+          
+          # API health check
+          echo "Testing API health..."
+          API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
+            "http://localhost:8080/api/health" || true)
+          
+          if [[ "$API_STATUS" != "200" ]]; then
+            echo "::error::API health check failed with status $API_STATUS"
+            cat /tmp/api_health.out || true
+            kill $PROXY_PID || true
+            exit 1
+          fi
+          
+          echo "::notice::All smoke tests passed via secure proxy!"
+          kill $PROXY_PID || true
+
+      - name: Gradual traffic rollout
+        run: |
+          DEPLOY_TYPE="${{ github.event.inputs.deploy_type || 'gradual' }}"
+          
+          echo "Starting $DEPLOY_TYPE deployment..."
+          
+          if [ "$DEPLOY_TYPE" = "immediate" ]; then
+            # Immediate 100% rollout (emergency only)
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=100
+            echo "::notice::Traffic immediately migrated to 100%"
+            
+          elif [ "$DEPLOY_TYPE" = "canary" ]; then
+            # Canary: 10% for 10 minutes, then 100%
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=10
+            echo "::notice::Canary deployed at 10% - monitoring for 10 minutes"
+            sleep 600
+            
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=100
+            echo "::notice::Traffic fully migrated to new version"
+            
+          else
+            # Gradual: 25% -> 50% -> 75% -> 100%
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=25
+            echo "::notice::Traffic at 25% - monitoring for 5 minutes"
+            sleep 300
+            
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=50
+            echo "::notice::Traffic at 50% - monitoring for 5 minutes"
+            sleep 300
+            
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=75
+            echo "::notice::Traffic at 75% - monitoring for 5 minutes"
+            sleep 300
+            
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region ${{ env.REGION }} \
+              --to-latest=100
+            echo "::notice::Traffic fully migrated to new version"
+          fi
+
+      - name: Post-deployment validation
+        run: |
+          set -euo pipefail
+          
+          # Use gcloud proxy for validation without exposing URL
+          echo "Starting secure proxy for validation..."
+          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --port 8080 &
+          PROXY_PID=$!
+          
+          sleep 10
+          
+          # Final health checks
+          echo "Running post-deployment validation..."
+          curl -f "http://localhost:8080/health" || (echo "::error::Post-deployment health check failed" && kill $PROXY_PID || true && exit 1)
+          curl -f "http://localhost:8080/api/health" || (echo "::error::Post-deployment API check failed" && kill $PROXY_PID || true && exit 1)
+          
+          kill $PROXY_PID || true
+          echo "::notice::✅ Production deployment validated successfully!"
+
+      - name: Create deployment summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Production Deployment Summary
+          
+          **Status:** ${{ job.status }}
+          **Environment:** Production
+          **GCP Project:** ${{ env.GCP_PROJECT_ID }}
+          **Service:** ${{ env.SERVICE_NAME }}
+          **Region:** ${{ env.REGION }}
+          **Image:** \`${{ needs.build.outputs.image-uri }}\`
+          **Commit:** ${{ github.sha }}
+          **Deployment Type:** ${{ github.event.inputs.deploy_type || 'gradual' }}
+          **Deployed by:** ${{ github.actor }}
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ⚠️ **Backend URL is confidential and not displayed for security**
+          
+          ### Security Features
+          - ✅ Manual approval required
+          - ✅ Workload Identity Federation (keyless)
+          - ✅ Sensitive secrets in Secret Manager
+          - ✅ Security gates (blocks on CRITICAL vulns)
+          - ✅ Comprehensive testing (unit + integration + e2e)
+          - ✅ Gradual traffic rollout
+          - ✅ Post-deployment validation
+          - ✅ SBOM generated
+          - ✅ URL hidden from logs and summaries
+          
+          ### Access Backend
+          - Use Firebase Auth tokens for API calls
+          - URL stored securely in Secret Manager
+          - Contact DevOps for direct access
+          
+          ### Monitoring
+          - [Cloud Run Logs](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/logs?project=${{ env.GCP_PROJECT_ID }})
+          - [Cloud Run Metrics](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/metrics?project=${{ env.GCP_PROJECT_ID }})
+          
+          ### Rollback Command
+          If needed, rollback with:
+          \`\`\`bash
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \\
+            --region ${{ env.REGION }} \\
+            --to-revisions=PREVIOUS_REVISION=100
+          \`\`\`
+          EOF
+
+      - name: Create GitHub release
+        if: success()
+        run: |
+          gh release create "v${{ github.run_number }}" \
+            --title "Production Release v${{ github.run_number }}" \
+            --notes "Deployed commit ${{ github.sha }} to production
+            
+            **Image:** \`${{ needs.build.outputs.image-uri }}\`
+            **Service:** ${{ env.SERVICE_NAME }}
+            **Region:** ${{ env.REGION }}
+            **Deployment Type:** ${{ github.event.inputs.deploy_type || 'gradual' }}
+            
+            ⚠️ Backend URL is confidential and not included for security"
+        env:
+          GH_TOKEN: ${{ github.token }}

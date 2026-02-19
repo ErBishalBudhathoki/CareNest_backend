@@ -3,9 +3,113 @@ const SupportItem = require('../models/SupportItem');
 const Client = require('../models/Client');
 const User = require('../models/User');
 const auditService = require('./auditService');
+const cacheService = require('./cacheService');
 const { priceValidationService } = require('./priceValidationService');
 
+const PricingSettings = require('../models/PricingSettings');
+
 class PricingService {
+  /**
+   * Process custom pricing for an NDIS item (Upsert logic)
+   * Used during assignment creation
+   */
+  async processCustomPricing(customPricing, ndisItem, organizationId, clientExists, userEmail) {
+    try {
+      // Determine if this is client-specific pricing
+      const isClientSpecific = customPricing.clientSpecific || false;
+      const targetClientId = isClientSpecific ? clientExists._id.toString() : null;
+
+      // Build the query to check for existing custom pricing
+      const duplicateCheckQuery = {
+        organizationId,
+        supportItemNumber: ndisItem.itemNumber,
+        clientSpecific: isClientSpecific,
+        isActive: true
+      };
+
+      // Only add clientId to query if it's client-specific pricing
+      if (isClientSpecific) {
+        duplicateCheckQuery.clientId = targetClientId;
+      } else {
+        duplicateCheckQuery.clientId = null;
+      }
+
+      // console.log(`Checking for duplicate custom pricing with query:`, JSON.stringify(duplicateCheckQuery, null, 2));
+
+      const existingCustomPricing = await CustomPricing.findOne(duplicateCheckQuery);
+
+      if (existingCustomPricing) {
+        // Check if the price is different before updating
+        const newPrice = customPricing.price || customPricing.customPrice;
+        const existingPrice = existingCustomPricing.customPrice;
+
+        if (newPrice !== existingPrice) {
+          // Update existing custom pricing with new price
+          await CustomPricing.updateOne(
+            { _id: existingCustomPricing._id },
+            {
+              $set: {
+                customPrice: newPrice,
+                pricingType: customPricing.pricingType === 'custom' ? 'fixed' : (customPricing.pricingType || 'fixed'),
+                updatedBy: userEmail,
+                updatedAt: new Date(),
+                version: (existingCustomPricing.version || 1) + 1
+              },
+              $push: {
+                auditTrail: {
+                  action: 'updated',
+                  performedBy: userEmail,
+                  timestamp: new Date(),
+                  changes: `Price updated from ${existingPrice} to ${newPrice} (${customPricing.pricingType || 'fixed'})`,
+                  reason: 'Assignment creation update'
+                }
+              }
+            }
+          );
+          // console.log(`Updated existing custom pricing for NDIS item ${ndisItem.itemNumber} from ${existingPrice} to ${newPrice}`);
+        } else {
+          // console.log(`Custom pricing for NDIS item ${ndisItem.itemNumber} already exists with same price ${newPrice}, skipping duplicate creation`);
+        }
+      } else {
+        // Create new custom pricing record
+        const pricingDoc = {
+          organizationId,
+          supportItemNumber: ndisItem.itemNumber,
+          supportItemName: ndisItem.itemName || ndisItem.description,
+          pricingType: customPricing.pricingType === 'custom' ? 'fixed' : (customPricing.pricingType || 'fixed'),
+          customPrice: (customPricing.pricingType === 'custom' || customPricing.pricingType === 'fixed' || !customPricing.pricingType) ? (customPricing.price || customPricing.customPrice) : null,
+          multiplier: customPricing.pricingType === 'multiplier' ? (customPricing.price || customPricing.customPrice) : null,
+          clientId: targetClientId,
+          clientSpecific: isClientSpecific,
+          ndisCompliant: true,
+          exceedsNdisCap: false,
+          approvalStatus: 'approved',
+          effectiveDate: new Date(),
+          expiryDate: null,
+          createdBy: userEmail,
+          createdAt: new Date(),
+          updatedBy: userEmail,
+          updatedAt: new Date(),
+          isActive: true,
+          version: 1,
+          auditTrail: [{
+            action: 'created',
+            performedBy: userEmail,
+            timestamp: new Date(),
+            changes: `Custom pricing created: ${customPricing.price || customPricing.customPrice} (${customPricing.pricingType || 'fixed'})`,
+            reason: 'Assignment creation'
+          }]
+        };
+
+        await CustomPricing.create(pricingDoc);
+        // console.log(`Created new custom pricing for NDIS item ${ndisItem.itemNumber} (clientSpecific: ${isClientSpecific}, clientId: ${targetClientId})`);
+      }
+    } catch (error) {
+      console.error(`Error processing custom pricing for NDIS item ${ndisItem.itemNumber}:`, error);
+      // Don't throw, just log error to allow assignment to proceed
+    }
+  }
+
   /**
    * Create custom pricing record
    */
@@ -426,6 +530,14 @@ class PricingService {
    */
   async getPricingLookup(organizationId, supportItemNumber, clientId = null) {
     try {
+      const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${clientId || 'global'}`;
+      const cachedResult = await cacheService.get(cacheKey);
+      
+      if (cachedResult) {
+        return cachedResult;
+      }
+
+      const lookupLogic = async () => {
       const currentDate = new Date();
       let clientIdForQuery = null;
       let stateUsed = 'NSW'; // default fallback
@@ -600,6 +712,15 @@ class PricingService {
       }
 
       return null;
+      };
+
+      const result = await lookupLogic();
+      // Cache only if result is found (non-null)
+      if (result) {
+        await cacheService.set(cacheKey, result, 600);
+      }
+      return result;
+
     } catch (error) {
       throw error;
     }
@@ -1035,6 +1156,111 @@ class PricingService {
       });
 
       return !!user;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get organization fallback base rate setting
+   */
+  async getFallbackBaseRate(organizationId) {
+    try {
+      const settingsDoc = await PricingSettings.findOne({
+        organizationId,
+        isActive: true
+      }).lean();
+
+      if (!settingsDoc || typeof settingsDoc.fallbackBaseRate !== 'number') {
+        throw new Error('No fallback base rate configured for this organization');
+      }
+
+      return {
+        organizationId,
+        fallbackBaseRate: settingsDoc.fallbackBaseRate,
+        updatedAt: settingsDoc.updatedAt,
+        updatedBy: settingsDoc.updatedBy,
+        version: settingsDoc.version || 1
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Set organization fallback base rate setting
+   */
+  async setFallbackBaseRate(organizationId, fallbackBaseRate, userEmail) {
+    try {
+      const numericRate = Number(fallbackBaseRate);
+      if (!Number.isFinite(numericRate) || numericRate <= 0) {
+        throw new Error('fallbackBaseRate must be a positive number');
+      }
+
+      const existing = await PricingSettings.findOne({
+        organizationId,
+        isActive: true
+      });
+
+      let resultDoc;
+      if (existing) {
+        await PricingSettings.updateOne(
+          { _id: existing._id },
+          {
+            $set: {
+              fallbackBaseRate: numericRate,
+              updatedBy: userEmail,
+              version: (existing.version || 1) + 1
+            },
+            $push: {
+              auditTrail: {
+                action: 'updated',
+                performedBy: userEmail,
+                timestamp: new Date(),
+                changes: `fallbackBaseRate set to ${numericRate}`
+              }
+            }
+          }
+        );
+        resultDoc = await PricingSettings.findById(existing._id).lean();
+      } else {
+        const settingsDoc = {
+          organizationId,
+          fallbackBaseRate: numericRate,
+          createdBy: userEmail,
+          updatedBy: userEmail,
+          isActive: true,
+          version: 1,
+          auditTrail: [{
+            action: 'created',
+            performedBy: userEmail,
+            timestamp: new Date(),
+            changes: `fallbackBaseRate set to ${numericRate}`
+          }]
+        };
+        const newSettings = await PricingSettings.create(settingsDoc);
+        resultDoc = newSettings.toObject();
+      }
+
+      // Audit log entry
+      await auditService.createAuditLog({
+        action: 'UPDATE',
+        entityType: 'pricing',
+        entityId: (resultDoc._id || resultDoc.id || '').toString(),
+        userEmail,
+        organizationId,
+        newValues: { fallbackBaseRate: numericRate },
+        reason: 'Updated fallback base rate',
+        metadata: { setting: 'fallbackBaseRate' }
+      });
+
+      return {
+        organizationId,
+        fallbackBaseRate: resultDoc.fallbackBaseRate,
+        updatedAt: resultDoc.updatedAt,
+        updatedBy: resultDoc.updatedBy,
+        version: resultDoc.version
+      };
     } catch (error) {
       throw error;
     }

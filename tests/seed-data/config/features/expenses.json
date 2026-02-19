@@ -1,0 +1,24 @@
+{
+  "phaseName": "expenses",
+  "displayName": "Smart Expenses",
+  "description": "Expense tracking, receipt management, and reimbursement",
+  "entities": [
+    "expenses",
+    "receipts",
+    "reimbursements",
+    "expenseReports",
+    "approvals"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers"
+  ],
+  "testSuites": [
+    "expense-creation",
+    "receipt-upload",
+    "approval-workflow",
+    "reimbursement-processing"
+  ],
+  "priority": "medium"
+}

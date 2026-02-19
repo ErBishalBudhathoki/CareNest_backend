@@ -53,7 +53,28 @@ const onboardingRecordSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  collection: 'onboarding_records'
+  collection: 'onboarding_records',
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      if (ret.userId) ret.userId = ret.userId.toString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      
+      if (ret.steps) {
+        if (ret.steps.personalDetails && ret.steps.personalDetails.updatedAt) ret.steps.personalDetails.updatedAt = ret.steps.personalDetails.updatedAt.toISOString();
+        if (ret.steps.bankDetails && ret.steps.bankDetails.updatedAt) ret.steps.bankDetails.updatedAt = ret.steps.bankDetails.updatedAt.toISOString();
+        if (ret.steps.taxDetails && ret.steps.taxDetails.updatedAt) ret.steps.taxDetails.updatedAt = ret.steps.taxDetails.updatedAt.toISOString();
+        if (ret.steps.superannuation && ret.steps.superannuation.updatedAt) ret.steps.superannuation.updatedAt = ret.steps.superannuation.updatedAt.toISOString();
+        if (ret.steps.documents && ret.steps.documents.updatedAt) ret.steps.documents.updatedAt = ret.steps.documents.updatedAt.toISOString();
+      }
+      
+      return ret;
+    }
+  }
 });
 
 // Static method to create initial record

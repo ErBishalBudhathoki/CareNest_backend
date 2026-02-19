@@ -1,26 +1,33 @@
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 
 const uri = process.env.MONGODB_URI;
 
 class ConfigController {
   // --- Job Roles ---
-
-  async getJobRoles(req, res) {
+  getJobRoles = catchAsync(async (req, res) => {
     const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db('Invoice');
       const { organizationId } = req.params;
       
+      if (!organizationId) {
+        return res.status(400).json({
+          success: false,
+          code: 'VALIDATION_ERROR',
+          message: 'Organization ID is required'
+        });
+      }
+      
       const roles = await db.collection('jobRoles').find({ 
         organizationId, 
         isActive: true 
       }).sort({ title: 1 }).toArray();
       
-      // If no roles exist, seed default ones (optional, for convenience)
       if (roles.length === 0) {
         const defaultRoles = [
           { organizationId, title: 'Shift Manager', description: 'Manages shifts', isActive: true, createdAt: new Date(), updatedAt: new Date(), permissions: [] },
@@ -36,25 +43,30 @@ class ConfigController {
           isActive: true 
         }).sort({ title: 1 }).toArray();
         
-        return res.status(200).json({ success: true, data: newRoles });
+        return res.status(200).json({
+          success: true,
+          code: 'JOB_ROLES_RETRIEVED',
+          data: newRoles
+        });
       }
+
+      logger.business('Retrieved job roles', {
+        action: 'config_job_roles_get',
+        organizationId,
+        count: roles.length
+      });
 
       res.status(200).json({
         success: true,
+        code: 'JOB_ROLES_RETRIEVED',
         data: roles
-      });
-    } catch (error) {
-      logger.error('Error fetching job roles', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error fetching job roles'
       });
     } finally {
       await client.close();
     }
-  }
+  });
 
-  async createJobRole(req, res) {
+  createJobRole = catchAsync(async (req, res) => {
     const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
@@ -62,13 +74,20 @@ class ConfigController {
       
       const { organizationId, title, description } = req.body;
       if (!organizationId || !title) {
-        return res.status(400).json({ success: false, message: 'Missing required fields' });
+        return res.status(400).json({
+          success: false,
+          code: 'VALIDATION_ERROR',
+          message: 'Missing required fields: organizationId, title'
+        });
       }
 
-      // Check for duplicate
       const existing = await db.collection('jobRoles').findOne({ organizationId, title });
       if (existing) {
-        return res.status(409).json({ success: false, message: 'Job role already exists' });
+        return res.status(409).json({
+          success: false,
+          code: 'DUPLICATE_ERROR',
+          message: 'Job role already exists'
+        });
       }
 
       const role = {
@@ -84,30 +103,45 @@ class ConfigController {
       const result = await db.collection('jobRoles').insertOne(role);
       role._id = result.insertedId;
 
-      res.status(201).json({ success: true, data: role });
-    } catch (error) {
-      logger.error('Error creating job role', error);
-      res.status(500).json({ success: false, message: 'Error creating job role' });
+      logger.business('Created job role', {
+        action: 'config_job_role_create',
+        organizationId,
+        title,
+        roleId: result.insertedId
+      });
+
+      res.status(201).json({
+        success: true,
+        code: 'JOB_ROLE_CREATED',
+        data: role
+      });
     } finally {
       await client.close();
     }
-  }
+  });
 
   // --- Leave Types ---
-
-  async getLeaveTypes(req, res) {
+  getLeaveTypes = catchAsync(async (req, res) => {
     const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
       const db = client.db('Invoice');
       
       const { organizationId } = req.params;
+      
+      if (!organizationId) {
+        return res.status(400).json({
+          success: false,
+          code: 'VALIDATION_ERROR',
+          message: 'Organization ID is required'
+        });
+      }
+      
       const types = await db.collection('leaveTypes').find({ 
         organizationId, 
         isActive: true 
       }).sort({ name: 1 }).toArray();
 
-      // Seed default if empty
       if (types.length === 0) {
         const defaultTypes = [
           { organizationId, name: 'Vacation', description: 'Annual leave', isActive: true, createdAt: new Date(), updatedAt: new Date() },
@@ -123,25 +157,30 @@ class ConfigController {
           isActive: true 
         }).sort({ name: 1 }).toArray();
         
-        return res.status(200).json({ success: true, data: newTypes });
+        return res.status(200).json({
+          success: true,
+          code: 'LEAVE_TYPES_RETRIEVED',
+          data: newTypes
+        });
       }
+
+      logger.business('Retrieved leave types', {
+        action: 'config_leave_types_get',
+        organizationId,
+        count: types.length
+      });
 
       res.status(200).json({
         success: true,
+        code: 'LEAVE_TYPES_RETRIEVED',
         data: types
-      });
-    } catch (error) {
-      logger.error('Error fetching leave types', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error fetching leave types'
       });
     } finally {
       await client.close();
     }
-  }
+  });
 
-  async createLeaveType(req, res) {
+  createLeaveType = catchAsync(async (req, res) => {
     const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
     try {
       await client.connect();
@@ -149,13 +188,20 @@ class ConfigController {
       
       const { organizationId, name, description } = req.body;
       if (!organizationId || !name) {
-        return res.status(400).json({ success: false, message: 'Missing required fields' });
+        return res.status(400).json({
+          success: false,
+          code: 'VALIDATION_ERROR',
+          message: 'Missing required fields: organizationId, name'
+        });
       }
 
-      // Check for duplicate
       const existing = await db.collection('leaveTypes').findOne({ organizationId, name });
       if (existing) {
-        return res.status(409).json({ success: false, message: 'Leave type already exists' });
+        return res.status(409).json({
+          success: false,
+          code: 'DUPLICATE_ERROR',
+          message: 'Leave type already exists'
+        });
       }
 
       const type = {
@@ -170,18 +216,25 @@ class ConfigController {
       const result = await db.collection('leaveTypes').insertOne(type);
       type._id = result.insertedId;
 
-      res.status(201).json({ success: true, data: type });
-    } catch (error) {
-      logger.error('Error creating leave type', error);
-      res.status(500).json({ success: false, message: 'Error creating leave type' });
+      logger.business('Created leave type', {
+        action: 'config_leave_type_create',
+        organizationId,
+        name,
+        typeId: result.insertedId
+      });
+
+      res.status(201).json({
+        success: true,
+        code: 'LEAVE_TYPE_CREATED',
+        data: type
+      });
     } finally {
       await client.close();
     }
-  }
+  });
+
   // --- Tax Brackets ---
-  async getTaxBrackets(req, res) {
-    // Return 2024-2025 ATO Resident Tax Rates
-    // This could be moved to a DB collection 'tax_configurations' in the future
+  getTaxBrackets = catchAsync(async (req, res) => {
     const taxConfig = {
       financialYear: '2024-2025',
       brackets: [
@@ -195,9 +248,10 @@ class ConfigController {
     
     res.status(200).json({
       success: true,
+      code: 'TAX_BRACKETS_RETRIEVED',
       data: taxConfig
     });
-  }
+  });
 }
 
 module.exports = new ConfigController();

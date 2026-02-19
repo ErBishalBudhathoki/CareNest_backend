@@ -5,16 +5,26 @@ const { InvoiceStatus, PaymentStatus } = require('../models/invoiceSchema');
 // const emailService = require('../services/emailService'); // Assuming this exists
 const logger = require('../config/logger');
 
-const uri = process.env.MONGODB_URI;
-
 class Scheduler {
   constructor() {
-    this.client = new MongoClient(uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+    this.client = null;
   }
 
   start() {
+    // Skip cron jobs in production Cloud Functions environment
+    // Use Google Cloud Scheduler to trigger HTTP endpoints instead for production
+    const isProductionServerless = process.env.NODE_ENV === 'production' &&
+      (process.env.FUNCTIONS_EMULATOR === 'true' ||
+        process.env.K_SERVICE ||  // Cloud Run/Functions indicator
+        process.env.FUNCTION_TARGET);  // Cloud Functions indicator
+
+    if (isProductionServerless) {
+      logger.info('Skipping in-process invoice/reminder scheduler in production Cloud Functions');
+      return;
+    }
+
     logger.info('Starting Cron Scheduler...');
-    
+
     // Run every day at midnight
     cron.schedule('0 0 * * *', async () => {
       logger.info('Running daily scheduled tasks');
@@ -24,6 +34,13 @@ class Scheduler {
   }
 
   async getDb() {
+    if (!this.client) {
+      const uri = process.env.MONGODB_URI;
+      if (!uri) {
+        throw new Error('MONGODB_URI is not configured');
+      }
+      this.client = new MongoClient(uri, { tls: true, family: 4, serverApi: ServerApiVersion.v1 });
+    }
     if (!this.client.topology || !this.client.topology.isConnected()) {
       await this.client.connect();
     }
@@ -154,7 +171,7 @@ class Scheduler {
       for (const invoice of overdueInvoices) {
         // Send email (Mocked for now as we haven't updated EmailService fully)
         // await emailService.sendOverdueReminder(invoice);
-        
+
         await db.collection("invoices").updateOne(
           { _id: invoice._id },
           {
@@ -173,4 +190,17 @@ class Scheduler {
   }
 }
 
-module.exports = new Scheduler();
+let schedulerInstance;
+
+function getScheduler() {
+  if (!schedulerInstance) {
+    schedulerInstance = new Scheduler();
+  }
+  return schedulerInstance;
+}
+
+module.exports = {
+  start: () => getScheduler().start(),
+  processRecurringInvoices: () => getScheduler().processRecurringInvoices(),
+  processOverdueReminders: () => getScheduler().processOverdueReminders()
+};

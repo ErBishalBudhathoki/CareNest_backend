@@ -1,27 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const clientPortalController = require('../controllers/clientPortalController');
-const { authenticateUser, requireRoles } = require('../middleware/auth');
 
-// Public routes
-router.post('/auth/activate', clientPortalController.activate);
-router.post('/auth/login', clientPortalController.login);
+// Get client dashboard
+router.get('/dashboard/:clientId', clientPortalController.getClientDashboard);
 
-// Protected routes (Require Client Role)
-router.use(authenticateUser);
-router.use(requireRoles(['client']));
+// Get worker location
+router.get('/worker-location/:appointmentId', clientPortalController.getWorkerLocation);
 
-// Invoices
-router.get('/invoices', clientPortalController.getInvoices);
-router.get('/invoices/:id', clientPortalController.getInvoiceDetail);
-router.post('/invoices/:id/approve', clientPortalController.approveInvoice);
-router.post('/invoices/:id/dispute', clientPortalController.disputeInvoice);
+// Get appointment status
+router.get('/appointment-status/:appointmentId', clientPortalController.getAppointmentStatus);
 
-// Appointments
-router.get('/appointments', clientPortalController.getAppointments);
-router.post('/appointments/request', clientPortalController.requestAppointment);
+// Send message
+router.post('/message', clientPortalController.sendClientMessage);
 
-// Account
-router.post('/auth/change-password', clientPortalController.changePassword);
+// Submit feedback
+router.post('/feedback', clientPortalController.submitServiceFeedback);
+
+// Get service history
+router.get('/service-history/:clientId', clientPortalController.getServiceHistory);
 
 module.exports = router;

@@ -1,6 +1,8 @@
 const { Invoice, PaymentStatus } = require('../models/Invoice');
 const { CreditNote, CreditNoteStatus } = require('../models/CreditNote');
+const Organization = require('../models/Organization');
 const auditService = require('./auditService');
+const emailService = require('./emailService');
 
 // Conditionally load Stripe
 let stripe;
@@ -18,32 +20,83 @@ class PaymentService {
 
   /**
    * Create a Payment Intent via Stripe
+   * Supports Stripe Connect (Standard) if organizationId is provided and has a connected account.
    */
-  async createPaymentIntent(invoiceId, amount, currency = 'aud', clientEmail) {
+  async createPaymentIntent(invoiceId, amount, currency = 'aud', clientEmail, organizationId) {
     if (!this.stripeEnabled) {
       throw new Error('Stripe is not configured on the server');
     }
 
     try {
+      // 1. Check for Connected Account
+      let stripeAccountHeader = {};
+      if (organizationId) {
+        const org = await Organization.findById(organizationId);
+        if (org && org.stripeAccountId) {
+           // For Standard Connect, we authenticate as the connected account
+           stripeAccountHeader = { stripeAccount: org.stripeAccountId };
+        }
+      }
+
       // Amount in cents
       const amountInCents = Math.round(amount * 100);
       
-      const paymentIntent = await stripe.paymentIntents.create({
+      const paymentIntentPayload = {
         amount: amountInCents,
         currency: currency.toLowerCase(),
-        metadata: { invoiceId, clientEmail },
+        metadata: { invoiceId, clientEmail, organizationId },
         receipt_email: clientEmail,
         automatic_payment_methods: { enabled: true },
-      });
+      };
+
+      // If we are a platform taking a fee, we would add application_fee_amount here.
+      // For now, we just pass the full amount to the connected account.
+
+      const paymentIntent = await stripe.paymentIntents.create(
+        paymentIntentPayload,
+        stripeAccountHeader // This routes the payment to the connected account
+      );
 
       return {
         clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id
+        paymentIntentId: paymentIntent.id,
+        connectedAccountId: stripeAccountHeader.stripeAccount
       };
     } catch (error) {
       console.error('Error creating payment intent:', error);
       throw error;
     }
+  }
+
+  /**
+   * Generate Stripe Connect Onboarding Link
+   */
+  async createOnboardingLink(organizationId, userEmail) {
+    if (!this.stripeEnabled) throw new Error('Stripe not configured');
+
+    const org = await Organization.findById(organizationId);
+    if (!org) throw new Error('Organization not found');
+
+    // 1. Create a Standard Connect Account if not exists
+    if (!org.stripeAccountId) {
+      const account = await stripe.accounts.create({
+        type: 'standard',
+        email: org.contactDetails?.email || userEmail,
+        country: 'AU', // Defaulting to AU for NDIS
+      });
+      org.stripeAccountId = account.id;
+      await org.save();
+    }
+
+    // 2. Create Account Link
+    const accountLink = await stripe.accountLinks.create({
+      account: org.stripeAccountId,
+      refresh_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/stripe/refresh`, // TODO: Define frontend routes
+      return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/stripe/return`,
+      type: 'account_onboarding',
+    });
+
+    return { url: accountLink.url };
   }
 
   /**
@@ -90,6 +143,19 @@ class PaymentService {
           details: { invoiceId, amount, method: paymentData.method },
           timestamp: new Date()
         });
+      }
+
+      // Send Email Receipt
+      if (invoice.clientEmail) {
+        const emailHtml = emailService.getReceiptTemplate(
+          amount, 
+          'AUD', 
+          invoice.invoiceNumber, 
+          new Date().toLocaleDateString(), 
+          paymentData.method
+        );
+        // Don't await email sending to keep response fast
+        emailService.sendEmail(invoice.clientEmail, `Payment Receipt: ${invoice.invoiceNumber}`, emailHtml);
       }
 
       return { success: true, newStatus, balanceDue };
@@ -181,6 +247,75 @@ class PaymentService {
       return { success: true, remainingCredit: newBalance };
     } catch (error) {
       console.error('Error applying credit note:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process a refund
+   */
+  async processRefund(invoiceId, amount, reason, userEmail) {
+    try {
+      const invoice = await Invoice.findById(invoiceId);
+      if (!invoice) throw new Error('Invoice not found');
+
+      // Validate refund amount
+      if (amount > (invoice.payment?.paidAmount || 0)) {
+        throw new Error('Refund amount cannot exceed paid amount');
+      }
+
+      // Update invoice
+      const newPaidAmount = (invoice.payment?.paidAmount || 0) - amount;
+      const totalAmount = invoice.financialSummary.totalAmount;
+      const balanceDue = totalAmount - newPaidAmount;
+
+      let newStatus = 'partial'; // Default to partial
+      if (balanceDue >= totalAmount - 0.01) {
+        newStatus = 'pending'; // Fully refunded / Unpaid
+      } else if (balanceDue <= 0.01) {
+        newStatus = 'paid'; // Still paid (e.g. partial refund of overpayment? unlikely case)
+      }
+
+      const transaction = {
+        date: new Date(),
+        amount: -amount, // Negative amount for refund
+        method: 'refund',
+        reference: reason,
+        status: 'success',
+        notes: `Refund processed by ${userEmail}`
+      };
+
+      if (!invoice.payment) invoice.payment = {};
+      invoice.payment.status = newStatus;
+      invoice.payment.paidAmount = newPaidAmount;
+      invoice.payment.balanceDue = balanceDue;
+      invoice.payment.transactions.push(transaction);
+
+      await invoice.save();
+
+      if (auditService && auditService.logAction) {
+          await auditService.logAction({
+            userEmail,
+            action: 'PAYMENT_REFUNDED',
+            details: { invoiceId, amount, reason },
+            timestamp: new Date()
+          });
+      }
+
+      // Send Refund Notification
+      if (invoice.clientEmail) {
+        const emailHtml = emailService.getRefundTemplate(
+          amount, 
+          'AUD', 
+          invoice.invoiceNumber, 
+          reason
+        );
+        emailService.sendEmail(invoice.clientEmail, `Refund Notification: ${invoice.invoiceNumber}`, emailHtml);
+      }
+
+      return { success: true, newStatus, balanceDue };
+    } catch (error) {
+      console.error('Error processing refund:', error);
       throw error;
     }
   }

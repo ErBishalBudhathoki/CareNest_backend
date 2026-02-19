@@ -1,0 +1,24 @@
+{
+  "phaseName": "payroll",
+  "displayName": "Advanced Payroll",
+  "description": "Payroll processing, tax calculations, and compliance",
+  "entities": [
+    "payrollRecords",
+    "taxCalculations",
+    "payStubs",
+    "deductions",
+    "complianceReports"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers",
+    "timesheets"
+  ],
+  "testSuites": [
+    "payroll-processing",
+    "tax-calculation",
+    "compliance-checking"
+  ],
+  "priority": "high"
+}

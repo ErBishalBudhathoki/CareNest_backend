@@ -1,0 +1,405 @@
+name: Backend Deploy - Development (Hybrid Secure)
+
+on:
+  push:
+    branches: [ dev, develop ]
+  pull_request:
+    branches: [ dev, develop ]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (emergency only)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: backend-dev-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write  # For Workload Identity Federation
+  pull-requests: write
+
+env:
+  NODE_VERSION: '22'
+  REGION: 'australia-southeast1'
+  SERVICE_NAME: 'backend-dev'
+  REGISTRY: 'australia-southeast1-docker.pkg.dev'
+  GCP_PROJECT_ID: 'invoice-660f3'  # Dev project
+  CONSOLIDATED_SECRET_NAME: 'app-secrets-dev'
+  CLOUD_RUN_SERVICE_ACCOUNT: 'invoice-660f3@appspot.gserviceaccount.com'
+
+jobs:
+  # Security and Quality Checks
+  security-scan:
+    name: Security & Quality Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: .
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high || true
+
+  # Testing
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: security-scan
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    defaults:
+      run:
+        working-directory: .
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: test
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        env:
+          NODE_ENV: test
+        run: npm run test:unit
+
+      - name: Run integration tests
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key
+        run: npm run test:integration
+
+  # Build and Push Docker Image
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [security-scan, test]
+    if: needs.security-scan.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-uri: ${{ steps.set_image_uri.outputs.image-uri }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Dev)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          format: spdx-json
+          output-file: backend-sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-sbom
+          path: backend-sbom.spdx.json
+
+      - name: Set image URI output
+        id: set_image_uri
+        run: |
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+  # Deploy to Cloud Run
+  deploy:
+    name: Deploy to Cloud Run (Dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: development
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Dev)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Verify consolidated Secret Manager secret exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
+
+      - name: Grant Cloud Run runtime access to consolidated secret
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud secrets add-iam-policy-binding "${CONSOLIDATED_SECRET_NAME}" \
+            --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
+            --role="roles/secretmanager.secretAccessor" \
+            --project="${GCP_PROJECT_ID}"
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        run: |
+          IMAGE_URI="${{ needs.build.outputs.image-uri }}"
+          PREVIEW_TAG="preview"
+          
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image "$IMAGE_URI" \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
+            --ingress all \
+            --min-instances 0 \
+            --max-instances 10 \
+            --cpu 1 \
+            --memory 512Mi \
+            --timeout 300 \
+            --cpu-boost \
+            --port 8080 \
+            --remove-secrets APP_SECRETS \
+            --set-env-vars "NODE_ENV=development,APP_CHECK_ENFORCEMENT=true" \
+            --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
+            --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+            --tag "$PREVIEW_TAG" \
+            --no-traffic \
+            --quiet
+          
+          # DO NOT capture or output URL for security
+          echo "deployment-status=success" >> $GITHUB_OUTPUT
+          echo "::notice::Deployment completed successfully (URL hidden for security)"
+
+      - name: Ensure public invoker access for mobile clients (Dev)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services add-iam-policy-binding "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.REGION }}" \
+            --member="allUsers" \
+            --role="roles/run.invoker"
+
+      - name: Grant GitHub deployer invocation access (Dev)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services add-iam-policy-binding "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.REGION }}" \
+            --member="serviceAccount:${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --role="roles/run.invoker"
+
+      - name: Run smoke tests
+        run: |
+          set -euo pipefail
+          
+          # Use gcloud proxy to test without exposing URL
+          echo "Starting secure proxy for smoke tests..."
+          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --port 8080 &
+          PROXY_PID=$!
+          
+          # Wait for proxy to be ready
+          sleep 10
+          
+          # Run smoke tests through proxy
+          for attempt in $(seq 1 8); do
+            echo "Smoke test attempt ${attempt}/8..."
+
+            HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
+              "http://localhost:8080/health" || true)
+
+            API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
+              "http://localhost:8080/api/health" || true)
+
+            if [[ "$HEALTH_STATUS" == "200" && "$API_STATUS" == "200" ]]; then
+              echo "::notice::Smoke tests passed via secure proxy"
+              cat /tmp/health.out
+              cat /tmp/api_health.out
+              kill $PROXY_PID || true
+              exit 0
+            fi
+
+            echo "Health=$HEALTH_STATUS API=$API_STATUS; retrying in 10s..."
+            sleep 10
+          done
+
+          echo "::error::Smoke tests failed after retries"
+          echo "Final /health response:"
+          cat /tmp/health.out || true
+          echo "Final /api/health response:"
+          cat /tmp/api_health.out || true
+          kill $PROXY_PID || true
+          exit 1
+
+      - name: Gradual traffic migration
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --to-latest
+
+          echo "::notice::Traffic migrated to latest revision"
+
+      - name: Dump latest Cloud Run revision logs
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REVISION=$(gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region "${{ env.REGION }}" \
+            --format 'value(status.latestCreatedRevisionName)')
+
+          echo "Latest created revision: ${REVISION}"
+
+          gcloud run revisions describe "${REVISION}" \
+            --region "${{ env.REGION }}" \
+            --format yaml || true
+
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }} AND resource.labels.revision_name=${REVISION}" \
+            --project "${{ env.GCP_PROJECT_ID }}" \
+            --limit 200 \
+            --freshness=2h \
+            --format json || true
+
+      - name: Create deployment summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🚀 Deployment Summary (Development)
+          
+          **Status:** ${{ job.status }}
+          **Environment:** Development
+          **GCP Project:** ${{ env.GCP_PROJECT_ID }}
+          **Service:** ${{ env.SERVICE_NAME }}
+          **Region:** ${{ env.REGION }}
+          **Image:** \`${{ needs.build.outputs.image-uri }}\`
+          **Commit:** ${{ github.sha }}
+          **Deployed by:** ${{ github.actor }}
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ⚠️ **Backend URL is confidential and not displayed for security**
+          
+          ### Security Features Enabled
+          - ✅ Workload Identity Federation (keyless auth)
+          - ✅ Sensitive secrets in Secret Manager
+          - ✅ Security scanning (Trivy + TruffleHog)
+          - ✅ Gradual traffic rollout
+          - ✅ Optimized Docker image
+          - ✅ SBOM generated
+          - ✅ URL hidden from logs and summaries
+          
+          ### Access Backend
+          - Use Firebase Auth tokens for API calls
+          - URL stored securely in Secret Manager
+          - Contact DevOps for direct access
+          
+          ### Monitoring
+          - [Cloud Run Logs](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/logs?project=${{ env.GCP_PROJECT_ID }})
+          - [Cloud Run Metrics](https://console.cloud.google.com/run/detail/${{ env.REGION }}/${{ env.SERVICE_NAME }}/metrics?project=${{ env.GCP_PROJECT_ID }})
+          
+          EOF
