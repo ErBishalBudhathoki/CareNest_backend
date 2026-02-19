@@ -77,17 +77,20 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "eslint": "^9.39.2",
-    "firebase-tools": "^15.1.0",
+    "eslint": "^9.18.0",
+    "firebase-tools": "^15.6.0",
     "globals": "^17.0.0",
     "ioredis-mock": "^8.13.1",
     "jest": "^30.2.0",
-    "nodemon": "^3.0.2",
+    "nodemon": "^3.1.11",
     "supertest": "^7.1.4"
   },
   "overrides": {
     "test-exclude": "^7.0.0",
-    "gcp-metadata": "^6.1.1"
+    "gcp-metadata": "^6.1.1",
+    "minimatch": "^10.2.1",
+    "glob": "^11.0.0",
+    "ajv": "^8.18.0"
   },
   "jest": {
     "testEnvironment": "node",
