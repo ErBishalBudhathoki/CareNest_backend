@@ -110,12 +110,28 @@ if (!redisConfig) {
   );
   redis = new DisabledRedisClient();
 } else if (typeof redisConfig === 'string') {
-  // REDIS_URL supports redis:// and rediss://
-  redis = new RedisClass(redisConfig, {
-    maxRetriesPerRequest: null
-  });
+  // REDIS_URL supports redis:// and rediss:// (SSL)
+  // Redis Cloud uses rediss:// for secure connections
+  const connectionOptions = {
+    maxRetriesPerRequest: null,
+    connectTimeout: 10000, // 10 seconds timeout
+    commandTimeout: 5000, // 5 seconds for commands
+    retryStrategy: (times) => {
+      if (times > 3) {
+        logger.error('Redis connection retry limit exceeded', { attempts: times });
+        return null; // Stop retrying
+      }
+      return Math.min(times * 1000, 3000);
+    },
+    tls: redisConfig.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined
+  };
+  redis = new RedisClass(redisConfig, connectionOptions);
 } else {
-  redis = new RedisClass(redisConfig);
+  redis = new RedisClass({
+    ...redisConfig,
+    connectTimeout: 10000,
+    commandTimeout: 5000
+  });
 }
 
 const redisConfigured = Boolean(redisConfig);
