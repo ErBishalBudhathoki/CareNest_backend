@@ -6,39 +6,115 @@ class QueueManager {
   constructor() {
     this.queues = {};
     this.workers = {};
-    this.redisEnabled = redis.isConfigured !== false && redis.status !== 'circuit-open';
+    this.redisEnabled = false;
     this.connection = null;
+    this.initErrorCount = 0;
+    this.maxInitErrors = 3;
 
-    if (!this.redisEnabled) {
-      logger.warn('QueueManager is disabled because Redis is unavailable');
-    } else {
-      // Build connection options for BullMQ
-      const baseOptions = redis.connectionOptions || {};
-      this.connection = {
-        host: redis.options?.host,
-        port: redis.options?.port,
-        ...baseOptions,
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-        // Increase timeouts for remote Redis
-        connectTimeout: 15000,
-        commandTimeout: 10000,
-      };
-      
-      // If using URL, extract host/port
-      if (redis.redisUrl) {
-        try {
-          const url = new URL(redis.redisUrl.replace('redis://', 'http://'));
-          this.connection.host = url.hostname;
-          this.connection.port = url.port || 6379;
-          if (url.password) {
-            this.connection.password = url.password;
-          }
-        } catch {
-          // Fallback to options
+    this._initialize();
+  }
+
+  _initialize() {
+    // Check if Redis is configured and not in circuit-open state
+    if (!redis.isConfigured) {
+      logger.warn('QueueManager is disabled because Redis is not configured');
+      return;
+    }
+
+    if (redis.status === 'circuit-open') {
+      logger.warn('QueueManager is disabled because Redis circuit breaker is open');
+      return;
+    }
+
+    // Build connection options for BullMQ
+    // BullMQ uses its own ioredis, so we need to pass full connection config
+    const connectionOptions = this._buildConnectionOptions();
+    
+    if (!connectionOptions) {
+      logger.warn('QueueManager is disabled: could not build connection options');
+      return;
+    }
+
+    this.connection = connectionOptions;
+    this.redisEnabled = true;
+    logger.info('QueueManager initialized with Redis connection');
+  }
+
+  _buildConnectionOptions() {
+    const redisUrl = redis.redisUrl;
+    
+    if (redisUrl) {
+      // Parse Redis URL: redis://[username:]password@host:port
+      // Redis Cloud format: redis://default:PASSWORD@host:port
+      try {
+        // Handle redis:// and rediss:// URLs
+        let urlToParse = redisUrl;
+        if (redisUrl.startsWith('redis://')) {
+          urlToParse = redisUrl.replace('redis://', 'http://');
+        } else if (redisUrl.startsWith('rediss://')) {
+          urlToParse = redisUrl.replace('rediss://', 'https://');
         }
+        
+        const parsed = new URL(urlToParse);
+        
+        const options = {
+          host: parsed.hostname,
+          port: parseInt(parsed.port, 10) || 6379,
+          maxRetriesPerRequest: null,
+          enableReadyCheck: false,
+          connectTimeout: 20000, // 20 seconds
+          commandTimeout: 15000, // 15 seconds
+          keepAlive: 10000,
+        };
+        
+        // Handle authentication
+        // Redis URL format: redis://username:password@host:port
+        // or redis://:password@host:port (empty username)
+        if (parsed.password) {
+          options.password = decodeURIComponent(parsed.password);
+        }
+        
+        // Username (if present, like 'default' in Redis Cloud)
+        if (parsed.username && parsed.username !== 'default') {
+          // Redis Cloud uses 'default' as username, which ioredis doesn't need
+          // But if it's a different username, we might need it
+          options.username = decodeURIComponent(parsed.username);
+        }
+        
+        // TLS for rediss://
+        if (redisUrl.startsWith('rediss://')) {
+          options.tls = { rejectUnauthorized: false };
+        }
+        
+        logger.info('QueueManager connection options built', {
+          host: options.host,
+          port: options.port,
+          hasPassword: !!options.password,
+          hasTls: !!options.tls
+        });
+        
+        return options;
+      } catch (err) {
+        logger.error('Failed to parse Redis URL for QueueManager', { error: err.message });
+        return null;
       }
     }
+    
+    // Fallback to redis.options if no URL
+    if (redis.options) {
+      return {
+        host: redis.options.host,
+        port: redis.options.port || 6379,
+        password: redis.options.password,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        connectTimeout: 20000,
+        commandTimeout: 15000,
+        keepAlive: 10000,
+      };
+    }
+    
+    return null;
   }
 
   /**
@@ -60,19 +136,19 @@ class QueueManager {
             attempts: 3,
             backoff: {
               type: 'exponential',
-              delay: 1000
+              delay: 2000
             }
           }
         });
         
         this.queues[name].on('error', (err) => {
-          logger.error(`Queue ${name} error`, { error: err.message });
+          this._handleQueueError(name, err);
         });
         
         logger.info(`Queue initialized: ${name}`);
       } catch (err) {
         logger.error(`Failed to initialize queue ${name}`, { error: err.message });
-        this.redisEnabled = false;
+        this._handleInitError(err);
         return null;
       }
     }
@@ -88,7 +164,7 @@ class QueueManager {
    */
   async addJob(queueName, jobName, data, opts = {}) {
     if (!this.redisEnabled) {
-      logger.warn(`Skipped job enqueue for ${queueName}/${jobName} because Redis is unavailable`);
+      logger.debug(`Skipped job enqueue for ${queueName}/${jobName} - Redis unavailable`);
       return null;
     }
 
@@ -100,6 +176,7 @@ class QueueManager {
       return await queue.add(jobName, data, opts);
     } catch (err) {
       logger.error(`Failed to add job ${queueName}/${jobName}`, { error: err.message });
+      this._handleInitError(err);
       return null;
     }
   }
@@ -111,12 +188,12 @@ class QueueManager {
    */
   registerWorker(queueName, processor) {
     if (!this.redisEnabled) {
-      logger.warn(`Skipped worker registration for ${queueName} because Redis is unavailable`);
+      logger.warn(`Skipped worker registration for ${queueName} - Redis unavailable`);
       return;
     }
 
     if (this.workers[queueName]) {
-      logger.warn(`Worker for ${queueName} already exists`);
+      logger.debug(`Worker for ${queueName} already exists`);
       return;
     }
 
@@ -132,21 +209,53 @@ class QueueManager {
         }
       }, { 
         connection: this.connection,
-        autorun: true
+        autorun: true,
+        settings: {
+          stalledInterval: 30000,
+          maxStalledCount: 1
+        }
       });
 
       this.workers[queueName].on('error', (err) => {
-        logger.error(`Worker ${queueName} error`, { error: err.message });
-        // If too many errors, disable queue
-        if (err.message.includes('ECONNREFUSED') || err.message.includes('ETIMEDOUT')) {
-          logger.error(`Disabling queue ${queueName} due to connection errors`);
-          this.redisEnabled = false;
-        }
+        this._handleWorkerError(queueName, err);
       });
 
       logger.info(`Worker registered for ${queueName}`);
     } catch (err) {
       logger.error(`Failed to register worker for ${queueName}`, { error: err.message });
+      this._handleInitError(err);
+    }
+  }
+
+  _handleQueueError(queueName, err) {
+    if (err.message.includes('ETIMEDOUT') || 
+        err.message.includes('ECONNRESET') ||
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('WRONGPASS')) {
+      logger.error(`Queue ${queueName} connection error, disabling queues`, { error: err.message });
+      this.redisEnabled = false;
+    } else {
+      logger.error(`Queue ${queueName} error`, { error: err.message });
+    }
+  }
+
+  _handleWorkerError(queueName, err) {
+    if (err.message.includes('ETIMEDOUT') || 
+        err.message.includes('ECONNRESET') ||
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('WRONGPASS')) {
+      logger.error(`Worker ${queueName} connection error, disabling queues`, { error: err.message });
+      this.redisEnabled = false;
+    } else {
+      logger.error(`Worker ${queueName} error`, { error: err.message });
+    }
+  }
+
+  _handleInitError(err) {
+    this.initErrorCount++;
+    if (this.initErrorCount >= this.maxInitErrors) {
+      logger.error('QueueManager: Too many initialization errors, disabling');
+      this.redisEnabled = false;
     }
   }
 
