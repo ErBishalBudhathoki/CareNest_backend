@@ -6,11 +6,11 @@ const fs = require('fs');
 
 // Ensure uploads directory exists for local fallback
 const uploadDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadDir)) {
+if (process.env.SERVERLESS !== 'true' && !fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-const isR2Configured = process.env.R2_ACCOUNT_ID &&
+let isR2Configured = process.env.R2_ACCOUNT_ID &&
                        process.env.R2_ACCESS_KEY_ID &&
                        process.env.R2_SECRET_ACCESS_KEY &&
                        process.env.R2_BUCKET_NAME;
@@ -50,15 +50,29 @@ let s3Client;
 
 if (isR2Configured) {
     console.log('Using Cloudflare R2 for storage');
-    s3Client = new S3Client({
-        region: 'auto',
-        endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-        credentials: {
-            accessKeyId: process.env.R2_ACCESS_KEY_ID,
-            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-        },
-    });
+    console.log('R2 Account ID:', process.env.R2_ACCOUNT_ID);
+    console.log('R2 Bucket:', process.env.R2_BUCKET_NAME);
+    console.log('R2 Public Domain:', process.env.R2_PUBLIC_DOMAIN);
+    
+    try {
+        s3Client = new S3Client({
+            region: 'auto',
+            endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+            credentials: {
+                accessKeyId: process.env.R2_ACCESS_KEY_ID,
+                secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+            },
+        });
+        console.log('R2 S3Client initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize R2 S3Client:', error);
+        console.log('Falling back to local disk storage');
+        isR2Configured = false;
+    }
+}
 
+// Separate block for Multer initialization to respect potential fallback above
+if (isR2Configured) {
     upload = multer({
         storage: multerS3({
             s3: s3Client,
@@ -73,14 +87,16 @@ if (isR2Configured) {
                 // For profile photos, store in 'profileImage' folder
                 if (file.fieldname === 'photo') folder = 'profileImage';
                 
-                cb(null, `${folder}/${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
+                const key = `${folder}/${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`;
+                console.log(`Uploading file to R2: ${key}`);
+                cb(null, key);
             }
         }),
         fileFilter: fileFilter,
         limits: limits
     });
 } else {
-    console.log('R2 credentials not found, falling back to local disk storage');
+    console.log('R2 credentials not found or initialization failed, falling back to local disk storage');
     // Fallback to disk storage
     const storage = multer.diskStorage({
         destination: "./uploads",

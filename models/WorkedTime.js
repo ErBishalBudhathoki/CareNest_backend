@@ -4,25 +4,41 @@ const workedTimeSchema = new mongoose.Schema({
   userEmail: {
     type: String,
     required: true,
-    index: true
+    index: true,
+    trim: true,
+    lowercase: true
   },
   clientEmail: {
     type: String,
+    required: true, // Legacy required, but maybe optional if non-client work? Keeping as required to match existing
+    index: true,
+    trim: true,
+    lowercase: true
+  },
+  workDate: {
+    type: Date,
     required: true,
     index: true
   },
-  date: {
-    type: Date
+  // Legacy fields kept for backward compatibility if needed, but workDate is primary
+  shiftDate: { type: String }, // YYYY-MM-DD
+  date: { type: Date }, // Legacy alias?
+  
+  isActive: { 
+    type: Boolean, 
+    default: true,
+    index: true 
   },
-  // Fields used in timesheetReminderService query
-  shiftDate: String, // YYYY-MM-DD
-  workDate: Date,
-  isActive: { type: Boolean, default: true },
   
   timeWorked: {
-    type: String, // Stored as string in original service logic (parseFloat used later)
+    type: String, // "HH:mm:ss"
     required: true
   },
+  totalHours: {
+    type: Number, // Calculated hours for easier querying
+    default: 0
+  },
+  
   providerType: {
     type: String,
     default: 'standard'
@@ -41,11 +57,24 @@ const workedTimeSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  collection: 'worked_times'
+  collection: 'worked_times',
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      if (ret.workDate) ret.workDate = ret.workDate.toISOString();
+      if (ret.date) ret.date = ret.date.toISOString();
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      return ret;
+    }
+  }
 });
 
-// Compound index for efficient range queries
-workedTimeSchema.index({ userEmail: 1, clientEmail: 1, date: 1 });
-workedTimeSchema.index({ userEmail: 1, isActive: 1 });
+// Indexes
+workedTimeSchema.index({ userEmail: 1, clientEmail: 1, workDate: 1 });
+workedTimeSchema.index({ userEmail: 1, workDate: 1 });
 
 module.exports = mongoose.model('WorkedTime', workedTimeSchema);

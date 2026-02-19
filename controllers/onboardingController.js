@@ -1,219 +1,198 @@
 const OnboardingService = require('../services/onboardingService');
 const logger = require('../config/logger');
+const catchAsync = require('../utils/catchAsync');
 const { ObjectId } = require('mongodb');
 
 class OnboardingController {
 
-    static async getStatus(req, res) {
-        try {
-            const { userId, organizationId } = req.user;
-            const status = await OnboardingService.getOnboardingStatus(userId, organizationId);
-            res.json({ success: true, data: status });
-        } catch (error) {
-            logger.error('Error getting onboarding status', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+    static getStatus = catchAsync(async (req, res) => {
+        const { userId, organizationId } = req.user;
+        const uid = userId || req.user.id;
+        const orgId = organizationId || req.user.organizationId;
+        
+        const status = await OnboardingService.getOnboardingStatus(uid, orgId);
+        
+        logger.business('Onboarding Status Retrieved', {
+            event: 'onboarding_status_retrieved',
+            userId: uid,
+            organizationId: orgId,
+            status: status?.status,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.json({ success: true, data: status });
+    });
+
+    static updateStep = catchAsync(async (req, res) => {
+        const { userId } = req.user;
+        const uid = userId || req.user.id;
+        const { stepName } = req.params;
+        const stepData = req.body;
+
+        const allowedSteps = ['personalDetails', 'bankDetails', 'taxDetails', 'superannuation'];
+        if (!allowedSteps.includes(stepName)) {
+            return res.status(400).json({ success: false, code: 'INVALID_STEP', message: 'Invalid step name' });
         }
-    }
 
-    static async updateStep(req, res) {
-        try {
-            const { userId } = req.user;
-            const { stepName } = req.params;
-            const stepData = req.body;
+        const { currentStep, ...data } = stepData;
 
-            const allowedSteps = ['personalDetails', 'bankDetails', 'taxDetails', 'superannuation'];
-            if (!allowedSteps.includes(stepName)) {
-                return res.status(400).json({ success: false, message: 'Invalid step name' });
-            }
+        const updatedRecord = await OnboardingService.updateStep(uid, stepName, data, currentStep);
+        
+        logger.business('Onboarding Step Updated', {
+            event: 'onboarding_step_updated',
+            userId: uid,
+            stepName,
+            currentStep,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.json({ success: true, code: 'STEP_UPDATED', data: updatedRecord });
+    });
 
-            // Extract currentStep if provided to update progress
-            const { currentStep, ...data } = stepData;
-
-            const updatedRecord = await OnboardingService.updateStep(userId, stepName, data, currentStep);
-            res.json({ success: true, data: updatedRecord });
-        } catch (error) {
-            logger.error('Error updating onboarding step', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+    static handleFileUpload = catchAsync(async (req, res) => {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No file uploaded' });
         }
-    }
 
-    static async handleFileUpload(req, res) {
-        try {
-            if (!req.file) {
-                return res.status(400).json({ success: false, message: 'No file uploaded' });
-            }
-
-            // Construct file URL based on storage type (local vs R2)
-            let fileUrl;
-            if (req.file.location) {
-                // S3/R2 upload
-                fileUrl = req.file.location;
-            } else {
-                // Local upload
-                const protocol = req.secure ? 'https' : 'http';
-                const host = req.get('host');
-                fileUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
-            }
-
-            res.json({ 
-                success: true, 
-                data: { 
-                    url: fileUrl,
-                    filename: req.file.originalname,
-                    mimetype: req.file.mimetype
-                } 
-            });
-        } catch (error) {
-            logger.error('Error handling file upload', error);
-            res.status(500).json({ success: false, message: 'Server error during upload' });
+        let fileUrl;
+        if (req.file.location) {
+            fileUrl = req.file.location;
+        } else {
+            const protocol = req.secure ? 'https' : 'http';
+            const host = req.get('host');
+            fileUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
         }
-    }
 
-    static async uploadDocument(req, res) {
-        try {
-            const { userId, organizationId } = req.user;
-            const { type, fileUrl, expiryDate, documentNumber } = req.body;
+        res.json({ 
+            success: true, 
+            data: { 
+                url: fileUrl,
+                filename: req.file.originalname,
+                mimetype: req.file.mimetype
+            } 
+        });
+    });
 
-            if (!type || !fileUrl) {
-                return res.status(400).json({ success: false, message: 'Type and File URL are required' });
-            }
+    static uploadDocument = catchAsync(async (req, res) => {
+        const { userId, organizationId } = req.user;
+        const uid = userId || req.user.id;
+        const orgId = organizationId || req.user.organizationId;
+        
+        const { type, fileUrl, expiryDate, documentNumber } = req.body;
 
-            const doc = await OnboardingService.saveDocument({
-                userId,
-                organizationId,
-                type,
-                fileUrl,
-                expiryDate,
-                documentNumber
-            });
-
-            res.json({ success: true, data: doc });
-        } catch (error) {
-            logger.error('Error uploading document', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+        if (!type || !fileUrl) {
+            return res.status(400).json({ success: false, message: 'Type and File URL are required' });
         }
-    }
 
-    static async getDocuments(req, res) {
-        try {
-            const { userId } = req.user;
-            const docs = await OnboardingService.getUserDocuments(userId);
-            res.json({ success: true, data: docs });
-        } catch (error) {
-            logger.error('Error fetching documents', error);
-            res.status(500).json({ success: false, message: 'Server error' });
-        }
-    }
+        const doc = await OnboardingService.saveDocument({
+            userId: uid,
+            organizationId: orgId,
+            type,
+            fileUrl,
+            expiryDate: expiryDate ? new Date(expiryDate) : null,
+            documentNumber
+        });
 
-    static async deleteDocument(req, res) {
-        try {
-            const { userId } = req.user;
-            const { docId } = req.params;
+        res.json({ success: true, data: doc });
+    });
 
-            await OnboardingService.deleteDocument(docId, userId);
-            res.json({ success: true, message: 'Document deleted successfully' });
-        } catch (error) {
-            logger.error('Error deleting document', error);
-            res.status(500).json({ success: false, message: 'Server error' });
-        }
-    }
+    static getDocuments = catchAsync(async (req, res) => {
+        const { userId } = req.user;
+        const uid = userId || req.user.id;
+        
+        const docs = await OnboardingService.getUserDocuments(uid);
+        res.json({ success: true, data: docs });
+    });
 
-    static async submitOnboarding(req, res) {
-        try {
-            const { userId } = req.user;
-            const result = await OnboardingService.submitOnboarding(userId);
-            res.json({ success: true, data: result });
-        } catch (error) {
-            logger.error('Error submitting onboarding', error);
-            res.status(500).json({ success: false, message: 'Server error' });
-        }
-    }
+    static deleteDocument = catchAsync(async (req, res) => {
+        const { userId } = req.user;
+        const uid = userId || req.user.id;
+        const { docId } = req.params;
+
+        await OnboardingService.deleteDocument(docId, uid);
+        res.json({ success: true, message: 'Document deleted successfully' });
+    });
+
+    static submitOnboarding = catchAsync(async (req, res) => {
+        const { userId, organizationId } = req.user;
+        const uid = userId || req.user.id;
+        const orgId = organizationId || req.user.organizationId;
+        
+        const result = await OnboardingService.submitOnboarding(uid);
+        
+        logger.business('Onboarding Submitted', {
+            event: 'onboarding_submitted',
+            userId: uid,
+            organizationId: orgId,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.json({ success: true, code: 'ONBOARDING_SUBMITTED', data: result });
+    });
 
     // --- Admin Endpoints ---
 
-    static async getPendingOnboardings(req, res) {
-        try {
-            const { organizationId } = req.user;
-            
-            if (!organizationId) {
-                return res.status(400).json({ success: false, message: 'Organization ID not found for user' });
-            }
-
-            if (!ObjectId.isValid(organizationId)) {
-                return res.status(400).json({ success: false, message: 'Invalid Organization ID format' });
-            }
-
-            // Ensure user is admin (this check should also be in middleware/RBAC)
-            
-            const records = await OnboardingService.getPendingOnboardings(organizationId);
-            res.json({ success: true, data: records });
-        } catch (error) {
-            logger.error('Error fetching pending onboardings', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+    static getPendingOnboardings = catchAsync(async (req, res) => {
+        const { organizationId } = req.user;
+        const orgId = organizationId || req.user.organizationId;
+        
+        if (!orgId) {
+            return res.status(400).json({ success: false, message: 'Organization ID not found for user' });
         }
-    }
 
-    static async getAdminDocuments(req, res) {
-        try {
-            const { userId } = req.params;
-            const docs = await OnboardingService.getUserDocuments(userId);
-            res.json({ success: true, data: docs });
-        } catch (error) {
-            logger.error('Error fetching user documents for admin', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+        // if (!ObjectId.isValid(orgId)) { ... } // Org ID in OnboardingRecord is String in our new schema, so no ObjectId check
+
+        const records = await OnboardingService.getPendingOnboardings(orgId);
+        res.json({ success: true, data: records });
+    });
+
+    static getAdminDocuments = catchAsync(async (req, res) => {
+        const { userId } = req.params;
+        const docs = await OnboardingService.getUserDocuments(userId);
+        res.json({ success: true, data: docs });
+    });
+
+    static verifyDocument = catchAsync(async (req, res) => {
+        const adminId = req.user.id;
+        const { docId } = req.params;
+        const { status, reason } = req.body;
+
+        if (!ObjectId.isValid(docId)) {
+            return res.status(400).json({ success: false, message: 'Invalid Document ID format' });
         }
-    }
 
-    static async verifyDocument(req, res) {
-        try {
-            const { userId: adminId } = req.user;
-            const { docId } = req.params;
-            const { status, reason } = req.body; // status: 'verified' | 'rejected'
-
-            if (!ObjectId.isValid(docId)) {
-                return res.status(400).json({ success: false, message: 'Invalid Document ID format' });
-            }
-
-            if (!['verified', 'rejected'].includes(status)) {
-                return res.status(400).json({ success: false, message: 'Invalid status' });
-            }
-
-            const doc = await OnboardingService.verifyDocument(docId, status, reason, adminId);
-            res.json({ success: true, data: doc });
-        } catch (error) {
-            logger.error('Error verifying document', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+        if (!['verified', 'rejected'].includes(status)) {
+            return res.status(400).json({ success: false, message: 'Invalid status' });
         }
-    }
 
-    static async finalizeOnboarding(req, res) {
-        try {
-            const { userId: adminId } = req.user;
-            const { userId } = req.params;
+        const doc = await OnboardingService.verifyDocument(docId, status, reason, adminId);
+        res.json({ success: true, data: doc });
+    });
 
-            if (!ObjectId.isValid(userId)) {
-                return res.status(400).json({ success: false, message: 'Invalid User ID format' });
-            }
+    static finalizeOnboarding = catchAsync(async (req, res) => {
+        const adminId = req.user.id;
+        const { userId } = req.params;
 
-            const result = await OnboardingService.finalizeOnboarding(userId, adminId);
-            
-            res.json({ success: true, data: result });
-        } catch (error) {
-            logger.error('Error finalizing onboarding', error);
-            res.status(500).json({ success: false, message: 'Server error' });
+        if (!ObjectId.isValid(userId)) {
+            return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Invalid User ID format' });
         }
-    }
 
-    static async checkProbationStatus(req, res) {
-        try {
-            // This endpoint might be protected or internal only
-            const result = await OnboardingService.checkProbationPeriods();
-            res.json({ success: true, data: result });
-        } catch (error) {
-            logger.error('Error checking probation status', error);
-            res.status(500).json({ success: false, message: 'Server error' });
-        }
-    }
+        const result = await OnboardingService.finalizeOnboarding(userId, adminId);
+        
+        logger.business('Onboarding Finalized', {
+            event: 'onboarding_finalized',
+            userId,
+            adminId,
+            timestamp: new Date().toISOString()
+        });
+        
+        res.json({ success: true, code: 'ONBOARDING_FINALIZED', data: result });
+    });
+
+    static checkProbationStatus = catchAsync(async (req, res) => {
+        const result = await OnboardingService.checkProbationPeriods();
+        res.json({ success: true, data: result });
+    });
 }
 
 module.exports = OnboardingController;

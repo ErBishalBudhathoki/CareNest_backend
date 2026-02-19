@@ -1,172 +1,131 @@
 const express = require('express');
 const router = express.Router();
-const logger = require('../config/logger');
-const {
-  createExpense,
-  getExpenseCategories,
-  getOrganizationExpenses,
-  getExpenseById,
-  updateExpense,
-  deleteExpense,
-  updateExpenseApproval,
-  bulkImportExpenses
-} = require('../services/expenseService');
+const rateLimit = require('express-rate-limit');
+const { body, param, query, validationResult } = require('express-validator');
+const expenseController = require('../controllers/expenseController');
+const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationOwnership,
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 
-// Create a new expense
-router.post('/api/expenses/create', async (req, res) => {
-  try {
-    const result = await createExpense(req.body);
-    res.json(result);
-  } catch (error) {
-    logger.error('Expense creation failed', {
-      error: error.message,
-      stack: error.stack,
-      expenseData: req.body
-    });
-    res.status(500).json({ error: 'Failed to create expense' });
-  }
+// Rate limiting
+const expenseReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, code: 'RATE_LIMIT_EXCEEDED', message: 'Too many expense read requests.' }
 });
 
-// Get expense categories
-router.get('/api/expenses/categories', async (req, res) => {
-  try {
-    const categories = await getExpenseCategories();
-    res.json(categories);
-  } catch (error) {
-    logger.error('Expense categories fetch failed', {
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ error: 'Failed to fetch expense categories' });
-  }
+const expenseWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, code: 'RATE_LIMIT_EXCEEDED', message: 'Too many expense write requests.' }
 });
 
-// Get expenses for an organization
-router.get('/api/expenses/organization/:organizationId', async (req, res) => {
-  try {
-    const { organizationId } = req.params;
-    const { page = 1, limit = 50, status, category, startDate, endDate } = req.query;
-    
-    const result = await getOrganizationExpenses(organizationId, {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      status,
-      category,
-      startDate,
-      endDate
+// Validation middleware
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: 'Validation failed',
+      errors: errors.array().map(e => ({ field: e.param, message: e.msg }))
     });
-    
-    res.json(result);
-  } catch (error) {
-    logger.error('Organization expenses fetch failed', {
-      error: error.message,
-      stack: error.stack,
-      organizationId: req.params.organizationId,
-      page: req.query.page,
-      limit: req.query.limit,
-      status: req.query.status,
-      category: req.query.category,
-      startDate: req.query.startDate,
-      endDate: req.query.endDate
-    });
-    res.status(500).json({ error: 'Failed to fetch organization expenses' });
   }
-});
+  next();
+};
 
-// Get expense by ID
-router.get('/api/expenses/:expenseId', async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    const expense = await getExpenseById(expenseId);
-    
-    if (!expense) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-    
-    res.json(expense);
-  } catch (error) {
-    logger.error('Expense deletion failed', {
-      error: error.message,
-      stack: error.stack,
-      expenseId: req.params.expenseId
-    });
-    res.status(500).json({ error: 'Failed to fetch expense' });
-  }
-});
+// Validation chains
+const createValidation = [
+  body('amount')
+    .isNumeric()
+    .withMessage('Amount must be a numeric value'),
+  body('description')
+    .trim()
+    .notEmpty()
+    .withMessage('Description is required'),
+  body('organizationId')
+    .isMongoId()
+    .withMessage('Valid organization ID is required')
+];
 
-// Update expense
-router.put('/api/expenses/:expenseId', async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    const result = await updateExpense(expenseId, req.body);
-    res.json(result);
-  } catch (error) {
-    logger.error('Expense update failed', {
-      error: error.message,
-      stack: error.stack,
-      expenseId: req.params.expenseId,
-      updateData: req.body
-    });
-    res.status(500).json({ error: 'Failed to update expense' });
-  }
-});
+const updateValidation = [
+  param('expenseId')
+    .isMongoId()
+    .withMessage('Valid expense ID is required')
+];
 
-// Delete expense
-router.delete('/api/expenses/:expenseId', async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    const result = await deleteExpense(expenseId);
-    res.json(result);
-  } catch (error) {
-    logger.error('Expense deletion failed', {
-      error: error.message,
-      stack: error.stack,
-      expenseId: req.params.expenseId
-    });
-    res.status(500).json({ error: 'Failed to delete expense' });
-  }
-});
+const approvalValidation = [
+  param('expenseId')
+    .isMongoId()
+    .withMessage('Valid expense ID is required'),
+  body('status')
+    .isIn(['approved', 'rejected'])
+    .withMessage('Status must be approved or rejected')
+];
 
-// Update expense approval status
-router.put('/api/expenses/:expenseId/approval', async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    const { status, approvedBy, approvalNotes } = req.body;
-    
-    const result = await updateExpenseApproval(expenseId, {
-      status,
-      approvedBy,
-      approvalNotes
-    });
-    
-    res.json(result);
-  } catch (error) {
-    logger.error('Expense approval update failed', {
-      error: error.message,
-      stack: error.stack,
-      expenseId: req.params.expenseId,
-      status: req.body.status,
-      approvedBy: req.body.approvedBy
-    });
-    res.status(500).json({ error: 'Failed to update expense approval' });
-  }
-});
+// Protected routes
+router.use(authenticateUser);
+router.use(organizationContextMiddleware);
 
-// Bulk import expenses
-router.post('/api/expenses/bulk-import', async (req, res) => {
-  try {
-    const { expenses, organizationId } = req.body;
-    const result = await bulkImportExpenses(expenses, organizationId);
-    res.json(result);
-  } catch (error) {
-    logger.error('Bulk expense import failed', {
-      error: error.message,
-      stack: error.stack,
-      organizationId: req.body.organizationId,
-      expenseCount: req.body.expenses?.length
-    });
-    res.status(500).json({ error: 'Failed to bulk import expenses' });
-  }
-});
+// Routes with validation
+router.post('/create', 
+  expenseWriteLimiter, 
+  requireOrganizationMatch('organizationId'),
+  createValidation, 
+  handleValidationErrors, 
+  expenseController.createExpense
+);
+
+router.get('/categories', expenseReadLimiter, expenseController.getExpenseCategories);
+
+router.get('/organization/:organizationId', 
+  expenseReadLimiter, 
+  param('organizationId').isMongoId(), 
+  requireOrganizationMatch('organizationId'),
+  handleValidationErrors, 
+  expenseController.getOrganizationExpenses
+);
+
+router.get('/:expenseId', 
+  expenseReadLimiter, 
+  param('expenseId').isMongoId(), 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.getExpenseById
+);
+
+router.put('/:expenseId', 
+  expenseWriteLimiter, 
+  updateValidation, 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.updateExpense
+);
+
+router.delete('/:expenseId', 
+  expenseWriteLimiter, 
+  param('expenseId').isMongoId(), 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.deleteExpense
+);
+
+router.put('/:expenseId/approval', 
+  expenseWriteLimiter, 
+  approvalValidation, 
+  requireOrganizationOwnership('expenseId', () => require('../models/Expense')),
+  handleValidationErrors, 
+  expenseController.updateExpenseApproval
+);
+
+router.post('/bulk-import', 
+  expenseWriteLimiter, 
+  body('expenses').isArray().withMessage('Expenses must be an array'), 
+  handleValidationErrors, 
+  expenseController.bulkImportExpenses
+);
 
 module.exports = router;

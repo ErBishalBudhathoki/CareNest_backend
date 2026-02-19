@@ -1,231 +1,247 @@
 const TripService = require('../services/tripService');
 const logger = require('../utils/logger');
+const catchAsync = require('../utils/catchAsync');
 
 class TripController {
   
   /**
    * Create a new trip
+   * POST /api/trips
    */
-  async createTrip(req, res) {
-    try {
-      const { 
-        date, 
-        startLocation, 
-        endLocation, 
-        distance, 
-        tripType, 
-        clientId 
-      } = req.body;
+  createTrip = catchAsync(async (req, res) => {
+    const { 
+      date, 
+      startLocation, 
+      endLocation, 
+      distance, 
+      tripType, 
+      clientId 
+    } = req.body;
 
-      // Basic validation
-      if (!date || !startLocation || !endLocation || !distance || !tripType) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Missing required fields: date, startLocation, endLocation, distance, tripType' 
-        });
-      }
-
-      // Assuming user ID and Organization ID come from auth middleware (e.g. req.user)
-      // If not, they might be in body, but usually auth middleware handles this.
-      // I'll assume req.user exists as per standard Express patterns.
-      const userId = req.user ? req.user.id : req.body.userId;
-      const organizationId = req.user ? req.user.organizationId : req.body.organizationId;
-
-      if (!userId || !organizationId) {
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Unauthorized: User or Organization not identified' 
-        });
-      }
-
-      const tripData = {
-        organizationId,
-        userId,
-        date,
-        startLocation,
-        endLocation,
-        distance,
-        tripType,
-        clientId
-      };
-
-      const result = await TripService.createTrip(tripData);
-      
-      return res.status(201).json({
-        success: true,
-        message: 'Trip created successfully',
-        data: result
-      });
-
-    } catch (error) {
-      logger.error('Error creating trip', { error: error.message });
-      return res.status(500).json({
-        success: false,
-        message: error.message || 'Internal server error'
+    // Basic validation
+    if (!date || !startLocation || !endLocation || !distance || !tripType) {
+      return res.status(400).json({ 
+        success: false, 
+        code: 'VALIDATION_ERROR',
+        message: 'Missing required fields: date, startLocation, endLocation, distance, tripType' 
       });
     }
-  }
+
+    const userId = req.user?.id;
+    const organizationId = req.user?.organizationId;
+
+    if (!userId || !organizationId) {
+      return res.status(401).json({ 
+        success: false, 
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized: User or Organization not identified' 
+      });
+    }
+
+    const tripData = {
+      organizationId,
+      userId,
+      date,
+      startLocation,
+      endLocation,
+      distance,
+      tripType,
+      clientId
+    };
+
+    const result = await TripService.createTrip(tripData);
+    
+    logger.business('Trip Created', {
+      event: 'trip_created',
+      userId,
+      organizationId,
+      tripId: result?._id?.toString(),
+      distance,
+      tripType,
+      timestamp: new Date().toISOString()
+    });
+    
+    return res.status(201).json({
+      success: true,
+      code: 'TRIP_CREATED',
+      message: 'Trip created successfully',
+      data: result
+    });
+  });
 
   /**
    * Get all trips (Admin)
+   * GET /api/trips
    */
-  async getAllTrips(req, res) {
-    try {
-      // Allow filtering by date range, status, and userId via query params
-      const { startDate, endDate, status, userId } = req.query;
-      const organizationId = req.user ? req.user.organizationId : req.query.organizationId;
+  getAllTrips = catchAsync(async (req, res) => {
+    const { startDate, endDate, status, userId } = req.query;
+    const organizationId = req.user?.organizationId;
 
-      const filters = {
-        organizationId,
-        userId,
-        startDate,
-        endDate,
-        status
-      };
+    const filters = {
+      organizationId,
+      userId,
+      startDate,
+      endDate,
+      status
+    };
 
-      const trips = await TripService.getAllTrips(filters);
+    const trips = await TripService.getAllTrips(filters);
 
-      return res.status(200).json({
-        success: true,
-        data: trips
-      });
+    logger.business('Trips Retrieved (Admin)', {
+      event: 'trips_retrieved_admin',
+      organizationId,
+      count: trips.length,
+      filters: Object.keys(filters).filter(k => filters[k]),
+      timestamp: new Date().toISOString()
+    });
 
-    } catch (error) {
-      logger.error('Error fetching all trips', { error: error.message });
-      return res.status(500).json({
-        success: false,
-        message: error.message || 'Internal server error'
-      });
-    }
-  }
+    return res.status(200).json({
+      success: true,
+      code: 'TRIPS_RETRIEVED',
+      data: trips
+    });
+  });
 
   /**
    * Update trip details
+   * PATCH /api/trips/:tripId
    */
-  async updateTripDetails(req, res) {
-    try {
-      const { tripId } = req.params;
-      const updateData = req.body;
-      const adminId = req.user ? req.user.id : null;
+  updateTripDetails = catchAsync(async (req, res) => {
+    const { tripId } = req.params;
+    const updateData = req.body;
+    const adminId = req.user?.id;
 
-      const success = await TripService.updateTripDetails(tripId, updateData, adminId);
+    const success = await TripService.updateTripDetails(tripId, updateData, adminId);
 
-      if (!success) {
-        return res.status(404).json({ success: false, message: 'Trip not found or update failed' });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Trip details updated successfully'
-      });
-
-    } catch (error) {
-      logger.error('Error updating trip details', { error: error.message });
-      return res.status(500).json({
-        success: false,
-        message: error.message || 'Internal server error'
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        code: 'TRIP_NOT_FOUND',
+        message: 'Trip not found or update failed' 
       });
     }
-  }
+
+    logger.business('Trip Details Updated', {
+      event: 'trip_details_updated',
+      tripId,
+      adminId,
+      updatedFields: Object.keys(updateData),
+      timestamp: new Date().toISOString()
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: 'TRIP_UPDATED',
+      message: 'Trip details updated successfully'
+    });
+  });
 
   /**
    * Approve or Reject a trip
+   * PATCH /api/trips/:tripId/status
    */
-  async updateTripStatus(req, res) {
-    try {
-      const { tripId } = req.params;
-      const { status } = req.body;
-      const adminId = req.user ? req.user.id : null;
+  updateTripStatus = catchAsync(async (req, res) => {
+    const { tripId } = req.params;
+    const { status } = req.body;
+    const adminId = req.user?.id;
 
-      if (!status) {
-        return res.status(400).json({ success: false, message: 'Status is required' });
-      }
-
-      const success = await TripService.updateTripStatus(tripId, status, adminId);
-
-      if (!success) {
-        return res.status(404).json({ success: false, message: 'Trip not found or update failed' });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: `Trip status updated to ${status}`
-      });
-
-    } catch (error) {
-      logger.error('Error updating trip status', { error: error.message });
-      return res.status(500).json({
-        success: false,
-        message: error.message || 'Internal server error'
+    if (!status) {
+      return res.status(400).json({ 
+        success: false, 
+        code: 'VALIDATION_ERROR',
+        message: 'Status is required' 
       });
     }
-  }
+
+    const success = await TripService.updateTripStatus(tripId, status, adminId);
+
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        code: 'TRIP_NOT_FOUND',
+        message: 'Trip not found or update failed' 
+      });
+    }
+
+    logger.business('Trip Status Updated', {
+      event: 'trip_status_updated',
+      tripId,
+      adminId,
+      status,
+      timestamp: new Date().toISOString()
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: 'TRIP_STATUS_UPDATED',
+      message: `Trip status updated to ${status}`
+    });
+  });
 
   /**
    * Get trips for an employee
+   * GET /api/trips/employee/:userId
    */
-  async getTripsByEmployee(req, res) {
-    try {
-      const { userId } = req.params;
-      // Allow filtering by date range and status via query params
-      const { startDate, endDate, status } = req.query;
+  getTripsByEmployee = catchAsync(async (req, res) => {
+    const { userId } = req.params;
+    const { startDate, endDate, status } = req.query;
 
-      // Security check: Ensure requester is the user or an admin of the same org
-      // (Skipping complex auth logic for now, assuming middleware handles route protection)
+    const trips = await TripService.getTripsByEmployee(userId, { startDate, endDate, status });
 
-      const trips = await TripService.getTripsByEmployee(userId, { startDate, endDate, status });
+    logger.business('Employee Trips Retrieved', {
+      event: 'trips_retrieved_employee',
+      userId,
+      count: trips.length,
+      dateRange: { startDate, endDate },
+      timestamp: new Date().toISOString()
+    });
 
-      return res.status(200).json({
-        success: true,
-        data: trips
-      });
-
-    } catch (error) {
-      logger.error('Error fetching employee trips', { error: error.message });
-      return res.status(500).json({
-        success: false,
-        message: error.message || 'Internal server error'
-      });
-    }
-  }
+    return res.status(200).json({
+      success: true,
+      code: 'EMPLOYEE_TRIPS_RETRIEVED',
+      data: trips
+    });
+  });
 
   /**
    * Get Enhanced Invoice Analytics
+   * GET /api/trips/analytics
    */
-  async getInvoiceAnalytics(req, res) {
-    try {
-      const { startDate, endDate } = req.query;
-      const organizationId = req.user ? req.user.organizationId : req.query.organizationId;
+  getInvoiceAnalytics = catchAsync(async (req, res) => {
+    const { startDate, endDate } = req.query;
+    const organizationId = req.user?.organizationId;
 
-      if (!startDate || !endDate || !organizationId) {
-        return res.status(400).json({
-          success: false,
-          message: 'startDate, endDate, and organizationId are required'
-        });
-      }
-
-      // Run both aggregations in parallel
-      const [reimbursements, clientBillings] = await Promise.all([
-        TripService.calculateReimbursement(organizationId, startDate, endDate),
-        TripService.calculateClientBilling(organizationId, startDate, endDate)
-      ]);
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          employeeReimbursements: reimbursements,
-          clientBillings: clientBillings
-        }
-      });
-
-    } catch (error) {
-      logger.error('Error calculating invoice analytics', { error: error.message });
-      return res.status(500).json({
+    if (!startDate || !endDate || !organizationId) {
+      return res.status(400).json({
         success: false,
-        message: error.message || 'Internal server error'
+        code: 'VALIDATION_ERROR',
+        message: 'startDate, endDate, and organizationId are required'
       });
     }
-  }
+
+    const [reimbursements, clientBillings] = await Promise.all([
+      TripService.calculateReimbursement(organizationId, startDate, endDate),
+      TripService.calculateClientBilling(organizationId, startDate, endDate)
+    ]);
+
+    logger.business('Trip Analytics Retrieved', {
+      event: 'trip_analytics_retrieved',
+      organizationId,
+      dateRange: { startDate, endDate },
+      reimbursementCount: reimbursements.length,
+      billingCount: clientBillings.length,
+      timestamp: new Date().toISOString()
+    });
+
+    return res.status(200).json({
+      success: true,
+      code: 'ANALYTICS_RETRIEVED',
+      data: {
+        employeeReimbursements: reimbursements,
+        clientBillings: clientBillings
+      }
+    });
+  });
 }
 
 module.exports = new TripController();

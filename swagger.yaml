@@ -1,0 +1,101 @@
+openapi: 3.0.0
+info:
+  title: CareNest API
+  description: Comprehensive API for CareNest Workforce & Invoicing Platform
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Development Server
+  - url: https://api.carenest.com
+    description: Production Server
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Error description
+        error:
+          type: string
+          example: Detailed error info
+    Success:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+paths:
+  /login:
+    post:
+      summary: Authenticate user
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+  /organization/create:
+    post:
+      summary: Create a new organization
+      tags:
+        - Organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - organizationName
+                - email
+              properties:
+                organizationName:
+                  type: string
+                email:
+                  type: string
+      responses:
+        '200':
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'

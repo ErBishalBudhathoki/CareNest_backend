@@ -1,0 +1,9 @@
+{
+  "phaseName": "shifts",
+  "displayName": "Shifts",
+  "description": "Shift scheduling and assignments",
+  "entities": ["shift"],
+  "dependencies": ["organizations", "clients", "workers"],
+  "testSuites": [],
+  "priority": "high"
+}

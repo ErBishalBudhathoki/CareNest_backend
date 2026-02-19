@@ -1,0 +1,27 @@
+{
+  "phaseName": "analytics",
+  "displayName": "Predictive Analytics",
+  "description": "Predictive insights, analytics, and reporting",
+  "entities": [
+    "predictions",
+    "analyticsData",
+    "insights",
+    "reports",
+    "dashboards"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers",
+    "clients",
+    "shifts",
+    "invoices"
+  ],
+  "testSuites": [
+    "prediction-generation",
+    "analytics-processing",
+    "insight-creation",
+    "report-generation"
+  ],
+  "priority": "medium"
+}

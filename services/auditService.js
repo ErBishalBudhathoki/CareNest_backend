@@ -31,7 +31,14 @@ const AUDIT_ACTIONS = {
   LOGOUT: 'LOGOUT',
   EXPORT: 'EXPORT',
   IMPORT: 'IMPORT',
-  VIEW: 'VIEW'
+  VIEW: 'VIEW',
+  // Auth specific
+  USER_CREATED: 'USER_CREATED',
+  USER_LOGIN: 'USER_LOGIN',
+  PHOTO_UPLOADED: 'PHOTO_UPLOADED',
+  OTP_GENERATED: 'OTP_GENERATED',
+  OTP_VERIFIED: 'OTP_VERIFIED',
+  PASSWORD_UPDATED: 'PASSWORD_UPDATED'
 };
 
 /**
@@ -111,7 +118,7 @@ async function createAuditLog(auditData) {
 
     // Insert audit log
     const result = await AuditLog.create(auditEntry);
-    
+
     logger.info('Audit log created', {
       action,
       entityType,
@@ -120,7 +127,7 @@ async function createAuditLog(auditData) {
       organizationId,
       auditId: result._id
     });
-    
+
     return {
       success: true,
       auditId: result._id,
@@ -299,7 +306,7 @@ async function getAuditStatistics(organizationId, options = {}) {
 
     // Build base query
     const baseQuery = { organizationId };
-    
+
     if (startDate || endDate) {
       baseQuery.timestamp = {};
       if (startDate) baseQuery.timestamp.$gte = new Date(startDate);
@@ -467,7 +474,7 @@ function sanitizeData(data) {
  */
 function getObjectDifferences(oldObj, newObj) {
   const differences = {};
-  
+
   // Check for changed or new fields
   Object.keys(newObj).forEach(key => {
     if (JSON.stringify(oldObj[key]) !== JSON.stringify(newObj[key])) {

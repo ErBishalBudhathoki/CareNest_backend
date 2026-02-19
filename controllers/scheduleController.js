@@ -6,6 +6,7 @@
  */
 
 const SchedulerService = require('../services/schedulerService');
+const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 
 class ScheduleController {
@@ -13,323 +14,167 @@ class ScheduleController {
      * Create a new shift
      * POST /api/schedule/shift
      */
-    static async createShift(req, res) {
-        try {
-            const shiftData = req.body;
+    static createShift = catchAsync(async (req, res) => {
+        const shiftData = req.body;
 
-            if (!shiftData.organizationId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'organizationId is required'
-                });
-            }
-
-            const result = await SchedulerService.createShift(shiftData);
-
-            if (!result.success) {
-                return res.status(result.code || 400).json(result);
-            }
-
-            res.status(201).json(result);
-        } catch (error) {
-            logger.error('Error in createShift controller', {
-                error: error.message,
-                stack: error.stack
-            });
-            res.status(500).json({
+        // Validation (handled by route, but safety check)
+        if (!shiftData.organizationId) {
+            return res.status(400).json({
                 success: false,
-                error: 'Failed to create shift'
+                error: 'organizationId is required'
             });
         }
-    }
+
+        const result = await SchedulerService.createShift(shiftData);
+
+        if (!result.success) {
+            return res.status(result.code || 400).json(result);
+        }
+
+        res.status(201).json(result);
+    });
 
     /**
      * Bulk create shifts
      * POST /api/schedule/bulk
      */
-    static async bulkDeploy(req, res) {
-        try {
-            const { shifts, organizationId } = req.body;
+    static bulkDeploy = catchAsync(async (req, res) => {
+        const { shifts, organizationId } = req.body;
 
-            if (!shifts || !Array.isArray(shifts)) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'shifts array is required'
-                });
-            }
-
-            // Ensure all shifts have organizationId
-            const normalizedShifts = shifts.map(s => ({
-                ...s,
-                organizationId: s.organizationId || organizationId
-            }));
-
-            const result = await SchedulerService.bulkCreateShifts(normalizedShifts);
-
-            res.status(result.success ? 201 : 207).json(result);
-        } catch (error) {
-            logger.error('Error in bulkDeploy controller', {
-                error: error.message,
-                stack: error.stack
-            });
-            res.status(500).json({
+        if (!shifts || !Array.isArray(shifts)) {
+            return res.status(400).json({
                 success: false,
-                error: 'Failed to create shifts in bulk'
+                error: 'shifts array is required'
             });
         }
-    }
+
+        const normalizedShifts = shifts.map(s => ({
+            ...s,
+            organizationId: s.organizationId || organizationId
+        }));
+
+        const result = await SchedulerService.bulkCreateShifts(normalizedShifts);
+
+        res.status(result.success ? 201 : 207).json(result);
+    });
 
     /**
-     * Get AI-powered employee recommendations for a shift
+     * Get AI-powered employee recommendations
      * GET /api/schedule/recommendations
      */
-    static async getRecommendations(req, res) {
-        try {
-            const {
-                organizationId,
-                clientEmail,
-                startTime,
-                endTime,
-                requiredSkills,
-                latitude,
-                longitude
-            } = req.query;
+    static getRecommendations = catchAsync(async (req, res) => {
+        const {
+            organizationId,
+            clientEmail,
+            startTime,
+            endTime,
+            requiredSkills,
+            latitude,
+            longitude
+        } = req.query;
 
-            if (!organizationId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'organizationId is required'
-                });
-            }
+        const shiftDetails = {
+            organizationId,
+            startTime: new Date(startTime),
+            endTime: new Date(endTime),
+            clientEmail,
+            requiredSkills: requiredSkills ? requiredSkills.split(',') : [],
+            location: (latitude && longitude) ? {
+                type: 'Point',
+                coordinates: [parseFloat(longitude), parseFloat(latitude)]
+            } : null
+        };
 
-            const shiftDetails = {
-                organizationId,
-                clientEmail,
-                startTime: startTime ? new Date(startTime) : new Date(),
-                endTime: endTime ? new Date(endTime) : new Date(Date.now() + 8 * 60 * 60 * 1000),
-                requiredSkills: requiredSkills ? requiredSkills.split(',') : [],
-                location: latitude && longitude ? {
-                    type: 'Point',
-                    coordinates: [parseFloat(longitude), parseFloat(latitude)]
-                } : null
-            };
+        const result = await SchedulerService.findBestMatch(shiftDetails);
 
-            const result = await SchedulerService.findBestMatch(shiftDetails);
-
-            res.status(200).json(result);
-        } catch (error) {
-            logger.error('Error in getRecommendations controller', {
-                error: error.message,
-                stack: error.stack
-            });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get recommendations'
-            });
-        }
-    }
+        res.json(result);
+    });
 
     /**
-     * Get shifts for an organization
-     * GET /api/schedule/shifts/:organizationId
-     */
-    static async getShifts(req, res) {
-        try {
-            const { organizationId } = req.params;
-            const { startDate, endDate, status, employeeEmail, clientEmail } = req.query;
-
-            if (!organizationId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'organizationId is required'
-                });
-            }
-
-            const filters = {};
-            if (startDate) filters.startDate = startDate;
-            if (endDate) filters.endDate = endDate;
-            if (status) filters.status = status;
-            if (employeeEmail) filters.employeeEmail = employeeEmail;
-            if (clientEmail) filters.clientEmail = clientEmail;
-
-            const result = await SchedulerService.getShifts(organizationId, filters);
-
-            res.status(200).json(result);
-        } catch (error) {
-            logger.error('Error in getShifts controller', {
-                error: error.message,
-                stack: error.stack,
-                organizationId: req.params.organizationId
-            });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get shifts'
-            });
-        }
-    }
-
-    /**
-     * Update a shift
-     * PUT /api/schedule/shift/:id
-     */
-    static async updateShift(req, res) {
-        try {
-            const { id } = req.params;
-            const updateData = req.body;
-
-            if (!id) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Shift ID is required'
-                });
-            }
-
-            const result = await SchedulerService.updateShift(id, updateData);
-
-            if (!result.success) {
-                return res.status(result.code || 400).json(result);
-            }
-
-            res.status(200).json(result);
-        } catch (error) {
-            logger.error('Error in updateShift controller', {
-                error: error.message,
-                stack: error.stack,
-                shiftId: req.params.id
-            });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to update shift'
-            });
-        }
-    }
-
-    /**
-     * Delete/cancel a shift
-     * DELETE /api/schedule/shift/:id
-     */
-    static async deleteShift(req, res) {
-        try {
-            const { id } = req.params;
-
-            if (!id) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Shift ID is required'
-                });
-            }
-
-            const result = await SchedulerService.deleteShift(id);
-
-            if (!result.success) {
-                return res.status(result.code || 400).json(result);
-            }
-
-            res.status(200).json(result);
-        } catch (error) {
-            logger.error('Error in deleteShift controller', {
-                error: error.message,
-                stack: error.stack,
-                shiftId: req.params.id
-            });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to delete shift'
-            });
-        }
-    }
-
-    /**
-     * Deploy a roster template
-     * POST /api/schedule/deploy-template
-     */
-    static async deployTemplate(req, res) {
-        try {
-            const { templateId, startDate, endDate, createdBy } = req.body;
-
-            if (!templateId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'templateId is required'
-                });
-            }
-
-            if (!startDate || !endDate) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'startDate and endDate are required'
-                });
-            }
-
-            const result = await SchedulerService.deployRosterTemplate(
-                templateId,
-                startDate,
-                endDate,
-                createdBy
-            );
-
-            if (!result.success) {
-                return res.status(result.code || 400).json(result);
-            }
-
-            res.status(201).json(result);
-        } catch (error) {
-            logger.error('Error in deployTemplate controller', {
-                error: error.message,
-                stack: error.stack
-            });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to deploy template'
-            });
-        }
-    }
-
-    /**
-     * Check conflicts for a proposed shift
+     * Check for conflicts
      * POST /api/schedule/check-conflicts
      */
-    static async checkConflicts(req, res) {
-        try {
-            const { employeeId, employeeEmail, startTime, endTime, excludeShiftId } = req.body;
+    static checkConflicts = catchAsync(async (req, res) => {
+        const { employeeId, employeeEmail, startTime, endTime, excludeShiftId } = req.body;
 
-            if (!startTime || !endTime) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'startTime and endTime are required'
-                });
-            }
+        const result = await SchedulerService.detectConflicts(
+            employeeId,
+            employeeEmail,
+            new Date(startTime),
+            new Date(endTime),
+            excludeShiftId
+        );
 
-            if (!employeeId && !employeeEmail) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Either employeeId or employeeEmail is required'
-                });
-            }
+        res.json({ success: true, ...result });
+    });
 
-            const result = await SchedulerService.detectConflicts(
-                employeeId,
-                employeeEmail,
-                new Date(startTime),
-                new Date(endTime),
-                excludeShiftId
-            );
+    /**
+     * Get shifts
+     * GET /api/schedule/shifts/:organizationId
+     */
+    static getShifts = catchAsync(async (req, res) => {
+        const { organizationId } = req.params;
+        const filters = req.query;
 
-            res.status(200).json({
-                success: true,
-                ...result
-            });
-        } catch (error) {
-            logger.error('Error in checkConflicts controller', {
-                error: error.message,
-                stack: error.stack
-            });
-            res.status(500).json({
-                success: false,
-                error: 'Failed to check conflicts'
-            });
+        const result = await SchedulerService.getShifts(organizationId, filters);
+
+        res.json(result);
+    });
+
+    /**
+     * Update shift
+     * PUT /api/schedule/shift/:id
+     */
+    static updateShift = catchAsync(async (req, res) => {
+        const { id } = req.params;
+        const updateData = req.body;
+
+        const result = await SchedulerService.updateShift(id, updateData);
+
+        if (!result.success) {
+            return res.status(result.code || 400).json(result);
         }
-    }
+
+        res.json(result);
+    });
+
+    /**
+     * Delete shift
+     * DELETE /api/schedule/shift/:id
+     */
+    static deleteShift = catchAsync(async (req, res) => {
+        const { id } = req.params;
+
+        const result = await SchedulerService.deleteShift(id);
+
+        if (!result.success) {
+            return res.status(result.code || 400).json(result);
+        }
+
+        res.json(result);
+    });
+
+    /**
+     * Deploy roster template
+     * POST /api/schedule/deploy-template
+     */
+    static deployTemplate = catchAsync(async (req, res) => {
+        const { templateId, startDate, endDate } = req.body;
+        const createdBy = req.user.id;
+
+        const result = await SchedulerService.deployRosterTemplate(
+            templateId,
+            startDate,
+            endDate,
+            createdBy
+        );
+
+        if (!result.success) {
+            return res.status(result.code || 400).json(result);
+        }
+
+        res.json(result);
+    });
 }
 
 module.exports = ScheduleController;

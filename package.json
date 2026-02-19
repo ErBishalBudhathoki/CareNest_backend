@@ -9,9 +9,27 @@
     "start:prod": "cp .env.production .env && NODE_ENV=production node server.js",
     "dev": "cp .env.development .env && NODE_ENV=development nodemon server.js",
     "prod": "cp .env.production .env && NODE_ENV=production node server.js",
-    "test": "jest",
+    "test": "jest --testPathIgnorePatterns=\"integration|seed-data\"",
+    "test:unit": "jest --testPathIgnorePatterns=\"integration|seed-data\"",
+    "test:integration": "jest tests/integration/eventFlow.test.js --runInBand --forceExit",
+    "test:integration:full": "jest --testPathPatterns=integration --runInBand --forceExit",
+    "test:e2e": "jest --testPathPatterns=e2e",
+    "test:all": "jest",
     "health-check": "curl $BACKEND_URL/health || curl $PRODUCTION_URL/health || echo 'Server not responding'",
-    "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'"
+    "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'",
+    "db:init-fresh": "node scripts/init_fresh_database.js",
+    "db:verify": "node scripts/verify_database.js",
+    "db:seed": "node scripts/seed_reference_data.js",
+    "secrets:upload:dev": "node scripts/upload-secrets.js dev",
+    "secrets:upload:prod": "node scripts/upload-secrets.js prod",
+    "secrets:upload:all": "node scripts/upload-secrets.js all",
+    "secrets:list:dev": "node scripts/upload-secrets.js list-dev",
+    "secrets:list:prod": "node scripts/upload-secrets.js list-prod",
+    "secrets:cleanup:dev": "node scripts/cleanup-old-secrets.js dev",
+    "secrets:cleanup:prod": "node scripts/cleanup-old-secrets.js prod",
+    "secrets:cleanup:all": "node scripts/cleanup-old-secrets.js all",
+    "secrets:restore:dev": "node scripts/restore-individual-secrets.js dev",
+    "secrets:restore:prod": "node scripts/restore-individual-secrets.js prod"
   },
   "keywords": [
     "invoice",
@@ -25,6 +43,7 @@
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
+    "@google-cloud/secret-manager": "^5.6.0",
     "@google-cloud/vertexai": "^1.10.0",
     "argon2": "^0.44.0",
     "axios": "^1.11.0",
@@ -35,14 +54,15 @@
     "dotenv": "^16.5.0",
     "express": "^4.18.2",
     "express-rate-limit": "^8.1.0",
+    "express-validator": "^7.3.1",
     "firebase-admin": "^12.0.0",
     "firebase-functions": "^7.0.3",
     "helmet": "^8.1.0",
     "iconv-lite": "^0.6.3",
     "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^9.1.5",
     "mongodb": "^6.12.0",
+    "mongoose": "^9.1.5",
     "multer": "^2.0.2",
     "multer-s3": "^3.0.1",
     "node-cache": "^5.1.2",
@@ -52,33 +72,37 @@
     "serverless-http": "^3.2.0",
     "stripe": "^20.2.0",
     "uuid": "^11.1.0",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "eslint": "^9.39.2",
-    "firebase-tools": "^15.1.0",
+    "eslint": "^9.18.0",
+    "firebase-tools": "^15.6.0",
     "globals": "^17.0.0",
-    "hono": "^4.11.3",
     "ioredis-mock": "^8.13.1",
     "jest": "^30.2.0",
-    "nodemon": "^3.0.2",
-    "picomatch": "^4.0.3",
-    "supertest": "^7.1.4",
-    "typescript": "^5.9.3"
+    "nodemon": "^3.1.11",
+    "supertest": "^7.1.4"
   },
   "overrides": {
     "test-exclude": "^7.0.0",
-    "gcp-metadata": "^6.1.1"
+    "gcp-metadata": "^6.1.1",
+    "minimatch": "^10.2.1",
+    "glob": "^11.0.0",
+    "ajv": "^8.18.0"
   },
   "jest": {
     "testEnvironment": "node",
     "testMatch": [
       "**/tests/**/*.test.js"
     ],
+    "setupFilesAfterEnv": [
+      "./tests/setup.js"
+    ],
     "clearMocks": true
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   }
 }

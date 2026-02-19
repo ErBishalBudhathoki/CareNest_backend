@@ -1,5 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param, query } = require('express-validator');
+const { handleValidationErrors } = require('../middleware/validation');
+const { authenticateUser } = require('../middleware/auth');
+const { 
+  organizationContextMiddleware, 
+  requireOrganizationMatch 
+} = require('../middleware/organizationContext');
 const logger = require('../config/logger');
 const {
   validatePrice,
@@ -10,8 +18,68 @@ const {
   getPriceValidationStats
 } = require('../services/priceValidationService');
 
+// Rate limiting configurations
+const priceValidationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many price validation requests.' }
+});
+
+const batchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Too many batch validation requests.' }
+});
+
+// Validation rules
+const validatePriceValidation = [
+  body('supportItemNumber').trim().notEmpty().withMessage('Support item number is required'),
+  body('supportItemNumber').isLength({ max: 50 }).withMessage('Support item number too long'),
+  body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('clientId').optional().isMongoId().withMessage('Invalid client ID'),
+  body('serviceDate').optional().isISO8601().withMessage('Invalid service date'),
+  body('location').optional().trim().isLength({ max: 100 }),
+  body('duration').optional().isFloat({ min: 0 }).withMessage('Duration must be positive')
+];
+
+const validateBatchValidation = [
+  body('items').isArray({ min: 1 }).withMessage('Items must be a non-empty array'),
+  body('items.*.supportItemNumber').trim().notEmpty().withMessage('Each item must have a support item number'),
+  body('items.*.price').isFloat({ min: 0 }).withMessage('Each item must have a valid price')
+];
+
+const getPriceCapsValidation = [
+  param('supportItemNumber').trim().notEmpty().withMessage('Support item number is required'),
+  query('location').optional().trim().isLength({ max: 100 }),
+  query('serviceDate').optional().isISO8601().withMessage('Invalid service date')
+];
+
+const quoteRequiredValidation = [
+  param('supportItemNumber').trim().notEmpty().withMessage('Support item number is required'),
+  query('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
+  query('location').optional().trim().isLength({ max: 100 })
+];
+
+const validateInvoiceValidation = [
+  body('invoiceData').isObject().withMessage('Invoice data is required'),
+  body('invoiceData.organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('invoiceData.clientId').isMongoId().withMessage('Valid client ID is required'),
+  body('invoiceData.lineItems').optional().isArray().withMessage('Line items must be an array')
+];
+
+const statsValidation = [
+  query('organizationId').optional().isMongoId().withMessage('Invalid organization ID'),
+  query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  query('endDate').optional().isISO8601().withMessage('Invalid end date')
+];
+
+// Apply authentication to all routes
+router.use(authenticateUser);
+router.use(organizationContextMiddleware);
+
 // Validate a single price
-router.post('/api/price-validation/validate', async (req, res) => {
+router.post('/api/price-validation/validate', priceValidationLimiter, requireOrganizationMatch('organizationId'), validatePriceValidation, handleValidationErrors, async (req, res) => {
   try {
     const {
       supportItemNumber,
@@ -51,7 +119,7 @@ router.post('/api/price-validation/validate', async (req, res) => {
 });
 
 // Validate multiple prices in batch
-router.post('/api/price-validation/validate-batch', async (req, res) => {
+router.post('/api/price-validation/validate-batch', batchLimiter, validateBatchValidation, handleValidationErrors, async (req, res) => {
   try {
     const { items } = req.body;
     const result = await validatePriceBatch(items);
@@ -67,7 +135,7 @@ router.post('/api/price-validation/validate-batch', async (req, res) => {
 });
 
 // Get price caps for a support item
-router.get('/api/price-validation/caps/:supportItemNumber', async (req, res) => {
+router.get('/api/price-validation/caps/:supportItemNumber', priceValidationLimiter, getPriceCapsValidation, handleValidationErrors, async (req, res) => {
   try {
     const { supportItemNumber } = req.params;
     const { location, serviceDate } = req.query;
@@ -91,7 +159,7 @@ router.get('/api/price-validation/caps/:supportItemNumber', async (req, res) => 
 });
 
 // Check if quote is required for a support item
-router.get('/api/price-validation/quote-required/:supportItemNumber', async (req, res) => {
+router.get('/api/price-validation/quote-required/:supportItemNumber', priceValidationLimiter, quoteRequiredValidation, handleValidationErrors, async (req, res) => {
   try {
     const { supportItemNumber } = req.params;
     const { price, location } = req.query;
@@ -115,7 +183,7 @@ router.get('/api/price-validation/quote-required/:supportItemNumber', async (req
 });
 
 // Validate an entire invoice
-router.post('/api/price-validation/validate-invoice', async (req, res) => {
+router.post('/api/price-validation/validate-invoice', priceValidationLimiter, requireOrganizationMatch('invoiceData.organizationId'), validateInvoiceValidation, handleValidationErrors, async (req, res) => {
   try {
     const { invoiceData } = req.body;
     const result = await validateInvoice(invoiceData);
@@ -131,7 +199,7 @@ router.post('/api/price-validation/validate-invoice', async (req, res) => {
 });
 
 // Get price validation statistics
-router.get('/api/price-validation/stats', async (req, res) => {
+router.get('/api/price-validation/stats', priceValidationLimiter, statsValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId, startDate, endDate } = req.query;
     

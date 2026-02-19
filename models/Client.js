@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 
 const clientSchema = new mongoose.Schema({
@@ -7,7 +6,8 @@ const clientSchema = new mongoose.Schema({
     required: true,
     unique: true,
     lowercase: true,
-    trim: true
+    trim: true,
+    index: true
   },
   clientFirstName: {
     type: String,
@@ -73,22 +73,37 @@ const clientSchema = new mongoose.Schema({
     default: {}
   },
   organizationId: {
-    type: String,
-    ref: 'Organization'
+    type: String, // Ideally ObjectId ref 'Organization', keeping String for legacy compatibility
+    required: true,
+    index: true
   },
   ndisItem: {
     type: Object
   },
   isActive: {
     type: Boolean,
-    default: true
+    default: true,
+    index: true
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  collection: 'clients', // Explicit collection name if needed, usually lowercase plural
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+      
+      if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
+      if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      return ret;
+    }
+  }
 });
 
 // Indexes
 clientSchema.index({ clientLastName: 1, clientFirstName: 1 });
-clientSchema.index({ organizationId: 1 });
+// clientSchema.index({ organizationId: 1 }); // Removed duplicate index
+// clientSchema.index({ clientEmail: 1 }); // Removed duplicate index
 
 module.exports = mongoose.model('Client', clientSchema);

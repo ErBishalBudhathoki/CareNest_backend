@@ -1,0 +1,25 @@
+{
+  "phaseName": "scheduling",
+  "displayName": "Auto Scheduling",
+  "description": "Shift matching, auto-scheduling, and optimization",
+  "entities": [
+    "shifts",
+    "shiftMatches",
+    "schedules",
+    "assignments",
+    "optimizations"
+  ],
+  "dependencies": [
+    "organizations",
+    "users",
+    "workers",
+    "clients"
+  ],
+  "testSuites": [
+    "shift-creation",
+    "worker-matching",
+    "shift-assignment",
+    "schedule-optimization"
+  ],
+  "priority": "high"
+}

@@ -1,0 +1,14 @@
+{
+  "preset": "large",
+  "description": "Performance testing with large data volume",
+  "entityCounts": {
+    "organization": 15,
+    "auth": 400,
+    "client": 100,
+    "shift": 800,
+    "invoice": 400,
+    "timesheet": 600,
+    "expense": 300
+  },
+  "relationshipDensity": 0.85
+}

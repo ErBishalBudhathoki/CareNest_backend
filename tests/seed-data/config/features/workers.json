@@ -1,0 +1,9 @@
+{
+  "phaseName": "workers",
+  "displayName": "Workers",
+  "description": "Worker profiles and assignments",
+  "entities": ["worker"],
+  "dependencies": ["organizations", "users"],
+  "testSuites": [],
+  "priority": "critical"
+}

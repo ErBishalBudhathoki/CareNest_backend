@@ -1,915 +1,724 @@
 const jwt = require('jsonwebtoken');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { createLogger } = require('../utils/logger');
+const { validationResult } = require('express-validator');
+const catchAsync = require('../utils/catchAsync');
+const logger = require('../config/logger');
+const User = require('../models/User');
+const FcmToken = require('../models/FcmToken');
+const UserOrganization = require('../models/UserOrganization');
+const Organization = require('../models/Organization');
+const authService = require('../services/authService');
 const SecureErrorHandler = require('../utils/errorHandler');
-const InputValidator = require('../utils/inputValidator');
-const { generateOTP, verifyOTP, hashPassword } = require('../utils/cryptoHelpers');
 const { messaging } = require('../firebase-admin-config');
-
-const logger = createLogger('SecureAuthController');
-const uri = process.env.MONGODB_URI;
+const keyRotationService = require('../services/jwtKeyRotationService');
 
 /**
  * Secure Authentication Controller
  * Handles all authentication operations with comprehensive security measures
+ * Migrated to Mongoose and authService
  */
 class SecureAuthController {
   /**
    * User registration with enhanced security
    */
-  static async register(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      // Validate request body size
-      const bodySizeValidation = InputValidator.validateRequestSize(req.body);
-      if (!bodySizeValidation.isValid) {
-        logger.security('Request body too large', { 
-          ip: req.ip, 
-          size: JSON.stringify(req.body).length 
-        });
-        return res.status(413).json(
-          SecureErrorHandler.createErrorResponse(
-            'Request body too large',
-            413,
-            'BODY_TOO_LARGE'
-          )
-        );
-      }
-
-      // Extract and validate input
-      const { email, password, confirmPassword, firstName, lastName, organizationCode, phone } = req.body;
-
-      // Validate required fields
-      if (!email || !password || !confirmPassword || !firstName || !lastName) {
-        logger.security('Missing required registration fields', { ip: req.ip, email });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'All required fields must be provided',
-            400,
-            'MISSING_FIELDS'
-          )
-        );
-      }
-
-      // Validate email
-      const emailValidation = InputValidator.validateEmail(email);
-      if (!emailValidation.isValid) {
-        logger.security('Invalid email format in registration', { ip: req.ip, email });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            emailValidation.message,
-            400,
-            'INVALID_EMAIL'
-          )
-        );
-      }
-
-      // Validate password
-      const passwordValidation = InputValidator.validatePassword(password);
-      if (!passwordValidation.isValid) {
-        logger.security('Weak password in registration', { ip: req.ip, email: emailValidation.sanitized });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            passwordValidation.message,
-            400,
-            'WEAK_PASSWORD'
-          )
-        );
-      }
-
-      // Validate password confirmation
-      if (password !== confirmPassword) {
-        logger.security('Password confirmation mismatch', { ip: req.ip, email: emailValidation.sanitized });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Passwords do not match',
-            400,
-            'PASSWORD_MISMATCH'
-          )
-        );
-      }
-
-      // Validate names
-      const firstNameValidation = InputValidator.validateName(firstName);
-      const lastNameValidation = InputValidator.validateName(lastName);
-      
-      if (!firstNameValidation.isValid || !lastNameValidation.isValid) {
-        logger.security('Invalid name format in registration', { ip: req.ip, email: emailValidation.sanitized });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid name format',
-            400,
-            'INVALID_NAME'
-          )
-        );
-      }
-
-      // Validate phone if provided
-      let phoneValidation = { isValid: true, sanitized: null };
-      if (phone) {
-        phoneValidation = InputValidator.validatePhone(phone);
-        if (!phoneValidation.isValid) {
-          logger.security('Invalid phone format in registration', { ip: req.ip, email: emailValidation.sanitized });
-          return res.status(400).json(
-            SecureErrorHandler.createErrorResponse(
-              phoneValidation.message,
-              400,
-              'INVALID_PHONE'
-            )
-          );
-        }
-      }
-
-      // Validate organization code if provided
-      let orgCodeValidation = { isValid: true, sanitized: null };
-      if (organizationCode) {
-        orgCodeValidation = InputValidator.validateOrganizationCode(organizationCode);
-        if (!orgCodeValidation.isValid) {
-          logger.security('Invalid organization code in registration', { ip: req.ip, email: emailValidation.sanitized });
-          return res.status(400).json(
-            SecureErrorHandler.createErrorResponse(
-              orgCodeValidation.message,
-              400,
-              'INVALID_ORG_CODE'
-            )
-          );
-        }
-      }
-
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-
-      // Check if user already exists
-      const existingUser = await usersCollection.findOne({ 
-        email: emailValidation.sanitized 
-      });
-      
-      if (existingUser) {
-        logger.security('Registration attempt with existing email', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized 
-        });
-        return res.status(409).json(
-          SecureErrorHandler.createErrorResponse(
-            'User with this email already exists',
-            409,
-            'USER_EXISTS'
-          )
-        );
-      }
-
-      // Hash password
-      const hashedPassword = await hashPassword(password);
-      
-      // Generate user ID
-      const userId = new ObjectId().toString();
-      
-      // Create user object
-      const newUser = {
-        userId,
-        email: emailValidation.sanitized,
-        password: hashedPassword,
-        firstName: firstNameValidation.sanitized,
-        lastName: lastNameValidation.sanitized,
-        phone: phoneValidation.sanitized,
-        organizationCode: orgCodeValidation.sanitized,
-        roles: ['user'],
-        jobRole: null, // Initialize jobRole
-        isActive: true,
-        isEmailVerified: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastLogin: null,
-        loginAttempts: 0,
-        lockUntil: null
-      };
-
-      // Insert user
-      await usersCollection.insertOne(newUser);
-
-      // Generate email verification OTP
-      const otpResult = await generateOTP(emailValidation.sanitized, 'email_verification');
-      
-      logger.info('User registered successfully', {
-        userId,
-        email: emailValidation.sanitized,
-        ip: req.ip
-      });
-
-      res.status(201).json(
-        SecureErrorHandler.createSuccessResponse(
-          {
-            userId,
-            email: emailValidation.sanitized,
-            firstName: firstNameValidation.sanitized,
-            lastName: lastNameValidation.sanitized,
-            verificationKey: otpResult.verificationKey
-          },
-          'User registered successfully. Please verify your email.'
-        )
-      );
-
-    } catch (error) {
-      logger.error('Registration error', {
-        error: error.message,
-        stack: error.stack,
-        ip: req.ip
-      });
-      
-      res.status(500).json(
+  register = catchAsync(async (req, res) => {
+    // 1. VALIDATION CHECK (express-validator)
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'REGISTRATION_ERROR'
+          'Validation failed',
+          400,
+          'VALIDATION_ERROR',
+          errors.array()
         )
       );
-    } finally {
-      await client.close();
     }
-  }
+
+    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, organizationName, isOwner, phone } = req.body;
+
+    // 2. LOGIC CHECK
+    if (password !== confirmPassword) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Passwords do not match',
+          400,
+          'PASSWORD_MISMATCH'
+        )
+      );
+    }
+
+    // 3. CHECK EXISTANCE
+    const existingUser = await authService.checkEmailExists(email);
+    if (existingUser) {
+      return res.status(409).json(
+        SecureErrorHandler.createErrorResponse(
+          'User with this email already exists',
+          409,
+          'USER_EXISTS'
+        )
+      );
+    }
+
+    // 4. CREATE USER
+    const newUser = await authService.createUser({
+      email,
+      password,
+      firstName,
+      lastName,
+      organizationCode,
+      organizationId: organizationId || null,
+      phone: phone || null,
+      role: isOwner ? 'admin' : 'user'
+    });
+
+    let createdOrganization = null;
+
+    // 5. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
+    if (isOwner || (!organizationId && !organizationCode)) {
+      try {
+        // Generate unique 6-character organization code
+        const generateOrgCode = () => {
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+          let code = '';
+          for (let i = 0; i < 6; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          return code;
+        };
+
+        let orgCode = generateOrgCode();
+        // Ensure uniqueness
+        while (await Organization.findOne({ code: orgCode })) {
+          orgCode = generateOrgCode();
+        }
+
+        createdOrganization = await Organization.create({
+          name: organizationName || `${firstName} ${lastName}'s Organization`,
+          code: orgCode,
+          ownerEmail: email,
+          contactDetails: {
+            email: email,
+            phone: phone || null
+          },
+          isActive: true,
+          createdAt: new Date()
+        });
+
+        // Update user with organization ID
+        newUser.organizationId = createdOrganization._id.toString();
+        newUser.organizationCode = orgCode;
+        newUser.role = 'admin';
+        await newUser.save();
+
+        // Create UserOrganization with owner role
+        await UserOrganization.create({
+          userId: newUser._id.toString(),
+          organizationId: createdOrganization._id.toString(),
+          role: 'owner',
+          permissions: ['all'],
+          isActive: true,
+          joinedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+
+        logger.info('Auto-created organization for new owner', {
+          userId: newUser._id.toString(),
+          organizationId: createdOrganization._id.toString(),
+          organizationCode: orgCode
+        });
+      } catch (orgError) {
+        logger.error('Failed to auto-create organization', {
+          userId: newUser._id.toString(),
+          error: orgError.message
+        });
+        // Don't fail registration, but log the error
+      }
+    }
+    // 5. CREATE USER ORGANIZATION RECORD (Zero-Trust requirement)
+    else if (organizationId) {
+      try {
+        await UserOrganization.create({
+          userId: newUser._id.toString(),
+          organizationId: organizationId,
+          role: 'user',
+          permissions: ['read', 'write'],
+          isActive: true,
+          joinedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+        logger.info('UserOrganization record created', {
+          userId: newUser._id.toString(),
+          organizationId: organizationId
+        });
+      } catch (orgError) {
+        logger.error('Failed to create UserOrganization record', {
+          userId: newUser._id.toString(),
+          organizationId: organizationId,
+          error: orgError.message
+        });
+      }
+    }
+
+    // 6. GENERATE OTP
+    await authService.generateOTP(email);
+
+    logger.business('User registered', {
+      action: 'USER_REGISTERED',
+      userId: newUser._id.toString(),
+      email: newUser.email,
+      ip: req.ip
+    });
+
+    res.status(201).json(
+      SecureErrorHandler.createSuccessResponse(
+        {
+          userId: newUser._id.toString(),
+          email: newUser.email,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          ...(createdOrganization && {
+            organization: {
+              id: createdOrganization._id.toString(),
+              name: createdOrganization.name,
+              code: createdOrganization.code
+            }
+          }),
+          organizationId: newUser.organizationId
+        },
+        'User registered successfully. Please verify your email.'
+      )
+    );
+  });
 
   /**
    * Register FCM Token for push notifications
    */
-  static async registerFcmToken(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      const email = req.body?.email || req.body?.userEmail;
-      let { organizationId, fcmToken, deviceId, deviceInfo } = req.body || {};
+  registerFcmToken = catchAsync(async (req, res) => {
+    const email = req.body?.email || req.body?.userEmail;
+    let { organizationId, fcmToken, deviceId, deviceInfo } = req.body || {};
 
-      if (!email || !fcmToken) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Email and FCM Token are required',
-            400,
-            'MISSING_FIELDS'
-          )
-        );
-      }
-
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-      const fcmTokensCollection = db.collection('fcmTokens');
-
-      if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.trim() === '') {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid FCM token provided',
-            400,
-            'INVALID_FCM_TOKEN'
-          )
-        );
-      }
-
-      const user = await usersCollection.findOne(
-        organizationId ? { email: email, organizationId } : { email: email },
-        { projection: { email: 1, organizationId: 1 } }
-      );
-
-      if (!user) {
-        return res.status(404).json(
-          SecureErrorHandler.createErrorResponse(
-            'User not found',
-            404,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      if (!organizationId) {
-        organizationId = user.organizationId;
-      }
-
-      try {
-        await messaging.send(
-          {
-            token: fcmToken,
-            data: { type: 'token_verification' },
-            android: { priority: 'normal' },
-            apns: { headers: { 'apns-priority': '5' } }
-          },
-          true
-        );
-      } catch (error) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            `Invalid FCM token: ${error.message}`,
-            400,
-            'INVALID_FCM_TOKEN'
-          )
-        );
-      }
-
-      const existingToken = await fcmTokensCollection.findOne({ fcmToken: fcmToken });
-      if (
-        existingToken &&
-        (existingToken.userEmail !== email || existingToken.organizationId !== organizationId)
-      ) {
-        await fcmTokensCollection.deleteOne({ fcmToken: fcmToken });
-      }
-
-      const fcmTokenFilter =
-        deviceId && typeof deviceId === 'string' && deviceId.trim() !== ''
-          ? { userEmail: email, organizationId, deviceId: deviceId }
-          : { userEmail: email, organizationId };
-
-      await fcmTokensCollection.updateOne(
-        fcmTokenFilter,
-        {
-          $set: {
-            fcmToken: fcmToken,
-            updatedAt: new Date(),
-            lastValidated: new Date(),
-            deviceId: deviceId || null,
-            deviceInfo: deviceInfo || null
-          },
-          $setOnInsert: { createdAt: new Date() }
-        },
-        { upsert: true }
-      );
-
-      // CRITICAL FIX: Ensure this token is NOT associated with any other user in the login collection
-      // This prevents notifications meant for one user from being sent to a device now used by another
-      await usersCollection.updateMany(
-        { fcmToken: fcmToken, email: { $ne: email } },
-        { $unset: { fcmToken: "" } }
-      );
-
-      // Update user with FCM token
-      const result = await usersCollection.updateOne(
-        organizationId ? { email: email, organizationId } : { email: email },
-        { 
-          $set: { 
-            fcmToken: fcmToken,
-            lastFcmUpdate: new Date(),
-            deviceId: deviceId || null,
-            deviceInfo: deviceInfo || null
-          } 
-        }
-      );
-
-      if (result.matchedCount === 0) {
-        return res.status(404).json(
-          SecureErrorHandler.createErrorResponse(
-            'User not found',
-            404,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      logger.info('FCM token registered successfully', { email, organizationId, deviceId });
-
-      return res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          { updated: true },
-          'FCM token registered successfully'
+    if (!email || !fcmToken) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Email and FCM Token are required',
+          400,
+          'MISSING_FIELDS'
         )
       );
-
-    } catch (error) {
-      logger.error('FCM token registration error', {
-        error: error.message,
-        email: req.body?.email
-      });
-      return SecureErrorHandler.handleError(error, res);
-    } finally {
-      await client.close();
     }
-  }
+
+    // Validate FCM token format basic check
+    if (typeof fcmToken !== 'string' || fcmToken.trim() === '') {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Invalid FCM token provided',
+          400,
+          'INVALID_FCM_TOKEN'
+        )
+      );
+    }
+
+    const user = await User.findOne(
+      organizationId ? { email: email, organizationId } : { email: email }
+    ).select('email organizationId');
+
+    if (!user) {
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
+    }
+
+    if (!organizationId) {
+      organizationId = user.organizationId;
+    }
+
+    // Verify token with Firebase
+    try {
+      await messaging.send(
+        {
+          token: fcmToken,
+          data: { type: 'token_verification' },
+          android: { priority: 'normal' },
+          apns: { headers: { 'apns-priority': '5' } }
+        },
+        true
+      );
+    } catch (error) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          `Invalid FCM token: ${error.message}`,
+          400,
+          'INVALID_FCM_TOKEN'
+        )
+      );
+    }
+
+    // Handle old token clean up
+    const existingToken = await FcmToken.findOne({ fcmToken: fcmToken });
+    if (
+      existingToken &&
+      (existingToken.userEmail !== email || existingToken.organizationId?.toString() !== organizationId?.toString())
+    ) {
+      await FcmToken.deleteOne({ fcmToken: fcmToken });
+    }
+
+    const fcmTokenFilter =
+      deviceId && typeof deviceId === 'string' && deviceId.trim() !== ''
+        ? { userEmail: email, organizationId, deviceId: deviceId }
+        : { userEmail: email, organizationId };
+
+    await FcmToken.updateOne(
+      fcmTokenFilter,
+      {
+        $set: {
+          fcmToken: fcmToken,
+          updatedAt: new Date(),
+          lastValidated: new Date(),
+          deviceId: deviceId || null,
+          deviceInfo: deviceInfo || null
+        },
+        $setOnInsert: { createdAt: new Date() }
+      },
+      { upsert: true }
+    );
+
+    // Ensure token not associated with others
+    await User.updateMany(
+      { fcmToken: fcmToken, email: { $ne: email } },
+      { $unset: { fcmToken: "" } }
+    );
+
+    // Update user
+    await User.updateOne(
+      { email: email },
+      {
+        $set: {
+          fcmToken: fcmToken,
+          lastFcmUpdate: new Date(),
+          deviceId: deviceId || null,
+          deviceInfo: deviceInfo || null
+        }
+      }
+    );
+
+    logger.business('FCM token registered', {
+      action: 'FCM_TOKEN_REGISTERED',
+      email,
+      organizationId,
+      deviceId
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        { updated: true },
+        'FCM token registered successfully'
+      )
+    );
+  });
 
   /**
    * User login with enhanced security
+   * Uses separated collections: login (auth) + users (profile)
    */
-  static async login(req, res) {
-    console.log('=== LOGIN METHOD CALLED ===');
-    console.log('Login method called with:', { email: req.body?.email, hasPassword: !!req.body?.password });
-    console.log('Request body:', req.body);
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      // Validate request body size
-      const bodySizeValidation = InputValidator.validateRequestSize(req.body);
-      if (!bodySizeValidation.isValid) {
-        logger.security('Request body too large in login', { ip: req.ip });
-        return res.status(413).json(
-          SecureErrorHandler.createErrorResponse(
-            'Request body too large',
-            413,
-            'BODY_TOO_LARGE'
-          )
-        );
-      }
+  login = catchAsync(async (req, res) => {
+    // 1. VALIDATION CHECK
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Validation failed',
+          400,
+          'VALIDATION_ERROR',
+          errors.array()
+        )
+      );
+    }
 
-      const { email, password } = req.body;
+    const { email, password } = req.body;
 
-      // Validate required fields
-      if (!email || !password) {
-        logger.security('Missing login credentials', { ip: req.ip, email });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Email and password are required',
-            400,
-            'MISSING_CREDENTIALS'
-          )
-        );
-      }
+    if (!email || !password) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Email and password are required',
+          400,
+          'MISSING_CREDENTIALS'
+        )
+      );
+    }
 
-      // Validate email format
-      const emailValidation = InputValidator.validateEmail(email);
-      if (!emailValidation.isValid) {
-        logger.security('Invalid email format in login', { ip: req.ip, email });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            SecureErrorHandler.GENERIC_AUTH_ERROR,
-            400,
-            'INVALID_CREDENTIALS'
-          )
-        );
-      }
+    // 2. FIND AUTH CREDENTIALS (from login collection)
+    const getAuthCollection = () => {
+      const mongoose = require('mongoose');
+      return mongoose.connection.collection('login');
+    };
+    const getUserCollection = () => {
+      const mongoose = require('mongoose');
+      return mongoose.connection.collection('users');
+    };
 
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
+    const authCollection = getAuthCollection();
+    const userCollection = getUserCollection();
 
-      // Find user
-      const user = await usersCollection.findOne({ 
-        email: emailValidation.sanitized 
+    const authData = await authCollection.findOne({ email: email.toLowerCase() });
+
+    if (!authData) {
+      logger.business('Login attempt with non-existent email', {
+        action: 'LOGIN_FAILED',
+        reason: 'NON_EXISTENT_EMAIL',
+        ip: req.ip,
+        email
       });
+      return res.status(401).json(
+        SecureErrorHandler.createErrorResponse(
+          SecureErrorHandler.GENERIC_AUTH_ERROR,
+          401,
+          'INVALID_CREDENTIALS'
+        )
+      );
+    }
+
+    // 3. CHECK LOCKOUT
+    if (authData.lockUntil && authData.lockUntil > new Date()) {
+      logger.business('Login attempt on locked account', {
+        action: 'LOGIN_FAILED',
+        reason: 'ACCOUNT_LOCKED',
+        ip: req.ip,
+        email: authData.email
+      });
+      return res.status(423).json(
+        SecureErrorHandler.createErrorResponse(
+          'Account is temporarily locked due to multiple failed login attempts',
+          423,
+          'ACCOUNT_LOCKED'
+        )
+      );
+    }
+
+    // 4. CHECK USER STATUS (from users collection)
+    const userProfile = await userCollection.findOne({ email: email.toLowerCase() });
+
+    if (userProfile && userProfile.isActive === false) {
+      return res.status(403).json(
+        SecureErrorHandler.createErrorResponse(
+          'Account is deactivated',
+          403,
+          'ACCOUNT_DISABLED'
+        )
+      );
+    }
+
+    // 5. VERIFY PASSWORD
+    if (!authData.password || !authData.password.startsWith('$2')) {
+      return res.status(401).json(
+        SecureErrorHandler.createErrorResponse(
+          SecureErrorHandler.GENERIC_AUTH_ERROR,
+          401,
+          'INVALID_CREDENTIALS'
+        )
+      );
+    }
+
+    const bcrypt = require('bcryptjs');
+    const isMatch = await bcrypt.compare(password, authData.password);
+
+    if (!isMatch) {
+      // Increment attempts
+      const maxAttempts = 5;
+      const lockDuration = 30 * 60 * 1000; // 30 mins
+
+      const updates = { $inc: { loginAttempts: 1 } };
+
+      // If attempts will exceed max, lock
+      if ((authData.loginAttempts || 0) + 1 >= maxAttempts) {
+        updates.$set = { lockUntil: new Date(Date.now() + lockDuration), loginAttempts: 0 };
+        delete updates.$inc;
+      }
+
+      await authCollection.updateOne({ email: email.toLowerCase() }, updates);
+
+      logger.business('Failed login attempt', {
+        action: 'LOGIN_FAILED',
+        reason: 'INVALID_PASSWORD',
+        ip: req.ip,
+        email: authData.email,
+        attempts: (authData.loginAttempts || 0) + 1
+      });
+
+      return res.status(401).json(
+        SecureErrorHandler.createErrorResponse(
+          SecureErrorHandler.GENERIC_AUTH_ERROR,
+          401,
+          'INVALID_CREDENTIALS'
+        )
+      );
+    }
+
+    // 6. SUCCESS - Get user profile
+    const user = await userCollection.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'User profile not found',
+          500,
+          'PROFILE_NOT_FOUND'
+        )
+      );
+    }
+
+    // 7. Reset attempts and update last login
+    await authCollection.updateOne(
+      { email: email.toLowerCase() },
+      { $set: { loginAttempts: 0, lockUntil: null, lastLogin: new Date() } }
+    );
+
+    // 8. Generate token
+    const userRoles = user.roles && user.roles.length > 0
+      ? user.roles
+      : (user.role ? [user.role] : ['user']);
+
+    const tokenPayload = {
+      userId: user._id?.toString() || user.email,
+      email: user.email,
+      roles: userRoles,
+      organizationId: user.organizationId
+    };
+
+    // Use key rotation service to get the current active key
+    let token;
+    try {
+      const activeKey = await keyRotationService.getActiveKey();
       
-      if (!user) {
-        logger.security('Login attempt with non-existent email', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized 
-        });
-        return res.status(401).json(
-          SecureErrorHandler.createErrorResponse(
-            SecureErrorHandler.GENERIC_AUTH_ERROR,
-            401,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      // Check if account is locked
-      if (user.lockUntil && user.lockUntil > new Date()) {
-        logger.security('Login attempt on locked account', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized,
-          lockUntil: user.lockUntil
-        });
-        return res.status(423).json(
-          SecureErrorHandler.createErrorResponse(
-            'Account is temporarily locked due to multiple failed login attempts',
-            423,
-            'ACCOUNT_LOCKED'
-          )
-        );
-      }
-
-      // Check if account is active
-      if (!user.isActive) {
-        logger.security('Login attempt on inactive account', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized 
-        });
-        return res.status(403).json(
-          SecureErrorHandler.createErrorResponse(
-            'Account is deactivated',
-            403,
-            'ACCOUNT_DISABLED'
-          )
-        );
-      }
-
-      // Verify password using the correct method from cryptoHelpers
-      console.log('About to verify password for user:', user.email);
-      const { verifyPassword } = require('../utils/cryptoHelpers');
-      console.log('Starting password verification...');
-      const isPasswordValid = await verifyPassword(password, user.password, user.salt);
-      console.log('Password verification result:', isPasswordValid);
-      
-      if (!isPasswordValid) {
-        // Increment login attempts
-        const loginAttempts = (user.loginAttempts || 0) + 1;
-        const maxAttempts = 5;
-        const lockDuration = 30 * 60 * 1000; // 30 minutes
-        
-        const updateData = {
-          loginAttempts,
-          updatedAt: new Date()
-        };
-        
-        // Lock account if too many attempts
-        if (loginAttempts >= maxAttempts) {
-          updateData.lockUntil = new Date(Date.now() + lockDuration);
-          updateData.loginAttempts = 0;
-        }
-        
-        await usersCollection.updateOne(
-          { userId: user.userId },
-          { $set: updateData }
-        );
-        
-        logger.security('Failed login attempt', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized,
-          attempts: loginAttempts,
-          locked: loginAttempts >= maxAttempts
-        });
-        
-        return res.status(401).json(
-          SecureErrorHandler.createErrorResponse(
-            SecureErrorHandler.GENERIC_AUTH_ERROR,
-            401,
-            'INCORRECT_PASSWORD'
-          )
-        );
-      }
-
-      // Reset login attempts on successful login
-      await usersCollection.updateOne(
-        { userId: user.userId },
-        { 
-          $set: { 
-            loginAttempts: 0,
-            lastLogin: new Date(),
-            updatedAt: new Date()
-          },
-          $unset: { lockUntil: 1 }
+      token = jwt.sign(
+        tokenPayload,
+        activeKey.secret,
+        {
+          expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+          issuer: 'invoice-app',
+          audience: 'invoice-app-users',
+          keyid: activeKey.keyId // Add key ID to JWT header for identification
         }
       );
-
-      // Generate JWT token
-      const tokenPayload = {
-        userId: user.userId,
-        email: user.email,
-        roles: user.roles || ['user'],
-        organizationId: user.organizationId
-      };
       
-      const token = jwt.sign(
+      logger.info('Token generated with key rotation', {
+        keyId: activeKey.keyId,
+        userId: user._id?.toString()
+      });
+    } catch (error) {
+      // Fallback to environment variable if key rotation service fails
+      logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
+        error: error.message
+      });
+      
+      token = jwt.sign(
         tokenPayload,
         process.env.JWT_SECRET,
-        { 
+        {
           expiresIn: process.env.JWT_EXPIRES_IN || '24h',
           issuer: 'invoice-app',
           audience: 'invoice-app-users'
         }
       );
-
-      logger.info('User logged in successfully', {
-        userId: user.userId,
-        email: user.email,
-        ip: req.ip
-      });
-
-      res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          {
-            token,
-            user: {
-              userId: user.userId,
-              email: user.email,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              roles: user.roles,
-              jobRole: user.jobRole, // Add jobRole to response
-              organizationId: user.organizationId,
-              isEmailVerified: user.isEmailVerified
-            }
-          },
-          'Login successful'
-        )
-      );
-
-    } catch (error) {
-      console.log('LOGIN ERROR DETAILS:', error.message, error.stack);
-      logger.error('Login error', {
-        error: error.message,
-        stack: error.stack,
-        ip: req.ip
-      });
-      
-      res.status(500).json(
-        SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'LOGIN_ERROR'
-        )
-      );
-    } finally {
-      await client.close();
     }
-  }
+
+    logger.business('User logged in', {
+      action: 'USER_LOGIN',
+      userId: user._id?.toString() || user.email,
+      email: user.email,
+      ip: req.ip
+    });
+
+    // 9. Return user profile (not auth data)
+    const responseUser = {
+      id: user._id?.toString(),
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      displayName: user.displayName,
+      phone: user.phone,
+      photo: user.photo,
+      photoUrl: user.photoUrl,
+      role: user.role,
+      roles: userRoles,
+      organizationId: user.organizationId,
+      organizationCode: user.organizationCode,
+      organizationName: user.organizationName,
+      jobRole: user.jobRole,
+      employmentType: user.employmentType,
+      classificationLevel: user.classificationLevel,
+      payPoint: user.payPoint,
+      stream: user.stream,
+      payRate: user.payRate || 0,
+      rates: user.rates || {},
+      activeAllowances: user.activeAllowances || [],
+      payType: user.payType,
+      abn: user.abn,
+      multiOrgEnabled: user.multiOrgEnabled || false,
+      defaultOrganizationId: user.defaultOrganizationId,
+      lastActiveOrganizationId: user.lastActiveOrganizationId,
+      isActive: user.isActive !== false,
+      isEmailVerified: user.isEmailVerified || false,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      lastLogin: user.lastLogin
+    };
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        {
+          token,
+          user: responseUser
+        },
+        'Login successful'
+      )
+    );
+  });
 
   /**
    * Email verification
    */
-  static async verifyEmail(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      const { email, otp, verificationKey } = req.body;
+  verifyEmail = catchAsync(async (req, res) => {
+    const { email, otp } = req.body;
 
-      // Validate required fields
-      if (!email || !otp || !verificationKey) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Email, OTP, and verification key are required',
-            400,
-            'MISSING_FIELDS'
-          )
-        );
-      }
-
-      // Validate email
-      const emailValidation = InputValidator.validateEmail(email);
-      if (!emailValidation.isValid) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid email format',
-            400,
-            'INVALID_EMAIL'
-          )
-        );
-      }
-
-      // Validate OTP
-      const otpValidation = InputValidator.validateOTP(otp);
-      if (!otpValidation.isValid) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid OTP format',
-            400,
-            'INVALID_OTP'
-          )
-        );
-      }
-      
-      // Verify OTP
-      const otpVerification = await verifyOTP(otpValidation.sanitized, verificationKey);
-      if (!otpVerification.success) {
-        logger.security('Failed email verification attempt', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized 
-        });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid or expired OTP',
-            400,
-            'INVALID_OTP'
-          )
-        );
-      }
-
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-
-      // Update user email verification status
-      const result = await usersCollection.updateOne(
-        { email: emailValidation.sanitized },
-        { 
-          $set: { 
-            isEmailVerified: true,
-            updatedAt: new Date()
-          }
-        }
-      );
-
-      if (result.matchedCount === 0) {
-        return res.status(404).json(
-          SecureErrorHandler.createErrorResponse(
-            'User not found',
-            404,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      logger.info('Email verified successfully', {
-        email: emailValidation.sanitized,
-        ip: req.ip
-      });
-
-      res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          null,
-          'Email verified successfully'
-        )
-      );
-
-    } catch (error) {
-      logger.error('Email verification error', {
-        error: error.message,
-        stack: error.stack,
-        ip: req.ip
-      });
-      
-      res.status(500).json(
+    if (!email || !otp) {
+      return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'VERIFICATION_ERROR'
+          'Email and OTP are required',
+          400,
+          'MISSING_FIELDS'
         )
       );
-    } finally {
-      await client.close();
     }
-  }
+
+    // Use authService to verify
+    await authService.verifyOTP(email, otp);
+
+    // Update user status
+    await User.updateOne(
+      { email: email },
+      { $set: { isEmailVerified: true, updatedAt: new Date() } }
+    );
+
+    logger.business('Email verified', {
+      action: 'EMAIL_VERIFIED',
+      email,
+      ip: req.ip
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        null,
+        'Email verified successfully'
+      )
+    );
+  });
 
   /**
    * Password reset request
    */
-  static async requestPasswordReset(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      const { email } = req.body;
+  requestPasswordReset = catchAsync(async (req, res) => {
+    const { email } = req.body;
 
-      // Validate email
-      const emailValidation = InputValidator.validateEmail(email);
-      if (!emailValidation.isValid) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid email format',
-            400,
-            'INVALID_EMAIL'
-          )
-        );
-      }
-
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-
-      // Check if user exists
-      const user = await usersCollection.findOne({ 
-        email: emailValidation.sanitized 
-      });
-      
-      // Always return success to prevent email enumeration
-      if (!user) {
-        logger.security('Password reset requested for non-existent email', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized 
-        });
-      } else {
-        // Generate password reset OTP
-        await generateOTP(emailValidation.sanitized, 'password_reset');
-        
-        logger.info('Password reset OTP generated', {
-          email: emailValidation.sanitized,
-          ip: req.ip
-        });
-      }
-
-      res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          null,
-          'If an account with this email exists, a password reset code has been sent.'
+    if (!email) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Email is required',
+          400,
+          'MISSING_FIELDS'
         )
       );
+    }
 
-    } catch (error) {
-      logger.error('Password reset request error', {
-        error: error.message,
-        stack: error.stack,
+    // Check if user exists (silent fail if not to prevent enumeration)
+    const user = await authService.checkEmailExists(email);
+
+    if (user) {
+      await authService.generateOTP(email);
+      logger.business('Password reset OTP generated', {
+        action: 'PASSWORD_RESET_REQUESTED',
+        email,
         ip: req.ip
       });
-      
-      res.status(500).json(
-        SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'PASSWORD_RESET_ERROR'
-        )
-      );
-    } finally {
-      await client.close();
+    } else {
+      logger.business('Password reset requested for non-existent email', {
+        action: 'PASSWORD_RESET_NONEXISTENT',
+        ip: req.ip,
+        email
+      });
     }
-  }
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        null,
+        'If an account with this email exists, a password reset code has been sent.'
+      )
+    );
+  });
 
   /**
-   * Password reset confirmation
+   * Password reset confirmation (Reset Password)
    */
-  static async resetPassword(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
+  resetPassword = catchAsync(async (req, res) => {
+    const { email, otp, newPassword, confirmPassword } = req.body;
+
+    if (!email || !otp || !newPassword || !confirmPassword) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'All fields required',
+          400,
+          'MISSING_FIELDS'
+        )
+      );
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Passwords do not match',
+          400,
+          'PASSWORD_MISMATCH'
+        )
+      );
+    }
+
+    // Verify OTP via authService
     try {
-      const { email, otp, verificationKey, newPassword, confirmPassword } = req.body;
+      // Allow already used OTPs to handle cases where frontend verifies before reset
+      await authService.verifyOTP(email, otp, { allowAlreadyUsed: true });
+    } catch (error) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          error.message || 'Invalid or expired OTP',
+          400,
+          'INVALID_OTP'
+        )
+      );
+    }
 
-      // Validate required fields
-      if (!email || !otp || !verificationKey || !newPassword || !confirmPassword) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'All fields are required',
-            400,
-            'MISSING_FIELDS'
-          )
-        );
-      }
+    try {
+      // Use authService to update password (handles hashing, salt, and OTP cleanup)
+      await authService.updatePassword(email, newPassword);
 
-      // Validate email
-      const emailValidation = InputValidator.validateEmail(email);
-      if (!emailValidation.isValid) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid email format',
-            400,
-            'INVALID_EMAIL'
-          )
-        );
-      }
-
-      // Validate password
-      const passwordValidation = InputValidator.validatePassword(newPassword);
-      if (!passwordValidation.isValid) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            passwordValidation.message,
-            400,
-            'WEAK_PASSWORD'
-          )
-        );
-      }
-
-      // Validate password confirmation
-      if (newPassword !== confirmPassword) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Passwords do not match',
-            400,
-            'PASSWORD_MISMATCH'
-          )
-        );
-      }
-
-      // Validate OTP
-      const otpValidation = InputValidator.validateOTP(otp);
-      if (!otpValidation.isValid) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid OTP format',
-            400,
-            'INVALID_OTP'
-          )
-        );
-      }
-
-      // Verify OTP
-      const otpVerification = await verifyOTP(otpValidation.sanitized, verificationKey);
-      if (!otpVerification.success) {
-        logger.security('Failed password reset attempt', { 
-          ip: req.ip, 
-          email: emailValidation.sanitized 
-        });
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'Invalid or expired OTP',
-            400,
-            'INVALID_OTP'
-          )
-        );
-      }
-
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-
-      // Hash new password
-      const hashedPassword = await hashPassword(newPassword);
-
-      // Update user password
-      const result = await usersCollection.updateOne(
-        { email: emailValidation.sanitized },
+      // Unlock account (reset login attempts)
+      await User.updateOne(
+        { email: email },
         { 
           $set: { 
-            password: hashedPassword,
-            updatedAt: new Date(),
-            loginAttempts: 0
-          },
-          $unset: { lockUntil: 1 }
+            loginAttempts: 0, 
+            lockUntil: undefined 
+          } 
         }
       );
 
-      if (result.matchedCount === 0) {
-        return res.status(404).json(
-          SecureErrorHandler.createErrorResponse(
-            'User not found',
-            404,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      logger.info('Password reset successfully', {
-        email: emailValidation.sanitized,
+      logger.business('Password reset', {
+        action: 'PASSWORD_RESET',
+        email,
         ip: req.ip
       });
 
@@ -919,189 +728,309 @@ class SecureAuthController {
           'Password reset successfully'
         )
       );
-
     } catch (error) {
-      logger.error('Password reset error', {
-        error: error.message,
-        stack: error.stack,
-        ip: req.ip
-      });
-      
-      res.status(500).json(
+      return res.status(500).json(
         SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
+          `Error resetting password: ${error.message}`,
           500,
-          'PASSWORD_RESET_ERROR'
+          'INTERNAL_ERROR'
         )
       );
-    } finally {
-      await client.close();
     }
-  }
+  });
 
   /**
    * Get user profile
    */
-  static async getProfile(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      const { userId } = req.user;
+  getProfile = catchAsync(async (req, res) => {
+    const { userId } = req.user;
+    const user = await User.findOne({ _id: userId }).select('-password -loginAttempts -lockUntil -__v');
 
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-
-      const user = await usersCollection.findOne(
-        { userId },
-        { 
-          projection: { 
-            password: 0, 
-            loginAttempts: 0, 
-            lockUntil: 0 
-          } 
-        }
-      );
-
-      if (!user) {
-        return res.status(404).json(
-          SecureErrorHandler.createErrorResponse(
-            'User not found',
-            404,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          user,
-          'Profile retrieved successfully'
-        )
-      );
-
-    } catch (error) {
-      logger.error('Get profile error', {
-        error: error.message,
-        stack: error.stack,
-        userId: req.user?.userId,
-        ip: req.ip
-      });
-      
-      res.status(500).json(
+    if (!user) {
+      return res.status(404).json(
         SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'PROFILE_ERROR'
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
         )
       );
-    } finally {
-      await client.close();
     }
-  }
+
+    logger.business('Profile retrieved', {
+      action: 'PROFILE_RETRIEVED',
+      userId
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        user,
+        'Profile retrieved successfully'
+      )
+    );
+  });
 
   /**
-   * Logout user (token blacklisting would be implemented here)
+   * Logout user
    */
-  static async logout(req, res) {
-    try {
-      // In a production environment, you would blacklist the token here
-      // For now, we'll just log the logout event
-      
-      logger.info('User logged out', {
-        userId: req.user?.userId,
-        email: req.user?.email,
-        ip: req.ip
-      });
+  logout = catchAsync(async (req, res) => {
+    logger.business('User logged out', {
+      action: 'USER_LOGOUT',
+      userId: req.user?.userId,
+      ip: req.ip
+    });
 
-      res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          null,
-          'Logged out successfully'
-        )
-      );
-
-    } catch (error) {
-      logger.error('Logout error', {
-        error: error.message,
-        stack: error.stack,
-        userId: req.user?.userId,
-        ip: req.ip
-      });
-      
-      res.status(500).json(
-        SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'LOGOUT_ERROR'
-        )
-      );
-    }
-  }
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        null,
+        'Logged out successfully'
+      )
+    );
+  });
 
   /**
-   * Assign Job Role to User
+   * Assign Job Role
    */
-  static async assignJobRole(req, res) {
-    const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
-    
-    try {
-      const { userId, jobRoleTitle } = req.body;
-      
-      if (!userId || !jobRoleTitle) {
-        return res.status(400).json(
-          SecureErrorHandler.createErrorResponse(
-            'User ID and Job Role Title are required',
-            400,
-            'MISSING_FIELDS'
-          )
-        );
-      }
+  assignJobRole = catchAsync(async (req, res) => {
+    const { userId, jobRoleTitle } = req.body;
 
-      await client.connect();
-      const db = client.db('Invoice');
-      const usersCollection = db.collection('login');
-
-      const result = await usersCollection.updateOne(
-        { userId: userId },
-        { 
-          $set: { 
-            jobRole: jobRoleTitle,
-            updatedAt: new Date()
-          } 
-        }
-      );
-
-      if (result.matchedCount === 0) {
-        return res.status(404).json(
-          SecureErrorHandler.createErrorResponse(
-            'User not found',
-            404,
-            'USER_NOT_FOUND'
-          )
-        );
-      }
-
-      res.status(200).json(
-        SecureErrorHandler.createSuccessResponse(
-          { userId, jobRole: jobRoleTitle },
-          'Job role assigned successfully'
-        )
-      );
-
-    } catch (error) {
-      logger.error('Error assigning job role', error);
-      res.status(500).json(
+    if (!userId || !jobRoleTitle) {
+      return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
-          SecureErrorHandler.GENERIC_SERVER_ERROR,
-          500,
-          'ASSIGN_ROLE_ERROR'
+          'Missing fields: userId and jobRoleTitle are required',
+          400,
+          'MISSING_FIELDS'
         )
       );
-    } finally {
-      await client.close();
     }
-  }
+
+    const result = await User.updateOne(
+      { _id: userId },
+      { $set: { jobRole: jobRoleTitle, updatedAt: new Date() } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
+    }
+
+    logger.business('Job role assigned', {
+      action: 'JOB_ROLE_ASSIGNED',
+      userId,
+      jobRole: jobRoleTitle
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        { userId, jobRole: jobRoleTitle },
+        'Job role assigned successfully'
+      )
+    );
+  });
+
+  /**
+   * Refresh Token
+   */
+  refreshToken = catchAsync(async (req, res) => {
+    const { userId } = req.user;
+    const user = await User.findOne({ _id: userId });
+
+    if (!user) {
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
+    }
+
+    // Handle both legacy 'role' and new 'roles' fields
+    const userRoles = user.roles && user.roles.length > 0 
+      ? user.roles 
+      : (user.role ? [user.role] : ['user']);
+    
+    const tokenPayload = {
+      userId: user._id.toString(),
+      email: user.email,
+      roles: userRoles,
+      organizationId: user.organizationId
+    };
+
+    const newToken = jwt.sign(
+      tokenPayload,
+      process.env.JWT_SECRET,
+      {
+        expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+        issuer: 'invoice-app',
+        audience: 'invoice-app-users'
+      }
+    );
+
+    logger.business('Token refreshed', {
+      action: 'TOKEN_REFRESHED',
+      userId: user._id.toString()
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        { token: newToken },
+        'Token refreshed'
+      )
+    );
+  });
+
+  /**
+   * Verify Token
+   */
+  verifyToken = catchAsync(async (req, res) => {
+    // Middleware already verified token
+    logger.business('Token verified', {
+      action: 'TOKEN_VERIFIED',
+      userId: req.user?.userId
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        { valid: true, user: req.user },
+        'Token is valid'
+      )
+    );
+  });
+
+  /**
+   * Change Password
+   */
+  changePassword = catchAsync(async (req, res) => {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const { userId } = req.user;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'All fields required',
+          400,
+          'MISSING_FIELDS'
+        )
+      );
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Passwords do not match',
+          400,
+          'PASSWORD_MISMATCH'
+        )
+      );
+    }
+
+    const user = await User.findOne({ _id: userId }).select('+password');
+    if (!user) {
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json(
+        SecureErrorHandler.createErrorResponse(
+          'Incorrect current password',
+          401,
+          'INVALID_PASSWORD'
+        )
+      );
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    logger.business('Password changed', {
+      action: 'PASSWORD_CHANGED',
+      userId
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        null,
+        'Password changed successfully'
+      )
+    );
+  });
+
+  /**
+   * Update Profile
+   */
+  updateProfile = catchAsync(async (req, res) => {
+    const { userId } = req.user;
+    const updates = req.body;
+
+    delete updates.password;
+    delete updates.email;
+    delete updates.roles;
+    delete updates.organizationId;
+    delete updates._id;
+
+    const result = await User.updateOne(
+      { _id: userId },
+      { $set: updates }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
+    }
+
+    logger.business('Profile updated', {
+      action: 'PROFILE_UPDATED',
+      userId
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        null,
+        'Profile updated'
+      )
+    );
+  });
+
+  /**
+   * Deactivate Account
+   */
+  deactivateAccount = catchAsync(async (req, res) => {
+    const { userId } = req.user;
+
+    await User.updateOne(
+      { _id: userId },
+      { $set: { isActive: false } }
+    );
+
+    logger.business('Account deactivated', {
+      action: 'ACCOUNT_DEACTIVATED',
+      userId
+    });
+
+    res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        null,
+        'Account deactivated'
+      )
+    );
+  });
 }
 
-module.exports = SecureAuthController;
+module.exports = new SecureAuthController();
