@@ -7,8 +7,12 @@ class QueueManager {
     this.queues = {};
     this.workers = {};
     this.redisEnabled = redis.isConfigured !== false;
-    // Reuse the existing Redis connection configuration
-    this.connection = this.redisEnabled ? redis.options : null;
+    // Use connection options with proper timeouts for BullMQ
+    this.connection = this.redisEnabled ? {
+      ...redis.options,
+      ...redis.connectionOptions,
+      maxRetriesPerRequest: null
+    } : null;
 
     if (!this.redisEnabled) {
       logger.warn('QueueManager is disabled because Redis is not configured');
