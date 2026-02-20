@@ -1,6 +1,8 @@
 const { admin } = require('../firebase-admin-config');
 const { createLogger } = require('../utils/logger');
 const User = require('../models/User');
+const Organization = require('../models/Organization');
+const UserOrganization = require('../models/UserOrganization');
 
 const logger = createLogger('FirebaseAuthController');
 
@@ -24,7 +26,7 @@ class FirebaseAuthController {
       let user = await User.findOne({ firebaseUid });
 
       if (!user) {
-        // Try to find by email (migration scenario)
+        // Try to find by email (migration scenario - existing MongoDB user)
         user = await User.findOne({ email });
         
         if (user) {
@@ -36,14 +38,15 @@ class FirebaseAuthController {
             firebaseUid
           });
         } else {
-          // Create new user
+          // Create new user - this is a Firebase-only signup
+          // They won't have organizationId yet (will be assigned via signup flow or admin)
           user = new User({
             firebaseUid,
             email,
             firstName: firstName || '',
             lastName: lastName || '',
             photoURL,
-            emailVerified: true, // Firebase handles verification
+            emailVerified: true,
             firebaseSyncedAt: new Date(),
             createdAt: new Date()
           });
@@ -63,6 +66,25 @@ class FirebaseAuthController {
 
       await user.save();
 
+      // Fetch organization details if user has organizationId
+      let organizationName = null;
+      let organizationCode = null;
+      
+      if (user.organizationId) {
+        try {
+          const organization = await Organization.findById(user.organizationId);
+          if (organization) {
+            organizationName = organization.name;
+            organizationCode = organization.code;
+          }
+        } catch (orgError) {
+          logger.warn('Could not fetch organization details', {
+            organizationId: user.organizationId,
+            error: orgError.message
+          });
+        }
+      }
+
       // Return user data (excluding sensitive fields)
       const userData = {
         _id: user._id,
@@ -72,8 +94,8 @@ class FirebaseAuthController {
         lastName: user.lastName,
         role: user.role,
         organizationId: user.organizationId,
-        organizationName: user.organizationName,
-        organizationCode: user.organizationCode,
+        organizationName: organizationName,
+        organizationCode: organizationCode || user.organizationCode,
         photoURL: user.photoURL,
         emailVerified: user.emailVerified,
         lastLoginAt: user.lastLoginAt
