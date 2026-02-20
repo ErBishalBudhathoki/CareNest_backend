@@ -8,7 +8,7 @@ const UserOrganization = require('../models/UserOrganization');
 const Organization = require('../models/Organization');
 const authService = require('../services/authService');
 const SecureErrorHandler = require('../utils/errorHandler');
-const { messaging } = require('../firebase-admin-config');
+const { admin, messaging } = require('../firebase-admin-config');
 const keyRotationService = require('../services/jwtKeyRotationService');
 
 /**
@@ -19,6 +19,7 @@ const keyRotationService = require('../services/jwtKeyRotationService');
 class SecureAuthController {
   /**
    * User registration with enhanced security
+   * Creates Firebase user via Admin SDK and MongoDB user
    */
   register = catchAsync(async (req, res) => {
     // 1. VALIDATION CHECK (express-validator)
@@ -34,11 +35,10 @@ class SecureAuthController {
       );
     }
 
-    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, organizationName, isOwner, phone, firebaseUid } = req.body;
+    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, organizationName, isOwner, phone } = req.body;
 
-    // 2. LOGIC CHECK - Skip password validation for Firebase signup
-    const isFirebaseSignup = !!firebaseUid;
-    if (!isFirebaseSignup && password !== confirmPassword) {
+    // 2. LOGIC CHECK
+    if (password !== confirmPassword) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'Passwords do not match',
@@ -48,69 +48,141 @@ class SecureAuthController {
       );
     }
 
-    // 3. CHECK EXISTANCE
-    const existingUser = await authService.checkEmailExists(email);
-    if (existingUser) {
-      // If Firebase signup and user exists, link Firebase UID
-      if (isFirebaseSignup && !existingUser.firebaseUid) {
-        existingUser.firebaseUid = firebaseUid;
-        existingUser.firebaseSyncedAt = new Date();
-        await existingUser.save();
-        
-        logger.info('Linked existing user to Firebase during signup', {
-          email,
-          firebaseUid,
-          userId: existingUser._id.toString()
-        });
-        
-        return res.status(200).json(
-          SecureErrorHandler.createSuccessResponse(
-            {
-              userId: existingUser._id.toString(),
-              email: existingUser.email,
-              firstName: existingUser.firstName,
-              lastName: existingUser.lastName,
-              organizationId: existingUser.organizationId
-            },
-            'Account linked successfully'
+    // 3. CHECK EXISTENCE — handle orphaned states from prior partial failures
+    const existingMongoUser = await authService.checkEmailExists(email);
+
+    if (existingMongoUser) {
+      // If MongoDB user exists WITH a firebaseUid — fully registered, reject
+      if (existingMongoUser.firebaseUid) {
+        return res.status(409).json(
+          SecureErrorHandler.createErrorResponse(
+            'User with this email already exists',
+            409,
+            'USER_EXISTS'
           )
         );
       }
-      
-      return res.status(409).json(
+
+      // MongoDB user exists WITHOUT firebaseUid — orphaned record from a prior partial failure.
+      // Delete it so the registration can proceed cleanly.
+      logger.warn('Deleting orphaned MongoDB user (no firebaseUid)', { email });
+      await existingMongoUser.deleteOne();
+    }
+
+    // 4. CREATE FIREBASE USER via Admin SDK
+    // Also handle the case where Firebase already has this user (orphaned Firebase record)
+    let firebaseUser;
+    let customToken;
+    try {
+      firebaseUser = await admin.auth().createUser({
+        email: email,
+        password: password,
+        displayName: `${firstName} ${lastName}`,
+        emailVerified: false
+      });
+
+      // Generate custom token for client to sign in
+      customToken = await admin.auth().createCustomToken(firebaseUser.uid);
+
+      logger.info('Firebase user created via Admin SDK', {
+        email,
+        firebaseUid: firebaseUser.uid
+      });
+    } catch (firebaseError) {
+      logger.error('Failed to create Firebase user', {
+        email,
+        error: firebaseError.message,
+        code: firebaseError.code
+      });
+
+      if (firebaseError.code === 'auth/email-already-exists') {
+        // Firebase has this user but MongoDB doesn't (we just cleaned up above).
+        // Delete the orphaned Firebase user and retry once.
+        try {
+          const existingFirebaseUser = await admin.auth().getUserByEmail(email);
+          await admin.auth().deleteUser(existingFirebaseUser.uid);
+          logger.warn('Deleted orphaned Firebase user, retrying creation', { email });
+
+          firebaseUser = await admin.auth().createUser({
+            email: email,
+            password: password,
+            displayName: `${firstName} ${lastName}`,
+            emailVerified: false
+          });
+          customToken = await admin.auth().createCustomToken(firebaseUser.uid);
+
+          logger.info('Firebase user re-created after orphan cleanup', {
+            email,
+            firebaseUid: firebaseUser.uid
+          });
+        } catch (retryError) {
+          logger.error('Failed to re-create Firebase user after orphan cleanup', {
+            email,
+            error: retryError.message
+          });
+          return res.status(500).json(
+            SecureErrorHandler.createErrorResponse(
+              'Failed to create user account. Please try again.',
+              500,
+              'FIREBASE_ERROR'
+            )
+          );
+        }
+      } else {
+        return res.status(500).json(
+          SecureErrorHandler.createErrorResponse(
+            'Failed to create user account',
+            500,
+            'FIREBASE_ERROR'
+          )
+        );
+      }
+    }
+
+    // 5. CREATE MONGODB USER — roll back Firebase user if this fails
+    let newUser;
+    try {
+      newUser = await authService.createUser({
+        email,
+        firstName,
+        lastName,
+        organizationCode,
+        organizationId: organizationId || null,
+        phone: phone || null,
+        role: isOwner ? 'admin' : 'user',
+        firebaseUid: firebaseUser.uid,
+        firebaseSyncedAt: new Date(),
+        emailVerified: false
+      });
+    } catch (mongoError) {
+      // Roll back Firebase user to keep systems in sync
+      logger.error('MongoDB user creation failed — rolling back Firebase user', {
+        email,
+        firebaseUid: firebaseUser.uid,
+        error: mongoError.message
+      });
+      try {
+        await admin.auth().deleteUser(firebaseUser.uid);
+        logger.info('Firebase user rolled back successfully', { email });
+      } catch (rollbackError) {
+        logger.error('Failed to roll back Firebase user', {
+          email,
+          firebaseUid: firebaseUser.uid,
+          error: rollbackError.message
+        });
+      }
+      return res.status(500).json(
         SecureErrorHandler.createErrorResponse(
-          'User with this email already exists',
-          409,
-          'USER_EXISTS'
+          'Failed to create user account. Please try again.',
+          500,
+          'REGISTRATION_FAILED'
         )
       );
     }
 
-    // 4. CREATE USER
-    const newUserData = {
-      email,
-      firstName,
-      lastName,
-      organizationCode,
-      organizationId: organizationId || null,
-      phone: phone || null,
-      role: isOwner ? 'admin' : 'user'
-    };
-    
-    // Add Firebase UID if provided (Firebase signup flow)
-    if (isFirebaseSignup) {
-      newUserData.firebaseUid = firebaseUid;
-      newUserData.firebaseSyncedAt = new Date();
-      newUserData.emailVerified = true;
-    } else {
-      newUserData.password = password;
-    }
-    
-    const newUser = await authService.createUser(newUserData);
-
     let createdOrganization = null;
 
-    // 5. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
+    // 6. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
     if (isOwner || (!organizationId && !organizationCode)) {
       try {
         // Generate unique 6-character organization code
@@ -169,10 +241,10 @@ class SecureAuthController {
           userId: newUser._id.toString(),
           error: orgError.message
         });
-        // Don't fail registration, but log the error
+        // Don't fail registration — user can set up org later
       }
     }
-    // 5. CREATE USER ORGANIZATION RECORD (Zero-Trust requirement)
+    // 7. CREATE USER ORGANIZATION RECORD for members joining an existing org
     else if (organizationId) {
       try {
         await UserOrganization.create({
@@ -198,13 +270,18 @@ class SecureAuthController {
       }
     }
 
-    // 6. GENERATE OTP
-    await authService.generateOTP(email);
+    // 8. GENERATE OTP for email verification
+    try {
+      await authService.generateOTP(email);
+    } catch (otpError) {
+      logger.warn('OTP generation failed (non-fatal)', { email, error: otpError.message });
+    }
 
     logger.business('User registered', {
       action: 'USER_REGISTERED',
       userId: newUser._id.toString(),
       email: newUser.email,
+      firebaseUid: firebaseUser.uid,
       ip: req.ip
     });
 
@@ -215,6 +292,8 @@ class SecureAuthController {
           email: newUser.email,
           firstName: newUser.firstName,
           lastName: newUser.lastName,
+          firebaseUid: firebaseUser.uid,
+          customToken: customToken,
           ...(createdOrganization && {
             organization: {
               id: createdOrganization._id.toString(),
@@ -531,7 +610,7 @@ class SecureAuthController {
     let token;
     try {
       const activeKey = await keyRotationService.getActiveKey();
-      
+
       token = jwt.sign(
         tokenPayload,
         activeKey.secret,
@@ -542,7 +621,7 @@ class SecureAuthController {
           keyid: activeKey.keyId // Add key ID to JWT header for identification
         }
       );
-      
+
       logger.info('Token generated with key rotation', {
         keyId: activeKey.keyId,
         userId: user._id?.toString()
@@ -552,7 +631,7 @@ class SecureAuthController {
       logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
         error: error.message
       });
-      
+
       token = jwt.sign(
         tokenPayload,
         process.env.JWT_SECRET,
@@ -745,11 +824,11 @@ class SecureAuthController {
       // Unlock account (reset login attempts)
       await User.updateOne(
         { email: email },
-        { 
-          $set: { 
-            loginAttempts: 0, 
-            lockUntil: undefined 
-          } 
+        {
+          $set: {
+            loginAttempts: 0,
+            lockUntil: undefined
+          }
         }
       );
 
@@ -887,10 +966,10 @@ class SecureAuthController {
     }
 
     // Handle both legacy 'role' and new 'roles' fields
-    const userRoles = user.roles && user.roles.length > 0 
-      ? user.roles 
+    const userRoles = user.roles && user.roles.length > 0
+      ? user.roles
       : (user.role ? [user.role] : ['user']);
-    
+
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
