@@ -1,5 +1,4 @@
 const EventEmitter = require('events');
-const Redis = require('ioredis');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 
@@ -8,123 +7,57 @@ class EventBus extends EventEmitter {
     super();
     this.channel = 'app_events';
     this.redisEnabled = false;
-    this.pubClient = null;
-    this.subClient = null;
+    this.subscribed = false;
     this.connectionErrors = 0;
     this.maxConnectionErrors = 5;
 
     // Check if Redis is available
-    if (!redis.isConfigured || redis.status === 'circuit-open') {
+    if (!redis.isConfigured || redis.status === 'disabled') {
       logger.warn('EventBus is running in local-only mode because Redis is unavailable');
       return;
     }
 
-    this._initializeClients();
+    // Use the shared redis connection instead of creating duplicates
+    // This saves Redis connections in CloudRun
+    this._initializeWithSharedConnection();
   }
 
-  _buildConnectionOptions() {
-    const redisUrl = redis.redisUrl;
-    
-    const baseOptions = {
-      maxRetriesPerRequest: null,
-      connectTimeout: 20000,
-      commandTimeout: 15000,
-      keepAlive: 10000,
-      retryStrategy: (times) => {
-        if (times > 3) {
-          logger.error('EventBus Redis retry limit exceeded');
-          return null;
-        }
-        return Math.min(times * 2000, 10000);
-      }
-    };
-    
-    if (redisUrl) {
-      try {
-        // Parse URL to extract connection details
-        let urlToParse = redisUrl;
-        if (redisUrl.startsWith('redis://')) {
-          urlToParse = redisUrl.replace('redis://', 'http://');
-        } else if (redisUrl.startsWith('rediss://')) {
-          urlToParse = redisUrl.replace('rediss://', 'https://');
-        }
-        
-        const parsed = new URL(urlToParse);
-        
-        const options = {
-          ...baseOptions,
-          host: parsed.hostname,
-          port: parseInt(parsed.port, 10) || 6379,
-        };
-        
-        // Handle password (Redis Cloud: redis://default:PASSWORD@host:port)
-        if (parsed.password) {
-          options.password = decodeURIComponent(parsed.password);
-        }
-        
-        // TLS for rediss://
-        if (redisUrl.startsWith('rediss://')) {
-          options.tls = { rejectUnauthorized: false };
-        }
-        
-        return { url: redisUrl, options };
-      } catch (err) {
-        logger.error('Failed to parse Redis URL for EventBus', { error: err.message });
-        return { url: redisUrl, options: baseOptions };
-      }
-    }
-    
-    return { options: { ...baseOptions, ...(redis.connectionOptions || {}) } };
-  }
-
-  _initializeClients() {
-    const connectionConfig = this._buildConnectionOptions();
-    
+  _initializeWithSharedConnection() {
     try {
-      const { url, options } = connectionConfig;
+      // For pub/sub, we need a dedicated connection for subscribe
+      // But we can use the shared connection for publish
+      // In CloudRun, we'll use local-only mode to save connections
       
-      if (url) {
-        this.pubClient = new Redis(url, options);
-        this.subClient = new Redis(url, options);
-      } else {
-        this.pubClient = redis.duplicate();
-        this.subClient = redis.duplicate();
+      const isCloudRun = Boolean(process.env.K_SERVICE);
+      
+      if (isCloudRun) {
+        // In CloudRun, run in local-only mode to conserve Redis connections
+        // EventBus pub/sub across instances would need a dedicated connection per instance
+        logger.info('EventBus running in local-only mode (CloudRun - conserving connections)');
+        return;
       }
 
-      this._setupClientHandlers();
-      this.redisEnabled = true;
-      
+      // In non-CloudRun environments, set up full pub/sub
+      this._setupPubSub();
     } catch (err) {
-      logger.error('Failed to initialize EventBus Redis clients', { error: err.message });
-      this.redisEnabled = false;
+      logger.error('Failed to initialize EventBus', { error: err.message });
     }
   }
 
-  _setupClientHandlers() {
-    const handleError = (clientName) => (error) => {
-      this.connectionErrors++;
-      
-      if (error.message.includes('ETIMEDOUT') || 
-          error.message.includes('ECONNRESET') ||
-          error.message.includes('ECONNREFUSED') ||
-          error.message.includes('WRONGPASS') ||
-          error.message.includes('Command timed out')) {
-        logger.error(`EventBus ${clientName} connection error`, { 
-          error: error.message,
-          errors: this.connectionErrors 
-        });
-        
-        if (this.connectionErrors >= this.maxConnectionErrors) {
-          logger.error('EventBus disabling Redis due to repeated errors');
-          this.redisEnabled = false;
-        }
+  _setupPubSub() {
+    // Subscribe using the shared connection
+    redis.subscribe(this.channel, (err, count) => {
+      if (err) {
+        logger.error('Failed to subscribe to Redis channel', { error: err.message });
+        return;
       }
-    };
+      this.subscribed = true;
+      this.redisEnabled = true;
+      logger.info(`Subscribed to ${count} Redis channel(s)`);
+    });
 
-    this.pubClient?.on('error', handleError('publisher'));
-    this.subClient?.on('error', handleError('subscriber'));
-
-    this.subClient?.on('message', (channel, message) => {
+    // Handle incoming messages
+    redis.on('message', (channel, message) => {
       if (channel === this.channel) {
         try {
           const { event, payload, source } = JSON.parse(message);
@@ -135,22 +68,20 @@ class EventBus extends EventEmitter {
       }
     });
 
-    // Subscribe with error handling
-    this.subClient?.subscribe(this.channel, (err, count) => {
-      if (err) {
-        logger.error('Failed to subscribe to Redis channel', { error: err.message });
+    redis.on('error', (error) => {
+      this.connectionErrors++;
+      if (this.connectionErrors >= this.maxConnectionErrors) {
+        logger.error('EventBus disabling due to Redis errors');
         this.redisEnabled = false;
-      } else {
-        logger.info(`Subscribed to ${count} Redis channel(s)`);
       }
     });
+
+    this.redisEnabled = true;
   }
 
   /**
    * Publish an event to the system.
-   * @param {string} event - The event name (e.g., 'shift.completed')
-   * @param {Object} payload - Data associated with the event
-   * @param {Object} options - Options (e.g., { localOnly: false })
+   * Always emits locally, publishes to Redis if available.
    */
   publish(event, payload, options = { localOnly: false }) {
     // Always emit locally first
@@ -160,7 +91,7 @@ class EventBus extends EventEmitter {
     logger.info(`Event Published: ${event}`, { payload });
 
     // Publish to Redis for distributed events
-    if (!options.localOnly && this.redisEnabled && this.pubClient) {
+    if (!options.localOnly && this.redisEnabled && redis.isConfigured) {
       const message = JSON.stringify({
         event,
         payload,
@@ -168,8 +99,7 @@ class EventBus extends EventEmitter {
       });
       
       try {
-        const publishResult = this.pubClient.publish(this.channel, message);
-        Promise.resolve(publishResult).catch((error) => {
+        redis.publish(this.channel, message).catch((error) => {
           logger.warn('Failed to publish distributed event', {
             event,
             error: error.message
@@ -186,8 +116,6 @@ class EventBus extends EventEmitter {
 
   /**
    * Subscribe to an event.
-   * @param {string} event - Event name
-   * @param {Function} handler - Callback function
    */
   subscribe(event, handler) {
     logger.info(`Subscribed to event: ${event}`);
@@ -198,11 +126,12 @@ class EventBus extends EventEmitter {
    * Close connections
    */
   async close() {
-    try {
-      await this.pubClient?.quit?.();
-      await this.subClient?.quit?.();
-    } catch {
-      // Ignore errors on close
+    if (this.subscribed) {
+      try {
+        await redis.unsubscribe(this.channel);
+      } catch {
+        // Ignore errors on close
+      }
     }
   }
 }

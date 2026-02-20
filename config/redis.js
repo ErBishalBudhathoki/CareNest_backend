@@ -43,7 +43,12 @@ let connectionFailures = 0;
 let circuitOpen = false;
 let circuitOpenTime = 0;
 const CIRCUIT_BREAK_THRESHOLD = 5;
-const CIRCUIT_BREAK_RESET_MS = 60000; // 1 minute
+const CIRCUIT_BREAK_RESET_MS = 60000;
+
+// Shared connection pool - minimize connections
+let sharedClient = null;
+let connectionCount = 0;
+const MAX_CONNECTIONS = isCloudRun ? 2 : 10; // Limit connections in Cloud Run
 
 class DisabledRedisClient extends EventEmitter {
   constructor() {
@@ -109,213 +114,142 @@ class DisabledRedisClient extends EventEmitter {
   disconnect() {}
 }
 
-class CircuitBreakerRedisClient extends EventEmitter {
-  constructor(url, options) {
-    super();
-    this.url = url;
-    this.baseOptions = options;
-    this.client = null;
-    this.isConfigured = true;
-    this.status = 'initializing';
+/**
+ * Create or reuse a Redis connection
+ * In Cloud Run, we limit connections to avoid hitting Redis Cloud limits
+ */
+function createRedisClient(url, options) {
+  // Check circuit breaker
+  if (circuitOpen) {
+    const elapsed = Date.now() - circuitOpenTime;
+    if (elapsed < CIRCUIT_BREAK_RESET_MS) {
+      logger.warn('Redis circuit breaker is open');
+      return new DisabledRedisClient();
+    }
+    logger.info('Attempting to reset Redis circuit breaker');
+    circuitOpen = false;
+    connectionFailures = 0;
+  }
+
+  // In CloudRun, reuse shared connection if possible
+  if (isCloudRun && sharedClient && sharedClient.status === 'ready') {
+    connectionCount++;
+    logger.info('Reusing shared Redis connection', { totalConnections: connectionCount });
     
-    this._initializeClient();
+    // Return a wrapper that uses the shared client
+    return createSharedClientWrapper(sharedClient);
   }
 
-  _initializeClient() {
-    // Check circuit breaker
-    if (circuitOpen) {
-      const elapsed = Date.now() - circuitOpenTime;
-      if (elapsed < CIRCUIT_BREAK_RESET_MS) {
-        logger.warn('Redis circuit breaker is open, using fallback');
-        this.status = 'circuit-open';
-        return;
-      }
-      // Try to reset circuit
-      logger.info('Attempting to reset Redis circuit breaker');
-      circuitOpen = false;
-      connectionFailures = 0;
+  // Check connection limit
+  if (connectionCount >= MAX_CONNECTIONS) {
+    logger.warn('Redis connection limit reached, reusing shared connection');
+    if (sharedClient) {
+      return createSharedClientWrapper(sharedClient);
     }
-
-    try {
-      this.client = new RedisClass(this.url, this.baseOptions);
-      
-      this.client.on('connect', () => {
-        this.status = 'connected';
-        connectionFailures = 0;
-        const maskedUrl = this.url.replace(/:([^@]+)@/, ':****@');
-        logger.info('Redis connection established', { config: maskedUrl });
-      });
-
-      this.client.on('ready', () => {
-        this.status = 'ready';
-        logger.info('Redis client is ready to accept commands');
-        
-        this.client.config('GET', 'maxmemory-policy').then((result) => {
-          const policy = result && result[1];
-          if (policy && policy !== 'noeviction') {
-            logger.info(`Redis maxmemory-policy is '${policy}'. For BullMQ, 'noeviction' is recommended.`);
-          }
-        }).catch(() => {});
-      });
-
-      this.client.on('error', (err) => {
-        if (err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET')) {
-          connectionFailures++;
-          logger.error('Redis connection error', { error: err.message, failures: connectionFailures });
-          
-          if (connectionFailures >= CIRCUIT_BREAK_THRESHOLD) {
-            circuitOpen = true;
-            circuitOpenTime = Date.now();
-            logger.error('Redis circuit breaker opened due to repeated failures');
-          }
-        }
-      });
-
-      this.client.on('close', () => {
-        this.status = 'disconnected';
-        logger.warn('Redis connection closed');
-      });
-
-      this.client.on('reconnecting', (delay) => {
-        this.status = 'reconnecting';
-        logger.warn('Redis reconnecting...', { delay });
-      });
-
-    } catch (err) {
-      logger.error('Failed to initialize Redis client', { error: err.message });
-      this.status = 'error';
-    }
+    return new DisabledRedisClient();
   }
 
-  get options() {
-    return this.client?.options || {};
+  // Create new connection
+  connectionCount++;
+  const client = new RedisClass(url, options);
+  
+  // Store as shared client for CloudRun
+  if (isCloudRun && !sharedClient) {
+    sharedClient = client;
   }
 
-  duplicate() {
-    return new CircuitBreakerRedisClient(this.url, this.baseOptions);
-  }
+  client.on('connect', () => {
+    connectionFailures = 0;
+    const maskedUrl = typeof url === 'string' ? url.replace(/:([^@]+)@/, ':****@') : 'config-object';
+    logger.info('Redis connection established', { config: maskedUrl });
+  });
 
-  async call(...args) {
-    if (!this.client || circuitOpen) return null;
-    try {
-      return await this.client.call(...args);
-    } catch (err) {
-      this._handleCommandError(err);
-      return null;
-    }
-  }
+  client.on('ready', () => {
+    logger.info('Redis client ready', { activeConnections: connectionCount });
+  });
 
-  async get(key) {
-    if (!this.client || circuitOpen) return null;
-    try {
-      return await this.client.get(key);
-    } catch (err) {
-      this._handleCommandError(err);
-      return null;
-    }
-  }
-
-  async set(key, value, ...args) {
-    if (!this.client || circuitOpen) return 'OK';
-    try {
-      return await this.client.set(key, value, ...args);
-    } catch (err) {
-      this._handleCommandError(err);
-      return 'OK';
-    }
-  }
-
-  async del(...keys) {
-    if (!this.client || circuitOpen) return 0;
-    try {
-      return await this.client.del(...keys);
-    } catch (err) {
-      this._handleCommandError(err);
-      return 0;
-    }
-  }
-
-  async exists(...keys) {
-    if (!this.client || circuitOpen) return 0;
-    try {
-      return await this.client.exists(...keys);
-    } catch (err) {
-      this._handleCommandError(err);
-      return 0;
-    }
-  }
-
-  async scan(cursor, ...args) {
-    if (!this.client || circuitOpen) return ['0', []];
-    try {
-      return await this.client.scan(cursor, ...args);
-    } catch (err) {
-      this._handleCommandError(err);
-      return ['0', []];
-    }
-  }
-
-  scanStream(...args) {
-    if (!this.client || circuitOpen) {
-      const stream = new EventEmitter();
-      setImmediate(() => stream.emit('end'));
-      return stream;
-    }
-    return this.client.scanStream(...args);
-  }
-
-  async publish(channel, message) {
-    if (!this.client || circuitOpen) return 0;
-    try {
-      return await this.client.publish(channel, message);
-    } catch (err) {
-      this._handleCommandError(err);
-      return 0;
-    }
-  }
-
-  async subscribe(channel, callback) {
-    if (!this.client || circuitOpen) {
-      if (typeof callback === 'function') callback(null, 0);
-      return 0;
-    }
-    try {
-      return await this.client.subscribe(channel, callback);
-    } catch (err) {
-      this._handleCommandError(err);
-      if (typeof callback === 'function') callback(null, 0);
-      return 0;
-    }
-  }
-
-  async quit() {
-    if (this.client) {
-      try {
-        return await this.client.quit();
-      } catch {
-        return 'OK';
-      }
-    }
-    return 'OK';
-  }
-
-  disconnect() {
-    if (this.client) {
-      this.client.disconnect();
-    }
-  }
-
-  _handleCommandError(err) {
-    if (err.message.includes('timed out') || err.message.includes('ETIMEDOUT')) {
+  client.on('error', (err) => {
+    if (err.message.includes('ETIMEDOUT') || 
+        err.message.includes('ECONNRESET') ||
+        err.message.includes('WRONGPASS') ||
+        err.message.includes('Command timed out')) {
       connectionFailures++;
+      logger.error('Redis connection error', { error: err.message, failures: connectionFailures });
+      
       if (connectionFailures >= CIRCUIT_BREAK_THRESHOLD) {
         circuitOpen = true;
         circuitOpenTime = Date.now();
-        logger.error('Redis circuit breaker opened due to command timeouts');
+        logger.error('Redis circuit breaker opened');
       }
     }
-    logger.warn('Redis command failed', { error: err.message });
+  });
+
+  client.on('close', () => {
+    logger.warn('Redis connection closed');
+    if (sharedClient === client) {
+      sharedClient = null;
+      connectionCount = Math.max(0, connectionCount - 1);
+    }
+  });
+
+  return client;
+}
+
+/**
+ * Create a wrapper that shares a single connection
+ * This reduces connection count but may have limitations for pub/sub
+ */
+function createSharedClientWrapper(client) {
+  const wrapper = new EventEmitter();
+  wrapper.isConfigured = true;
+  wrapper.status = client.status;
+  wrapper.options = client.options;
+  
+  // Pass through common methods
+  const methods = ['call', 'get', 'set', 'del', 'exists', 'scan', 'scanStream', 
+                   'publish', 'subscribe', 'config', 'quit', 'disconnect'];
+  
+  methods.forEach(method => {
+    wrapper[method] = (...args) => client[method](...args);
+  });
+  
+  wrapper.duplicate = () => {
+    // Instead of creating a new connection, return the same wrapper
+    logger.debug('Redis duplicate() called - returning shared connection');
+    return createSharedClientWrapper(client);
+  };
+  
+  // Forward events
+  ['connect', 'ready', 'error', 'close', 'reconnecting'].forEach(event => {
+    client.on(event, (...args) => wrapper.emit(event, ...args));
+  });
+  
+  return wrapper;
+}
+
+// Parse connection options
+function parseConnectionOptions(redisUrl) {
+  const options = {
+    maxRetriesPerRequest: null,
+    connectTimeout: 20000,
+    commandTimeout: 15000,
+    keepAlive: 10000,
+    retryStrategy: (times) => {
+      if (times > 3) {
+        logger.error('Redis connection retry limit exceeded', { attempts: times });
+        return null;
+      }
+      return Math.min(times * 2000, 10000);
+    }
+  };
+
+  if (typeof redisUrl === 'string') {
+    if (redisUrl.startsWith('rediss://')) {
+      options.tls = { rejectUnauthorized: false };
+    }
   }
+
+  return options;
 }
 
 let redis;
@@ -326,40 +260,28 @@ if (!redisConfig) {
   );
   redis = new DisabledRedisClient();
 } else if (typeof redisConfig === 'string') {
-  // Increased timeouts for Redis Cloud over internet
-  const connectionOptions = {
-    maxRetriesPerRequest: null,
-    connectTimeout: 15000, // 15 seconds for connection
-    commandTimeout: 10000, // 10 seconds for commands
-    keepAlive: 10000, // Keep connection alive
-    retryStrategy: (times) => {
-      if (times > 3) {
-        logger.error('Redis connection retry limit exceeded', { attempts: times });
-        return null;
-      }
-      return Math.min(times * 2000, 10000);
-    },
-    tls: redisConfig.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined
-  };
-  
-  redis = new CircuitBreakerRedisClient(redisConfig, connectionOptions);
+  const connectionOptions = parseConnectionOptions(redisConfig);
+  redis = createRedisClient(redisConfig, connectionOptions);
   redis.connectionOptions = connectionOptions;
   redis.redisUrl = redisConfig;
 } else {
   const connectionOptions = {
     ...redisConfig,
-    connectTimeout: 15000,
-    commandTimeout: 10000,
-    keepAlive: 10000
+    ...parseConnectionOptions(null),
   };
   redis = new RedisClass(connectionOptions);
   redis.connectionOptions = connectionOptions;
-  
-  redis.on('error', (err) => {
-    logger.error('Redis connection error', { error: err.message });
-  });
 }
 
 redis.isConfigured = Boolean(redisConfig);
+
+// Export connection stats for monitoring
+redis.getConnectionStats = () => ({
+  isCloudRun,
+  connectionCount,
+  maxConnections: MAX_CONNECTIONS,
+  circuitOpen,
+  sharedClientActive: !!sharedClient
+});
 
 module.exports = redis;
