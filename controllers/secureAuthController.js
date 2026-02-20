@@ -34,10 +34,11 @@ class SecureAuthController {
       );
     }
 
-    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, organizationName, isOwner, phone } = req.body;
+    const { email, password, confirmPassword, firstName, lastName, organizationCode, organizationId, organizationName, isOwner, phone, firebaseUid } = req.body;
 
-    // 2. LOGIC CHECK
-    if (password !== confirmPassword) {
+    // 2. LOGIC CHECK - Skip password validation for Firebase signup
+    const isFirebaseSignup = !!firebaseUid;
+    if (!isFirebaseSignup && password !== confirmPassword) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'Passwords do not match',
@@ -50,6 +51,32 @@ class SecureAuthController {
     // 3. CHECK EXISTANCE
     const existingUser = await authService.checkEmailExists(email);
     if (existingUser) {
+      // If Firebase signup and user exists, link Firebase UID
+      if (isFirebaseSignup && !existingUser.firebaseUid) {
+        existingUser.firebaseUid = firebaseUid;
+        existingUser.firebaseSyncedAt = new Date();
+        await existingUser.save();
+        
+        logger.info('Linked existing user to Firebase during signup', {
+          email,
+          firebaseUid,
+          userId: existingUser._id.toString()
+        });
+        
+        return res.status(200).json(
+          SecureErrorHandler.createSuccessResponse(
+            {
+              userId: existingUser._id.toString(),
+              email: existingUser.email,
+              firstName: existingUser.firstName,
+              lastName: existingUser.lastName,
+              organizationId: existingUser.organizationId
+            },
+            'Account linked successfully'
+          )
+        );
+      }
+      
       return res.status(409).json(
         SecureErrorHandler.createErrorResponse(
           'User with this email already exists',
@@ -60,16 +87,26 @@ class SecureAuthController {
     }
 
     // 4. CREATE USER
-    const newUser = await authService.createUser({
+    const newUserData = {
       email,
-      password,
       firstName,
       lastName,
       organizationCode,
       organizationId: organizationId || null,
       phone: phone || null,
       role: isOwner ? 'admin' : 'user'
-    });
+    };
+    
+    // Add Firebase UID if provided (Firebase signup flow)
+    if (isFirebaseSignup) {
+      newUserData.firebaseUid = firebaseUid;
+      newUserData.firebaseSyncedAt = new Date();
+      newUserData.emailVerified = true;
+    } else {
+      newUserData.password = password;
+    }
+    
+    const newUser = await authService.createUser(newUserData);
 
     let createdOrganization = null;
 
