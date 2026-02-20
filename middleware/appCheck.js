@@ -26,6 +26,12 @@ function isIOSPlatform(req) {
 }
 
 async function requireAppCheck(req, res, next) {
+  logger.debug('AppCheck incoming headers', {
+    url: req.originalUrl,
+    method: req.method,
+    headers: req.headers
+  });
+
   // Skip App Check for iOS - requires Apple Developer account for App Attest
   if (isIOSPlatform(req)) {
     logger.debug('Skipping App Check for iOS platform', {
