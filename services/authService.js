@@ -91,20 +91,28 @@ class AuthService {
    */
   async createUser(userData) {
     try {
-      // Create user instance with plain password (model handles hashing)
+      const isFirebaseUser = !!userData.firebaseUid;
+      
       const newUser = new User({
         email: userData.email,
-        password: userData.password, // Will be hashed by pre-save hook
         firstName: userData.firstName,
         lastName: userData.lastName,
         organizationCode: userData.organizationCode,
         organizationId: userData.organizationId,
         role: userData.role || 'user',
-        roles: ['user'], // Ensure default role in array
+        roles: ['user'],
         createdAt: new Date(),
         lastLogin: null,
         isActive: true,
-        isEmailVerified: false
+        isEmailVerified: isFirebaseUser ? true : false,
+        // Firebase-specific fields
+        ...(isFirebaseUser && {
+          firebaseUid: userData.firebaseUid,
+          firebaseSyncedAt: userData.firebaseSyncedAt || new Date(),
+          emailVerified: userData.emailVerified !== undefined ? userData.emailVerified : true
+        }),
+        // Password only for non-Firebase users
+        ...(!isFirebaseUser && { password: userData.password })
       });
 
       const savedUser = await newUser.save();

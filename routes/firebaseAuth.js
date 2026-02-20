@@ -4,24 +4,33 @@ const FirebaseAuthController = require('../controllers/firebaseAuthController');
 const { verifyFirebaseToken } = require('../middleware/firebaseAuth');
 const { requireAppCheck } = require('../middleware/appCheck');
 
+function isIOSPlatform(req) {
+  const platform = req.header('X-Platform');
+  return platform && platform.toLowerCase() === 'ios';
+}
+
+function optionalAppCheck(req, res, next) {
+  if (isIOSPlatform(req)) {
+    return next();
+  }
+  return requireAppCheck(req, res, next);
+}
+
 /**
  * @route POST /api/firebase-auth/sync
  * @desc Sync Firebase user with MongoDB
  * @access Public (but requires valid Firebase ID token)
  */
 router.post('/sync',
-  requireAppCheck,
+  optionalAppCheck,
   verifyFirebaseToken,
   async (req, res) => {
     try {
-      // Extract data from verified Firebase token
       const { uid, email, name, picture } = req.firebaseUser;
       
-      // Parse name if available
       const firstName = name?.split(' ')[0] || '';
       const lastName = name?.split(' ').slice(1).join(' ') || '';
 
-      // Add to request body
       req.body = {
         ...req.body,
         firebaseUid: uid,
@@ -48,7 +57,7 @@ router.post('/sync',
  * @access Private
  */
 router.get('/user/:firebaseUid',
-  requireAppCheck,
+  optionalAppCheck,
   verifyFirebaseToken,
   FirebaseAuthController.getUserByFirebaseUid
 );
@@ -59,7 +68,7 @@ router.get('/user/:firebaseUid',
  * @access Private
  */
 router.put('/profile/:firebaseUid',
-  requireAppCheck,
+  optionalAppCheck,
   verifyFirebaseToken,
   FirebaseAuthController.updateProfile
 );
@@ -70,7 +79,7 @@ router.put('/profile/:firebaseUid',
  * @access Private
  */
 router.delete('/account/:firebaseUid',
-  requireAppCheck,
+  optionalAppCheck,
   verifyFirebaseToken,
   FirebaseAuthController.deleteAccount
 );
@@ -81,7 +90,7 @@ router.delete('/account/:firebaseUid',
  * @access Private
  */
 router.post('/verify-email',
-  requireAppCheck,
+  optionalAppCheck,
   verifyFirebaseToken,
   FirebaseAuthController.verifyEmail
 );
