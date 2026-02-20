@@ -1,4 +1,3 @@
-const { Queue, Worker } = require('bullmq');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 
@@ -6,6 +5,15 @@ const logger = require('../config/logger');
 // In CloudRun, BullMQ creates multiple connections which can exhaust Redis limits
 const isCloudRun = Boolean(process.env.K_SERVICE);
 const ENABLE_QUEUES = process.env.ENABLE_QUEUES === 'true' || !isCloudRun;
+
+// Lazy load BullMQ only when needed
+let bullmq = null;
+function getBullMQ() {
+  if (!bullmq) {
+    bullmq = require('bullmq');
+  }
+  return bullmq;
+}
 
 class QueueManager {
   constructor() {
@@ -108,6 +116,7 @@ class QueueManager {
 
     if (!this.queues[name]) {
       try {
+        const { Queue } = getBullMQ();
         this.queues[name] = new Queue(name, { 
           connection: this.connection,
           defaultJobOptions: {
@@ -165,6 +174,7 @@ class QueueManager {
     }
 
     try {
+      const { Worker } = getBullMQ();
       this.workers[queueName] = new Worker(queueName, async (job) => {
         logger.info(`Processing job ${job.name} in ${queueName}`);
         try {
