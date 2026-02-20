@@ -2,6 +2,11 @@ const { Queue, Worker } = require('bullmq');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 
+// Check if we should enable BullMQ at all
+// In CloudRun, BullMQ creates multiple connections which can exhaust Redis limits
+const isCloudRun = Boolean(process.env.K_SERVICE);
+const ENABLE_QUEUES = process.env.ENABLE_QUEUES === 'true' || !isCloudRun;
+
 class QueueManager {
   constructor() {
     this.queues = {};
@@ -15,23 +20,25 @@ class QueueManager {
   }
 
   _initialize() {
-    // Check if Redis is configured and not in circuit-open state
+    // In CloudRun, disable queues by default to save Redis connections
+    if (!ENABLE_QUEUES) {
+      logger.info('QueueManager: Queues disabled in CloudRun to conserve Redis connections');
+      return;
+    }
+
     if (!redis.isConfigured) {
       logger.warn('QueueManager is disabled because Redis is not configured');
       return;
     }
 
-    if (redis.status === 'circuit-open') {
-      logger.warn('QueueManager is disabled because Redis circuit breaker is open');
+    if (redis.status === 'circuit-open' || redis.status === 'disabled') {
+      logger.warn('QueueManager is disabled: Redis unavailable');
       return;
     }
 
-    // Build connection options for BullMQ
-    // BullMQ uses its own ioredis, so we need to pass full connection config
     const connectionOptions = this._buildConnectionOptions();
-    
     if (!connectionOptions) {
-      logger.warn('QueueManager is disabled: could not build connection options');
+      logger.warn('QueueManager: Could not build connection options');
       return;
     }
 
@@ -44,10 +51,7 @@ class QueueManager {
     const redisUrl = redis.redisUrl;
     
     if (redisUrl) {
-      // Parse Redis URL: redis://[username:]password@host:port
-      // Redis Cloud format: redis://default:PASSWORD@host:port
       try {
-        // Handle redis:// and rediss:// URLs
         let urlToParse = redisUrl;
         if (redisUrl.startsWith('redis://')) {
           urlToParse = redisUrl.replace('redis://', 'http://');
@@ -62,36 +66,18 @@ class QueueManager {
           port: parseInt(parsed.port, 10) || 6379,
           maxRetriesPerRequest: null,
           enableReadyCheck: false,
-          connectTimeout: 20000, // 20 seconds
-          commandTimeout: 15000, // 15 seconds
+          connectTimeout: 20000,
+          commandTimeout: 15000,
           keepAlive: 10000,
         };
         
-        // Handle authentication
-        // Redis URL format: redis://username:password@host:port
-        // or redis://:password@host:port (empty username)
         if (parsed.password) {
           options.password = decodeURIComponent(parsed.password);
         }
         
-        // Username (if present, like 'default' in Redis Cloud)
-        if (parsed.username && parsed.username !== 'default') {
-          // Redis Cloud uses 'default' as username, which ioredis doesn't need
-          // But if it's a different username, we might need it
-          options.username = decodeURIComponent(parsed.username);
-        }
-        
-        // TLS for rediss://
         if (redisUrl.startsWith('rediss://')) {
           options.tls = { rejectUnauthorized: false };
         }
-        
-        logger.info('QueueManager connection options built', {
-          host: options.host,
-          port: options.port,
-          hasPassword: !!options.password,
-          hasTls: !!options.tls
-        });
         
         return options;
       } catch (err) {
@@ -100,7 +86,6 @@ class QueueManager {
       }
     }
     
-    // Fallback to redis.options if no URL
     if (redis.options) {
       return {
         host: redis.options.host,
@@ -110,17 +95,12 @@ class QueueManager {
         enableReadyCheck: false,
         connectTimeout: 20000,
         commandTimeout: 15000,
-        keepAlive: 10000,
       };
     }
     
     return null;
   }
 
-  /**
-   * Get or create a queue
-   * @param {string} name - Queue name
-   */
   getQueue(name) {
     if (!this.redisEnabled) {
       return null;
@@ -155,13 +135,6 @@ class QueueManager {
     return this.queues[name];
   }
 
-  /**
-   * Add a job to a queue
-   * @param {string} queueName 
-   * @param {string} jobName 
-   * @param {Object} data 
-   * @param {Object} opts 
-   */
   async addJob(queueName, jobName, data, opts = {}) {
     if (!this.redisEnabled) {
       logger.debug(`Skipped job enqueue for ${queueName}/${jobName} - Redis unavailable`);
@@ -181,19 +154,13 @@ class QueueManager {
     }
   }
 
-  /**
-   * Register a worker for a queue
-   * @param {string} queueName 
-   * @param {Function} processor 
-   */
   registerWorker(queueName, processor) {
     if (!this.redisEnabled) {
-      logger.warn(`Skipped worker registration for ${queueName} - Redis unavailable`);
+      logger.debug(`Skipped worker registration for ${queueName} - Redis unavailable`);
       return;
     }
 
     if (this.workers[queueName]) {
-      logger.debug(`Worker for ${queueName} already exists`);
       return;
     }
 
@@ -231,7 +198,8 @@ class QueueManager {
     if (err.message.includes('ETIMEDOUT') || 
         err.message.includes('ECONNRESET') ||
         err.message.includes('ECONNREFUSED') ||
-        err.message.includes('WRONGPASS')) {
+        err.message.includes('WRONGPASS') ||
+        err.message.includes('Command timed out')) {
       logger.error(`Queue ${queueName} connection error, disabling queues`, { error: err.message });
       this.redisEnabled = false;
     } else {
@@ -243,7 +211,8 @@ class QueueManager {
     if (err.message.includes('ETIMEDOUT') || 
         err.message.includes('ECONNRESET') ||
         err.message.includes('ECONNREFUSED') ||
-        err.message.includes('WRONGPASS')) {
+        err.message.includes('WRONGPASS') ||
+        err.message.includes('Command timed out')) {
       logger.error(`Worker ${queueName} connection error, disabling queues`, { error: err.message });
       this.redisEnabled = false;
     } else {
@@ -259,9 +228,6 @@ class QueueManager {
     }
   }
 
-  /**
-   * Close all queues and workers
-   */
   async closeAll() {
     const closePromises = [];
     
