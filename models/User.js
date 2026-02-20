@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: function() {
+    required: function () {
       // Password not required if using Firebase Auth
       return !this.firebaseUid;
     },
@@ -24,12 +24,14 @@ const userSchema = new mongoose.Schema({
   firstName: {
     type: String,
     required: [true, 'First name is required'],
-    trim: true
+    trim: true,
+    default: ''
   },
   lastName: {
     type: String,
     required: [true, 'Last name is required'],
-    trim: true
+    trim: true,
+    default: ''
   },
   role: {
     type: String,
@@ -43,7 +45,7 @@ const userSchema = new mongoose.Schema({
   },
   organizationId: {
     type: String,
-    required: [true, 'Organization ID is required']
+    default: null
   },
   organizationCode: {
     type: String,
@@ -139,13 +141,13 @@ const userSchema = new mongoose.Schema({
       delete ret.password;
       delete ret.otp; // Security: Don't expose OTP
       delete ret.refreshTokens; // Security: Don't expose refresh tokens
-      
+
       // Handle legacy 'role' field (singular) → 'roles' (array)
       if (ret.role && (!ret.roles || ret.roles.length === 0)) {
         ret.roles = [ret.role];
       }
       delete ret.role; // Remove legacy field
-      
+
       return ret;
     }
   }
