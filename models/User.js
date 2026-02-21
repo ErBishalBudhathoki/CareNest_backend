@@ -64,6 +64,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     match: [/^\+?[1-9]\d{1,14}$/, 'Invalid phone number']
   },
+  abn: {
+    type: String,
+    trim: true,
+    match: [/^\d{11}$/, 'ABN must be 11 digits']
+  },
   profilePic: String,
 
   // Firebase Authentication Fields
