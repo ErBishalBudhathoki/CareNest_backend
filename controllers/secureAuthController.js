@@ -325,7 +325,7 @@ class SecureAuthController {
 
     // 8. GENERATE OTP for email verification
     try {
-      await authService.generateOTP(email);
+      await authService.generateOTP(email, 'verification');
     } catch (otpError) {
       logger.warn('OTP generation failed (non-fatal)', { email, error: otpError.message });
     }
