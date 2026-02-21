@@ -28,14 +28,15 @@ const organizationContextMiddleware = async (req, res, next) => {
       '/api/auth/v2/login',
       '/api/health',
       '/api-docs',
-      '/api-docs.json'
+      '/api-docs.json',
+      '/api/firebase-auth'
     ];
-    
+
     const path = req.originalUrl || req.path;
     if (publicEndpoints.some(endpoint => path.startsWith(endpoint))) {
       return next();
     }
-    
+
     // Require authenticated user
     if (!req.user || !req.user.userId) {
       logger.security('Organization context middleware called without authenticated user', {
@@ -52,7 +53,7 @@ const organizationContextMiddleware = async (req, res, next) => {
     }
 
     // 1. Get Organization ID from multiple sources (in priority order)
-    const orgId = 
+    const orgId =
       req.headers['x-organization-id'] ||  // Explicit header (preferred)
       req.query.organizationId ||           // Query parameter
       req.body.organizationId ||            // Body parameter
@@ -108,13 +109,13 @@ const organizationContextMiddleware = async (req, res, next) => {
       isOwner: userOrg.role === 'owner',
       isAdmin: userOrg.role === 'admin' || userOrg.role === 'owner'
     };
-    
+
     logger.debug('Organization context set', {
       userId: req.user.userId,
       organizationId: orgId,
       role: userOrg.role
     });
-    
+
     next();
   } catch (error) {
     logger.error('Organization context error', {
@@ -143,7 +144,7 @@ const optionalOrganizationContext = async (req, res, next) => {
       return next(); // No user, skip organization context
     }
 
-    const orgId = 
+    const orgId =
       req.headers['x-organization-id'] ||
       req.query.organizationId ||
       req.body.organizationId ||
@@ -170,7 +171,7 @@ const optionalOrganizationContext = async (req, res, next) => {
         isAdmin: userOrg.role === 'admin' || userOrg.role === 'owner'
       };
     }
-    
+
     next();
   } catch (error) {
     logger.error('Optional organization context error', {
@@ -201,9 +202,9 @@ function requireOrganizationOwnership(resourceIdField, modelGetter, orgFieldName
   return async (req, res, next) => {
     try {
       // Get resource ID from params, query, or body
-      const resourceId = req.params[resourceIdField] || 
-                        req.query[resourceIdField] || 
-                        req.body[resourceIdField];
+      const resourceId = req.params[resourceIdField] ||
+        req.query[resourceIdField] ||
+        req.body[resourceIdField];
 
       if (!resourceId) {
         return res.status(400).json(
@@ -286,7 +287,7 @@ function requireOrganizationOwnership(resourceIdField, modelGetter, orgFieldName
 const requireOrganizationMatch = (bodyFieldName = 'organizationId') => {
   return (req, res, next) => {
     const bodyOrgId = req.body[bodyFieldName];
-    
+
     if (!bodyOrgId) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
@@ -336,7 +337,7 @@ const requireOrganizationMatch = (bodyFieldName = 'organizationId') => {
 const requireOrganizationQueryMatch = (queryFieldName = 'organizationId') => {
   return (req, res, next) => {
     const queryOrgId = req.query[queryFieldName];
-    
+
     if (!queryOrgId) {
       // If not in query, nothing to mismatch against.
       // If query param is required, use express-validator or similar.
@@ -375,7 +376,7 @@ const requireOrganizationQueryMatch = (queryFieldName = 'organizationId') => {
   };
 };
 
-module.exports = { 
+module.exports = {
   organizationContextMiddleware,
   optionalOrganizationContext,
   requireOrganizationOwnership,
