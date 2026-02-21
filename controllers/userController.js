@@ -11,26 +11,26 @@ class UserController {
     // Security: Filter by authenticated user's organization
     // Only superadmins might be allowed to see all, but for now we restrict to org
     const organizationId = req.user.organizationId;
-    
+
     // If no organization ID in token (shouldn't happen for valid users), return empty or error
     if (!organizationId) {
-       // Check if superadmin, maybe allow? For now, safer to return empty or specific error
-       // Assuming standard user flow
-       return res.status(403).json({
-         success: false,
-         code: 'FORBIDDEN',
-         message: 'Organization context required'
-       });
+      // Check if superadmin, maybe allow? For now, safer to return empty or specific error
+      // Assuming standard user flow
+      return res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN',
+        message: 'Organization context required'
+      });
     }
 
     const users = await userService.getAllUsers(organizationId);
-    
+
     logger.business('Retrieved all users', {
       action: 'user_list_all',
       count: users.length,
       organizationId
     });
-    
+
     res.status(200).json({
       success: true,
       code: 'USERS_RETRIEVED',
@@ -44,7 +44,7 @@ class UserController {
    */
   getOrganizationEmployees = catchAsync(async (req, res) => {
     const { organizationId } = req.params;
-    
+
     if (!organizationId) {
       return res.status(400).json({
         success: false,
@@ -52,23 +52,24 @@ class UserController {
         message: 'Organization ID is required'
       });
     }
-    
+
     const employees = await userService.getOrganizationEmployees(organizationId);
-    
+
     if (employees.length === 0) {
-      return res.status(404).json({
-        success: false,
+      return res.status(200).json({
+        success: true,
         code: 'NO_EMPLOYEES_FOUND',
-        message: 'No users (employees) were found for this organization.'
+        message: 'No users (employees) were found for this organization.',
+        employees: []
       });
     }
-    
+
     logger.business('Retrieved organization employees', {
       action: 'user_list_organization',
       organizationId,
       count: employees.length
     });
-    
+
     res.status(200).json({
       success: true,
       code: 'EMPLOYEES_RETRIEVED',
@@ -82,7 +83,7 @@ class UserController {
    */
   fixClientOrganizationId = catchAsync(async (req, res) => {
     const { userEmail, organizationId } = req.body;
-    
+
     if (!userEmail || !organizationId) {
       return res.status(400).json({
         success: false,
@@ -90,9 +91,9 @@ class UserController {
         message: 'userEmail and organizationId are required'
       });
     }
-    
+
     const result = await userService.fixClientOrganizationId(userEmail, organizationId);
-    
+
     logger.business('Fixed client organizationId', {
       action: 'user_fix_org_id',
       userEmail,
@@ -100,7 +101,7 @@ class UserController {
       clientsUpdated: result.clientsUpdated,
       assignmentsUpdated: result.assignmentsUpdated
     });
-    
+
     res.status(200).json({
       success: true,
       code: 'ORGANIZATION_ID_FIXED',
