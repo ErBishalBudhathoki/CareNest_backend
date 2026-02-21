@@ -58,7 +58,8 @@ const organizationContextMiddleware = async (req, res, next) => {
       req.query.organizationId ||           // Query parameter
       req.body.organizationId ||            // Body parameter
       req.params.organizationId ||          // URL parameter
-      req.user.lastActiveOrganizationId;    // User's last active org (fallback)
+      req.user.lastActiveOrganizationId ||  // User's last active org (fallback)
+      req.user.organizationId;              // User's primary org (last fallback)
 
     if (!orgId) {
       logger.security('No organization context provided', {
