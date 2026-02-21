@@ -381,9 +381,10 @@ class AuthService {
   /**
    * Generate and store OTP for password reset
    * @param {string} email - User email
+   * @param {string} purpose - Purpose of OTP ('verification' or 'reset')
    * @returns {string} - Generated OTP
    */
-  async generateOTP(email) {
+  async generateOTP(email, purpose = 'reset') {
     try {
       const user = await this.checkEmailExists(email);
 
@@ -406,20 +407,38 @@ class AuthService {
         }
       );
 
-      // Send OTP via Email
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
-          <h2 style="color: #4CAF50;">Password Reset Request</h2>
-          <p>You requested to reset your password. Use the OTP below to verify your identity.</p>
-          <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
-            <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
+      // Email content based on purpose
+      let emailSubject, emailHtml;
+      
+      if (purpose === 'verification') {
+        emailSubject = 'Verify Your Email - CareNest';
+        emailHtml = `
+          <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+            <h2 style="color: #4CAF50;">Welcome to CareNest!</h2>
+            <p>Thank you for creating your account. Please verify your email address using the code below.</p>
+            <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
+              <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
+            </div>
+            <p>This verification code will expire in 10 minutes.</p>
+            <p style="color: #777; font-size: 12px;">If you did not create an account, please ignore this email.</p>
           </div>
-          <p>This code will expire in 10 minutes.</p>
-          <p style="color: #777; font-size: 12px;">If you did not request this, please ignore this email.</p>
-        </div>
-      `;
+        `;
+      } else {
+        emailSubject = 'Your OTP Code - CareNest';
+        emailHtml = `
+          <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+            <h2 style="color: #4CAF50;">Password Reset Request</h2>
+            <p>You requested to reset your password. Use the OTP below to verify your identity.</p>
+            <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
+              <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
+            </div>
+            <p>This code will expire in 10 minutes.</p>
+            <p style="color: #777; font-size: 12px;">If you did not request this, please ignore this email.</p>
+          </div>
+        `;
+      }
 
-      await emailService.sendEmail(email, 'Your OTP Code - CareNest', emailHtml);
+      await emailService.sendEmail(email, emailSubject, emailHtml);
 
       // Create audit trail
       await auditService.createAuditLog({
