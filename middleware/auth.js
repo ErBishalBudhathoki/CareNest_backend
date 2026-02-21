@@ -145,6 +145,7 @@ class AuthMiddleware {
               email: user.email,
               roles: user.roles && user.roles.length > 0 ? user.roles : [user.role || 'user'],
               organizationId: user.organizationId,
+              lastActiveOrganizationId: user.lastActiveOrganizationId || user.organizationId,
               iat: decodedFirebaseToken.iat,
               exp: decodedFirebaseToken.exp,
               provider: 'firebase'
