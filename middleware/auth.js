@@ -7,7 +7,7 @@ const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
 const keyRotationService = require('../services/jwtKeyRotationService');
-const admin = require('../firebase-admin-config');
+const { admin } = require('../firebase-admin-config');
 const User = require('../models/User');
 
 const logger = createLogger('AuthMiddleware');
@@ -133,7 +133,10 @@ class AuthMiddleware {
       try {
         const decodedFirebaseToken = await admin.auth().verifyIdToken(token);
         if (decodedFirebaseToken) {
-          const user = await User.findOne({ email: decodedFirebaseToken.email.toLowerCase() });
+          const email = decodedFirebaseToken.email.toLowerCase();
+          logger.debug('Valid Firebase token received, looking up user', { email });
+
+          const user = await User.findOne({ email });
 
           if (user) {
             // Populate req.user for compatibility with existing middleware and controllers
@@ -157,13 +160,26 @@ class AuthMiddleware {
             // Reset failed attempts on success
             AuthMiddleware.resetFailedAttempts(req.ip);
             return next();
+          } else {
+            logger.security('Firebase token valid but user not found in MongoDB', {
+              email,
+              path: req.path,
+              ip: req.ip
+            });
+            return res.status(401).json(
+              SecureErrorHandler.createErrorResponse(
+                'User account not found. Please register first.',
+                401,
+                'USER_NOT_FOUND'
+              )
+            );
           }
         }
       } catch (firebaseError) {
         // Not a Firebase token or verification failed, continue to custom JWT
         // We only log if it's not a standard 'invalid token' error to avoid log bloating
         if (firebaseError.code !== 'auth/argument-error' && firebaseError.code !== 'auth/invalid-id-token') {
-          logger.debug('Firebase token check skipped or failed', { error: firebaseError.message });
+          logger.debug('Firebase token verification error', { error: firebaseError.message });
         }
       }
 
