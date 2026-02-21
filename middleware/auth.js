@@ -66,6 +66,7 @@ class AuthMiddleware {
         '/api/auth/health',
         '/api/auth/v2/register',
         '/api/auth/v2/login',
+        '/api/firebase-auth', // Firebase auth routes use their own token verification
         '/api/health',
         '/api-docs',
         '/api-docs.json'
