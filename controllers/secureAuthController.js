@@ -225,7 +225,7 @@ class SecureAuthController {
           userId: newUser._id.toString(),
           organizationId: createdOrganization._id.toString(),
           role: 'owner',
-          permissions: ['all'],
+          permissions: ['read', 'write', 'delete', 'manage_users', 'manage_billing', 'cross_org_access'],
           isActive: true,
           joinedAt: new Date(),
           createdAt: new Date(),
@@ -277,7 +277,7 @@ class SecureAuthController {
         await UserOrganization.create({
           userId: newUser._id.toString(),
           organizationId: organizationId,
-          role: 'user',
+          role: 'employee',
           permissions: ['read', 'write'],
           isActive: true,
           joinedAt: new Date(),
