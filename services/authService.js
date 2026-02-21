@@ -97,6 +97,7 @@ class AuthService {
         email: userData.email,
         firstName: userData.firstName,
         lastName: userData.lastName,
+        abn: userData.abn,
         organizationCode: userData.organizationCode,
         organizationId: userData.organizationId,
         role: userData.role || 'user',
@@ -136,21 +137,23 @@ class AuthService {
         }
       }
 
-      // Create audit trail
-      await auditService.createAuditLog({
-        action: 'USER_CREATED',
-        entityType: 'user',
-        entityId: savedUser._id.toString(),
-        userEmail: userData.email,
-        organizationId: userData.organizationId,
-        details: {
-          email: userData.email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          role: userData.role
-        },
-        timestamp: new Date()
-      });
+      // Create audit trail only if organizationId exists (for owners creating new orgs, this happens later)
+      if (userData.organizationId) {
+        await auditService.createAuditLog({
+          action: 'USER_CREATED',
+          entityType: 'user',
+          entityId: savedUser._id.toString(),
+          userEmail: userData.email,
+          organizationId: userData.organizationId,
+          details: {
+            email: userData.email,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+            role: userData.role
+          },
+          timestamp: new Date()
+        });
+      }
 
       return savedUser;
     } catch (error) {

@@ -146,6 +146,7 @@ class SecureAuthController {
         email,
         firstName,
         lastName,
+        abn: req.body.abn,
         organizationCode,
         organizationId: organizationId || null,
         phone: phone || null,
@@ -231,6 +232,32 @@ class SecureAuthController {
           updatedAt: new Date()
         });
 
+        // Create audit log after organization is created
+        const auditService = require('../services/auditService');
+        try {
+          await auditService.createAuditLog({
+            action: 'USER_CREATED',
+            entityType: 'user',
+            entityId: newUser._id.toString(),
+            userEmail: email,
+            organizationId: createdOrganization._id.toString(),
+            details: {
+              email: email,
+              firstName: firstName,
+              lastName: lastName,
+              role: 'admin',
+              organizationCreated: true,
+              organizationCode: orgCode
+            },
+            timestamp: new Date()
+          });
+        } catch (auditError) {
+          logger.warn('Audit log creation failed (non-fatal)', {
+            userId: newUser._id.toString(),
+            error: auditError.message
+          });
+        }
+
         logger.info('Auto-created organization for new owner', {
           userId: newUser._id.toString(),
           organizationId: createdOrganization._id.toString(),
@@ -257,6 +284,32 @@ class SecureAuthController {
           createdAt: new Date(),
           updatedAt: new Date()
         });
+
+        // Create audit log for member joining existing org
+        const auditService = require('../services/auditService');
+        try {
+          await auditService.createAuditLog({
+            action: 'USER_CREATED',
+            entityType: 'user',
+            entityId: newUser._id.toString(),
+            userEmail: email,
+            organizationId: organizationId,
+            details: {
+              email: email,
+              firstName: firstName,
+              lastName: lastName,
+              role: 'user',
+              joinedExistingOrg: true
+            },
+            timestamp: new Date()
+          });
+        } catch (auditError) {
+          logger.warn('Audit log creation failed (non-fatal)', {
+            userId: newUser._id.toString(),
+            error: auditError.message
+          });
+        }
+
         logger.info('UserOrganization record created', {
           userId: newUser._id.toString(),
           organizationId: organizationId
