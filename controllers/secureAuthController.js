@@ -347,14 +347,15 @@ class SecureAuthController {
           lastName: newUser.lastName,
           firebaseUid: firebaseUser.uid,
           customToken: customToken,
+          organizationId: newUser.organizationId,
+          organizationCode: newUser.organizationCode,
           ...(createdOrganization && {
             organization: {
               id: createdOrganization._id.toString(),
               name: createdOrganization.name,
               code: createdOrganization.code
             }
-          }),
-          organizationId: newUser.organizationId
+          })
         },
         'User registered successfully. Please verify your email.'
       )
