@@ -7,6 +7,8 @@ const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
 const keyRotationService = require('../services/jwtKeyRotationService');
+const admin = require('../firebase-admin-config');
+const User = require('../models/User');
 
 const logger = createLogger('AuthMiddleware');
 
@@ -71,7 +73,7 @@ class AuthMiddleware {
         '/api-docs',
         '/api-docs.json'
       ];
-      
+
       // Check if this is a public endpoint (use originalUrl for full path)
       const path = req.originalUrl || req.path;
       if (publicEndpoints.some(endpoint => path.startsWith(endpoint))) {
@@ -81,7 +83,7 @@ class AuthMiddleware {
       if (process.env.NODE_ENV === 'production') {
         validateSecurityConfig({ throwOnMissing: true });
       }
-      
+
       // Check if IP is blocked
       if (AuthMiddleware.isIPBlocked(req.ip)) {
         logger.security('Blocked IP attempted access', { ip: req.ip, path: req.path });
@@ -98,8 +100,8 @@ class AuthMiddleware {
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
         AuthMiddleware.recordFailedAttempt(req.ip);
-        logger.security('Missing or invalid authorization header', { 
-          ip: req.ip, 
+        logger.security('Missing or invalid authorization header', {
+          ip: req.ip,
           path: req.path,
           userAgent: req.get('User-Agent')
         });
@@ -115,7 +117,7 @@ class AuthMiddleware {
       const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
       // Validate token format
-      if (!token || typeof token !== 'string' || token.length > 1000) {
+      if (!token || typeof token !== 'string' || token.length > 2000) { // Increased limit slightly for Firebase tokens which can be long
         AuthMiddleware.recordFailedAttempt(req.ip);
         logger.security('Invalid token format', { ip: req.ip, path: req.path });
         return res.status(401).json(
@@ -127,15 +129,53 @@ class AuthMiddleware {
         );
       }
 
-      // Verify JWT token using key rotation service
+      // 1. Try to verify as Firebase ID token first
+      try {
+        const decodedFirebaseToken = await admin.auth().verifyIdToken(token);
+        if (decodedFirebaseToken) {
+          const user = await User.findOne({ email: decodedFirebaseToken.email.toLowerCase() });
+
+          if (user) {
+            // Populate req.user for compatibility with existing middleware and controllers
+            req.user = {
+              userId: user._id.toString(),
+              email: user.email,
+              roles: user.roles && user.roles.length > 0 ? user.roles : [user.role || 'user'],
+              organizationId: user.organizationId,
+              iat: decodedFirebaseToken.iat,
+              exp: decodedFirebaseToken.exp,
+              provider: 'firebase'
+            };
+
+            logger.info('User authenticated successfully via Firebase token', {
+              userId: req.user.userId,
+              email: req.user.email,
+              ip: req.ip,
+              path: req.path
+            });
+
+            // Reset failed attempts on success
+            AuthMiddleware.resetFailedAttempts(req.ip);
+            return next();
+          }
+        }
+      } catch (firebaseError) {
+        // Not a Firebase token or verification failed, continue to custom JWT
+        // We only log if it's not a standard 'invalid token' error to avoid log bloating
+        if (firebaseError.code !== 'auth/argument-error' && firebaseError.code !== 'auth/invalid-id-token') {
+          logger.debug('Firebase token check skipped or failed', { error: firebaseError.message });
+        }
+      }
+
+      // 2. Verify custom JWT token using key rotation service
       // The service supports multiple keys for zero-downtime rotation
       let decoded;
       let verificationError;
-      
+
       try {
         // Get all valid keys (active + previous valid keys)
         const validKeys = await keyRotationService.getValidKeys();
-        
+
         if (!validKeys || validKeys.length === 0) {
           logger.error('No valid JWT keys available for verification');
           return res.status(500).json(
@@ -146,7 +186,7 @@ class AuthMiddleware {
             )
           );
         }
-        
+
         // Try to verify with each valid key (most recent first)
         for (const key of validKeys) {
           try {
@@ -154,7 +194,7 @@ class AuthMiddleware {
               issuer: 'invoice-app',
               audience: 'invoice-app-users'
             });
-            
+
             // Successfully verified - add key metadata to decoded token
             decoded._keyId = key.keyId;
             break;
@@ -164,7 +204,7 @@ class AuthMiddleware {
             continue;
           }
         }
-        
+
         // If no key worked, throw the last error
         if (!decoded) {
           throw verificationError || new Error('Token verification failed');
@@ -174,7 +214,7 @@ class AuthMiddleware {
         logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
           error: error.message
         });
-        
+
         const privateKey = process.env.JWT_SECRET;
         if (!privateKey) {
           logger.error('JWT_SECRET not properly configured in environment variables');
@@ -186,7 +226,7 @@ class AuthMiddleware {
             )
           );
         }
-        
+
         decoded = jwt.verify(token, privateKey, {
           issuer: 'invoice-app',
           audience: 'invoice-app-users'
@@ -196,8 +236,8 @@ class AuthMiddleware {
       // Validate decoded token structure
       if (!decoded.userId || !decoded.email) {
         AuthMiddleware.recordFailedAttempt(req.ip);
-        logger.security('Invalid token payload', { 
-          ip: req.ip, 
+        logger.security('Invalid token payload', {
+          ip: req.ip,
           path: req.path,
           tokenPayload: { userId: decoded.userId, email: decoded.email }
         });
@@ -214,8 +254,8 @@ class AuthMiddleware {
       const userIdValidation = InputValidator.validateObjectId(decoded.userId);
       if (!userIdValidation.isValid) {
         AuthMiddleware.recordFailedAttempt(req.ip);
-        logger.security('Invalid user ID in token', { 
-          ip: req.ip, 
+        logger.security('Invalid user ID in token', {
+          ip: req.ip,
           path: req.path,
           userId: decoded.userId
         });
@@ -232,8 +272,8 @@ class AuthMiddleware {
       const emailValidation = InputValidator.validateEmail(decoded.email);
       if (!emailValidation.isValid) {
         AuthMiddleware.recordFailedAttempt(req.ip);
-        logger.security('Invalid email in token', { 
-          ip: req.ip, 
+        logger.security('Invalid email in token', {
+          ip: req.ip,
           path: req.path,
           email: decoded.email
         });
@@ -249,8 +289,8 @@ class AuthMiddleware {
       // Check token expiration (additional check)
       if (decoded.exp && decoded.exp < Math.floor(Date.now() / 1000)) {
         AuthMiddleware.recordFailedAttempt(req.ip);
-        logger.security('Expired token used', { 
-          ip: req.ip, 
+        logger.security('Expired token used', {
+          ip: req.ip,
           path: req.path,
           userId: decoded.userId,
           expiredAt: new Date(decoded.exp * 1000)
@@ -289,10 +329,10 @@ class AuthMiddleware {
       next();
     } catch (error) {
       AuthMiddleware.recordFailedAttempt(req.ip);
-      
+
       if (error.name === 'JsonWebTokenError') {
-        logger.security('Invalid JWT token', { 
-          ip: req.ip, 
+        logger.security('Invalid JWT token', {
+          ip: req.ip,
           path: req.path,
           error: error.message
         });
@@ -306,8 +346,8 @@ class AuthMiddleware {
       }
 
       if (error.name === 'TokenExpiredError') {
-        logger.security('Expired JWT token', { 
-          ip: req.ip, 
+        logger.security('Expired JWT token', {
+          ip: req.ip,
           path: req.path,
           expiredAt: error.expiredAt
         });
@@ -319,10 +359,10 @@ class AuthMiddleware {
           )
         );
       }
-      
+
       if (error.name === 'NotBeforeError') {
-        logger.security('Token not yet valid', { 
-          ip: req.ip, 
+        logger.security('Token not yet valid', {
+          ip: req.ip,
           path: req.path,
           date: error.date
         });
@@ -334,10 +374,10 @@ class AuthMiddleware {
           )
         );
       }
-      
+
       if (error.name === 'InvalidAudienceError' || error.name === 'InvalidIssuerError') {
-        logger.security('Token validation error', { 
-          ip: req.ip, 
+        logger.security('Token validation error', {
+          ip: req.ip,
           path: req.path,
           error: error.message
         });
@@ -375,9 +415,9 @@ class AuthMiddleware {
   static requireRoles(allowedRoles = []) {
     return (req, res, next) => {
       if (!req.user) {
-        logger.security('Authorization check without authentication', { 
-          ip: req.ip, 
-          path: req.path 
+        logger.security('Authorization check without authentication', {
+          ip: req.ip,
+          path: req.path
         });
         return res.status(401).json(
           SecureErrorHandler.createErrorResponse(
@@ -426,25 +466,25 @@ class AuthMiddleware {
     }
 
     const attempts = AuthMiddleware.failedAttempts.get(ip);
-    
+
     // Remove attempts older than the window
     const recentAttempts = attempts.filter(timestamp => now - timestamp < windowMs);
     recentAttempts.push(now);
-    
+
     AuthMiddleware.failedAttempts.set(ip, recentAttempts);
 
     // Block IP if too many attempts
     if (recentAttempts.length >= maxAttempts) {
       const blockDuration = 60 * 60 * 1000; // 1 hour
       AuthMiddleware.blockedIPs.set(ip, now + blockDuration);
-      
+
       // Keep security monitor in sync for visibility and unified management
       try {
         securityMonitor.blockIP(ip, 'Too many failed authentication attempts', blockDuration);
       } catch (e) {
         logger.warn('Failed to sync block with securityMonitor', { error: e.message });
       }
-      
+
       logger.security('IP blocked due to failed attempts', {
         ip,
         attemptCount: recentAttempts.length,
@@ -512,7 +552,7 @@ class AuthMiddleware {
    */
   static authenticateAPIKey(req, res, next) {
     const apiKey = req.headers['x-api-key'];
-    
+
     if (!apiKey) {
       logger.security('Missing API key', { ip: req.ip, path: req.path });
       return res.status(401).json(
@@ -526,7 +566,7 @@ class AuthMiddleware {
 
     // Validate API key format and check against allowed keys
     const validAPIKeys = (process.env.VALID_API_KEYS || '').split(',');
-    
+
     if (!validAPIKeys.includes(apiKey)) {
       AuthMiddleware.recordFailedAttempt(req.ip);
       logger.security('Invalid API key', { ip: req.ip, path: req.path });
@@ -604,14 +644,14 @@ function rateLimitMiddleware(type) {
   const keyGenerator = (req, res) => {
     // If user is authenticated, use their ID or email
     if (req.user && req.user.email) return req.user.email;
-    
+
     // For public auth endpoints, use email from body if available
     if (req.body && req.body.email && [
       'login', 'register', 'verify', 'forgot', 'reset', 'resend'
     ].includes(type)) {
       return req.body.email;
     }
-    
+
     // Fallback to undefined - let express-rate-limit use default IP handling
     return undefined;
   };
@@ -635,7 +675,7 @@ function rateLimitMiddleware(type) {
         type: type,
         userAgent: req.get('User-Agent')
       });
-      
+
       // Record in securityMonitor for centralized visibility and history (if available)
       if (typeof securityMonitor !== 'undefined' && securityMonitor && typeof securityMonitor.recordRateLimitViolation === 'function') {
         try {
@@ -649,7 +689,7 @@ function rateLimitMiddleware(type) {
           logger.warn('Failed to record rate limit violation in securityMonitor', { error: e.message });
         }
       }
-      
+
       res.status(429).json({
         success: false,
         message: config.message,
