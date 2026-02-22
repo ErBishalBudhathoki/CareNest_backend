@@ -34,16 +34,66 @@ const strictLimiter = rateLimit({
 
 // Validation rules
 const createInvoiceValidation = [
-  body('clientId').isMongoId().withMessage('Valid client ID is required'),
-  body('invoiceNumber').trim().notEmpty().withMessage('Invoice number is required'),
-  body('issueDate').isISO8601().withMessage('Valid issue date is required'),
-  body('dueDate').isISO8601().withMessage('Valid due date is required'),
-  body('lineItems').isArray({ min: 1 }).withMessage('At least one line item is required'),
-  body('lineItems.*.description').trim().notEmpty().withMessage('Line item description is required'),
-  body('lineItems.*.quantity').isFloat({ min: 0 }).withMessage('Valid quantity is required'),
-  body('lineItems.*.unitPrice').isFloat({ min: 0 }).withMessage('Valid unit price is required'),
-  body('taxRate').optional().isFloat({ min: 0, max: 100 }).withMessage('Tax rate must be between 0 and 100'),
-  body('notes').optional().trim().isLength({ max: 2000 }).withMessage('Notes too long')
+  body('organizationId').trim().notEmpty().withMessage('Organization ID is required'),
+  body('clientEmail').isEmail().withMessage('Valid client email is required'),
+  body('invoiceType')
+    .optional()
+    .isIn(['client', 'employee'])
+    .withMessage('invoiceType must be "client" or "employee"'),
+  body('lineItems')
+    .isArray()
+    .withMessage('lineItems must be an array'),
+  body()
+    .custom((payload) => {
+      const lineItems = Array.isArray(payload?.lineItems) ? payload.lineItems : [];
+      const expenses = Array.isArray(payload?.expenses) ? payload.expenses : [];
+      if (lineItems.length === 0 && expenses.length === 0) {
+        throw new Error('At least one line item or expense is required');
+      }
+      return true;
+    }),
+  body('lineItems.*')
+    .custom((item) => {
+      if (!item || typeof item !== 'object') {
+        throw new Error('Each line item must be an object');
+      }
+
+      const description = String(
+        item.description ||
+        item.itemName ||
+        item.supportItemName ||
+        item.ndisItemName ||
+        ''
+      ).trim();
+
+      const quantity = Number(item.quantity ?? item.hours ?? item.totalHours ?? 0);
+      const price = Number(item.unitPrice ?? item.rate ?? item.price ?? 0);
+      const total = Number(item.totalPrice ?? item.amount ?? item.total ?? 0);
+
+      if (!description) {
+        throw new Error('Line item description/name is required');
+      }
+      if ((Number.isNaN(quantity) || quantity <= 0) && (Number.isNaN(total) || total <= 0)) {
+        throw new Error('Line item must include a positive quantity/hours or total amount');
+      }
+      if ((Number.isNaN(price) || price <= 0) && (Number.isNaN(total) || total <= 0)) {
+        throw new Error('Line item must include a positive unit price/rate or total amount');
+      }
+      return true;
+    }),
+  body('financialSummary.taxAmount')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Tax amount must be a positive number'),
+  body('financialSummary.totalAmount')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('Total amount must be a positive number'),
+  body('metadata.internalNotes')
+    .optional()
+    .trim()
+    .isLength({ max: 2000 })
+    .withMessage('Notes too long')
 ];
 
 const getInvoicesValidation = [

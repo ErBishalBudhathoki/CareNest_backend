@@ -85,6 +85,20 @@ const invoiceSchema = new mongoose.Schema({
     priority: String,
     internalNotes: String
   },
+
+  // Preserved for employee payroll workflows and PDF regeneration.
+  header: {
+    issuer: mongoose.Schema.Types.Mixed,
+    billedTo: mongoose.Schema.Types.Mixed
+  },
+
+  calculatedPayloadData: mongoose.Schema.Types.Mixed,
+
+  employeeContext: {
+    employeeId: String,
+    employeeEmail: String,
+    employeeName: String
+  },
   
   compliance: {
     ndisCompliant: Boolean,

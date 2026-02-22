@@ -203,9 +203,10 @@ class CareIntelligenceController {
   async trackGoalProgress(req, res) {
     try {
       const { goalId } = req.params;
-      const { progressData } = req.body;
+      const { progressData, progressUpdate } = req.body;
+      const payload = progressData || progressUpdate || {};
       
-      const result = await carePlanService.trackGoalProgress(goalId, progressData);
+      const result = await carePlanService.trackGoalProgress(goalId, payload);
       res.json(result);
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -214,7 +215,7 @@ class CareIntelligenceController {
 
   async generateEvidenceBasedRecommendations(req, res) {
     try {
-      const { clientProfile } = req.body;
+      const clientProfile = req.body.clientProfile || req.body;
       
       const result = await carePlanService.generateEvidenceBasedRecommendations(clientProfile);
       res.json(result);
@@ -253,9 +254,14 @@ class CareIntelligenceController {
   async detectPatterns(req, res) {
     try {
       const { organizationId } = req.params;
-      const { timeframe } = req.body;
+      const { timeframe, startDate, endDate } = req.body;
+      const computedTimeframe = timeframe ||
+        (startDate && endDate ? `${startDate} to ${endDate}` : 'last_30_days');
       
-      const result = await incidentManagementService.detectPatterns(organizationId, timeframe);
+      const result = await incidentManagementService.detectPatterns(
+        organizationId,
+        computedTimeframe
+      );
       res.json(result);
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -294,7 +300,7 @@ class CareIntelligenceController {
     try {
       const { medications } = req.body;
       
-      const result = await medicationService.checkInteractions(medications);
+      const result = await medicationService.checkInteractions(medications || []);
       res.json(result);
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -304,9 +310,11 @@ class CareIntelligenceController {
   async trackCompliance(req, res) {
     try {
       const { clientId } = req.params;
-      const { period } = req.body;
+      const { period, startDate, endDate } = req.body;
+      const resolvedPeriod = period ||
+        (startDate && endDate ? `${startDate} to ${endDate}` : 'last_30_days');
       
-      const result = await medicationService.trackCompliance(clientId, period);
+      const result = await medicationService.trackCompliance(clientId, resolvedPeriod);
       res.json(result);
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
