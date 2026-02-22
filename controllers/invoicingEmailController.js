@@ -2,6 +2,15 @@ const InvoicingEmailDetail = require('../models/InvoicingEmailDetail');
 const InvoicingEmailKey = require('../models/InvoicingEmailKey');
 
 class InvoicingEmailController {
+  constructor() {
+    this.addUpdateInvoicingEmailDetail =
+      this.addUpdateInvoicingEmailDetail.bind(this);
+    this.setInvoicingEmailDetailKey = this.setInvoicingEmailDetailKey.bind(this);
+    this.getInvoicingEmailDetails = this.getInvoicingEmailDetails.bind(this);
+    this.checkInvoicingEmailKey = this.checkInvoicingEmailKey.bind(this);
+    this.getEmailDetailToSendEmail = this.getEmailDetailToSendEmail.bind(this);
+  }
+
   _normalizeEmail(value) {
     return String(value || '').trim().toLowerCase();
   }
@@ -297,4 +306,3 @@ class InvoicingEmailController {
 }
 
 module.exports = new InvoicingEmailController();
-
