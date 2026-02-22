@@ -72,7 +72,12 @@ const offlineSyncRoutes = require('./offlineSyncRoutes'); // Offline sync (Phase
 const clientPortalEnhancedRoutes = require('./clientPortalRoutes'); // Client portal (Phase 4)
 const advancedPayrollRoutes = require('./advancedPayrollRoutes'); // Advanced payroll (Phase 4)
 const communicationHubRoutes = require('./communicationHubRoutes'); // Communication hub (Phase 4)
+const realtimePortalRoutes = require('./realtimePortalRoutes'); // Realtime portal (Phase 7)
 const firebaseAuthRoutes = require('./firebaseAuth'); // Firebase authentication
+const workforceOptimizationRoutes = require('./workforceOptimizationRoutes'); // Workforce optimization (Phase 8)
+const financialIntelligenceRoutes = require('./financialIntelligenceRoutes'); // Financial intelligence (Phase 10)
+const careIntelligenceRoutes = require('./careIntelligenceRoutes'); // Care intelligence
+const invoicingEmailLegacyRoutes = require('./invoicingEmailLegacyRoutes'); // Legacy invoicing email endpoints
 
 // Mount Routes
 
@@ -149,7 +154,12 @@ router.use('/offline', offlineSyncRoutes); // Offline sync API (Phase 3)
 router.use('/client-portal-enhanced', clientPortalEnhancedRoutes); // Client portal API (Phase 4)
 router.use('/payroll-advanced', advancedPayrollRoutes); // Advanced payroll API (Phase 4)
 router.use('/communication-hub', communicationHubRoutes); // Communication hub API (Phase 4)
+router.use('/realtime-portal', realtimePortalRoutes); // Realtime portal API (Phase 7)
 router.use('/firebase-auth', firebaseAuthRoutes); // Firebase authentication API
+router.use('/workforce', workforceOptimizationRoutes); // Workforce optimization API (Phase 8)
+router.use('/financial-intelligence', financialIntelligenceRoutes); // Financial intelligence API (Phase 10)
+router.use('/care-intelligence', careIntelligenceRoutes); // Care intelligence API
+router.use('/', invoicingEmailLegacyRoutes); // Legacy invoicing email compatibility API
 // router.use('/upload', uploadRoutes); // TODO: Add uploadRoutes import if needed
 
 module.exports = router;
