@@ -42,13 +42,13 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.958.0",
+    "@aws-sdk/client-s3": "^3.995.0",
     "@google-cloud/secret-manager": "^5.6.0",
     "@google-cloud/vertexai": "^1.10.0",
     "argon2": "^0.44.0",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
-    "bullmq": "^5.66.6",
+    "bullmq": "^5.70.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.5.0",
@@ -76,13 +76,13 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "eslint": "^9.18.0",
-    "firebase-tools": "^15.6.0",
+    "@eslint/js": "^9.39.3",
+    "eslint": "^9.39.3",
+    "firebase-tools": "^15.7.0",
     "globals": "^17.0.0",
     "ioredis-mock": "^8.13.1",
     "jest": "^30.2.0",
-    "nodemon": "^3.1.11",
+    "nodemon": "^3.1.14",
     "supertest": "^7.1.4"
   },
   "overrides": {
