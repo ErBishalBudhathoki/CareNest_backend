@@ -4,9 +4,11 @@ const NotificationHistory = require('../models/NotificationHistory');
 const Shift = require('../models/Shift');
 const Expense = require('../models/Expense');
 const User = require('../models/User');
+const FcmToken = require('../models/FcmToken');
 const logger = require('../config/logger');
 const QueueManager = require('../core/QueueManager');
 const { QUEUE_NAME } = require('../workers/notificationWorker');
+const { admin, messaging } = require('../firebase-admin-config');
 
 class NotificationScheduler {
   start() {
@@ -38,6 +40,15 @@ class NotificationScheduler {
     cron.schedule('0 18 * * *', async () => {
       await this.processTimesheetReminders();
     });
+
+    // Email Verification Reminders: Run once daily at 10 AM (Australia/Sydney)
+    cron.schedule(
+      '0 10 * * *',
+      async () => {
+        await this.processEmailVerificationReminders();
+      },
+      { timezone: 'Australia/Sydney' }
+    );
   }
 
   async processShiftReminders() {
@@ -140,6 +151,153 @@ class NotificationScheduler {
     logger.info('Processing timesheet reminders... (Placeholder)');
   }
 
+  async processEmailVerificationReminders() {
+    try {
+      logger.info('Processing email verification reminders...');
+
+      const unverifiedUsers = await User.find({
+        isActive: { $ne: false },
+        email: { $exists: true, $ne: null },
+        emailVerified: { $ne: true }
+      })
+        .select('_id email firstName firebaseUid')
+        .lean();
+
+      if (!unverifiedUsers.length) {
+        logger.info('No unverified users found for email verification reminders');
+        return;
+      }
+
+      const now = new Date();
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      let sentCount = 0;
+      let skippedNoToken = 0;
+      let alreadySentCount = 0;
+      let failedCount = 0;
+      const canCheckFirebaseStatus =
+        Array.isArray(admin.apps) && admin.apps.length > 0;
+
+      for (const user of unverifiedUsers) {
+        const normalizedEmail = String(user.email || '').trim().toLowerCase();
+        if (!normalizedEmail) {
+          continue;
+        }
+
+        // Re-check verification directly in Firebase to avoid stale reminders.
+        if (canCheckFirebaseStatus && user.firebaseUid) {
+          try {
+            const firebaseUser = await admin.auth().getUser(user.firebaseUid);
+            if (firebaseUser.emailVerified) {
+              await User.updateOne(
+                { _id: user._id },
+                { $set: { emailVerified: true, updatedAt: new Date() } }
+              );
+              continue;
+            }
+          } catch (firebaseLookupError) {
+            logger.warn('Failed to re-check Firebase verification status', {
+              userId: user._id?.toString(),
+              firebaseUid: user.firebaseUid,
+              error: firebaseLookupError.message
+            });
+          }
+        }
+
+        const alreadySent = await NotificationHistory.findOne({
+          userId: user._id,
+          type: 'email_verification',
+          createdAt: { $gte: twentyFourHoursAgo }
+        }).lean();
+
+        if (alreadySent) {
+          alreadySentCount += 1;
+          continue;
+        }
+
+        const tokenDoc = await FcmToken.findOne({
+          userEmail: normalizedEmail
+        }).lean();
+
+        if (!tokenDoc?.fcmToken) {
+          skippedNoToken += 1;
+          continue;
+        }
+
+        const history = await NotificationHistory.create({
+          userId: user._id,
+          type: 'email_verification',
+          title: 'Verify your email',
+          body:
+            'Please verify your email address in Settings to keep your account secure.',
+          data: {
+            channel: 'verify_email',
+            screen: 'settings',
+            action: 'verify_email'
+          },
+          status: 'scheduled',
+          scheduledAt: now
+        });
+
+        try {
+          const response = await messaging.send({
+            token: tokenDoc.fcmToken,
+            notification: {
+              title: 'Verify your email',
+              body:
+                'Please verify your email address in Settings to keep your account secure.'
+            },
+            data: {
+              type: 'email_verification',
+              channel: 'verify_email',
+              action: 'open_settings',
+              screen: 'settings'
+            },
+            android: { priority: 'high' },
+            apns: { headers: { 'apns-priority': '10' } }
+          });
+
+          const messageId =
+            typeof response === 'string' ? response.split('/').pop() : null;
+
+          await NotificationHistory.findByIdAndUpdate(history._id, {
+            status: 'delivered',
+            sentAt: new Date(),
+            deliveredAt: new Date(),
+            ...(messageId ? { fcmMessageId: messageId } : {})
+          });
+          sentCount += 1;
+        } catch (error) {
+          failedCount += 1;
+          await NotificationHistory.findByIdAndUpdate(history._id, {
+            status: 'failed',
+            sentAt: new Date(),
+            error: error.message
+          });
+
+          if (
+            error.code === 'messaging/registration-token-not-registered' ||
+            error.code === 'messaging/invalid-argument'
+          ) {
+            await FcmToken.deleteOne({ userEmail: normalizedEmail });
+          }
+        }
+      }
+
+      logger.info('Email verification reminder processing complete', {
+        totalUnverifiedUsers: unverifiedUsers.length,
+        sentCount,
+        alreadySentCount,
+        skippedNoToken,
+        failedCount
+      });
+    } catch (error) {
+      logger.error('Error processing email verification reminders', {
+        error: error.message
+      });
+    }
+  }
+
   async sendNotification(userId, notification) {
     // Create history record (status: scheduled)
     const history = await NotificationHistory.create({
@@ -171,3 +329,4 @@ module.exports = notificationSchedulerInstance;
 module.exports.processShiftReminders = notificationSchedulerInstance.processShiftReminders.bind(notificationSchedulerInstance);
 module.exports.processExpenseReminders = notificationSchedulerInstance.processExpenseReminders.bind(notificationSchedulerInstance);
 module.exports.processTimesheetReminders = notificationSchedulerInstance.processTimesheetReminders.bind(notificationSchedulerInstance);
+module.exports.processEmailVerificationReminders = notificationSchedulerInstance.processEmailVerificationReminders.bind(notificationSchedulerInstance);

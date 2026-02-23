@@ -141,6 +141,7 @@ router.post('/medium-frequency', schedulerLimiter, logSchedulerExecution('medium
  * - Process dunning (overdue invoice collections)
  * - Process recurring expenses
  * - Send timesheet reminders
+ * - Send email verification reminders for unverified users
  */
 router.post('/daily', schedulerLimiter, logSchedulerExecution('daily'), async (req, res) => {
     try {
@@ -234,6 +235,23 @@ router.post('/daily', schedulerLimiter, logSchedulerExecution('daily'), async (r
             logger.error('Error processing timesheet reminders:', error);
             results.tasks.push({
                 name: 'timesheet_reminders',
+                status: 'error',
+                error: error.message
+            });
+        }
+
+        // Task 6: Send email verification reminders
+        try {
+            logger.info('Processing email verification reminders...');
+            await notificationScheduler.processEmailVerificationReminders();
+            results.tasks.push({
+                name: 'email_verification_reminders',
+                status: 'success'
+            });
+        } catch (error) {
+            logger.error('Error processing email verification reminders:', error);
+            results.tasks.push({
+                name: 'email_verification_reminders',
                 status: 'error',
                 error: error.message
             });
