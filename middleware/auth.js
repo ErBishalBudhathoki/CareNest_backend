@@ -7,7 +7,11 @@ const SecureErrorHandler = require('../utils/errorHandler');
 const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
 const keyRotationService = require('../services/jwtKeyRotationService');
-const { admin } = require('../firebase-admin-config');
+const firebaseAdminConfig = require('../firebase-admin-config');
+// Support both export shapes:
+// - { admin, messaging } (production module)
+// - { auth: () => ... } (unit tests mocking firebase-admin-config)
+const admin = firebaseAdminConfig.admin || firebaseAdminConfig;
 const User = require('../models/User');
 
 const logger = createLogger('AuthMiddleware');
