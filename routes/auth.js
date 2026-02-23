@@ -403,12 +403,18 @@ router.get('/activity-logs',
  * @access Public
  */
 router.post('/resend-verification',
+  requireAppCheck,
   rateLimitMiddleware('resend'),
+  emailValidators,
   async (req, res) => {
     try {
-      // resendVerification missed?
-      return res.status(501).json({ error: 'Not Implemented Yet' });
+      const result = await SecureAuthController.resendVerification(req, res);
+      return result;
     } catch (error) {
+      logger.error('Resend verification route error', {
+        error: error.message,
+        email: req.body?.email
+      });
       return SecureErrorHandler.handleError(error, res);
     }
   }
