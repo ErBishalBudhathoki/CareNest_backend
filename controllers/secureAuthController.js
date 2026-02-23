@@ -323,11 +323,15 @@ class SecureAuthController {
       }
     }
 
-    // 8. GENERATE OTP for email verification
+    let verificationOtpSent = false;
     try {
       await authService.generateOTP(email, 'verification');
-    } catch (otpError) {
-      logger.warn('OTP generation failed (non-fatal)', { email, error: otpError.message });
+      verificationOtpSent = true;
+    } catch (verificationOtpError) {
+      logger.warn('Verification OTP generation failed (non-fatal)', {
+        email,
+        error: verificationOtpError.message
+      });
     }
 
     logger.business('User registered', {
@@ -337,6 +341,10 @@ class SecureAuthController {
       firebaseUid: firebaseUser.uid,
       ip: req.ip
     });
+
+    const registrationMessage = verificationOtpSent
+      ? 'User registered successfully. Verification OTP sent to your email.'
+      : 'User registered successfully. Please request a verification OTP.';
 
     res.status(201).json(
       SecureErrorHandler.createSuccessResponse(
@@ -349,6 +357,7 @@ class SecureAuthController {
           customToken: customToken,
           organizationId: newUser.organizationId,
           organizationCode: newUser.organizationCode,
+          verificationOtpSent,
           ...(createdOrganization && {
             organization: {
               id: createdOrganization._id.toString(),
@@ -357,7 +366,7 @@ class SecureAuthController {
             }
           })
         },
-        'User registered successfully. Please verify your email.'
+        registrationMessage
       )
     );
   });
@@ -733,7 +742,8 @@ class SecureAuthController {
       defaultOrganizationId: user.defaultOrganizationId,
       lastActiveOrganizationId: user.lastActiveOrganizationId,
       isActive: user.isActive !== false,
-      isEmailVerified: user.isEmailVerified || false,
+      isEmailVerified:
+        user.emailVerified === true || user.isEmailVerified === true,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       lastLogin: user.lastLogin
@@ -766,18 +776,44 @@ class SecureAuthController {
       );
     }
 
-    // Use authService to verify
-    await authService.verifyOTP(email, otp);
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-    // Update user status
-    await User.updateOne(
-      { email: email },
-      { $set: { isEmailVerified: true, updatedAt: new Date() } }
+    // Use authService to verify
+    await authService.verifyOTP(normalizedEmail, otp);
+
+    // Update user status in MongoDB
+    const user = await User.findOneAndUpdate(
+      { email: normalizedEmail },
+      { $set: { emailVerified: true, updatedAt: new Date() } },
+      { new: true }
     );
+
+    if (!user) {
+      return res.status(404).json(
+        SecureErrorHandler.createErrorResponse(
+          'User not found',
+          404,
+          'USER_NOT_FOUND'
+        )
+      );
+    }
+
+    // Keep Firebase emailVerified in sync with OTP verification state.
+    if (user.firebaseUid) {
+      try {
+        await admin.auth().updateUser(user.firebaseUid, { emailVerified: true });
+      } catch (firebaseSyncError) {
+        logger.warn('Failed to sync Firebase emailVerified after OTP verify', {
+          email: normalizedEmail,
+          firebaseUid: user.firebaseUid,
+          error: firebaseSyncError.message
+        });
+      }
+    }
 
     logger.business('Email verified', {
       action: 'EMAIL_VERIFIED',
-      email,
+      email: normalizedEmail,
       ip: req.ip
     });
 
@@ -785,6 +821,53 @@ class SecureAuthController {
       SecureErrorHandler.createSuccessResponse(
         null,
         'Email verified successfully'
+      )
+    );
+  });
+
+  /**
+   * Resend verification OTP for email verification.
+   */
+  resendVerification = catchAsync(async (req, res) => {
+    const email = req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
+
+    if (!email) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'Email is required',
+          400,
+          'MISSING_FIELDS'
+        )
+      );
+    }
+
+    const user = await authService.checkEmailExists(email);
+
+    // Prevent user enumeration while still returning success semantics.
+    if (!user) {
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          null,
+          'If an account with this email exists, a verification code has been sent.'
+        )
+      );
+    }
+
+    if (user.emailVerified === true) {
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          { alreadyVerified: true },
+          'Email is already verified.'
+        )
+      );
+    }
+
+    await authService.generateOTP(email, 'verification');
+
+    return res.status(200).json(
+      SecureErrorHandler.createSuccessResponse(
+        { otpSent: true },
+        'Verification code sent successfully.'
       )
     );
   });

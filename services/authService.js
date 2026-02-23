@@ -92,6 +92,7 @@ class AuthService {
   async createUser(userData) {
     try {
       const isFirebaseUser = !!userData.firebaseUid;
+      const isEmailVerified = userData.emailVerified === true;
       
       const newUser = new User({
         email: userData.email,
@@ -105,12 +106,12 @@ class AuthService {
         createdAt: new Date(),
         lastLogin: null,
         isActive: true,
-        isEmailVerified: isFirebaseUser ? true : false,
+        isEmailVerified: isEmailVerified,
         // Firebase-specific fields
         ...(isFirebaseUser && {
           firebaseUid: userData.firebaseUid,
           firebaseSyncedAt: userData.firebaseSyncedAt || new Date(),
-          emailVerified: userData.emailVerified !== undefined ? userData.emailVerified : true
+          emailVerified: isEmailVerified
         }),
         // Password only for non-Firebase users
         ...(!isFirebaseUser && { password: userData.password })
@@ -258,7 +259,8 @@ class AuthService {
           defaultOrganizationId: user.defaultOrganizationId,
           lastActiveOrganizationId: user.lastActiveOrganizationId,
           isActive: user.isActive !== false,
-          isEmailVerified: user.isEmailVerified || false,
+          isEmailVerified:
+            user.emailVerified === true || user.isEmailVerified === true,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
           lastLogin: user.lastLogin

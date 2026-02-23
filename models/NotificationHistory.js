@@ -10,7 +10,7 @@ const notificationHistorySchema = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    enum: ['shift', 'geofence', 'expense', 'timesheet'],
+    enum: ['shift', 'geofence', 'expense', 'timesheet', 'email_verification'],
     index: true
   },
   title: {
