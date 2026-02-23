@@ -14,6 +14,9 @@ class FirebaseAuthController {
   static async syncUser(req, res) {
     try {
       const { firebaseUid, email, firstName, lastName, photoURL } = req.body;
+      const emailVerifiedFromFirebase = Boolean(
+        req.firebaseUser?.email_verified
+      );
 
       if (!firebaseUid || !email) {
         return res.status(400).json({
@@ -46,7 +49,7 @@ class FirebaseAuthController {
             firstName: firstName || '',
             lastName: lastName || '',
             photoURL,
-            emailVerified: true,
+            emailVerified: emailVerifiedFromFirebase,
             firebaseSyncedAt: new Date(),
             createdAt: new Date()
           });
@@ -61,6 +64,7 @@ class FirebaseAuthController {
       if (firstName) user.firstName = firstName;
       if (lastName) user.lastName = lastName;
       if (photoURL) user.photoURL = photoURL;
+      user.emailVerified = emailVerifiedFromFirebase;
       user.lastLoginAt = new Date();
       user.updatedAt = new Date();
 
@@ -274,13 +278,56 @@ class FirebaseAuthController {
    */
   static async verifyEmail(req, res) {
     try {
-      const { firebaseUid } = req.body;
+      const tokenFirebaseUid = req.firebaseUser?.uid;
+      const tokenEmail = req.firebaseUser?.email;
+      const tokenEmailVerified = Boolean(req.firebaseUser?.email_verified);
+      const bodyFirebaseUid = req.body?.firebaseUid;
+      const firebaseUid = tokenFirebaseUid || bodyFirebaseUid;
 
-      const user = await User.findOneAndUpdate(
+      if (!firebaseUid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Firebase UID is required'
+        });
+      }
+
+      if (
+        tokenFirebaseUid &&
+        bodyFirebaseUid &&
+        tokenFirebaseUid !== bodyFirebaseUid
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: 'Token user does not match requested user'
+        });
+      }
+
+      if (!tokenEmailVerified) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is not verified in Firebase yet'
+        });
+      }
+
+      let user = await User.findOneAndUpdate(
         { firebaseUid },
         { emailVerified: true, updatedAt: new Date() },
         { new: true }
       );
+
+      // Fallback for older records that may be linked by email only.
+      if (!user && tokenEmail) {
+        user = await User.findOneAndUpdate(
+          { email: tokenEmail.toLowerCase() },
+          {
+            firebaseUid,
+            emailVerified: true,
+            firebaseSyncedAt: new Date(),
+            updatedAt: new Date()
+          },
+          { new: true }
+        );
+      }
 
       if (!user) {
         return res.status(404).json({
@@ -296,7 +343,8 @@ class FirebaseAuthController {
 
       return res.status(200).json({
         success: true,
-        message: 'Email verified successfully'
+        message: 'Email verified successfully',
+        data: { emailVerified: true }
       });
     } catch (error) {
       logger.error('Email verification failed', {
@@ -313,4 +361,3 @@ class FirebaseAuthController {
 }
 
 module.exports = FirebaseAuthController;
-
