@@ -146,8 +146,12 @@ class AuthControllerV2 {
             return res.status(400).json(SecureErrorHandler.createErrorResponse('Weak or invalid password', 400, 'VALIDATION_ERROR', validation.error.issues));
         }
 
-        const userId = req.user.id; // From authenticateUser middleware
+        const userId = req.user?.userId || req.user?.id; // Support both auth payload shapes
         const ipAddress = req.ip || req.connection.remoteAddress;
+
+        if (!userId) {
+            return res.status(401).json(SecureErrorHandler.createErrorResponse('Unauthorized user context', 401, 'AUTH_FAILED'));
+        }
 
         try {
             await AuthService.changePassword(userId, validation.data.currentPassword, validation.data.newPassword, ipAddress);
