@@ -825,17 +825,30 @@ class SecureAuthController {
       );
     }
 
+    const firebaseProjectId =
+      process.env.FIREBASE_PROJECT_ID ||
+      process.env.GCP_PROJECT_ID ||
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      'invoice-660f3';
+
     const verificationContinueUrl =
       process.env.EMAIL_VERIFICATION_CONTINUE_URL ||
       process.env.FRONTEND_URL ||
-      'https://careservices.page.link/verify-email';
+      `https://${firebaseProjectId}.firebaseapp.com/verify-email`;
+
+    const emailVerificationActionSettings = {
+      url: verificationContinueUrl,
+      handleCodeInApp: true
+    };
+
+    if (process.env.FIREBASE_AUTH_LINK_DOMAIN) {
+      emailVerificationActionSettings.linkDomain =
+        process.env.FIREBASE_AUTH_LINK_DOMAIN;
+    }
 
     const verificationLink = await admin.auth().generateEmailVerificationLink(
       normalizedEmail,
-      {
-        url: verificationContinueUrl,
-        handleCodeInApp: true
-      }
+      emailVerificationActionSettings
     );
 
     const subject = 'Verify your email - CareNest';
