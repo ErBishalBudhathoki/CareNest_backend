@@ -144,18 +144,31 @@ class ClientAuthService {
       );
 
       // 6. Generate Firebase reset link for password setup
+      const firebaseProjectId =
+        process.env.FIREBASE_PROJECT_ID ||
+        process.env.GCP_PROJECT_ID ||
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        'invoice-660f3';
+
       const activationContinueUrl =
         process.env.CLIENT_ACTIVATION_CONTINUE_URL ||
         process.env.PASSWORD_RESET_CONTINUE_URL ||
         process.env.FRONTEND_URL ||
-        'https://careservices.page.link/reset-password';
+        `https://${firebaseProjectId}.firebaseapp.com/reset-password`;
+
+      const passwordResetActionSettings = {
+        url: activationContinueUrl,
+        handleCodeInApp: true
+      };
+
+      if (process.env.FIREBASE_AUTH_LINK_DOMAIN) {
+        passwordResetActionSettings.linkDomain =
+          process.env.FIREBASE_AUTH_LINK_DOMAIN;
+      }
 
       const resetLink = await admin.auth().generatePasswordResetLink(
         normalizedEmail,
-        {
-          url: activationContinueUrl,
-          handleCodeInApp: true
-        }
+        passwordResetActionSettings
       );
 
       // 7. Send activation email
