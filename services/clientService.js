@@ -7,6 +7,12 @@ const auditService = require('./auditService');
 const { processCustomPricing } = require('../utils/pricingHelpers');
 
 class ClientService {
+  createServiceError(message, statusCode = 400) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+  }
+
   async logAuditSafe(auditData, context) {
     try {
       await auditService.createAuditLog(auditData);
@@ -38,7 +44,7 @@ class ClientService {
     try {
       // CRITICAL: Require organizationId for multi-tenant isolation
       if (!organizationId) {
-        throw new Error('Organization ID is required for client creation');
+        throw this.createServiceError('Organization ID is required for client creation', 400);
       }
 
       // Verify user belongs to organization
@@ -49,7 +55,7 @@ class ClientService {
         }).populate('userId');
         
         if (!userOrg || userOrg.userId.email !== userEmail) {
-          throw new Error('User not authorized for this organization');
+          throw this.createServiceError('User not authorized for this organization', 403);
         }
       }
       
@@ -61,7 +67,10 @@ class ClientService {
       });
       
       if (existingClient) {
-        throw new Error('Client with this email already exists in your organization');
+        throw this.createServiceError(
+          'Client with this email already exists in your organization',
+          409
+        );
       }
       
       // Create client document with organization context
