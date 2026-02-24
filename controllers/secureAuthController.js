@@ -7,9 +7,11 @@ const FcmToken = require('../models/FcmToken');
 const UserOrganization = require('../models/UserOrganization');
 const Organization = require('../models/Organization');
 const authService = require('../services/authService');
+const emailService = require('../services/emailService');
 const SecureErrorHandler = require('../utils/errorHandler');
 const { admin, messaging } = require('../firebase-admin-config');
 const keyRotationService = require('../services/jwtKeyRotationService');
+const { verifyFirebaseCredentials } = require('../utils/firebasePasswordVerifier');
 
 /**
  * Secure Authentication Controller
@@ -323,17 +325,6 @@ class SecureAuthController {
       }
     }
 
-    let verificationOtpSent = false;
-    try {
-      await authService.generateOTP(email, 'verification');
-      verificationOtpSent = true;
-    } catch (verificationOtpError) {
-      logger.warn('Verification OTP generation failed (non-fatal)', {
-        email,
-        error: verificationOtpError.message
-      });
-    }
-
     logger.business('User registered', {
       action: 'USER_REGISTERED',
       userId: newUser._id.toString(),
@@ -341,10 +332,6 @@ class SecureAuthController {
       firebaseUid: firebaseUser.uid,
       ip: req.ip
     });
-
-    const registrationMessage = verificationOtpSent
-      ? 'User registered successfully. Verification OTP sent to your email.'
-      : 'User registered successfully. Please request a verification OTP.';
 
     res.status(201).json(
       SecureErrorHandler.createSuccessResponse(
@@ -357,7 +344,6 @@ class SecureAuthController {
           customToken: customToken,
           organizationId: newUser.organizationId,
           organizationCode: newUser.organizationCode,
-          verificationOtpSent,
           ...(createdOrganization && {
             organization: {
               id: createdOrganization._id.toString(),
@@ -366,7 +352,7 @@ class SecureAuthController {
             }
           })
         },
-        registrationMessage
+        'User registered successfully. Please verify your email using the Firebase verification link.'
       )
     );
   });
@@ -761,77 +747,26 @@ class SecureAuthController {
   });
 
   /**
-   * Email verification
+   * Deprecated email verification OTP endpoint.
    */
   verifyEmail = catchAsync(async (req, res) => {
-    const { email, otp } = req.body;
-
-    if (!email || !otp) {
-      return res.status(400).json(
-        SecureErrorHandler.createErrorResponse(
-          'Email and OTP are required',
-          400,
-          'MISSING_FIELDS'
-        )
-      );
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-
-    // Use authService to verify
-    await authService.verifyOTP(normalizedEmail, otp);
-
-    // Update user status in MongoDB
-    const user = await User.findOneAndUpdate(
-      { email: normalizedEmail },
-      { $set: { emailVerified: true, updatedAt: new Date() } },
-      { new: true }
-    );
-
-    if (!user) {
-      return res.status(404).json(
-        SecureErrorHandler.createErrorResponse(
-          'User not found',
-          404,
-          'USER_NOT_FOUND'
-        )
-      );
-    }
-
-    // Keep Firebase emailVerified in sync with OTP verification state.
-    if (user.firebaseUid) {
-      try {
-        await admin.auth().updateUser(user.firebaseUid, { emailVerified: true });
-      } catch (firebaseSyncError) {
-        logger.warn('Failed to sync Firebase emailVerified after OTP verify', {
-          email: normalizedEmail,
-          firebaseUid: user.firebaseUid,
-          error: firebaseSyncError.message
-        });
-      }
-    }
-
-    logger.business('Email verified', {
-      action: 'EMAIL_VERIFIED',
-      email: normalizedEmail,
-      ip: req.ip
-    });
-
-    res.status(200).json(
-      SecureErrorHandler.createSuccessResponse(
-        null,
-        'Email verified successfully'
+    return res.status(410).json(
+      SecureErrorHandler.createErrorResponse(
+        'Email verification OTP is no longer supported. Use Firebase email verification link flow.',
+        410,
+        'EMAIL_VERIFICATION_OTP_DEPRECATED'
       )
     );
   });
 
   /**
-   * Resend verification OTP for email verification.
+   * Resend Firebase email verification link.
    */
   resendVerification = catchAsync(async (req, res) => {
-    const email = req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
+    const normalizedEmail =
+      req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
 
-    if (!email) {
+    if (!normalizedEmail) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'Email is required',
@@ -841,19 +776,47 @@ class SecureAuthController {
       );
     }
 
-    const user = await authService.checkEmailExists(email);
-
-    // Prevent user enumeration while still returning success semantics.
+    const user = await authService.checkEmailExists(normalizedEmail);
     if (!user) {
       return res.status(200).json(
         SecureErrorHandler.createSuccessResponse(
           null,
-          'If an account with this email exists, a verification code has been sent.'
+          'If an account with this email exists, a verification link has been sent.'
         )
       );
     }
 
-    if (user.emailVerified === true) {
+    let firebaseUser;
+    try {
+      if (user.firebaseUid) {
+        firebaseUser = await admin.auth().getUser(user.firebaseUid);
+      } else {
+        firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        await User.updateOne(
+          { _id: user._id },
+          { $set: { firebaseUid: firebaseUser.uid, firebaseSyncedAt: new Date() } }
+        );
+      }
+    } catch (firebaseLookupError) {
+      logger.warn('Firebase user lookup failed for verification resend', {
+        email: normalizedEmail,
+        error: firebaseLookupError.message
+      });
+
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          null,
+          'If an account with this email exists, a verification link has been sent.'
+        )
+      );
+    }
+
+    if (firebaseUser.emailVerified) {
+      await User.updateOne(
+        { email: normalizedEmail },
+        { $set: { emailVerified: true, isEmailVerified: true, firebaseSyncedAt: new Date() } }
+      );
+
       return res.status(200).json(
         SecureErrorHandler.createSuccessResponse(
           { alreadyVerified: true },
@@ -862,12 +825,55 @@ class SecureAuthController {
       );
     }
 
-    await authService.generateOTP(email, 'verification');
+    const verificationContinueUrl =
+      process.env.EMAIL_VERIFICATION_CONTINUE_URL ||
+      process.env.FRONTEND_URL ||
+      'https://careservices.page.link/verify-email';
+
+    const verificationLink = await admin.auth().generateEmailVerificationLink(
+      normalizedEmail,
+      {
+        url: verificationContinueUrl,
+        handleCodeInApp: true
+      }
+    );
+
+    const subject = 'Verify your email - CareNest';
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; text-align: left;">
+        <h2 style="color: #4CAF50;">Verify your email address</h2>
+        <p>Please confirm your account by clicking the button below:</p>
+        <p style="margin: 24px 0;">
+          <a href="${verificationLink}" style="display: inline-block; padding: 12px 18px; background: #4CAF50; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+            Verify Email
+          </a>
+        </p>
+        <p>If the button does not work, copy and paste this link into your browser:</p>
+        <p style="word-break: break-all; color: #555;">${verificationLink}</p>
+        <p style="color: #777; font-size: 12px;">If you did not request this, you can ignore this email.</p>
+      </div>
+    `;
+
+    const sendResult = await emailService.sendEmail(
+      normalizedEmail,
+      subject,
+      html
+    );
+
+    if (!sendResult) {
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'Failed to send verification email',
+          500,
+          'EMAIL_SEND_FAILED'
+        )
+      );
+    }
 
     return res.status(200).json(
       SecureErrorHandler.createSuccessResponse(
-        { otpSent: true },
-        'Verification code sent successfully.'
+        { sent: true },
+        'Verification link sent successfully.'
       )
     );
   });
@@ -876,9 +882,10 @@ class SecureAuthController {
    * Password reset request
    */
   requestPasswordReset = catchAsync(async (req, res) => {
-    const { email } = req.body;
+    const normalizedEmail =
+      req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
 
-    if (!email) {
+    if (!normalizedEmail) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'Email is required',
@@ -889,20 +896,20 @@ class SecureAuthController {
     }
 
     // Check if user exists (silent fail if not to prevent enumeration)
-    const user = await authService.checkEmailExists(email);
+    const user = await authService.checkEmailExists(normalizedEmail);
 
     if (user) {
-      await authService.generateOTP(email);
+      await authService.generateOTP(normalizedEmail);
       logger.business('Password reset OTP generated', {
         action: 'PASSWORD_RESET_REQUESTED',
-        email,
+        email: normalizedEmail,
         ip: req.ip
       });
     } else {
       logger.business('Password reset requested for non-existent email', {
         action: 'PASSWORD_RESET_NONEXISTENT',
         ip: req.ip,
-        email
+        email: normalizedEmail
       });
     }
 
@@ -919,8 +926,11 @@ class SecureAuthController {
    */
   resetPassword = catchAsync(async (req, res) => {
     const { email, otp, newPassword, confirmPassword } = req.body;
+    const normalizedEmail = email
+      ? String(email).trim().toLowerCase()
+      : '';
 
-    if (!email || !otp || !newPassword || !confirmPassword) {
+    if (!normalizedEmail || !otp || !newPassword || !confirmPassword) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'All fields required',
@@ -943,7 +953,9 @@ class SecureAuthController {
     // Verify OTP via authService
     try {
       // Allow already used OTPs to handle cases where frontend verifies before reset
-      await authService.verifyOTP(email, otp, { allowAlreadyUsed: true });
+      await authService.verifyOTP(normalizedEmail, otp, {
+        allowAlreadyUsed: true
+      });
     } catch (error) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
@@ -956,11 +968,11 @@ class SecureAuthController {
 
     try {
       // Use authService to update password (handles hashing, salt, and OTP cleanup)
-      await authService.updatePassword(email, newPassword);
+      await authService.updatePassword(normalizedEmail, newPassword);
 
       // Unlock account (reset login attempts)
       await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
             loginAttempts: 0,
@@ -971,7 +983,7 @@ class SecureAuthController {
 
       logger.business('Password reset', {
         action: 'PASSWORD_RESET',
-        email,
+        email: normalizedEmail,
         ip: req.ip
       });
 
@@ -1182,7 +1194,9 @@ class SecureAuthController {
       );
     }
 
-    const user = await User.findOne({ _id: userId }).select('+password');
+    const user = await User.findOne({ _id: userId }).select(
+      'email firebaseUid'
+    );
     if (!user) {
       return res.status(404).json(
         SecureErrorHandler.createErrorResponse(
@@ -1193,8 +1207,40 @@ class SecureAuthController {
       );
     }
 
-    const isMatch = await user.comparePassword(currentPassword);
-    if (!isMatch) {
+    const normalizedEmail = String(user.email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'User email is missing',
+          400,
+          'INVALID_USER_STATE'
+        )
+      );
+    }
+
+    let isCurrentPasswordValid = false;
+    try {
+      isCurrentPasswordValid = await verifyFirebaseCredentials(
+        normalizedEmail,
+        currentPassword
+      );
+    } catch (verificationError) {
+      logger.error('Firebase current password verification failed', {
+        userId,
+        email: normalizedEmail,
+        error: verificationError.message
+      });
+
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'Unable to verify current password. Please try again.',
+          500,
+          'FIREBASE_PASSWORD_VERIFY_FAILED'
+        )
+      );
+    }
+
+    if (!isCurrentPasswordValid) {
       return res.status(401).json(
         SecureErrorHandler.createErrorResponse(
           'Incorrect current password',
@@ -1204,8 +1250,60 @@ class SecureAuthController {
       );
     }
 
-    user.password = newPassword;
-    await user.save();
+    let firebaseUid = user.firebaseUid;
+    if (!firebaseUid) {
+      try {
+        const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        firebaseUid = firebaseUser.uid;
+      } catch (firebaseLookupError) {
+        logger.error('Failed to resolve Firebase user in changePassword', {
+          userId,
+          email: normalizedEmail,
+          error: firebaseLookupError.message
+        });
+
+        return res.status(500).json(
+          SecureErrorHandler.createErrorResponse(
+            'Failed to resolve account for password update.',
+            500,
+            'FIREBASE_USER_RESOLUTION_FAILED'
+          )
+        );
+      }
+    }
+
+    try {
+      await admin.auth().updateUser(firebaseUid, { password: newPassword });
+      await admin.auth().revokeRefreshTokens(firebaseUid);
+    } catch (firebaseError) {
+      logger.error('Failed to update Firebase password in changePassword', {
+        userId,
+        firebaseUid,
+        error: firebaseError.message
+      });
+
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'Failed to update password. Please try again.',
+          500,
+          'FIREBASE_PASSWORD_UPDATE_FAILED'
+        )
+      );
+    }
+
+    await User.updateOne(
+      { _id: userId },
+      {
+        $set: {
+          firebaseUid,
+          passwordUpdatedAt: new Date(),
+          firebaseSyncedAt: new Date()
+        },
+        $unset: {
+          password: ''
+        }
+      }
+    );
 
     logger.business('Password changed', {
       action: 'PASSWORD_CHANGED',
