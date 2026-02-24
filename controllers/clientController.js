@@ -11,10 +11,15 @@ class ClientController {
     }
 
     const result = await clientAuthService.activateClientByAdmin(email);
+    const activationMessage = result.emailSent
+      ? (result.alreadyActivated
+          ? 'Client account already existed. Activation email sent again.'
+          : 'Client activated successfully. Activation email sent.')
+      : 'Client activated, but activation email could not be sent. Please retry.';
     
     res.status(200).json({
       statusCode: 200,
-      message: "Client activated successfully",
+      message: activationMessage,
       data: result
     });
   });

@@ -312,8 +312,9 @@ class AuthService {
    */
   async uploadUserPhoto(email, photoUrl, contentType) {
     try {
+      const normalizedEmail = String(email).trim().toLowerCase();
       const result = await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
             photoUrl: photoUrl,
@@ -321,7 +322,8 @@ class AuthService {
             photoUpdatedAt: new Date()
           },
           $unset: {
-            photo: "" // Remove legacy buffer field to enforce R2 usage
+            photo: "", // Remove legacy buffer field to enforce R2 usage
+            photoData: ""
           }
         }
       );
@@ -331,12 +333,12 @@ class AuthService {
       }
 
       // Create audit trail
-      const user = await this.checkEmailExists(email);
+      const user = await this.checkEmailExists(normalizedEmail);
       await auditService.createAuditLog({
         action: 'PHOTO_UPLOADED',
         entityType: 'user',
         entityId: user._id.toString(),
-        userEmail: email,
+        userEmail: normalizedEmail,
         organizationId: user.organizationId,
         details: {
           contentType: contentType,
