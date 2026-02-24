@@ -26,6 +26,7 @@ class BusinessController {
     const businessId = await businessService.addBusiness(req.body);
     
     res.status(201).json({
+      success: true,
       statusCode: 201,
       message: "Business added successfully",
       businessId: businessId
@@ -49,8 +50,50 @@ class BusinessController {
     const businesses = await businessService.getBusinessesByOrganization(organizationId);
     
     res.status(200).json({
+      success: true,
       statusCode: 200,
       businesses: businesses
+    });
+  });
+
+  /**
+   * Update business details
+   * PUT /business/:businessId
+   */
+  updateBusiness = catchAsync(async (req, res) => {
+    const { businessId } = req.params;
+    const { organizationId, userEmail, ...updateData } = req.body;
+
+    const result = await businessService.updateBusiness(
+      businessId,
+      updateData,
+      organizationId,
+      userEmail
+    );
+
+    res.status(200).json({
+      statusCode: 200,
+      ...result
+    });
+  });
+
+  /**
+   * Soft delete business
+   * POST /business/:businessId/delete
+   */
+  deleteBusiness = catchAsync(async (req, res) => {
+    const { businessId } = req.params;
+    const { organizationId, userEmail } = req.body;
+
+    const result = await businessService.deleteBusiness(
+      businessId,
+      organizationId,
+      userEmail
+    );
+
+    res.status(200).json({
+      statusCode: 200,
+      ...result
     });
   });
 }
