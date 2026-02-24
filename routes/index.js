@@ -13,7 +13,6 @@ const invoiceManagementRoutes = require('./invoiceManagement');
 const authRoutes = require('./auth');
 const authRoutesV2 = require('./auth_v2');
 const authTestRoutes = require('./authTest');
-const legacyAuthRoutes = require('./legacyAuth');
 const initRoutes = require('./initRoutes');
 const userRoutes = require('./user');
 const securityDashboardRoutes = require('./securityDashboard');
@@ -96,7 +95,6 @@ router.use('/', invoiceManagementRoutes);
 router.use('/auth', authRoutes);
 router.use('/auth/v2', authRoutesV2);
 router.use('/auth-test', authTestRoutes);
-router.use('/', legacyAuthRoutes); // Mount legacy auth routes at root
 router.use('/', initRoutes);
 router.use('/user', userRoutes);
 router.use('/security', securityDashboardRoutes);

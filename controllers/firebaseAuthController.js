@@ -97,6 +97,7 @@ class FirebaseAuthController {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        clientId: user.clientId ? user.clientId.toString() : null,
         organizationId: user.organizationId,
         organizationName: organizationName,
         organizationCode: organizationCode || user.organizationCode,

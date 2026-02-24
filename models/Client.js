@@ -84,6 +84,11 @@ const clientSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
     index: true
+  },
+  isActivated: {
+    type: Boolean,
+    default: false,
+    index: true
   }
 }, {
   timestamps: true,
