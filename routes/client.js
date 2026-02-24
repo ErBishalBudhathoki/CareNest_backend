@@ -45,6 +45,28 @@ router.get('/getClients', clientLimiter, clientController.getClients);
 // Get client details by ID
 router.get('/details/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.getClientById);
 
+// Update client core details
+router.put(
+  '/client/:clientId',
+  clientLimiter,
+  param('clientId').isMongoId(),
+  body('organizationId').optional().isMongoId(),
+  body('userEmail').optional().isEmail(),
+  requireOrganizationOwnership('clientId', () => require('../models/Client')),
+  clientController.updateClient
+);
+
+// Delete (soft-delete) client
+router.post(
+  '/client/:clientId/delete',
+  clientLimiter,
+  param('clientId').isMongoId(),
+  body('organizationId').optional().isMongoId(),
+  body('userEmail').optional().isEmail(),
+  requireOrganizationOwnership('clientId', () => require('../models/Client')),
+  clientController.deleteClient
+);
+
 router.post('/updateCareNotes/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.updateCareNotes);
 router.get('/getMultipleClients/:emails', clientLimiter, clientController.getMultipleClients);
 router.post('/assignClientToUser', clientLimiter, assignValidation, clientController.assignClientToUser);
