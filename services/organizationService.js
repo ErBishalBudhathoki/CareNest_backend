@@ -261,6 +261,57 @@ class OrganizationService {
     }
   }
 
+  async getOrganizationBusinesses(organizationId) {
+    try {
+      return await Business.find({
+        organizationId: organizationId,
+        isActive: true
+      }).lean();
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getOrganizationClients(organizationId) {
+    try {
+      const clients = await Client.find({
+        organizationId: organizationId,
+        isActive: true
+      }).lean();
+
+      if (!clients || clients.length === 0) {
+        return [];
+      }
+
+      const clientEmails = clients
+        .map(c => String(c.clientEmail || '').trim().toLowerCase())
+        .filter(Boolean);
+
+      const activatedUsers = await User.find(
+        {
+          email: { $in: clientEmails },
+          role: 'client',
+          isActive: true
+        },
+        'email'
+      ).lean();
+      const activatedEmailSet = new Set(
+        activatedUsers.map(u => String(u.email || '').trim().toLowerCase())
+      );
+
+      return clients.map(client => ({
+        ...client,
+        isActivated:
+          Boolean(client.isActivated) ||
+          activatedEmailSet.has(
+            String(client.clientEmail || '').trim().toLowerCase()
+          )
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async getOrganizationEmployees(organizationId) {
     try {
       // Query UserOrganization for zero-trust compliance

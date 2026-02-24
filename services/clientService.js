@@ -73,7 +73,8 @@ class ClientService {
         medicalConditions: medicalConditions || [],
         riskAssessment: riskAssessment || {},
         organizationId: organizationId, // Always required
-        isActive: true
+        isActive: true,
+        isActivated: false
       };
       
       const result = await Client.create(clientDoc);
@@ -124,11 +125,43 @@ class ClientService {
         query.organizationId = organizationId;
       }
       
-      const clients = await Client.find(query);
+      const clients = await Client.find(query).lean();
+
+      if (!clients || clients.length === 0) {
+        return {
+          success: true,
+          clients: []
+        };
+      }
+
+      // Backfill activation status for legacy records by checking linked client users.
+      const clientEmails = clients
+        .map(c => String(c.clientEmail || '').trim().toLowerCase())
+        .filter(Boolean);
+      const activatedUsers = await User.find(
+        {
+          email: { $in: clientEmails },
+          role: 'client',
+          isActive: true
+        },
+        'email firebaseUid'
+      ).lean();
+      const activatedEmailSet = new Set(
+        activatedUsers.map(u => String(u.email || '').trim().toLowerCase())
+      );
+
+      const normalizedClients = clients.map(client => ({
+        ...client,
+        isActivated:
+          Boolean(client.isActivated) ||
+          activatedEmailSet.has(
+            String(client.clientEmail || '').trim().toLowerCase()
+          )
+      }));
       
       return {
         success: true,
-        clients
+        clients: normalizedClients
       };
       
     } catch (error) {
