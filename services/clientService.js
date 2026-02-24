@@ -7,6 +7,14 @@ const auditService = require('./auditService');
 const { processCustomPricing } = require('../utils/pricingHelpers');
 
 class ClientService {
+  async logAuditSafe(auditData, context) {
+    try {
+      await auditService.createAuditLog(auditData);
+    } catch (auditError) {
+      console.error(`[ClientService] Audit log failed during ${context}:`, auditError.message);
+    }
+  }
+
   async addClient(clientData) {
     const { 
       clientFirstName, 
@@ -81,18 +89,26 @@ class ClientService {
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_CREATED',
-          entityType: 'client',
+          action: auditService.AUDIT_ACTIONS.CREATE,
+          entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: result._id,
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId: result._id,
-            clientName: `${clientFirstName} ${clientLastName}`,
-            organizationId
+          newValues: {
+            clientFirstName,
+            clientLastName,
+            clientEmail,
+            clientPhone
+          },
+          metadata: {
+            additionalInfo: {
+              clientId: result._id,
+              clientName: `${clientFirstName} ${clientLastName}`,
+              organizationId
+            }
           }
-        });
+        }, 'addClient');
       }
       
       return {
@@ -248,18 +264,21 @@ class ClientService {
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_UPDATED',
-          entityType: 'client',
+          action: auditService.AUDIT_ACTIONS.UPDATE,
+          entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: clientId,
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId,
-            organizationId,
-            updatedFields: Object.keys(updateData)
+          newValues: updateData,
+          metadata: {
+            additionalInfo: {
+              clientId,
+              organizationId,
+              updatedFields: Object.keys(updateData)
+            }
           }
-        });
+        }, 'updateClient');
       }
       
       return {
@@ -313,17 +332,19 @@ class ClientService {
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_DELETED',
-          entityType: 'client',
+          action: auditService.AUDIT_ACTIONS.DELETE,
+          entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: clientId,
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId,
-            organizationId
+          metadata: {
+            additionalInfo: {
+              clientId,
+              organizationId
+            }
           }
-        });
+        }, 'deleteClient');
       }
       
       return {
@@ -390,18 +411,20 @@ class ClientService {
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_PRICING_UPDATED',
-          entityType: 'pricing',
+          action: auditService.AUDIT_ACTIONS.UPDATE,
+          entityType: auditService.AUDIT_ENTITIES.PRICING,
           entityId: clientId, // Using Client ID as the entity ID reference
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId,
-            organizationId,
-            pricingCount: processedPricing.length
+          metadata: {
+            additionalInfo: {
+              clientId,
+              organizationId,
+              pricingCount: processedPricing.length
+            }
           }
-        });
+        }, 'updateClientPricing');
       }
       
       return {
