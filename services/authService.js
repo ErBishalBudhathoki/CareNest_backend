@@ -1,11 +1,11 @@
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const User = require('../models/User');
 const Client = require('../models/Client');
 const Organization = require('../models/Organization');
 const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
+const { admin } = require('../firebase-admin-config');
 
 /**
  * Get auth collection (login collection)
@@ -383,12 +383,12 @@ class AuthService {
   /**
    * Generate and store OTP for password reset
    * @param {string} email - User email
-   * @param {string} purpose - Purpose of OTP ('verification' or 'reset')
    * @returns {string} - Generated OTP
    */
-  async generateOTP(email, purpose = 'reset') {
+  async generateOTP(email) {
     try {
-      const user = await this.checkEmailExists(email);
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const user = await this.checkEmailExists(normalizedEmail);
 
       if (!user) {
         throw new Error('User not found');
@@ -399,7 +399,7 @@ class AuthService {
       const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
             otp: otp,
@@ -409,45 +409,27 @@ class AuthService {
         }
       );
 
-      // Email content based on purpose
-      let emailSubject, emailHtml;
-      
-      if (purpose === 'verification') {
-        emailSubject = 'Verify Your Email - CareNest';
-        emailHtml = `
-          <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
-            <h2 style="color: #4CAF50;">Welcome to CareNest!</h2>
-            <p>Thank you for creating your account. Please verify your email address using the code below.</p>
-            <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
-              <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
-            </div>
-            <p>This verification code will expire in 10 minutes.</p>
-            <p style="color: #777; font-size: 12px;">If you did not create an account, please ignore this email.</p>
+      const emailSubject = 'Password Reset Code - CareNest';
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+          <h2 style="color: #4CAF50;">Password Reset Request</h2>
+          <p>Use the code below to verify your identity and reset your password.</p>
+          <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
+            <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
           </div>
-        `;
-      } else {
-        emailSubject = 'Your OTP Code - CareNest';
-        emailHtml = `
-          <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
-            <h2 style="color: #4CAF50;">Password Reset Request</h2>
-            <p>You requested to reset your password. Use the OTP below to verify your identity.</p>
-            <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
-              <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
-            </div>
-            <p>This code will expire in 10 minutes.</p>
-            <p style="color: #777; font-size: 12px;">If you did not request this, please ignore this email.</p>
-          </div>
-        `;
-      }
+          <p>This code will expire in 10 minutes.</p>
+          <p style="color: #777; font-size: 12px;">If you did not request a password reset, you can ignore this email.</p>
+        </div>
+      `;
 
-      await emailService.sendEmail(email, emailSubject, emailHtml);
+      await emailService.sendEmail(normalizedEmail, emailSubject, emailHtml);
 
       // Create audit trail
       await auditService.createAuditLog({
         action: 'OTP_GENERATED',
         entityType: 'user',
         entityId: user._id.toString(),
-        userEmail: email,
+        userEmail: normalizedEmail,
         organizationId: user.organizationId,
         details: {
           otpExpiry: otpExpiry
@@ -473,7 +455,8 @@ class AuthService {
    */
   async verifyOTP(email, otp, options = {}) {
     try {
-      const user = await User.findOne({ email: email });
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const user = await User.findOne({ email: normalizedEmail });
 
       if (!user) {
         throw new Error('User not found');
@@ -501,7 +484,7 @@ class AuthService {
       // Mark OTP as used (unless prevented)
       if (!options.preventConsumption && !user.otpUsed) {
         await User.updateOne(
-          { email: email },
+          { email: normalizedEmail },
           { $set: { otpUsed: true } }
         );
 
@@ -510,7 +493,7 @@ class AuthService {
           action: 'OTP_VERIFIED',
           entityType: 'user',
           entityId: user._id.toString(),
-          userEmail: email,
+          userEmail: normalizedEmail,
           organizationId: user.organizationId,
           details: {},
           timestamp: new Date()
@@ -531,25 +514,51 @@ class AuthService {
    */
   async updatePassword(email, newPassword) {
     try {
-      const user = await this.checkEmailExists(email);
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const user = await this.checkEmailExists(normalizedEmail);
 
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Generate new salt and hash password
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hashedPassword = bcrypt.hashSync(newPassword, 10);
+      let firebaseUid = user.firebaseUid;
+
+      // Resolve Firebase identity by email when firebaseUid is not yet synced.
+      if (!firebaseUid) {
+        try {
+          const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+          firebaseUid = firebaseUser.uid;
+
+          await User.updateOne(
+            { _id: user._id },
+            {
+              $set: {
+                firebaseUid,
+                firebaseSyncedAt: new Date()
+              }
+            }
+          );
+        } catch (firebaseLookupError) {
+          throw new Error(
+            'Unable to resolve Firebase account for this email. Please contact support.'
+          );
+        }
+      }
+
+      // Firebase is the source of truth for sign-in credentials.
+      await admin.auth().updateUser(firebaseUid, { password: newPassword });
+      const now = new Date();
 
       await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
-            password: hashedPassword,
-            salt: salt,
-            passwordUpdatedAt: new Date()
+            passwordUpdatedAt: now,
+            firebaseUid,
+            firebaseSyncedAt: now
           },
           $unset: {
+            password: '',
             otp: '',
             otpExpiry: '',
             otpUsed: ''
@@ -562,12 +571,13 @@ class AuthService {
         action: 'PASSWORD_UPDATED',
         entityType: 'user',
         entityId: user._id.toString(),
-        userEmail: email,
+        userEmail: normalizedEmail,
         organizationId: user.organizationId,
         details: {
-          passwordUpdatedAt: new Date()
+          passwordUpdatedAt: now,
+          firebaseUid
         },
-        timestamp: new Date()
+        timestamp: now
       });
 
       return true;

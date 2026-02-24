@@ -4,6 +4,8 @@ const UserOrganization = require('../models/UserOrganization');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { createLogger } = require('../utils/logger');
+const { admin } = require('../firebase-admin-config');
+const { verifyFirebaseCredentials } = require('../utils/firebasePasswordVerifier');
 const logger = createLogger('AuthServiceV2');
 
 // Constants
@@ -234,17 +236,35 @@ class AuthServiceV2 {
     }
 
     async changePassword(userId, currentPassword, newPassword, ipAddress) {
-        const user = await User.findById(userId).select('+password');
+        const user = await User.findById(userId).select(
+            'email firebaseUid refreshTokens'
+        );
         if (!user) {
             throw new Error('User not found');
         }
 
-        const valid = await user.comparePassword(currentPassword);
-        if (!valid) {
+        const email = String(user.email || '').trim().toLowerCase();
+        if (!email) {
+            throw new Error('User email missing');
+        }
+
+        const isCurrentPasswordValid = await verifyFirebaseCredentials(
+            email,
+            currentPassword
+        );
+        if (!isCurrentPasswordValid) {
             throw new Error('Invalid credentials');
         }
 
-        user.password = newPassword; // Pre-save will hash
+        let firebaseUid = user.firebaseUid;
+        if (!firebaseUid) {
+            const firebaseUser = await admin.auth().getUserByEmail(email);
+            firebaseUid = firebaseUser.uid;
+            user.firebaseUid = firebaseUid;
+        }
+
+        await admin.auth().updateUser(firebaseUid, { password: newPassword });
+        await admin.auth().revokeRefreshTokens(firebaseUid);
 
         // Revoke all existing sessions
         user.refreshTokens.forEach(t => {
@@ -255,6 +275,9 @@ class AuthServiceV2 {
             }
         });
 
+        user.passwordUpdatedAt = new Date();
+        user.firebaseSyncedAt = new Date();
+        user.markModified('refreshTokens');
         await user.save();
 
         return true;

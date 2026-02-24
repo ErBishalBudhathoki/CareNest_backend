@@ -164,7 +164,7 @@ router.post('/secure-login',
 
 /**
  * @route POST /api/auth/verify-email
- * @desc Verify user email with OTP
+ * @desc Deprecated: email verification OTP flow removed
  * @access Public
  */
 router.post('/verify-email',
@@ -399,7 +399,7 @@ router.get('/activity-logs',
 
 /**
  * @route POST /api/auth/resend-verification
- * @desc Resend email verification OTP
+ * @desc Send Firebase email verification link
  * @access Public
  */
 router.post('/resend-verification',
