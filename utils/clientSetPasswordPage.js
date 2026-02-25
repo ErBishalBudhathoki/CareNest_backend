@@ -340,6 +340,11 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       const endpoint =
         'https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=' +
         encodeURIComponent(firebaseApiKey || '');
+      const signInEndpoint =
+        'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' +
+        encodeURIComponent(firebaseApiKey || '');
+      const completeActivationEndpoint =
+        '/api/firebase-auth/complete-client-activation';
 
       const alertEl = document.getElementById('alert');
       const emailPill = document.getElementById('email-pill');
@@ -348,6 +353,7 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       const submitBtn = document.getElementById('submit-btn');
       const newPasswordEl = document.getElementById('new-password');
       const confirmPasswordEl = document.getElementById('confirm-password');
+      let resolvedEmail = '';
 
       const rules = {
         len: document.getElementById('rule-len'),
@@ -434,6 +440,54 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
         return data;
       }
 
+      async function signInWithNewPassword(email, password) {
+        const response = await fetch(signInEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: String(email || '').trim(),
+            password: String(password || ''),
+            returnSecureToken: true
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const code = normalizeErrorCode(data?.error?.message);
+          const error = new Error(
+            code ? ('Sign-in verification failed: ' + code) : 'Sign-in verification failed.'
+          );
+          error.code = code || 'SIGN_IN_FAILED';
+          throw error;
+        }
+        return data;
+      }
+
+      async function completeClientActivation(idToken) {
+        const token = String(idToken || '').trim();
+        if (!token) {
+          return false;
+        }
+        const response = await fetch(completeActivationEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token
+          },
+          body: '{}'
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data?.success === false) {
+          const error = new Error(
+            data?.message
+              ? String(data.message)
+              : 'Activation status update failed.'
+          );
+          error.code = 'ACTIVATION_SYNC_FAILED';
+          throw error;
+        }
+        return true;
+      }
+
       async function initialize() {
         if (!firebaseApiKey) {
           showAlert('error', toFriendlyError('MISSING_API_KEY'));
@@ -450,6 +504,7 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
           const data = await callResetApi({ oobCode: oobCode });
           const email = data?.email ? String(data.email) : '';
           if (email) {
+            resolvedEmail = email.trim().toLowerCase();
             emailPill.textContent = 'Resetting password for ' + email;
             emailPill.classList.remove('hidden');
           }
@@ -491,9 +546,31 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
 
         try {
           await callResetApi({ oobCode: oobCode, newPassword: newPassword });
+          let activationSynced = false;
+          if (resolvedEmail) {
+            try {
+              const signInResult = await signInWithNewPassword(
+                resolvedEmail,
+                newPassword
+              );
+              activationSynced = await completeClientActivation(
+                signInResult?.idToken
+              );
+            } catch (syncError) {
+              console.warn(
+                'Activation sync skipped:',
+                syncError?.message || syncError
+              );
+            }
+          }
           formEl.classList.add('hidden');
           successPanel.classList.remove('hidden');
-          showAlert('success', 'Password updated. Return to the app and sign in.');
+          showAlert(
+            'success',
+            activationSynced
+              ? 'Password updated and account activated. You can now sign in.'
+              : 'Password updated. If status still shows pending, sign in once in the app.'
+          );
         } catch (error) {
           showAlert('error', error.message || 'Unable to save password.');
         } finally {

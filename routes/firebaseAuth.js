@@ -52,6 +52,16 @@ router.post('/sync',
 );
 
 /**
+ * @route POST /api/firebase-auth/complete-client-activation
+ * @desc Complete client activation from web reset flow
+ * @access Public (requires valid Firebase ID token)
+ */
+router.post('/complete-client-activation',
+  verifyFirebaseToken,
+  FirebaseAuthController.completeClientActivation
+);
+
+/**
  * @route GET /api/firebase-auth/user/:firebaseUid
  * @desc Get user data by Firebase UID
  * @access Private
@@ -96,4 +106,3 @@ router.post('/verify-email',
 );
 
 module.exports = router;
-
