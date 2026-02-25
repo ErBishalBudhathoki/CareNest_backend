@@ -24,6 +24,13 @@ class ClientService {
     };
   }
 
+  buildDeletedClientQuery(baseQuery = {}) {
+    return {
+      ...baseQuery,
+      deletedAt: { $ne: null }
+    };
+  }
+
   _normalizeEmail(email) {
     return String(email || '').trim().toLowerCase();
   }
@@ -430,6 +437,122 @@ class ClientService {
         message: "Client updated successfully"
       };
       
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  _extractRestorableFields(updateData = {}) {
+    const allowedFields = [
+      'clientFirstName',
+      'clientLastName',
+      'clientPhone',
+      'clientAddress',
+      'clientCity',
+      'clientState',
+      'clientZip',
+      'businessName',
+      'preferences',
+      'careNotes',
+      'emergencyContact',
+      'medicalConditions',
+      'riskAssessment'
+    ];
+
+    return allowedFields.reduce((acc, field) => {
+      if (
+        Object.prototype.hasOwnProperty.call(updateData, field) &&
+        updateData[field] !== undefined
+      ) {
+        acc[field] = updateData[field];
+      }
+      return acc;
+    }, {});
+  }
+
+  async restoreClient(clientId, organizationId, userEmail, restoreData = {}) {
+    try {
+      if (organizationId && userEmail) {
+        const user = await User.findOne({
+          email: userEmail,
+          organizationId: organizationId
+        });
+
+        if (!user) {
+          throw new Error('User not authorized for this organization');
+        }
+      }
+
+      const query = this.buildDeletedClientQuery({ _id: clientId });
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const now = new Date();
+      const restoreFields = this._extractRestorableFields(restoreData);
+      const restoredClient = await Client.findOneAndUpdate(
+        query,
+        {
+          $set: {
+            ...restoreFields,
+            isActive: true,
+            isActivated: false,
+            updatedAt: now
+          },
+          $unset: {
+            deletedAt: '',
+            deletedBy: '',
+            purgeAfter: ''
+          }
+        },
+        { new: true }
+      );
+
+      if (!restoredClient) {
+        const existingQuery = { _id: clientId };
+        if (organizationId) {
+          existingQuery.organizationId = organizationId;
+        }
+        const existingClient = await Client.findOne(existingQuery).lean();
+        if (existingClient && !existingClient.deletedAt) {
+          return {
+            success: true,
+            message: 'Client is already active'
+          };
+        }
+        throw new Error('Deleted client not found');
+      }
+
+      // Keep login blocked until admin explicitly activates again.
+      await this._deactivateClientAccess(restoredClient.clientEmail, organizationId);
+
+      if (userEmail) {
+        await this.logAuditSafe(
+          {
+            userEmail,
+            action: auditService.AUDIT_ACTIONS.UPDATE,
+            entityType: auditService.AUDIT_ENTITIES.CLIENT,
+            entityId: clientId,
+            organizationId: organizationId || 'unknown',
+            metadata: {
+              additionalInfo: {
+                clientId,
+                organizationId,
+                restoredFromHistory: true,
+                reactivationRequired: true,
+                updatedFields: Object.keys(restoreFields)
+              }
+            }
+          },
+          'restoreClient'
+        );
+      }
+
+      return {
+        success: true,
+        message:
+          'Client restored successfully. Activate the client account to grant app access again.'
+      };
     } catch (error) {
       throw error;
     }

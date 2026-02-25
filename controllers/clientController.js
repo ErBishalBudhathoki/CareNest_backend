@@ -95,6 +95,55 @@ class ClientController {
     });
   });
 
+  restoreClient = catchAsync(async (req, res) => {
+    const { clientId } = req.params;
+    const {
+      organizationId,
+      userEmail,
+      clientFirstName,
+      clientLastName,
+      clientPhone,
+      clientAddress,
+      clientCity,
+      clientState,
+      clientZip,
+      businessName,
+      preferences,
+      careNotes,
+      emergencyContact,
+      medicalConditions,
+      riskAssessment
+    } = req.body;
+
+    const restoreData = {
+      clientFirstName,
+      clientLastName,
+      clientPhone,
+      clientAddress,
+      clientCity,
+      clientState,
+      clientZip,
+      businessName,
+      preferences,
+      careNotes,
+      emergencyContact,
+      medicalConditions,
+      riskAssessment
+    };
+
+    const result = await clientService.restoreClient(
+      clientId,
+      organizationId,
+      userEmail,
+      restoreData
+    );
+
+    res.status(200).json({
+      statusCode: 200,
+      ...result
+    });
+  });
+
   getClientPricing = catchAsync(async (req, res) => {
     const { clientId } = req.params;
     const { organizationId } = req.query;
