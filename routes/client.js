@@ -68,6 +68,16 @@ router.post(
   clientController.deleteClient
 );
 
+router.post(
+  '/client/:clientId/restore',
+  clientLimiter,
+  param('clientId').isMongoId(),
+  body('organizationId').optional().isMongoId(),
+  body('userEmail').optional().isEmail(),
+  requireOrganizationOwnership('clientId', () => require('../models/Client')),
+  clientController.restoreClient
+);
+
 router.post('/updateCareNotes/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.updateCareNotes);
 router.get('/getMultipleClients/:emails', clientLimiter, clientController.getMultipleClients);
 router.post('/assignClientToUser', clientLimiter, assignValidation, clientController.assignClientToUser);

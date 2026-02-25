@@ -281,6 +281,19 @@ router.get(
 );
 
 /**
+ * Get soft-deleted client history
+ * GET /organization/:organizationId/clients/history
+ */
+router.get(
+  '/:organizationId/clients/history',
+  organizationReadLimiter,
+  organizationContextMiddleware,
+  organizationIdValidation,
+  handleValidationErrors,
+  organizationController.getOrganizationDeletedClients
+);
+
+/**
  * Get organization employees
  * GET /organization/:organizationId/employees
  */
