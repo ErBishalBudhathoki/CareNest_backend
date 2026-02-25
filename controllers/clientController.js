@@ -13,9 +13,9 @@ class ClientController {
     const result = await clientAuthService.activateClientByAdmin(email);
     const activationMessage = result.emailSent
       ? (result.alreadyActivated
-          ? 'Client account already existed. Activation email sent again.'
-          : 'Client activated successfully. Activation email sent.')
-      : 'Client activated, but activation email could not be sent. Please retry.';
+          ? 'Activation email sent again. Client account is now pending setup.'
+          : 'Activation email sent. Client account is pending setup.')
+      : 'Activation email could not be sent. Please retry.';
     
     res.status(200).json({
       statusCode: 200,

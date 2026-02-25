@@ -179,6 +179,9 @@ class ClientService {
               riskAssessment: riskAssessment || {},
               isActive: true,
               isActivated: false,
+              activationPending: false,
+              activationEmailSentAt: null,
+              activatedAt: null,
               updatedAt: new Date()
             },
             $unset: {
@@ -235,7 +238,10 @@ class ClientService {
         riskAssessment: riskAssessment || {},
         organizationId: organizationId, // Always required
         isActive: true,
-        isActivated: false
+        isActivated: false,
+        activationPending: false,
+        activationEmailSentAt: null,
+        activatedAt: null
       };
       
       const result = await Client.create(clientDoc);
@@ -303,29 +309,10 @@ class ClientService {
         };
       }
 
-      // Backfill activation status for legacy records by checking linked client users.
-      const clientEmails = clients
-        .map(c => String(c.clientEmail || '').trim().toLowerCase())
-        .filter(Boolean);
-      const activatedUsers = await User.find(
-        {
-          email: { $in: clientEmails },
-          role: 'client',
-          isActive: true
-        },
-        'email firebaseUid'
-      ).lean();
-      const activatedEmailSet = new Set(
-        activatedUsers.map(u => String(u.email || '').trim().toLowerCase())
-      );
-
       const normalizedClients = clients.map(client => ({
         ...client,
-        isActivated:
-          Boolean(client.isActivated) ||
-          activatedEmailSet.has(
-            String(client.clientEmail || '').trim().toLowerCase()
-          )
+        isActivated: Boolean(client.isActivated),
+        activationPending: Boolean(client.activationPending)
       }));
       
       return {
@@ -497,6 +484,9 @@ class ClientService {
             ...restoreFields,
             isActive: true,
             isActivated: false,
+            activationPending: false,
+            activationEmailSentAt: null,
+            activatedAt: null,
             updatedAt: now
           },
           $unset: {
@@ -594,6 +584,7 @@ class ClientService {
           $set: { 
             isActive: false,
             isActivated: false,
+            activationPending: false,
             deletedAt: now,
             deletedBy: userEmail ? this._normalizeEmail(userEmail) : null,
             purgeAfter,
