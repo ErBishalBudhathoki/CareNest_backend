@@ -59,39 +59,6 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       z-index: 2;
     }
 
-    .shape {
-      position: fixed;
-      border: 3px solid var(--black);
-      z-index: 0;
-    }
-
-    .shape.red {
-      width: 124px;
-      height: 124px;
-      background: var(--red);
-      left: 22px;
-      top: 34px;
-      border-radius: 50%;
-    }
-
-    .shape.blue {
-      width: 88px;
-      height: 88px;
-      background: var(--blue);
-      right: 30px;
-      top: 52px;
-      border-radius: 50%;
-    }
-
-    .shape.yellow {
-      width: 68px;
-      height: 180px;
-      background: var(--yellow);
-      right: 52px;
-      bottom: 38px;
-      border-radius: 0;
-    }
-
     .header {
       padding: 24px 24px 18px;
       border-bottom: 4px solid var(--black);
@@ -302,18 +269,6 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
         padding: 14px;
       }
 
-      .shape.red,
-      .shape.yellow {
-        display: none;
-      }
-
-      .shape.blue {
-        width: 50px;
-        height: 50px;
-        right: 12px;
-        top: 12px;
-      }
-
       .card {
         border-width: 3px;
         box-shadow: 5px 5px 0 var(--black);
@@ -326,10 +281,6 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
   </style>
 </head>
 <body>
-  <div class="shape red" aria-hidden="true"></div>
-  <div class="shape blue" aria-hidden="true"></div>
-  <div class="shape yellow" aria-hidden="true"></div>
-
   <main class="card">
     <section class="header">
       <div class="bars" aria-hidden="true">
