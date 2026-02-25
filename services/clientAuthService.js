@@ -117,6 +117,26 @@ class ClientAuthService {
     return `com.bishal.invoice://reset-password?${query}`;
   }
 
+  _buildCustomWebResetLink(oobCode, lang = 'en', options = {}) {
+    if (!oobCode) return null;
+    const requestedBase =
+      options.webBaseUrl ||
+      process.env.CLIENT_ACTIVATION_WEB_BASE_URL ||
+      process.env.BACKEND_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      null;
+    if (!requestedBase) {
+      return null;
+    }
+
+    const base = String(requestedBase).replace(/\/+$/, '');
+    const query = new URLSearchParams({
+      code: String(oobCode).trim(),
+      lang: String(lang || 'en').trim()
+    }).toString();
+    return `${base}/client/set-password?${query}`;
+  }
+
   _buildActivationEmailHtml({ firstName, webResetLink, appResetLink }) {
     const safeFirstName = firstName || 'there';
     const primaryLink = appResetLink || webResetLink;
@@ -138,8 +158,10 @@ class ClientAuthService {
             Open Web Reset Page
           </a>
         </p>
-        <p>If the app button does not open the app, use this web link:</p>
-        <p style="word-break: break-all; color: #555;">${webResetLink}</p>
+        <p style="margin-top: 4px;">
+          If buttons do not work, use this
+          <a href="${webResetLink}" style="color:#1A3BA0; font-weight:600;">backup reset link</a>.
+        </p>
         <p style="color: #777; font-size: 12px;">If you did not expect this email, you can ignore it.</p>
       </div>
     `;
@@ -150,7 +172,7 @@ class ClientAuthService {
    * @param {string} email - Client email
    * @returns {Object} - Activation result
    */
-  async activateClientByAdmin(email) {
+  async activateClientByAdmin(email, options = {}) {
     try {
       const normalizedEmail = this._normalizeEmail(email);
       if (!normalizedEmail) {
@@ -283,8 +305,15 @@ class ClientAuthService {
       const oobCode =
         resetParams?.oobCode || this._extractResetOobCode(resetLink);
       const appResetLink = this._buildAppResetLink(oobCode);
+      const customWebResetLink = this._buildCustomWebResetLink(
+        oobCode,
+        resetParams?.lang || 'en',
+        options
+      );
       const stableWebResetLink =
-        this._buildWebResetLink(resetParams) || resetLink;
+        customWebResetLink ||
+        this._buildWebResetLink(resetParams) ||
+        resetLink;
 
       // 7. Send activation email
       const emailSubject = 'Set up your CareNest client account';

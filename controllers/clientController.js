@@ -10,7 +10,19 @@ class ClientController {
       return res.status(400).json({ statusCode: 400, message: "Client email is required" });
     }
 
-    const result = await clientAuthService.activateClientByAdmin(email);
+    const forwardedProto = req.header('x-forwarded-proto');
+    const forwardedHost = req.header('x-forwarded-host');
+    const protocol = String(forwardedProto || req.protocol || 'https')
+      .split(',')[0]
+      .trim();
+    const host = String(forwardedHost || req.get('host') || '')
+      .split(',')[0]
+      .trim();
+    const webBaseUrl = host ? `${protocol}://${host}` : null;
+
+    const result = await clientAuthService.activateClientByAdmin(email, {
+      webBaseUrl
+    });
     const activationMessage = result.emailSent
       ? (result.alreadyActivated
           ? 'Activation email sent again. Client account is now pending setup.'

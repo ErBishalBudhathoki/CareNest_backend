@@ -18,6 +18,7 @@ const { errorTrackingMiddleware } = require('./middleware/errorTracking');
 const { systemHealthMiddleware } = require('./middleware/systemHealth');
 const { requestLogger, securityLogger } = require('./middleware/requestLogger');
 const { apiUsageMonitor } = require('./utils/apiUsageMonitor');
+const { renderClientSetPasswordPage } = require('./utils/clientSetPasswordPage');
 
 // Initialize express app
 const app = express();
@@ -33,7 +34,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.redoc.ly"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:", "https://cdn.redoc.ly"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "https://identitytoolkit.googleapis.com"],
       fontSrc: ["'self'", "https:", "data:", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
@@ -171,6 +172,22 @@ app.get('/api/health', (req, res) => {
     environment: environmentConfig.getEnvironment(),
     api: 'available'
   });
+});
+
+// Client activation web reset page (public)
+app.get('/client/set-password', (req, res) => {
+  const firebaseWebApiKey =
+    process.env.FIREBASE_WEB_API_KEY ||
+    process.env.FIREBASE_API_KEY ||
+    '';
+
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.status(200).type('html').send(
+    renderClientSetPasswordPage({
+      apiKey: firebaseWebApiKey,
+      brandName: 'CareNest'
+    })
+  );
 });
 
 // Main API Routes
