@@ -63,6 +63,7 @@ router.post(
   param('clientId').isMongoId(),
   body('organizationId').optional().isMongoId(),
   body('userEmail').optional().isEmail(),
+  body('forceDelete').optional().isBoolean().toBoolean(),
   requireOrganizationOwnership('clientId', () => require('../models/Client')),
   clientController.deleteClient
 );

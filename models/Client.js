@@ -89,6 +89,22 @@ const clientSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
     index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null,
+    index: true
+  },
+  deletedBy: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    default: null
+  },
+  purgeAfter: {
+    type: Date,
+    default: null,
+    index: true
   }
 }, {
   timestamps: true,
@@ -101,6 +117,8 @@ const clientSchema = new mongoose.Schema({
       
       if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
       if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      if (ret.deletedAt) ret.deletedAt = ret.deletedAt.toISOString();
+      if (ret.purgeAfter) ret.purgeAfter = ret.purgeAfter.toISOString();
       return ret;
     }
   }
