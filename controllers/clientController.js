@@ -79,9 +79,16 @@ class ClientController {
 
   deleteClient = catchAsync(async (req, res) => {
     const { clientId } = req.params;
-    const { organizationId, userEmail } = req.body;
+    const { organizationId, userEmail, forceDelete } = req.body;
+    const forceDeleteFlag =
+      forceDelete === true || String(forceDelete).toLowerCase() == 'true';
     
-    const result = await clientService.deleteClient(clientId, organizationId, userEmail);
+    const result = await clientService.deleteClient(
+      clientId,
+      organizationId,
+      userEmail,
+      forceDeleteFlag
+    );
     res.status(200).json({
       statusCode: 200,
       ...result
