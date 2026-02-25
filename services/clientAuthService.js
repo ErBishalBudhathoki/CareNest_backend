@@ -99,16 +99,19 @@ class ClientAuthService {
 
       const now = new Date();
       const wasAlreadyActivated = client.isActivated === true;
+      const temporaryPassword = `Temp#${Math.random().toString(36).slice(-12)}A1`;
 
       // 2. Ensure Firebase user exists
       let firebaseUser;
       try {
         firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
-        if (firebaseUser.disabled) {
-          firebaseUser = await admin.auth().updateUser(firebaseUser.uid, {
-            disabled: false
-          });
-        }
+        // Rotate password on each activation email so prior credentials cannot be reused.
+        firebaseUser = await admin.auth().updateUser(firebaseUser.uid, {
+          disabled: false,
+          password: temporaryPassword,
+          displayName: `${client.clientFirstName} ${client.clientLastName}`
+        });
+        await admin.auth().revokeRefreshTokens(firebaseUser.uid);
       } catch (firebaseLookupError) {
         if (firebaseLookupError.code !== 'auth/user-not-found') {
           throw firebaseLookupError;
@@ -116,7 +119,6 @@ class ClientAuthService {
 
         // Create Firebase user with temporary random password.
         // Client sets their own password using the activation reset link.
-        const temporaryPassword = `Temp#${Math.random().toString(36).slice(-12)}A1`;
         firebaseUser = await admin.auth().createUser({
           email: normalizedEmail,
           password: temporaryPassword,
@@ -189,11 +191,18 @@ class ClientAuthService {
         );
       }
 
-      // 5. Mark client as activated
+      // 5. Mark client activation as pending until client completes setup.
       await Client.updateOne(
         { _id: client._id },
         {
-          $set: { isActivated: true, isActive: true, updatedAt: now },
+          $set: {
+            isActivated: false,
+            activationPending: true,
+            activationEmailSentAt: now,
+            activatedAt: null,
+            isActive: true,
+            updatedAt: now
+          },
           $unset: { deletedAt: '', deletedBy: '', purgeAfter: '' }
         }
       );
@@ -233,6 +242,7 @@ class ClientAuthService {
         metadata: {
           resetLinkSent: Boolean(emailResult),
           alreadyActivated: wasAlreadyActivated,
+          activationPending: true,
           appResetLinkGenerated: Boolean(appResetLink)
         }
       });
@@ -244,6 +254,7 @@ class ClientAuthService {
         firebaseUid: firebaseUser.uid,
         emailSent: Boolean(emailResult),
         alreadyActivated: wasAlreadyActivated,
+        activationPending: true,
         activationLinkFormat: appResetLink
           ? 'com.bishal.invoice://reset-password?mode=resetPassword&oobCode=...'
           : 'firebase-web-link'

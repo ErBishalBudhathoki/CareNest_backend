@@ -5,6 +5,7 @@ const Organization = require('../models/Organization');
 const UserOrganization = require('../models/UserOrganization');
 
 const logger = createLogger('FirebaseAuthController');
+const Client = require('../models/Client');
 
 class FirebaseAuthController {
   /**
@@ -69,6 +70,31 @@ class FirebaseAuthController {
       user.updatedAt = new Date();
 
       await user.save();
+
+      // Mark client activation complete only after successful Firebase login sync.
+      if (user.role === 'client') {
+        const clientQuery = user.clientId
+          ? { _id: user.clientId }
+          : { clientEmail: String(user.email || '').trim().toLowerCase() };
+
+        await Client.updateOne(
+          clientQuery,
+          {
+            $set: {
+              isActivated: true,
+              activationPending: false,
+              activatedAt: new Date(),
+              isActive: true,
+              updatedAt: new Date()
+            },
+            $unset: {
+              deletedAt: '',
+              deletedBy: '',
+              purgeAfter: ''
+            }
+          }
+        );
+      }
 
       // Fetch organization details if user has organizationId
       let organizationName = null;

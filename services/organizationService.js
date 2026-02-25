@@ -298,30 +298,11 @@ class OrganizationService {
         return [];
       }
 
-      const clientEmails = clients
-        .map(c => String(c.clientEmail || '').trim().toLowerCase())
-        .filter(Boolean);
-
-      const activatedUsers = await User.find(
-        {
-          email: { $in: clientEmails },
-          role: 'client',
-          isActive: true
-        },
-        'email'
-      ).lean();
-      const activatedEmailSet = new Set(
-        activatedUsers.map(u => String(u.email || '').trim().toLowerCase())
-      );
-
       return clients.map(client => ({
         ...client,
         isActive: !client.deletedAt && client.isActive !== false,
-        isActivated:
-          Boolean(client.isActivated) ||
-          activatedEmailSet.has(
-            String(client.clientEmail || '').trim().toLowerCase()
-          )
+        isActivated: Boolean(client.isActivated),
+        activationPending: Boolean(client.activationPending)
       }));
     } catch (error) {
       throw error;
@@ -343,7 +324,8 @@ class OrganizationService {
       return clients.map(client => ({
         ...client,
         isActive: false,
-        isActivated: false
+        isActivated: false,
+        activationPending: Boolean(client.activationPending)
       }));
     } catch (error) {
       throw error;
