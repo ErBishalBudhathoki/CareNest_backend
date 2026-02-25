@@ -3,7 +3,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const clientController = require('../controllers/clientController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 const { 
   organizationContextMiddleware, 
   requireOrganizationOwnership,
@@ -66,6 +66,17 @@ router.post(
   body('forceDelete').optional().isBoolean().toBoolean(),
   requireOrganizationOwnership('clientId', () => require('../models/Client')),
   clientController.deleteClient
+);
+
+router.post(
+  '/client/:clientId/mark-activated',
+  clientLimiter,
+  param('clientId').isMongoId(),
+  body('organizationId').optional().isMongoId(),
+  body('userEmail').optional().isEmail(),
+  requireRoles(['admin', 'superadmin']),
+  requireOrganizationOwnership('clientId', () => require('../models/Client')),
+  clientController.markClientActivated
 );
 
 router.post(
