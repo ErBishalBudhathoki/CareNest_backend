@@ -23,50 +23,61 @@ class ClientAuthService {
     };
   }
 
-  _isDynamicLinkHost(hostname) {
-    return String(hostname || '')
-      .trim()
-      .toLowerCase()
-      .endsWith('.page.link');
-  }
-
-  _resolveActivationContinueUrl(firebaseProjectId) {
-    const fallback = `https://${firebaseProjectId}.firebaseapp.com/reset-password`;
-    const configuredUrl =
-      process.env.CLIENT_ACTIVATION_CONTINUE_URL ||
-      process.env.PASSWORD_RESET_CONTINUE_URL ||
-      process.env.FRONTEND_URL;
-
-    const candidate = String(configuredUrl || '').trim();
-    if (!candidate) {
-      return fallback;
-    }
-
+  _extractResetOobCode(resetLink) {
     try {
-      const parsed = new URL(candidate);
-      const isHttp = parsed.protocol === 'https:' || parsed.protocol === 'http:';
-      if (!isHttp || this._isDynamicLinkHost(parsed.hostname)) {
-        return fallback;
+      const parsed = new URL(resetLink);
+      const mode = parsed.searchParams.get('mode');
+      const code = parsed.searchParams.get('oobCode');
+      if (mode === 'resetPassword' && code) {
+        return code;
       }
-      return parsed.toString();
+
+      const nestedLink = parsed.searchParams.get('link');
+      if (nestedLink) {
+        const nested = new URL(nestedLink);
+        const nestedMode = nested.searchParams.get('mode');
+        const nestedCode = nested.searchParams.get('oobCode');
+        if (nestedMode === 'resetPassword' && nestedCode) {
+          return nestedCode;
+        }
+      }
     } catch (_) {
-      return fallback;
+      return null;
     }
+    return null;
   }
 
-  _buildActivationEmailHtml({ firstName, resetLink }) {
+  _buildAppResetLink(oobCode) {
+    if (!oobCode) return null;
+    const query = new URLSearchParams({
+      mode: 'resetPassword',
+      oobCode: String(oobCode).trim()
+    }).toString();
+    return `com.bishal.invoice://reset-password?${query}`;
+  }
+
+  _buildActivationEmailHtml({ firstName, resetLink, appResetLink }) {
     const safeFirstName = firstName || 'there';
+    const primaryLink = appResetLink || resetLink;
+    const primaryLabel = appResetLink
+      ? 'Set Password in CareNest App'
+      : 'Set Password';
     return `
       <div style="font-family: Arial, sans-serif; padding: 20px; text-align: left;">
         <h2 style="color: #4CAF50;">Welcome to CareNest</h2>
         <p>Hi ${safeFirstName},</p>
         <p>Your client account has been activated. Set your password to start using the app.</p>
         <p style="margin: 24px 0;">
-          <a href="${resetLink}" style="display: inline-block; padding: 12px 18px; background: #4CAF50; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
-            Set Password
+          <a href="${primaryLink}" style="display: inline-block; padding: 12px 18px; background: #4CAF50; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+            ${primaryLabel}
           </a>
         </p>
-        <p>If the button does not work, copy and paste this link into your browser:</p>
+        <p style="margin: 8px 0 16px;">
+          <a href="${resetLink}" style="display: inline-block; padding: 10px 16px; background: #1A3BA0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+            Open Web Reset Page
+          </a>
+        </p>
+        <p>If the app button does not open the app, use this web link:</p>
         <p style="word-break: break-all; color: #555;">${resetLink}</p>
         <p style="color: #777; font-size: 12px;">If you did not expect this email, you can ignore it.</p>
       </div>
@@ -189,40 +200,19 @@ class ClientAuthService {
         }
       );
 
-      // 6. Generate Firebase reset link for password setup
-      const firebaseProjectId =
-        process.env.FIREBASE_PROJECT_ID ||
-        process.env.GCP_PROJECT_ID ||
-        process.env.GOOGLE_CLOUD_PROJECT ||
-        'invoice-660f3';
-
-      const activationContinueUrl =
-        this._resolveActivationContinueUrl(firebaseProjectId);
-      const handleCodeInApp =
-        String(process.env.CLIENT_ACTIVATION_HANDLE_IN_APP || '')
-            .trim()
-            .toLowerCase() === 'true';
-
-      const passwordResetActionSettings = {
-        url: activationContinueUrl,
-        handleCodeInApp
-      };
-
-      if (handleCodeInApp && process.env.FIREBASE_AUTH_LINK_DOMAIN) {
-        passwordResetActionSettings.linkDomain =
-          process.env.FIREBASE_AUTH_LINK_DOMAIN;
-      }
-
+      // 6. Generate Firebase reset link and deterministic in-app deep link
       const resetLink = await admin.auth().generatePasswordResetLink(
-        normalizedEmail,
-        passwordResetActionSettings
+        normalizedEmail
       );
+      const oobCode = this._extractResetOobCode(resetLink);
+      const appResetLink = this._buildAppResetLink(oobCode);
 
       // 7. Send activation email
       const emailSubject = 'Set up your CareNest client account';
       const emailHtml = this._buildActivationEmailHtml({
         firstName: client.clientFirstName,
-        resetLink
+        resetLink,
+        appResetLink
       });
       const emailResult = await emailService.sendEmail(
         normalizedEmail,
@@ -244,7 +234,8 @@ class ClientAuthService {
         },
         metadata: {
           resetLinkSent: Boolean(emailResult),
-          alreadyActivated: wasAlreadyActivated
+          alreadyActivated: wasAlreadyActivated,
+          appResetLinkGenerated: Boolean(appResetLink)
         }
       });
 
@@ -254,7 +245,10 @@ class ClientAuthService {
         email: normalizedEmail,
         firebaseUid: firebaseUser.uid,
         emailSent: Boolean(emailResult),
-        alreadyActivated: wasAlreadyActivated
+        alreadyActivated: wasAlreadyActivated,
+        activationLinkFormat: appResetLink
+          ? 'com.bishal.invoice://reset-password?mode=resetPassword&oobCode=...'
+          : 'firebase-web-link'
       };
     } catch (error) {
       throw new Error(`Client activation failed: ${error.message}`);
