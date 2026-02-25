@@ -107,6 +107,22 @@ class ClientController {
     });
   });
 
+  markClientActivated = catchAsync(async (req, res) => {
+    const { clientId } = req.params;
+    const { organizationId, userEmail } = req.body;
+
+    const result = await clientService.markClientActivatedByAdmin(
+      clientId,
+      organizationId,
+      userEmail
+    );
+
+    res.status(200).json({
+      statusCode: 200,
+      ...result
+    });
+  });
+
   restoreClient = catchAsync(async (req, res) => {
     const { clientId } = req.params;
     const {
