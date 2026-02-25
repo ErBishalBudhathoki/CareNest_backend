@@ -40,6 +40,74 @@ class ClientAuthService {
     return null;
   }
 
+  _extractResetParams(resetLink) {
+    const parseCandidate = (urlValue) => {
+      try {
+        const parsed = new URL(urlValue);
+        const mode = parsed.searchParams.get('mode');
+        const oobCode = parsed.searchParams.get('oobCode');
+        if (mode !== 'resetPassword' || !oobCode) {
+          return null;
+        }
+        return {
+          oobCode: String(oobCode).trim(),
+          apiKey: parsed.searchParams.get('apiKey') || null,
+          lang: parsed.searchParams.get('lang') || null
+        };
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const direct = parseCandidate(resetLink);
+    if (direct) {
+      return direct;
+    }
+
+    try {
+      const outer = new URL(resetLink);
+      const nestedLink = outer.searchParams.get('link');
+      if (!nestedLink) {
+        return null;
+      }
+      return parseCandidate(nestedLink);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _buildWebResetLink(resetParams) {
+    if (!resetParams?.oobCode) return null;
+
+    let inferredProjectId = process.env.FIREBASE_PROJECT_ID || null;
+    if (!inferredProjectId) {
+      try {
+        inferredProjectId = admin.app().options?.projectId || null;
+      } catch (_) {
+        inferredProjectId = null;
+      }
+    }
+    const apiKey =
+      resetParams.apiKey ||
+      process.env.FIREBASE_WEB_API_KEY ||
+      process.env.FIREBASE_API_KEY ||
+      null;
+
+    if (!inferredProjectId || !apiKey) {
+      return null;
+    }
+
+    const lang = resetParams.lang || 'en';
+    const query = new URLSearchParams({
+      mode: 'resetPassword',
+      oobCode: String(resetParams.oobCode).trim(),
+      apiKey: String(apiKey).trim(),
+      lang: String(lang).trim()
+    }).toString();
+
+    return `https://${inferredProjectId}.firebaseapp.com/__/auth/action?${query}`;
+  }
+
   _buildAppResetLink(oobCode) {
     if (!oobCode) return null;
     const query = new URLSearchParams({
@@ -49,9 +117,9 @@ class ClientAuthService {
     return `com.bishal.invoice://reset-password?${query}`;
   }
 
-  _buildActivationEmailHtml({ firstName, resetLink, appResetLink }) {
+  _buildActivationEmailHtml({ firstName, webResetLink, appResetLink }) {
     const safeFirstName = firstName || 'there';
-    const primaryLink = appResetLink || resetLink;
+    const primaryLink = appResetLink || webResetLink;
     const primaryLabel = appResetLink
       ? 'Set Password in CareNest App'
       : 'Set Password';
@@ -66,12 +134,12 @@ class ClientAuthService {
           </a>
         </p>
         <p style="margin: 8px 0 16px;">
-          <a href="${resetLink}" style="display: inline-block; padding: 10px 16px; background: #1A3BA0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+          <a href="${webResetLink}" style="display: inline-block; padding: 10px 16px; background: #1A3BA0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
             Open Web Reset Page
           </a>
         </p>
         <p>If the app button does not open the app, use this web link:</p>
-        <p style="word-break: break-all; color: #555;">${resetLink}</p>
+        <p style="word-break: break-all; color: #555;">${webResetLink}</p>
         <p style="color: #777; font-size: 12px;">If you did not expect this email, you can ignore it.</p>
       </div>
     `;
@@ -211,14 +279,18 @@ class ClientAuthService {
       const resetLink = await admin.auth().generatePasswordResetLink(
         normalizedEmail
       );
-      const oobCode = this._extractResetOobCode(resetLink);
+      const resetParams = this._extractResetParams(resetLink);
+      const oobCode =
+        resetParams?.oobCode || this._extractResetOobCode(resetLink);
       const appResetLink = this._buildAppResetLink(oobCode);
+      const stableWebResetLink =
+        this._buildWebResetLink(resetParams) || resetLink;
 
       // 7. Send activation email
       const emailSubject = 'Set up your CareNest client account';
       const emailHtml = this._buildActivationEmailHtml({
         firstName: client.clientFirstName,
-        resetLink,
+        webResetLink: stableWebResetLink,
         appResetLink
       });
       const emailResult = await emailService.sendEmail(
