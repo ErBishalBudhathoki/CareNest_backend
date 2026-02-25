@@ -10,6 +10,50 @@ class ClientAuthService {
     return String(email || '').trim().toLowerCase();
   }
 
+  _buildActivatableClientQuery(normalizedEmail) {
+    return {
+      clientEmail: normalizedEmail,
+      $or: [
+        { isActive: true },
+        { isActive: { $exists: false } },
+        {
+          $and: [{ isActive: false }, { deletedAt: { $exists: false } }]
+        }
+      ]
+    };
+  }
+
+  _isDynamicLinkHost(hostname) {
+    return String(hostname || '')
+      .trim()
+      .toLowerCase()
+      .endsWith('.page.link');
+  }
+
+  _resolveActivationContinueUrl(firebaseProjectId) {
+    const fallback = `https://${firebaseProjectId}.firebaseapp.com/reset-password`;
+    const configuredUrl =
+      process.env.CLIENT_ACTIVATION_CONTINUE_URL ||
+      process.env.PASSWORD_RESET_CONTINUE_URL ||
+      process.env.FRONTEND_URL;
+
+    const candidate = String(configuredUrl || '').trim();
+    if (!candidate) {
+      return fallback;
+    }
+
+    try {
+      const parsed = new URL(candidate);
+      const isHttp = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+      if (!isHttp || this._isDynamicLinkHost(parsed.hostname)) {
+        return fallback;
+      }
+      return parsed.toString();
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   _buildActivationEmailHtml({ firstName, resetLink }) {
     const safeFirstName = firstName || 'there';
     return `
@@ -42,10 +86,9 @@ class ClientAuthService {
       }
 
       // 1. Verify client exists
-      const client = await Client.findOne({
-        clientEmail: normalizedEmail,
-        isActive: true
-      });
+      const client = await Client.findOne(
+        this._buildActivatableClientQuery(normalizedEmail)
+      );
       if (!client) {
         throw new Error('Client email not found in records');
       }
@@ -140,7 +183,10 @@ class ClientAuthService {
       // 5. Mark client as activated
       await Client.updateOne(
         { _id: client._id },
-        { $set: { isActivated: true, updatedAt: now } }
+        {
+          $set: { isActivated: true, isActive: true, updatedAt: now },
+          $unset: { deletedAt: '' }
+        }
       );
 
       // 6. Generate Firebase reset link for password setup
@@ -151,17 +197,18 @@ class ClientAuthService {
         'invoice-660f3';
 
       const activationContinueUrl =
-        process.env.CLIENT_ACTIVATION_CONTINUE_URL ||
-        process.env.PASSWORD_RESET_CONTINUE_URL ||
-        process.env.FRONTEND_URL ||
-        `https://${firebaseProjectId}.firebaseapp.com/reset-password`;
+        this._resolveActivationContinueUrl(firebaseProjectId);
+      const handleCodeInApp =
+        String(process.env.CLIENT_ACTIVATION_HANDLE_IN_APP || '')
+            .trim()
+            .toLowerCase() === 'true';
 
       const passwordResetActionSettings = {
         url: activationContinueUrl,
-        handleCodeInApp: true
+        handleCodeInApp
       };
 
-      if (process.env.FIREBASE_AUTH_LINK_DOMAIN) {
+      if (handleCodeInApp && process.env.FIREBASE_AUTH_LINK_DOMAIN) {
         passwordResetActionSettings.linkDomain =
           process.env.FIREBASE_AUTH_LINK_DOMAIN;
       }
