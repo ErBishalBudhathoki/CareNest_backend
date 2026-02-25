@@ -139,10 +139,8 @@ class ClientAuthService {
 
   _buildActivationEmailHtml({ firstName, webResetLink, appResetLink }) {
     const safeFirstName = firstName || 'there';
-    const primaryLink = appResetLink || webResetLink;
-    const primaryLabel = appResetLink
-      ? 'Set Password in CareNest App'
-      : 'Set Password';
+    const primaryLink = webResetLink || appResetLink;
+    const showAppShortcut = Boolean(appResetLink && appResetLink !== primaryLink);
     return `
       <div style="font-family: Arial, sans-serif; padding: 20px; text-align: left;">
         <h2 style="color: #4CAF50;">Welcome to CareNest</h2>
@@ -150,17 +148,18 @@ class ClientAuthService {
         <p>Your client account has been activated. Set your password to start using the app.</p>
         <p style="margin: 24px 0;">
           <a href="${primaryLink}" style="display: inline-block; padding: 12px 18px; background: #4CAF50; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
-            ${primaryLabel}
+            Set Password
           </a>
         </p>
+        ${showAppShortcut ? `
         <p style="margin: 8px 0 16px;">
-          <a href="${webResetLink}" style="display: inline-block; padding: 10px 16px; background: #1A3BA0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
-            Open Web Reset Page
+          <a href="${appResetLink}" style="display: inline-block; padding: 10px 16px; background: #1A3BA0; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+            Open in CareNest App
           </a>
-        </p>
+        </p>` : ''}
         <p style="margin-top: 4px;">
           If buttons do not work, use this
-          <a href="${webResetLink}" style="color:#1A3BA0; font-weight:600;">backup reset link</a>.
+          <a href="${primaryLink}" style="color:#1A3BA0; font-weight:600;">backup reset link</a>.
         </p>
         <p style="color: #777; font-size: 12px;">If you did not expect this email, you can ignore it.</p>
       </div>
