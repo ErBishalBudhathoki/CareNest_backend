@@ -20,6 +20,13 @@ class OrganizationService {
     };
   }
 
+  _buildDeletedClientQuery(organizationId) {
+    return {
+      organizationId: organizationId,
+      deletedAt: { $ne: null }
+    };
+  }
+
   async createOrganization(organizationData) {
     try {
       const { organizationName, ownerEmail, ownerFirstName, ownerLastName } = organizationData;
@@ -315,6 +322,28 @@ class OrganizationService {
           activatedEmailSet.has(
             String(client.clientEmail || '').trim().toLowerCase()
           )
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getOrganizationDeletedClients(organizationId) {
+    try {
+      const clients = await Client.find(
+        this._buildDeletedClientQuery(organizationId)
+      )
+        .sort({ deletedAt: -1, updatedAt: -1 })
+        .lean();
+
+      if (!clients || clients.length === 0) {
+        return [];
+      }
+
+      return clients.map(client => ({
+        ...client,
+        isActive: false,
+        isActivated: false
       }));
     } catch (error) {
       throw error;

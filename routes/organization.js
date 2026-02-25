@@ -71,6 +71,7 @@ router.put('/:organizationId', strictLimiter, organizationContextMiddleware, org
 router.get('/:organizationId/members', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationMembers);
 router.get('/:organizationId/businesses', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationBusinesses);
 router.get('/:organizationId/clients', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationClients);
+router.get('/:organizationId/clients/history', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationDeletedClients);
 router.get('/:organizationId/employees', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationEmployees);
 
 // Branding
