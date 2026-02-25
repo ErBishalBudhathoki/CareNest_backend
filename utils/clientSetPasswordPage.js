@@ -19,20 +19,15 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
   <title>${safeBrandName} - Set Password</title>
   <style>
     :root {
-      --bg-a: #f0f7ff;
-      --bg-b: #e9fff5;
-      --card: #ffffff;
-      --text: #0f172a;
-      --muted: #475569;
-      --primary: #1d4ed8;
-      --primary-2: #0f766e;
-      --border: #dbe5f5;
-      --danger: #b91c1c;
-      --danger-bg: #fee2e2;
-      --success: #166534;
-      --success-bg: #dcfce7;
-      --warning: #854d0e;
-      --warning-bg: #fef9c3;
+      --red: #cf2f22;
+      --blue: #1b3fa6;
+      --yellow: #f1ba19;
+      --black: #121212;
+      --cream: #f5f1e6;
+      --white: #ffffff;
+      --green: #0da85e;
+      --danger: #d32f2f;
+      --muted: #4f4f4f;
     }
 
     * {
@@ -42,43 +37,107 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(1200px 700px at 0% -10%, var(--bg-a), transparent 60%),
-        radial-gradient(900px 500px at 100% 0%, var(--bg-b), transparent 55%),
-        #f8fafc;
+      font-family: 'Futura PT', 'Futura', 'Avenir Next', 'Century Gothic', sans-serif;
+      color: var(--black);
+      background: var(--cream);
       display: grid;
       place-items: center;
-      padding: 24px;
+      padding: 28px;
+      position: relative;
+      overflow-x: hidden;
     }
 
     .card {
       width: 100%;
-      max-width: 520px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      box-shadow: 0 24px 64px rgba(2, 6, 23, 0.12);
+      max-width: 600px;
+      background: var(--white);
+      border: 4px solid var(--black);
+      border-radius: 0;
+      box-shadow: 8px 8px 0 var(--black);
       overflow: hidden;
+      position: relative;
+      z-index: 2;
+    }
+
+    .shape {
+      position: fixed;
+      border: 3px solid var(--black);
+      z-index: 0;
+    }
+
+    .shape.red {
+      width: 124px;
+      height: 124px;
+      background: var(--red);
+      left: 22px;
+      top: 34px;
+      border-radius: 50%;
+    }
+
+    .shape.blue {
+      width: 88px;
+      height: 88px;
+      background: var(--blue);
+      right: 30px;
+      top: 52px;
+      border-radius: 50%;
+    }
+
+    .shape.yellow {
+      width: 68px;
+      height: 180px;
+      background: var(--yellow);
+      right: 52px;
+      bottom: 38px;
+      border-radius: 0;
     }
 
     .header {
-      padding: 24px;
-      background: linear-gradient(135deg, var(--primary), var(--primary-2));
-      color: #fff;
+      padding: 24px 24px 18px;
+      border-bottom: 4px solid var(--black);
+      background: var(--white);
+    }
+
+    .bars {
+      display: grid;
+      grid-template-columns: 1fr 1fr 72px;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .bar {
+      height: 20px;
+      border: 2px solid var(--black);
+      border-radius: 0;
+    }
+
+    .bar.red {
+      background: var(--red);
+    }
+
+    .bar.blue {
+      background: var(--blue);
+    }
+
+    .bar.yellow {
+      background: var(--yellow);
     }
 
     .header h1 {
-      margin: 0 0 6px;
-      font-size: 24px;
-      line-height: 1.2;
+      margin: 0 0 4px;
+      font-size: 34px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      line-height: 1.1;
+      text-transform: uppercase;
     }
 
     .header p {
       margin: 0;
       font-size: 14px;
-      opacity: 0.95;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.01em;
     }
 
     .content {
@@ -88,89 +147,98 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
     .email-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 14px;
+      gap: 7px;
+      margin-bottom: 16px;
       padding: 8px 12px;
-      border-radius: 999px;
-      border: 1px solid #cfe0ff;
-      background: #f1f6ff;
-      color: #1e3a8a;
+      border-radius: 0;
+      border: 2px solid var(--black);
+      background: var(--yellow);
+      color: var(--black);
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
     }
 
     .alert {
-      margin-bottom: 14px;
-      padding: 10px 12px;
-      border-radius: 10px;
+      margin-bottom: 15px;
+      padding: 11px 12px;
+      border-radius: 0;
       font-size: 14px;
       line-height: 1.4;
       display: none;
+      border: 2px solid var(--black);
+      font-weight: 600;
     }
 
     .alert.error {
       display: block;
-      background: var(--danger-bg);
+      background: #ffe8e6;
       color: var(--danger);
-      border: 1px solid #fecaca;
     }
 
     .alert.success {
       display: block;
-      background: var(--success-bg);
-      color: var(--success);
-      border: 1px solid #bbf7d0;
+      background: #e5f9ef;
+      color: var(--green);
     }
 
     .alert.warning {
       display: block;
-      background: var(--warning-bg);
-      color: var(--warning);
-      border: 1px solid #fde68a;
+      background: #fff7da;
+      color: #6f4e00;
     }
 
     .field {
-      margin-bottom: 12px;
+      margin-bottom: 14px;
     }
 
     label {
       display: block;
-      margin-bottom: 6px;
+      margin-bottom: 7px;
       font-size: 13px;
       font-weight: 700;
-      color: #1e293b;
+      color: var(--black);
       text-transform: uppercase;
-      letter-spacing: .04em;
+      letter-spacing: 0.06em;
     }
 
     input {
       width: 100%;
-      border: 1px solid #cbd5e1;
-      border-radius: 10px;
-      padding: 12px;
-      font-size: 14px;
+      border: 2px solid var(--black);
+      border-radius: 0;
+      background: var(--white);
+      padding: 12px 13px;
+      font-size: 15px;
+      font-weight: 600;
       outline: none;
-      transition: border-color .18s, box-shadow .18s;
+      transition: transform .08s ease;
     }
 
     input:focus {
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+      border-color: var(--blue);
+      box-shadow: 3px 3px 0 var(--blue);
+      transform: translate(-1px, -1px);
     }
 
     .rules {
-      margin: 12px 0 16px;
-      padding: 12px;
-      border-radius: 12px;
-      background: #f8fafc;
-      border: 1px dashed #cbd5e1;
+      margin: 14px 0 17px;
+      padding: 13px;
+      border-radius: 0;
+      background: #fff8dc;
+      border: 2px solid var(--black);
       font-size: 13px;
       color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
 
     .rules ul {
       margin: 8px 0 0;
       padding-left: 18px;
+      text-transform: none;
+      letter-spacing: 0;
     }
 
     .rules li {
@@ -178,47 +246,97 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
     }
 
     .rules li.ok {
-      color: var(--success);
-      font-weight: 600;
+      color: var(--green);
+      font-weight: 700;
     }
 
     .button {
       width: 100%;
-      border: 0;
-      border-radius: 12px;
-      padding: 13px 14px;
-      font-size: 15px;
+      border: 2px solid var(--black);
+      border-radius: 0;
+      padding: 14px 16px;
+      font-size: 16px;
       font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
       cursor: pointer;
-      color: #fff;
-      background: linear-gradient(135deg, var(--primary), var(--primary-2));
-      transition: transform .08s ease, opacity .18s ease;
+      color: var(--white);
+      background: var(--red);
+      box-shadow: 4px 4px 0 var(--black);
+      transition: transform .08s ease, box-shadow .08s ease, opacity .18s ease;
     }
 
     .button:hover {
-      transform: translateY(-1px);
+      transform: translate(-1px, -1px);
+      box-shadow: 5px 5px 0 var(--black);
+    }
+
+    .button:active {
+      transform: translate(1px, 1px);
+      box-shadow: 2px 2px 0 var(--black);
     }
 
     .button:disabled {
       cursor: not-allowed;
-      opacity: 0.7;
+      opacity: 0.68;
       transform: none;
+      box-shadow: 0 0 0 transparent;
     }
 
     .footer {
-      margin-top: 14px;
+      margin-top: 15px;
       font-size: 12px;
-      color: #64748b;
+      color: var(--muted);
+      font-weight: 600;
+      border-top: 2px solid #d7d2c5;
+      padding-top: 12px;
+      letter-spacing: 0.01em;
     }
 
     .hidden {
       display: none !important;
     }
+
+    @media (max-width: 560px) {
+      body {
+        padding: 14px;
+      }
+
+      .shape.red,
+      .shape.yellow {
+        display: none;
+      }
+
+      .shape.blue {
+        width: 50px;
+        height: 50px;
+        right: 12px;
+        top: 12px;
+      }
+
+      .card {
+        border-width: 3px;
+        box-shadow: 5px 5px 0 var(--black);
+      }
+
+      .header h1 {
+        font-size: 28px;
+      }
+    }
   </style>
 </head>
 <body>
+  <div class="shape red" aria-hidden="true"></div>
+  <div class="shape blue" aria-hidden="true"></div>
+  <div class="shape yellow" aria-hidden="true"></div>
+
   <main class="card">
     <section class="header">
+      <div class="bars" aria-hidden="true">
+        <div class="bar red"></div>
+        <div class="bar blue"></div>
+        <div class="bar yellow"></div>
+      </div>
       <h1>Set Your Password</h1>
       <p>Securely complete account setup for ${safeBrandName}</p>
     </section>
@@ -443,4 +561,3 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
 module.exports = {
   renderClientSetPasswordPage
 };
-
