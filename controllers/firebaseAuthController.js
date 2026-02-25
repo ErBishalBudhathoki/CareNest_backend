@@ -8,6 +8,43 @@ const logger = createLogger('FirebaseAuthController');
 const Client = require('../models/Client');
 
 class FirebaseAuthController {
+  static async _markClientActivationComplete(user, now = new Date()) {
+    if (!user || user.role !== 'client') {
+      return { matched: 0, modified: 0 };
+    }
+
+    const clientQuery = user.clientId
+      ? { _id: user.clientId }
+      : { clientEmail: String(user.email || '').trim().toLowerCase() };
+
+    const updateResult = await Client.updateOne(
+      clientQuery,
+      {
+        $set: {
+          isActivated: true,
+          activationPending: false,
+          activatedAt: now,
+          isActive: true,
+          updatedAt: now
+        },
+        $unset: {
+          deletedAt: '',
+          deletedBy: '',
+          purgeAfter: ''
+        }
+      }
+    );
+
+    const matched = Number.isInteger(updateResult?.matchedCount)
+      ? updateResult.matchedCount
+      : Number(updateResult?.n || 0);
+    const modified = Number.isInteger(updateResult?.modifiedCount)
+      ? updateResult.modifiedCount
+      : Number(updateResult?.nModified || 0);
+
+    return { matched, modified };
+  }
+
   /**
    * Sync Firebase user with MongoDB after successful authentication
    * This endpoint is called after Firebase Auth succeeds on the client
@@ -71,29 +108,9 @@ class FirebaseAuthController {
 
       await user.save();
 
-      // Mark client activation complete only after successful Firebase login sync.
+      // Mark client activation complete after successful Firebase login sync.
       if (user.role === 'client') {
-        const clientQuery = user.clientId
-          ? { _id: user.clientId }
-          : { clientEmail: String(user.email || '').trim().toLowerCase() };
-
-        await Client.updateOne(
-          clientQuery,
-          {
-            $set: {
-              isActivated: true,
-              activationPending: false,
-              activatedAt: new Date(),
-              isActive: true,
-              updatedAt: new Date()
-            },
-            $unset: {
-              deletedAt: '',
-              deletedBy: '',
-              purgeAfter: ''
-            }
-          }
-        );
+        await this._markClientActivationComplete(user, new Date());
       }
 
       // Fetch organization details if user has organizationId
@@ -146,6 +163,100 @@ class FirebaseAuthController {
       return res.status(500).json({
         success: false,
         message: 'Failed to sync user data',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Complete client activation immediately after successful password setup on web reset page.
+   */
+  static async completeClientActivation(req, res) {
+    try {
+      const tokenUid = req.firebaseUser?.uid;
+      const tokenEmail = String(req.firebaseUser?.email || '')
+        .trim()
+        .toLowerCase();
+
+      if (!tokenUid || !tokenEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid Firebase token is required'
+        });
+      }
+
+      const user = req.user || (await User.findOne({ firebaseUid: tokenUid }));
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      if (user.role !== 'client') {
+        return res.status(403).json({
+          success: false,
+          message: 'Only client accounts can complete this activation flow'
+        });
+      }
+
+      const now = new Date();
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            firebaseUid: tokenUid,
+            firebaseSyncedAt: now,
+            isActive: true,
+            updatedAt: now
+          }
+        }
+      );
+
+      const userDoc = user.toObject ? user.toObject() : user;
+      const activation = await this._markClientActivationComplete(
+        {
+          ...userDoc,
+          _id: user._id,
+          role: user.role,
+          clientId: user.clientId,
+          email: tokenEmail || user.email
+        },
+        now
+      );
+
+      if (activation.matched === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Client profile not found for this account'
+        });
+      }
+
+      logger.info('Client activation completed from web reset flow', {
+        firebaseUid: tokenUid,
+        email: tokenEmail,
+        userId: user._id?.toString?.() || null,
+        clientId: user.clientId?.toString?.() || null
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Client activation completed',
+        data: {
+          isActivated: true,
+          activationPending: false,
+          activatedAt: now.toISOString()
+        }
+      });
+    } catch (error) {
+      logger.error('Client activation completion failed', {
+        error: error.message
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to complete client activation',
         error: error.message
       });
     }

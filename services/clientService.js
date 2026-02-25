@@ -548,6 +548,88 @@ class ClientService {
     }
   }
 
+  async markClientActivatedByAdmin(clientId, organizationId, userEmail) {
+    try {
+      if (organizationId && userEmail) {
+        const user = await User.findOne({
+          email: userEmail,
+          organizationId: organizationId
+        });
+
+        if (!user) {
+          throw new Error('User not authorized for this organization');
+        }
+      }
+
+      const query = this.buildNonDeletedClientQuery({ _id: clientId });
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const existingClient = await Client.findOne(query).lean();
+      if (!existingClient) {
+        throw new Error('Client not found');
+      }
+
+      if (
+        existingClient.isActivated === true &&
+        existingClient.activationPending !== true
+      ) {
+        return {
+          success: true,
+          message: 'Client already activated'
+        };
+      }
+
+      const now = new Date();
+      await Client.updateOne(
+        { _id: existingClient._id },
+        {
+          $set: {
+            isActivated: true,
+            activationPending: false,
+            activatedAt: now,
+            isActive: true,
+            updatedAt: now
+          },
+          $unset: {
+            deletedAt: '',
+            deletedBy: '',
+            purgeAfter: ''
+          }
+        }
+      );
+
+      if (userEmail) {
+        await this.logAuditSafe(
+          {
+            userEmail,
+            action: auditService.AUDIT_ACTIONS.UPDATE,
+            entityType: auditService.AUDIT_ENTITIES.CLIENT,
+            entityId: clientId,
+            organizationId: organizationId || 'unknown',
+            metadata: {
+              additionalInfo: {
+                clientId,
+                organizationId,
+                manualActivationOverride: true
+              }
+            }
+          },
+          'markClientActivatedByAdmin'
+        );
+      }
+
+      return {
+        success: true,
+        message:
+          'Client marked as activated by admin. Client login is not required for this status.'
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async deleteClient(clientId, organizationId, userEmail, forceDelete = false) {
     if (forceDelete) {
       return this.forceDeleteClient(clientId, organizationId, userEmail);
