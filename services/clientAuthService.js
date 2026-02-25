@@ -12,14 +12,7 @@ class ClientAuthService {
 
   _buildActivatableClientQuery(normalizedEmail) {
     return {
-      clientEmail: normalizedEmail,
-      $or: [
-        { isActive: true },
-        { isActive: { $exists: false } },
-        {
-          $and: [{ isActive: false }, { deletedAt: { $exists: false } }]
-        }
-      ]
+      clientEmail: normalizedEmail
     };
   }
 
@@ -111,6 +104,11 @@ class ClientAuthService {
       let firebaseUser;
       try {
         firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        if (firebaseUser.disabled) {
+          firebaseUser = await admin.auth().updateUser(firebaseUser.uid, {
+            disabled: false
+          });
+        }
       } catch (firebaseLookupError) {
         if (firebaseLookupError.code !== 'auth/user-not-found') {
           throw firebaseLookupError;
@@ -196,7 +194,7 @@ class ClientAuthService {
         { _id: client._id },
         {
           $set: { isActivated: true, isActive: true, updatedAt: now },
-          $unset: { deletedAt: '' }
+          $unset: { deletedAt: '', deletedBy: '', purgeAfter: '' }
         }
       );
 

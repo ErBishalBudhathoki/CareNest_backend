@@ -5,6 +5,7 @@ const ClientAssignment = require('../models/ClientAssignment');
 const CustomPricing = require('../models/CustomPricing');
 const auditService = require('./auditService');
 const { processCustomPricing } = require('../utils/pricingHelpers');
+const { admin } = require('../firebase-admin-config');
 
 class ClientService {
   createServiceError(message, statusCode = 400) {
@@ -17,13 +18,65 @@ class ClientService {
     return {
       ...baseQuery,
       $or: [
-        { isActive: true },
-        { isActive: { $exists: false } },
-        {
-          $and: [{ isActive: false }, { deletedAt: { $exists: false } }]
-        }
+        { deletedAt: null },
+        { deletedAt: { $exists: false } }
       ]
     };
+  }
+
+  _normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  _retentionDays() {
+    const raw = Number.parseInt(
+      process.env.CLIENT_SOFT_DELETE_RETENTION_DAYS || '90',
+      10
+    );
+    if (Number.isNaN(raw) || raw <= 0) {
+      return 90;
+    }
+    return raw;
+  }
+
+  _buildPurgeAfter(now = new Date()) {
+    const days = this._retentionDays();
+    return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
+  async _deactivateClientAccess(clientEmail, organizationId) {
+    const normalizedEmail = this._normalizeEmail(clientEmail);
+    if (!normalizedEmail) return;
+
+    const now = new Date();
+    const mongoUser = await User.findOneAndUpdate(
+      { email: normalizedEmail, role: 'client' },
+      { $set: { isActive: false, updatedAt: now } },
+      { new: true }
+    );
+
+    if (mongoUser) {
+      const userOrgQuery = { userId: mongoUser._id.toString() };
+      if (organizationId) {
+        userOrgQuery.organizationId = String(organizationId);
+      }
+      await UserOrganization.updateMany(userOrgQuery, {
+        $set: { isActive: false, updatedAt: now }
+      });
+    }
+
+    try {
+      const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+      await admin.auth().updateUser(firebaseUser.uid, { disabled: true });
+      await admin.auth().revokeRefreshTokens(firebaseUser.uid);
+    } catch (firebaseError) {
+      if (firebaseError.code !== 'auth/user-not-found') {
+        console.error(
+          '[ClientService] Failed to disable Firebase client account:',
+          firebaseError.message
+        );
+      }
+    }
   }
 
   async logAuditSafe(auditData, context) {
@@ -55,6 +108,11 @@ class ClientService {
     } = clientData;
 
     try {
+      const normalizedClientEmail = this._normalizeEmail(clientEmail);
+      if (!normalizedClientEmail) {
+        throw this.createServiceError('Valid client email is required', 400);
+      }
+
       // CRITICAL: Require organizationId for multi-tenant isolation
       if (!organizationId) {
         throw this.createServiceError('Organization ID is required for client creation', 400);
@@ -75,7 +133,7 @@ class ClientService {
       // Check if client email already exists in this organization
       const existingClient = await Client.findOne(
         this.buildNonDeletedClientQuery({
-          clientEmail: clientEmail,
+          clientEmail: normalizedClientEmail,
           organizationId: organizationId
         })
       );
@@ -86,12 +144,77 @@ class ClientService {
           409
         );
       }
+
+      // If a matching client was soft-deleted, restore it instead of creating a duplicate.
+      const softDeletedClient = await Client.findOne({
+        clientEmail: normalizedClientEmail,
+        organizationId: organizationId,
+        deletedAt: { $ne: null }
+      });
+      if (softDeletedClient) {
+        const restoredClient = await Client.findOneAndUpdate(
+          { _id: softDeletedClient._id },
+          {
+            $set: {
+              clientFirstName,
+              clientLastName,
+              clientEmail: normalizedClientEmail,
+              clientPhone,
+              clientAddress,
+              clientCity,
+              clientState,
+              clientZip,
+              businessName,
+              preferences: preferences || {},
+              careNotes: careNotes || '',
+              emergencyContact: emergencyContact || {},
+              medicalConditions: medicalConditions || [],
+              riskAssessment: riskAssessment || {},
+              isActive: true,
+              isActivated: false,
+              updatedAt: new Date()
+            },
+            $unset: {
+              deletedAt: '',
+              deletedBy: '',
+              purgeAfter: ''
+            }
+          },
+          { new: true }
+        );
+
+        if (restoredClient) {
+          await this.logAuditSafe(
+            {
+              userEmail,
+              action: auditService.AUDIT_ACTIONS.UPDATE,
+              entityType: auditService.AUDIT_ENTITIES.CLIENT,
+              entityId: restoredClient._id,
+              organizationId: organizationId || 'unknown',
+              metadata: {
+                additionalInfo: {
+                  clientId: restoredClient._id,
+                  clientName: `${clientFirstName} ${clientLastName}`,
+                  restoredFromSoftDelete: true
+                }
+              }
+            },
+            'restoreSoftDeletedClient'
+          );
+
+          return {
+            success: true,
+            clientId: restoredClient._id,
+            message: 'Soft-deleted client restored successfully'
+          };
+        }
+      }
       
       // Create client document with organization context
       const clientDoc = {
         clientFirstName,
         clientLastName,
-        clientEmail,
+        clientEmail: normalizedClientEmail,
         clientPhone,
         clientAddress,
         clientCity,
@@ -312,7 +435,11 @@ class ClientService {
     }
   }
 
-  async deleteClient(clientId, organizationId, userEmail) {
+  async deleteClient(clientId, organizationId, userEmail, forceDelete = false) {
+    if (forceDelete) {
+      return this.forceDeleteClient(clientId, organizationId, userEmail);
+    }
+
     try {
       // Verify user belongs to organization
       if (organizationId && userEmail) {
@@ -333,22 +460,42 @@ class ClientService {
       if (organizationId) {
         query.organizationId = organizationId;
       }
+
+      const now = new Date();
+      const purgeAfter = this._buildPurgeAfter(now);
+      const retentionDays = this._retentionDays();
       
       const result = await Client.findOneAndUpdate(
         query,
         { 
           $set: { 
             isActive: false,
-            deletedAt: new Date(),
-            updatedAt: new Date()
+            isActivated: false,
+            deletedAt: now,
+            deletedBy: userEmail ? this._normalizeEmail(userEmail) : null,
+            purgeAfter,
+            updatedAt: now
           }
         },
         { new: true }
       );
       
       if (!result) {
+        const existingQuery = { _id: clientId };
+        if (organizationId) {
+          existingQuery.organizationId = organizationId;
+        }
+        const existingClient = await Client.findOne(existingQuery).lean();
+        if (existingClient && existingClient.deletedAt) {
+          return {
+            success: true,
+            message: 'Client already deleted'
+          };
+        }
         throw new Error('Client not found');
       }
+
+      await this._deactivateClientAccess(result.clientEmail, organizationId);
       
       // Log audit trail
       if (userEmail) {
@@ -361,7 +508,9 @@ class ClientService {
           metadata: {
             additionalInfo: {
               clientId,
-              organizationId
+              organizationId,
+              retentionDays,
+              purgeAfter: purgeAfter.toISOString()
             }
           }
         }, 'deleteClient');
@@ -369,9 +518,75 @@ class ClientService {
       
       return {
         success: true,
-        message: "Client deleted successfully"
+        message: `Client deleted successfully. Retained for ${retentionDays} days.`
       };
       
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async forceDeleteClient(clientId, organizationId, userEmail) {
+    try {
+      if (organizationId && userEmail) {
+        const user = await User.findOne({
+          email: userEmail,
+          organizationId: organizationId
+        });
+
+        if (!user) {
+          throw new Error('User not authorized for this organization');
+        }
+      }
+
+      const query = { _id: clientId };
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const client = await Client.findOne(query);
+      if (!client) {
+        throw new Error('Client not found');
+      }
+
+      await this._deactivateClientAccess(client.clientEmail, organizationId);
+
+      await Promise.all([
+        ClientAssignment.deleteMany({
+          $or: [{ clientId: client._id }, { clientEmail: client.clientEmail }],
+          ...(organizationId ? { organizationId } : {})
+        }),
+        CustomPricing.deleteMany({
+          ...(organizationId ? { organizationId } : {}),
+          clientId: String(client._id)
+        }),
+        Client.deleteOne({ _id: client._id })
+      ]);
+
+      if (userEmail) {
+        await this.logAuditSafe(
+          {
+            userEmail,
+            action: auditService.AUDIT_ACTIONS.DELETE,
+            entityType: auditService.AUDIT_ENTITIES.CLIENT,
+            entityId: clientId,
+            organizationId: organizationId || 'unknown',
+            metadata: {
+              additionalInfo: {
+                clientId,
+                organizationId,
+                forceDeleted: true
+              }
+            }
+          },
+          'forceDeleteClient'
+        );
+      }
+
+      return {
+        success: true,
+        message: 'Client permanently deleted successfully'
+      };
     } catch (error) {
       throw error;
     }
@@ -497,6 +712,9 @@ class ClientService {
 
       if (!clientExists) {
         throw new Error('Client not found or inactive');
+      }
+      if (clientExists.isActive === false) {
+        throw new Error('Client is inactive');
       }
 
       // Parse ndisItem if it's a string
