@@ -14,11 +14,8 @@ class OrganizationService {
     return {
       organizationId: organizationId,
       $or: [
-        { isActive: true },
-        { isActive: { $exists: false } },
-        {
-          $and: [{ isActive: false }, { deletedAt: { $exists: false } }]
-        }
+        { deletedAt: null },
+        { deletedAt: { $exists: false } }
       ]
     };
   }
@@ -312,7 +309,7 @@ class OrganizationService {
 
       return clients.map(client => ({
         ...client,
-        isActive: client.isActive !== false || !client.deletedAt,
+        isActive: !client.deletedAt && client.isActive !== false,
         isActivated:
           Boolean(client.isActivated) ||
           activatedEmailSet.has(
