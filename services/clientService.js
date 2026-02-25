@@ -13,6 +13,19 @@ class ClientService {
     return error;
   }
 
+  buildNonDeletedClientQuery(baseQuery = {}) {
+    return {
+      ...baseQuery,
+      $or: [
+        { isActive: true },
+        { isActive: { $exists: false } },
+        {
+          $and: [{ isActive: false }, { deletedAt: { $exists: false } }]
+        }
+      ]
+    };
+  }
+
   async logAuditSafe(auditData, context) {
     try {
       await auditService.createAuditLog(auditData);
@@ -60,11 +73,12 @@ class ClientService {
       }
       
       // Check if client email already exists in this organization
-      const existingClient = await Client.findOne({
-        clientEmail: clientEmail,
-        organizationId: organizationId,
-        isActive: true
-      });
+      const existingClient = await Client.findOne(
+        this.buildNonDeletedClientQuery({
+          clientEmail: clientEmail,
+          organizationId: organizationId
+        })
+      );
       
       if (existingClient) {
         throw this.createServiceError(
@@ -145,7 +159,7 @@ class ClientService {
         }
       }
       
-      const query = { isActive: true };
+      const query = this.buildNonDeletedClientQuery();
       if (organizationId) {
         query.organizationId = organizationId;
       }
@@ -208,10 +222,9 @@ class ClientService {
         }
       }
       
-      const query = { 
-        _id: clientId,
-        isActive: true
-      };
+      const query = this.buildNonDeletedClientQuery({
+        _id: clientId
+      });
       
       if (organizationId) {
         query.organizationId = organizationId;
@@ -247,10 +260,9 @@ class ClientService {
         }
       }
       
-      const query = { 
-        _id: clientId,
-        isActive: true
-      };
+      const query = this.buildNonDeletedClientQuery({
+        _id: clientId
+      });
       
       if (organizationId) {
         query.organizationId = organizationId;
@@ -314,10 +326,9 @@ class ClientService {
         }
       }
       
-      const query = { 
-        _id: clientId,
-        isActive: true
-      };
+      const query = this.buildNonDeletedClientQuery({
+        _id: clientId
+      });
       
       if (organizationId) {
         query.organizationId = organizationId;
@@ -454,8 +465,8 @@ class ClientService {
       
       // Find clients with matching emails
       const clients = await Client.find({
-        clientEmail: { $in: emailList },
-        isActive: true
+        ...this.buildNonDeletedClientQuery(),
+        clientEmail: { $in: emailList }
       });
       
       return clients;
@@ -480,8 +491,8 @@ class ClientService {
       
       // Verify client exists
       const clientExists = await Client.findOne({ 
-        clientEmail: clientEmail,
-        isActive: true
+        ...this.buildNonDeletedClientQuery(),
+        clientEmail: clientEmail
       });
 
       if (!clientExists) {
