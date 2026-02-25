@@ -10,6 +10,18 @@ const { generateOrganizationCode } = require('../utils/cryptoHelpers');
 const cacheService = require('./cacheService');
 
 class OrganizationService {
+  _buildNonDeletedClientQuery(organizationId) {
+    return {
+      organizationId: organizationId,
+      $or: [
+        { isActive: true },
+        { isActive: { $exists: false } },
+        {
+          $and: [{ isActive: false }, { deletedAt: { $exists: false } }]
+        }
+      ]
+    };
+  }
 
   async createOrganization(organizationData) {
     try {
@@ -274,10 +286,9 @@ class OrganizationService {
 
   async getOrganizationClients(organizationId) {
     try {
-      const clients = await Client.find({
-        organizationId: organizationId,
-        isActive: true
-      }).lean();
+      const clients = await Client.find(
+        this._buildNonDeletedClientQuery(organizationId)
+      ).lean();
 
       if (!clients || clients.length === 0) {
         return [];
@@ -301,6 +312,7 @@ class OrganizationService {
 
       return clients.map(client => ({
         ...client,
+        isActive: client.isActive !== false || !client.deletedAt,
         isActivated:
           Boolean(client.isActivated) ||
           activatedEmailSet.has(
