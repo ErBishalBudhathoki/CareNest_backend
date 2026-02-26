@@ -5,8 +5,95 @@ const ClientAssignment = require('../models/ClientAssignment');
 const CustomPricing = require('../models/CustomPricing');
 const auditService = require('./auditService');
 const { processCustomPricing } = require('../utils/pricingHelpers');
+const { admin } = require('../firebase-admin-config');
 
 class ClientService {
+  createServiceError(message, statusCode = 400) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+  }
+
+  buildNonDeletedClientQuery(baseQuery = {}) {
+    return {
+      ...baseQuery,
+      $or: [
+        { deletedAt: null },
+        { deletedAt: { $exists: false } }
+      ]
+    };
+  }
+
+  buildDeletedClientQuery(baseQuery = {}) {
+    return {
+      ...baseQuery,
+      deletedAt: { $ne: null }
+    };
+  }
+
+  _normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  _retentionDays() {
+    const raw = Number.parseInt(
+      process.env.CLIENT_SOFT_DELETE_RETENTION_DAYS || '90',
+      10
+    );
+    if (Number.isNaN(raw) || raw <= 0) {
+      return 90;
+    }
+    return raw;
+  }
+
+  _buildPurgeAfter(now = new Date()) {
+    const days = this._retentionDays();
+    return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
+  async _deactivateClientAccess(clientEmail, organizationId) {
+    const normalizedEmail = this._normalizeEmail(clientEmail);
+    if (!normalizedEmail) return;
+
+    const now = new Date();
+    const mongoUser = await User.findOneAndUpdate(
+      { email: normalizedEmail, role: 'client' },
+      { $set: { isActive: false, updatedAt: now } },
+      { new: true }
+    );
+
+    if (mongoUser) {
+      const userOrgQuery = { userId: mongoUser._id.toString() };
+      if (organizationId) {
+        userOrgQuery.organizationId = String(organizationId);
+      }
+      await UserOrganization.updateMany(userOrgQuery, {
+        $set: { isActive: false, updatedAt: now }
+      });
+    }
+
+    try {
+      const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+      await admin.auth().updateUser(firebaseUser.uid, { disabled: true });
+      await admin.auth().revokeRefreshTokens(firebaseUser.uid);
+    } catch (firebaseError) {
+      if (firebaseError.code !== 'auth/user-not-found') {
+        console.error(
+          '[ClientService] Failed to disable Firebase client account:',
+          firebaseError.message
+        );
+      }
+    }
+  }
+
+  async logAuditSafe(auditData, context) {
+    try {
+      await auditService.createAuditLog(auditData);
+    } catch (auditError) {
+      console.error(`[ClientService] Audit log failed during ${context}:`, auditError.message);
+    }
+  }
+
   async addClient(clientData) {
     const { 
       clientFirstName, 
@@ -28,9 +115,14 @@ class ClientService {
     } = clientData;
 
     try {
+      const normalizedClientEmail = this._normalizeEmail(clientEmail);
+      if (!normalizedClientEmail) {
+        throw this.createServiceError('Valid client email is required', 400);
+      }
+
       // CRITICAL: Require organizationId for multi-tenant isolation
       if (!organizationId) {
-        throw new Error('Organization ID is required for client creation');
+        throw this.createServiceError('Organization ID is required for client creation', 400);
       }
 
       // Verify user belongs to organization
@@ -41,26 +133,98 @@ class ClientService {
         }).populate('userId');
         
         if (!userOrg || userOrg.userId.email !== userEmail) {
-          throw new Error('User not authorized for this organization');
+          throw this.createServiceError('User not authorized for this organization', 403);
         }
       }
       
       // Check if client email already exists in this organization
-      const existingClient = await Client.findOne({
-        clientEmail: clientEmail,
-        organizationId: organizationId,
-        isActive: true
-      });
+      const existingClient = await Client.findOne(
+        this.buildNonDeletedClientQuery({
+          clientEmail: normalizedClientEmail,
+          organizationId: organizationId
+        })
+      );
       
       if (existingClient) {
-        throw new Error('Client with this email already exists in your organization');
+        throw this.createServiceError(
+          'Client with this email already exists in your organization',
+          409
+        );
+      }
+
+      // If a matching client was soft-deleted, restore it instead of creating a duplicate.
+      const softDeletedClient = await Client.findOne({
+        clientEmail: normalizedClientEmail,
+        organizationId: organizationId,
+        deletedAt: { $ne: null }
+      });
+      if (softDeletedClient) {
+        const restoredClient = await Client.findOneAndUpdate(
+          { _id: softDeletedClient._id },
+          {
+            $set: {
+              clientFirstName,
+              clientLastName,
+              clientEmail: normalizedClientEmail,
+              clientPhone,
+              clientAddress,
+              clientCity,
+              clientState,
+              clientZip,
+              businessName,
+              preferences: preferences || {},
+              careNotes: careNotes || '',
+              emergencyContact: emergencyContact || {},
+              medicalConditions: medicalConditions || [],
+              riskAssessment: riskAssessment || {},
+              isActive: true,
+              isActivated: false,
+              activationPending: false,
+              activationEmailSentAt: null,
+              activatedAt: null,
+              updatedAt: new Date()
+            },
+            $unset: {
+              deletedAt: '',
+              deletedBy: '',
+              purgeAfter: ''
+            }
+          },
+          { new: true }
+        );
+
+        if (restoredClient) {
+          await this.logAuditSafe(
+            {
+              userEmail,
+              action: auditService.AUDIT_ACTIONS.UPDATE,
+              entityType: auditService.AUDIT_ENTITIES.CLIENT,
+              entityId: restoredClient._id,
+              organizationId: organizationId || 'unknown',
+              metadata: {
+                additionalInfo: {
+                  clientId: restoredClient._id,
+                  clientName: `${clientFirstName} ${clientLastName}`,
+                  restoredFromSoftDelete: true
+                }
+              }
+            },
+            'restoreSoftDeletedClient'
+          );
+
+          return {
+            success: true,
+            clientId: restoredClient._id,
+            message: 'Soft-deleted client restored successfully'
+          };
+        }
       }
       
       // Create client document with organization context
       const clientDoc = {
         clientFirstName,
         clientLastName,
-        clientEmail,
+        clientEmail: normalizedClientEmail,
         clientPhone,
         clientAddress,
         clientCity,
@@ -73,25 +237,37 @@ class ClientService {
         medicalConditions: medicalConditions || [],
         riskAssessment: riskAssessment || {},
         organizationId: organizationId, // Always required
-        isActive: true
+        isActive: true,
+        isActivated: false,
+        activationPending: false,
+        activationEmailSentAt: null,
+        activatedAt: null
       };
       
       const result = await Client.create(clientDoc);
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_CREATED',
-          entityType: 'client',
+          action: auditService.AUDIT_ACTIONS.CREATE,
+          entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: result._id,
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId: result._id,
-            clientName: `${clientFirstName} ${clientLastName}`,
-            organizationId
+          newValues: {
+            clientFirstName,
+            clientLastName,
+            clientEmail,
+            clientPhone
+          },
+          metadata: {
+            additionalInfo: {
+              clientId: result._id,
+              clientName: `${clientFirstName} ${clientLastName}`,
+              organizationId
+            }
           }
-        });
+        }, 'addClient');
       }
       
       return {
@@ -119,16 +295,29 @@ class ClientService {
         }
       }
       
-      const query = { isActive: true };
+      const query = this.buildNonDeletedClientQuery();
       if (organizationId) {
         query.organizationId = organizationId;
       }
       
-      const clients = await Client.find(query);
+      const clients = await Client.find(query).lean();
+
+      if (!clients || clients.length === 0) {
+        return {
+          success: true,
+          clients: []
+        };
+      }
+
+      const normalizedClients = clients.map(client => ({
+        ...client,
+        isActivated: Boolean(client.isActivated),
+        activationPending: Boolean(client.activationPending)
+      }));
       
       return {
         success: true,
-        clients
+        clients: normalizedClients
       };
       
     } catch (error) {
@@ -150,10 +339,9 @@ class ClientService {
         }
       }
       
-      const query = { 
-        _id: clientId,
-        isActive: true
-      };
+      const query = this.buildNonDeletedClientQuery({
+        _id: clientId
+      });
       
       if (organizationId) {
         query.organizationId = organizationId;
@@ -189,10 +377,9 @@ class ClientService {
         }
       }
       
-      const query = { 
-        _id: clientId,
-        isActive: true
-      };
+      const query = this.buildNonDeletedClientQuery({
+        _id: clientId
+      });
       
       if (organizationId) {
         query.organizationId = organizationId;
@@ -215,18 +402,21 @@ class ClientService {
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_UPDATED',
-          entityType: 'client',
+          action: auditService.AUDIT_ACTIONS.UPDATE,
+          entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: clientId,
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId,
-            organizationId,
-            updatedFields: Object.keys(updateData)
+          newValues: updateData,
+          metadata: {
+            additionalInfo: {
+              clientId,
+              organizationId,
+              updatedFields: Object.keys(updateData)
+            }
           }
-        });
+        }, 'updateClient');
       }
       
       return {
@@ -239,7 +429,212 @@ class ClientService {
     }
   }
 
-  async deleteClient(clientId, organizationId, userEmail) {
+  _extractRestorableFields(updateData = {}) {
+    const allowedFields = [
+      'clientFirstName',
+      'clientLastName',
+      'clientPhone',
+      'clientAddress',
+      'clientCity',
+      'clientState',
+      'clientZip',
+      'businessName',
+      'preferences',
+      'careNotes',
+      'emergencyContact',
+      'medicalConditions',
+      'riskAssessment'
+    ];
+
+    return allowedFields.reduce((acc, field) => {
+      if (
+        Object.prototype.hasOwnProperty.call(updateData, field) &&
+        updateData[field] !== undefined
+      ) {
+        acc[field] = updateData[field];
+      }
+      return acc;
+    }, {});
+  }
+
+  async restoreClient(clientId, organizationId, userEmail, restoreData = {}) {
+    try {
+      if (organizationId && userEmail) {
+        const user = await User.findOne({
+          email: userEmail,
+          organizationId: organizationId
+        });
+
+        if (!user) {
+          throw new Error('User not authorized for this organization');
+        }
+      }
+
+      const query = this.buildDeletedClientQuery({ _id: clientId });
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const now = new Date();
+      const restoreFields = this._extractRestorableFields(restoreData);
+      const restoredClient = await Client.findOneAndUpdate(
+        query,
+        {
+          $set: {
+            ...restoreFields,
+            isActive: true,
+            isActivated: false,
+            activationPending: false,
+            activationEmailSentAt: null,
+            activatedAt: null,
+            updatedAt: now
+          },
+          $unset: {
+            deletedAt: '',
+            deletedBy: '',
+            purgeAfter: ''
+          }
+        },
+        { new: true }
+      );
+
+      if (!restoredClient) {
+        const existingQuery = { _id: clientId };
+        if (organizationId) {
+          existingQuery.organizationId = organizationId;
+        }
+        const existingClient = await Client.findOne(existingQuery).lean();
+        if (existingClient && !existingClient.deletedAt) {
+          return {
+            success: true,
+            message: 'Client is already active'
+          };
+        }
+        throw new Error('Deleted client not found');
+      }
+
+      // Keep login blocked until admin explicitly activates again.
+      await this._deactivateClientAccess(restoredClient.clientEmail, organizationId);
+
+      if (userEmail) {
+        await this.logAuditSafe(
+          {
+            userEmail,
+            action: auditService.AUDIT_ACTIONS.UPDATE,
+            entityType: auditService.AUDIT_ENTITIES.CLIENT,
+            entityId: clientId,
+            organizationId: organizationId || 'unknown',
+            metadata: {
+              additionalInfo: {
+                clientId,
+                organizationId,
+                restoredFromHistory: true,
+                reactivationRequired: true,
+                updatedFields: Object.keys(restoreFields)
+              }
+            }
+          },
+          'restoreClient'
+        );
+      }
+
+      return {
+        success: true,
+        message:
+          'Client restored successfully. Activate the client account to grant app access again.'
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async markClientActivatedByAdmin(clientId, organizationId, userEmail) {
+    try {
+      if (organizationId && userEmail) {
+        const user = await User.findOne({
+          email: userEmail,
+          organizationId: organizationId
+        });
+
+        if (!user) {
+          throw new Error('User not authorized for this organization');
+        }
+      }
+
+      const query = this.buildNonDeletedClientQuery({ _id: clientId });
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const existingClient = await Client.findOne(query).lean();
+      if (!existingClient) {
+        throw new Error('Client not found');
+      }
+
+      if (
+        existingClient.isActivated === true &&
+        existingClient.activationPending !== true
+      ) {
+        return {
+          success: true,
+          message: 'Client already activated'
+        };
+      }
+
+      const now = new Date();
+      await Client.updateOne(
+        { _id: existingClient._id },
+        {
+          $set: {
+            isActivated: true,
+            activationPending: false,
+            activatedAt: now,
+            isActive: true,
+            updatedAt: now
+          },
+          $unset: {
+            deletedAt: '',
+            deletedBy: '',
+            purgeAfter: ''
+          }
+        }
+      );
+
+      if (userEmail) {
+        await this.logAuditSafe(
+          {
+            userEmail,
+            action: auditService.AUDIT_ACTIONS.UPDATE,
+            entityType: auditService.AUDIT_ENTITIES.CLIENT,
+            entityId: clientId,
+            organizationId: organizationId || 'unknown',
+            metadata: {
+              additionalInfo: {
+                clientId,
+                organizationId,
+                manualActivationOverride: true
+              }
+            }
+          },
+          'markClientActivatedByAdmin'
+        );
+      }
+
+      return {
+        success: true,
+        message:
+          'Client marked as activated by admin. Client login is not required for this status.'
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async deleteClient(clientId, organizationId, userEmail, forceDelete = false) {
+    if (forceDelete) {
+      return this.forceDeleteClient(clientId, organizationId, userEmail);
+    }
+
     try {
       // Verify user belongs to organization
       if (organizationId && userEmail) {
@@ -253,51 +648,141 @@ class ClientService {
         }
       }
       
-      const query = { 
-        _id: clientId,
-        isActive: true
-      };
+      const query = this.buildNonDeletedClientQuery({
+        _id: clientId
+      });
       
       if (organizationId) {
         query.organizationId = organizationId;
       }
+
+      const now = new Date();
+      const purgeAfter = this._buildPurgeAfter(now);
+      const retentionDays = this._retentionDays();
       
       const result = await Client.findOneAndUpdate(
         query,
         { 
           $set: { 
             isActive: false,
-            deletedAt: new Date(),
-            updatedAt: new Date()
+            isActivated: false,
+            activationPending: false,
+            deletedAt: now,
+            deletedBy: userEmail ? this._normalizeEmail(userEmail) : null,
+            purgeAfter,
+            updatedAt: now
           }
         },
         { new: true }
       );
       
       if (!result) {
+        const existingQuery = { _id: clientId };
+        if (organizationId) {
+          existingQuery.organizationId = organizationId;
+        }
+        const existingClient = await Client.findOne(existingQuery).lean();
+        if (existingClient && existingClient.deletedAt) {
+          return {
+            success: true,
+            message: 'Client already deleted'
+          };
+        }
         throw new Error('Client not found');
       }
+
+      await this._deactivateClientAccess(result.clientEmail, organizationId);
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_DELETED',
-          entityType: 'client',
+          action: auditService.AUDIT_ACTIONS.DELETE,
+          entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: clientId,
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId,
-            organizationId
+          metadata: {
+            additionalInfo: {
+              clientId,
+              organizationId,
+              retentionDays,
+              purgeAfter: purgeAfter.toISOString()
+            }
           }
-        });
+        }, 'deleteClient');
       }
       
       return {
         success: true,
-        message: "Client deleted successfully"
+        message: `Client deleted successfully. Retained for ${retentionDays} days.`
       };
       
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async forceDeleteClient(clientId, organizationId, userEmail) {
+    try {
+      if (organizationId && userEmail) {
+        const user = await User.findOne({
+          email: userEmail,
+          organizationId: organizationId
+        });
+
+        if (!user) {
+          throw new Error('User not authorized for this organization');
+        }
+      }
+
+      const query = { _id: clientId };
+      if (organizationId) {
+        query.organizationId = organizationId;
+      }
+
+      const client = await Client.findOne(query);
+      if (!client) {
+        throw new Error('Client not found');
+      }
+
+      await this._deactivateClientAccess(client.clientEmail, organizationId);
+
+      await Promise.all([
+        ClientAssignment.deleteMany({
+          $or: [{ clientId: client._id }, { clientEmail: client.clientEmail }],
+          ...(organizationId ? { organizationId } : {})
+        }),
+        CustomPricing.deleteMany({
+          ...(organizationId ? { organizationId } : {}),
+          clientId: String(client._id)
+        }),
+        Client.deleteOne({ _id: client._id })
+      ]);
+
+      if (userEmail) {
+        await this.logAuditSafe(
+          {
+            userEmail,
+            action: auditService.AUDIT_ACTIONS.DELETE,
+            entityType: auditService.AUDIT_ENTITIES.CLIENT,
+            entityId: clientId,
+            organizationId: organizationId || 'unknown',
+            metadata: {
+              additionalInfo: {
+                clientId,
+                organizationId,
+                forceDeleted: true
+              }
+            }
+          },
+          'forceDeleteClient'
+        );
+      }
+
+      return {
+        success: true,
+        message: 'Client permanently deleted successfully'
+      };
     } catch (error) {
       throw error;
     }
@@ -357,18 +842,20 @@ class ClientService {
       
       // Log audit trail
       if (userEmail) {
-        await auditService.logAction({
+        await this.logAuditSafe({
           userEmail,
-          action: 'CLIENT_PRICING_UPDATED',
-          entityType: 'pricing',
+          action: auditService.AUDIT_ACTIONS.UPDATE,
+          entityType: auditService.AUDIT_ENTITIES.PRICING,
           entityId: clientId, // Using Client ID as the entity ID reference
           organizationId: organizationId || 'unknown',
-          details: {
-            clientId,
-            organizationId,
-            pricingCount: processedPricing.length
+          metadata: {
+            additionalInfo: {
+              clientId,
+              organizationId,
+              pricingCount: processedPricing.length
+            }
           }
-        });
+        }, 'updateClientPricing');
       }
       
       return {
@@ -389,8 +876,8 @@ class ClientService {
       
       // Find clients with matching emails
       const clients = await Client.find({
-        clientEmail: { $in: emailList },
-        isActive: true
+        ...this.buildNonDeletedClientQuery(),
+        clientEmail: { $in: emailList }
       });
       
       return clients;
@@ -415,12 +902,15 @@ class ClientService {
       
       // Verify client exists
       const clientExists = await Client.findOne({ 
-        clientEmail: clientEmail,
-        isActive: true
+        ...this.buildNonDeletedClientQuery(),
+        clientEmail: clientEmail
       });
 
       if (!clientExists) {
         throw new Error('Client not found or inactive');
+      }
+      if (clientExists.isActive === false) {
+        throw new Error('Client is inactive');
       }
 
       // Parse ndisItem if it's a string

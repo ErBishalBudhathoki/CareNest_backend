@@ -5,6 +5,7 @@ const User = require('../models/User');
 const auditService = require('./auditService');
 const cacheService = require('./cacheService');
 const { priceValidationService } = require('./priceValidationService');
+const ndisCatalogSyncService = require('./ndisCatalogSyncService');
 
 const PricingSettings = require('../models/PricingSettings');
 
@@ -530,6 +531,10 @@ class PricingService {
    */
   async getPricingLookup(organizationId, supportItemNumber, clientId = null) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'pricing_lookup_single',
+      });
+
       const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${clientId || 'global'}`;
       const cachedResult = await cacheService.get(cacheKey);
       
@@ -731,6 +736,10 @@ class PricingService {
    */
   async getBulkPricingLookup(organizationId, supportItemNumbers, clientId = null) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'pricing_lookup_bulk',
+      });
+
       let clientIdForQuery = null;
       let stateUsed = 'NSW';
       let stateSource = 'fallback';
@@ -1091,6 +1100,10 @@ class PricingService {
    */
   async getStandardPrice(supportItemNumber, clientId = null) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'pricing_standard_price',
+      });
+
       let stateUsed = 'NSW';
       let stateSource = 'fallback';
       let providerTypeUsed = 'standard';
@@ -1172,7 +1185,14 @@ class PricingService {
       }).lean();
 
       if (!settingsDoc || typeof settingsDoc.fallbackBaseRate !== 'number') {
-        throw new Error('No fallback base rate configured for this organization');
+        return {
+          organizationId,
+          fallbackBaseRate: null,
+          updatedAt: settingsDoc?.updatedAt || null,
+          updatedBy: settingsDoc?.updatedBy || null,
+          version: settingsDoc?.version || 1,
+          configured: false
+        };
       }
 
       return {
@@ -1180,7 +1200,8 @@ class PricingService {
         fallbackBaseRate: settingsDoc.fallbackBaseRate,
         updatedAt: settingsDoc.updatedAt,
         updatedBy: settingsDoc.updatedBy,
-        version: settingsDoc.version || 1
+        version: settingsDoc.version || 1,
+        configured: true
       };
     } catch (error) {
       throw error;
