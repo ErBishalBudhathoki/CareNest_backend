@@ -7,9 +7,11 @@ const FcmToken = require('../models/FcmToken');
 const UserOrganization = require('../models/UserOrganization');
 const Organization = require('../models/Organization');
 const authService = require('../services/authService');
+const emailService = require('../services/emailService');
 const SecureErrorHandler = require('../utils/errorHandler');
-const { messaging } = require('../firebase-admin-config');
+const { admin, messaging } = require('../firebase-admin-config');
 const keyRotationService = require('../services/jwtKeyRotationService');
+const { verifyFirebaseCredentials } = require('../utils/firebasePasswordVerifier');
 
 /**
  * Secure Authentication Controller
@@ -19,6 +21,7 @@ const keyRotationService = require('../services/jwtKeyRotationService');
 class SecureAuthController {
   /**
    * User registration with enhanced security
+   * Creates Firebase user via Admin SDK and MongoDB user
    */
   register = catchAsync(async (req, res) => {
     // 1. VALIDATION CHECK (express-validator)
@@ -47,33 +50,142 @@ class SecureAuthController {
       );
     }
 
-    // 3. CHECK EXISTANCE
-    const existingUser = await authService.checkEmailExists(email);
-    if (existingUser) {
-      return res.status(409).json(
+    // 3. CHECK EXISTENCE — handle orphaned states from prior partial failures
+    const existingMongoUser = await authService.checkEmailExists(email);
+
+    if (existingMongoUser) {
+      // If MongoDB user exists WITH a firebaseUid — fully registered, reject
+      if (existingMongoUser.firebaseUid) {
+        return res.status(409).json(
+          SecureErrorHandler.createErrorResponse(
+            'User with this email already exists',
+            409,
+            'USER_EXISTS'
+          )
+        );
+      }
+
+      // MongoDB user exists WITHOUT firebaseUid — orphaned record from a prior partial failure.
+      // Delete it so the registration can proceed cleanly.
+      logger.warn('Deleting orphaned MongoDB user (no firebaseUid)', { email });
+      await existingMongoUser.deleteOne();
+    }
+
+    // 4. CREATE FIREBASE USER via Admin SDK
+    // Also handle the case where Firebase already has this user (orphaned Firebase record)
+    let firebaseUser;
+    let customToken;
+    try {
+      firebaseUser = await admin.auth().createUser({
+        email: email,
+        password: password,
+        displayName: `${firstName} ${lastName}`,
+        emailVerified: false
+      });
+
+      // Generate custom token for client to sign in
+      customToken = await admin.auth().createCustomToken(firebaseUser.uid);
+
+      logger.info('Firebase user created via Admin SDK', {
+        email,
+        firebaseUid: firebaseUser.uid
+      });
+    } catch (firebaseError) {
+      logger.error('Failed to create Firebase user', {
+        email,
+        error: firebaseError.message,
+        code: firebaseError.code
+      });
+
+      if (firebaseError.code === 'auth/email-already-exists') {
+        // Firebase has this user but MongoDB doesn't (we just cleaned up above).
+        // Delete the orphaned Firebase user and retry once.
+        try {
+          const existingFirebaseUser = await admin.auth().getUserByEmail(email);
+          await admin.auth().deleteUser(existingFirebaseUser.uid);
+          logger.warn('Deleted orphaned Firebase user, retrying creation', { email });
+
+          firebaseUser = await admin.auth().createUser({
+            email: email,
+            password: password,
+            displayName: `${firstName} ${lastName}`,
+            emailVerified: false
+          });
+          customToken = await admin.auth().createCustomToken(firebaseUser.uid);
+
+          logger.info('Firebase user re-created after orphan cleanup', {
+            email,
+            firebaseUid: firebaseUser.uid
+          });
+        } catch (retryError) {
+          logger.error('Failed to re-create Firebase user after orphan cleanup', {
+            email,
+            error: retryError.message
+          });
+          return res.status(500).json(
+            SecureErrorHandler.createErrorResponse(
+              'Failed to create user account. Please try again.',
+              500,
+              'FIREBASE_ERROR'
+            )
+          );
+        }
+      } else {
+        return res.status(500).json(
+          SecureErrorHandler.createErrorResponse(
+            'Failed to create user account',
+            500,
+            'FIREBASE_ERROR'
+          )
+        );
+      }
+    }
+
+    // 5. CREATE MONGODB USER — roll back Firebase user if this fails
+    let newUser;
+    try {
+      newUser = await authService.createUser({
+        email,
+        firstName,
+        lastName,
+        abn: req.body.abn,
+        organizationCode,
+        organizationId: organizationId || null,
+        phone: phone || null,
+        role: isOwner ? 'admin' : 'user',
+        firebaseUid: firebaseUser.uid,
+        firebaseSyncedAt: new Date(),
+        emailVerified: false
+      });
+    } catch (mongoError) {
+      // Roll back Firebase user to keep systems in sync
+      logger.error('MongoDB user creation failed — rolling back Firebase user', {
+        email,
+        firebaseUid: firebaseUser.uid,
+        error: mongoError.message
+      });
+      try {
+        await admin.auth().deleteUser(firebaseUser.uid);
+        logger.info('Firebase user rolled back successfully', { email });
+      } catch (rollbackError) {
+        logger.error('Failed to roll back Firebase user', {
+          email,
+          firebaseUid: firebaseUser.uid,
+          error: rollbackError.message
+        });
+      }
+      return res.status(500).json(
         SecureErrorHandler.createErrorResponse(
-          'User with this email already exists',
-          409,
-          'USER_EXISTS'
+          'Failed to create user account. Please try again.',
+          500,
+          'REGISTRATION_FAILED'
         )
       );
     }
 
-    // 4. CREATE USER
-    const newUser = await authService.createUser({
-      email,
-      password,
-      firstName,
-      lastName,
-      organizationCode,
-      organizationId: organizationId || null,
-      phone: phone || null,
-      role: isOwner ? 'admin' : 'user'
-    });
-
     let createdOrganization = null;
 
-    // 5. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
+    // 6. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
     if (isOwner || (!organizationId && !organizationCode)) {
       try {
         // Generate unique 6-character organization code
@@ -115,12 +227,38 @@ class SecureAuthController {
           userId: newUser._id.toString(),
           organizationId: createdOrganization._id.toString(),
           role: 'owner',
-          permissions: ['all'],
+          permissions: ['read', 'write', 'delete', 'manage_users', 'manage_billing', 'cross_org_access'],
           isActive: true,
           joinedAt: new Date(),
           createdAt: new Date(),
           updatedAt: new Date()
         });
+
+        // Create audit log after organization is created
+        const auditService = require('../services/auditService');
+        try {
+          await auditService.createAuditLog({
+            action: 'USER_CREATED',
+            entityType: 'user',
+            entityId: newUser._id.toString(),
+            userEmail: email,
+            organizationId: createdOrganization._id.toString(),
+            details: {
+              email: email,
+              firstName: firstName,
+              lastName: lastName,
+              role: 'admin',
+              organizationCreated: true,
+              organizationCode: orgCode
+            },
+            timestamp: new Date()
+          });
+        } catch (auditError) {
+          logger.warn('Audit log creation failed (non-fatal)', {
+            userId: newUser._id.toString(),
+            error: auditError.message
+          });
+        }
 
         logger.info('Auto-created organization for new owner', {
           userId: newUser._id.toString(),
@@ -132,22 +270,48 @@ class SecureAuthController {
           userId: newUser._id.toString(),
           error: orgError.message
         });
-        // Don't fail registration, but log the error
+        // Don't fail registration — user can set up org later
       }
     }
-    // 5. CREATE USER ORGANIZATION RECORD (Zero-Trust requirement)
+    // 7. CREATE USER ORGANIZATION RECORD for members joining an existing org
     else if (organizationId) {
       try {
         await UserOrganization.create({
           userId: newUser._id.toString(),
           organizationId: organizationId,
-          role: 'user',
+          role: 'employee',
           permissions: ['read', 'write'],
           isActive: true,
           joinedAt: new Date(),
           createdAt: new Date(),
           updatedAt: new Date()
         });
+
+        // Create audit log for member joining existing org
+        const auditService = require('../services/auditService');
+        try {
+          await auditService.createAuditLog({
+            action: 'USER_CREATED',
+            entityType: 'user',
+            entityId: newUser._id.toString(),
+            userEmail: email,
+            organizationId: organizationId,
+            details: {
+              email: email,
+              firstName: firstName,
+              lastName: lastName,
+              role: 'user',
+              joinedExistingOrg: true
+            },
+            timestamp: new Date()
+          });
+        } catch (auditError) {
+          logger.warn('Audit log creation failed (non-fatal)', {
+            userId: newUser._id.toString(),
+            error: auditError.message
+          });
+        }
+
         logger.info('UserOrganization record created', {
           userId: newUser._id.toString(),
           organizationId: organizationId
@@ -161,13 +325,11 @@ class SecureAuthController {
       }
     }
 
-    // 6. GENERATE OTP
-    await authService.generateOTP(email);
-
     logger.business('User registered', {
       action: 'USER_REGISTERED',
       userId: newUser._id.toString(),
       email: newUser.email,
+      firebaseUid: firebaseUser.uid,
       ip: req.ip
     });
 
@@ -178,16 +340,19 @@ class SecureAuthController {
           email: newUser.email,
           firstName: newUser.firstName,
           lastName: newUser.lastName,
+          firebaseUid: firebaseUser.uid,
+          customToken: customToken,
+          organizationId: newUser.organizationId,
+          organizationCode: newUser.organizationCode,
           ...(createdOrganization && {
             organization: {
               id: createdOrganization._id.toString(),
               name: createdOrganization.name,
               code: createdOrganization.code
             }
-          }),
-          organizationId: newUser.organizationId
+          })
         },
-        'User registered successfully. Please verify your email.'
+        'User registered successfully. Please verify your email using the Firebase verification link.'
       )
     );
   });
@@ -494,7 +659,7 @@ class SecureAuthController {
     let token;
     try {
       const activeKey = await keyRotationService.getActiveKey();
-      
+
       token = jwt.sign(
         tokenPayload,
         activeKey.secret,
@@ -505,7 +670,7 @@ class SecureAuthController {
           keyid: activeKey.keyId // Add key ID to JWT header for identification
         }
       );
-      
+
       logger.info('Token generated with key rotation', {
         keyId: activeKey.keyId,
         userId: user._id?.toString()
@@ -515,7 +680,7 @@ class SecureAuthController {
       logger.warn('Key rotation service unavailable, falling back to JWT_SECRET', {
         error: error.message
       });
-      
+
       token = jwt.sign(
         tokenPayload,
         process.env.JWT_SECRET,
@@ -563,7 +728,8 @@ class SecureAuthController {
       defaultOrganizationId: user.defaultOrganizationId,
       lastActiveOrganizationId: user.lastActiveOrganizationId,
       isActive: user.isActive !== false,
-      isEmailVerified: user.isEmailVerified || false,
+      isEmailVerified:
+        user.emailVerified === true || user.isEmailVerified === true,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       lastLogin: user.lastLogin
@@ -581,40 +747,146 @@ class SecureAuthController {
   });
 
   /**
-   * Email verification
+   * Deprecated email verification OTP endpoint.
    */
   verifyEmail = catchAsync(async (req, res) => {
-    const { email, otp } = req.body;
+    return res.status(410).json(
+      SecureErrorHandler.createErrorResponse(
+        'Email verification OTP is no longer supported. Use Firebase email verification link flow.',
+        410,
+        'EMAIL_VERIFICATION_OTP_DEPRECATED'
+      )
+    );
+  });
 
-    if (!email || !otp) {
+  /**
+   * Resend Firebase email verification link.
+   */
+  resendVerification = catchAsync(async (req, res) => {
+    const normalizedEmail =
+      req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
+
+    if (!normalizedEmail) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
-          'Email and OTP are required',
+          'Email is required',
           400,
           'MISSING_FIELDS'
         )
       );
     }
 
-    // Use authService to verify
-    await authService.verifyOTP(email, otp);
+    const user = await authService.checkEmailExists(normalizedEmail);
+    if (!user) {
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          null,
+          'If an account with this email exists, a verification link has been sent.'
+        )
+      );
+    }
 
-    // Update user status
-    await User.updateOne(
-      { email: email },
-      { $set: { isEmailVerified: true, updatedAt: new Date() } }
+    let firebaseUser;
+    try {
+      if (user.firebaseUid) {
+        firebaseUser = await admin.auth().getUser(user.firebaseUid);
+      } else {
+        firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        await User.updateOne(
+          { _id: user._id },
+          { $set: { firebaseUid: firebaseUser.uid, firebaseSyncedAt: new Date() } }
+        );
+      }
+    } catch (firebaseLookupError) {
+      logger.warn('Firebase user lookup failed for verification resend', {
+        email: normalizedEmail,
+        error: firebaseLookupError.message
+      });
+
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          null,
+          'If an account with this email exists, a verification link has been sent.'
+        )
+      );
+    }
+
+    if (firebaseUser.emailVerified) {
+      await User.updateOne(
+        { email: normalizedEmail },
+        { $set: { emailVerified: true, isEmailVerified: true, firebaseSyncedAt: new Date() } }
+      );
+
+      return res.status(200).json(
+        SecureErrorHandler.createSuccessResponse(
+          { alreadyVerified: true },
+          'Email is already verified.'
+        )
+      );
+    }
+
+    const firebaseProjectId =
+      process.env.FIREBASE_PROJECT_ID ||
+      process.env.GCP_PROJECT_ID ||
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      'invoice-660f3';
+
+    const verificationContinueUrl =
+      process.env.EMAIL_VERIFICATION_CONTINUE_URL ||
+      process.env.FRONTEND_URL ||
+      `https://${firebaseProjectId}.firebaseapp.com/verify-email`;
+
+    const emailVerificationActionSettings = {
+      url: verificationContinueUrl,
+      handleCodeInApp: true
+    };
+
+    if (process.env.FIREBASE_AUTH_LINK_DOMAIN) {
+      emailVerificationActionSettings.linkDomain =
+        process.env.FIREBASE_AUTH_LINK_DOMAIN;
+    }
+
+    const verificationLink = await admin.auth().generateEmailVerificationLink(
+      normalizedEmail,
+      emailVerificationActionSettings
     );
 
-    logger.business('Email verified', {
-      action: 'EMAIL_VERIFIED',
-      email,
-      ip: req.ip
-    });
+    const subject = 'Verify your email - CareNest';
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; text-align: left;">
+        <h2 style="color: #4CAF50;">Verify your email address</h2>
+        <p>Please confirm your account by clicking the button below:</p>
+        <p style="margin: 24px 0;">
+          <a href="${verificationLink}" style="display: inline-block; padding: 12px 18px; background: #4CAF50; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600;">
+            Verify Email
+          </a>
+        </p>
+        <p>If the button does not work, copy and paste this link into your browser:</p>
+        <p style="word-break: break-all; color: #555;">${verificationLink}</p>
+        <p style="color: #777; font-size: 12px;">If you did not request this, you can ignore this email.</p>
+      </div>
+    `;
 
-    res.status(200).json(
+    const sendResult = await emailService.sendEmail(
+      normalizedEmail,
+      subject,
+      html
+    );
+
+    if (!sendResult) {
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'Failed to send verification email',
+          500,
+          'EMAIL_SEND_FAILED'
+        )
+      );
+    }
+
+    return res.status(200).json(
       SecureErrorHandler.createSuccessResponse(
-        null,
-        'Email verified successfully'
+        { sent: true },
+        'Verification link sent successfully.'
       )
     );
   });
@@ -623,9 +895,10 @@ class SecureAuthController {
    * Password reset request
    */
   requestPasswordReset = catchAsync(async (req, res) => {
-    const { email } = req.body;
+    const normalizedEmail =
+      req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
 
-    if (!email) {
+    if (!normalizedEmail) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'Email is required',
@@ -636,20 +909,20 @@ class SecureAuthController {
     }
 
     // Check if user exists (silent fail if not to prevent enumeration)
-    const user = await authService.checkEmailExists(email);
+    const user = await authService.checkEmailExists(normalizedEmail);
 
     if (user) {
-      await authService.generateOTP(email);
+      await authService.generateOTP(normalizedEmail);
       logger.business('Password reset OTP generated', {
         action: 'PASSWORD_RESET_REQUESTED',
-        email,
+        email: normalizedEmail,
         ip: req.ip
       });
     } else {
       logger.business('Password reset requested for non-existent email', {
         action: 'PASSWORD_RESET_NONEXISTENT',
         ip: req.ip,
-        email
+        email: normalizedEmail
       });
     }
 
@@ -666,8 +939,11 @@ class SecureAuthController {
    */
   resetPassword = catchAsync(async (req, res) => {
     const { email, otp, newPassword, confirmPassword } = req.body;
+    const normalizedEmail = email
+      ? String(email).trim().toLowerCase()
+      : '';
 
-    if (!email || !otp || !newPassword || !confirmPassword) {
+    if (!normalizedEmail || !otp || !newPassword || !confirmPassword) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
           'All fields required',
@@ -690,7 +966,9 @@ class SecureAuthController {
     // Verify OTP via authService
     try {
       // Allow already used OTPs to handle cases where frontend verifies before reset
-      await authService.verifyOTP(email, otp, { allowAlreadyUsed: true });
+      await authService.verifyOTP(normalizedEmail, otp, {
+        allowAlreadyUsed: true
+      });
     } catch (error) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
@@ -703,22 +981,22 @@ class SecureAuthController {
 
     try {
       // Use authService to update password (handles hashing, salt, and OTP cleanup)
-      await authService.updatePassword(email, newPassword);
+      await authService.updatePassword(normalizedEmail, newPassword);
 
       // Unlock account (reset login attempts)
       await User.updateOne(
-        { email: email },
-        { 
-          $set: { 
-            loginAttempts: 0, 
-            lockUntil: undefined 
-          } 
+        { email: normalizedEmail },
+        {
+          $set: {
+            loginAttempts: 0,
+            lockUntil: undefined
+          }
         }
       );
 
       logger.business('Password reset', {
         action: 'PASSWORD_RESET',
-        email,
+        email: normalizedEmail,
         ip: req.ip
       });
 
@@ -850,10 +1128,10 @@ class SecureAuthController {
     }
 
     // Handle both legacy 'role' and new 'roles' fields
-    const userRoles = user.roles && user.roles.length > 0 
-      ? user.roles 
+    const userRoles = user.roles && user.roles.length > 0
+      ? user.roles
       : (user.role ? [user.role] : ['user']);
-    
+
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
@@ -929,7 +1207,9 @@ class SecureAuthController {
       );
     }
 
-    const user = await User.findOne({ _id: userId }).select('+password');
+    const user = await User.findOne({ _id: userId }).select(
+      'email firebaseUid'
+    );
     if (!user) {
       return res.status(404).json(
         SecureErrorHandler.createErrorResponse(
@@ -940,8 +1220,40 @@ class SecureAuthController {
       );
     }
 
-    const isMatch = await user.comparePassword(currentPassword);
-    if (!isMatch) {
+    const normalizedEmail = String(user.email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      return res.status(400).json(
+        SecureErrorHandler.createErrorResponse(
+          'User email is missing',
+          400,
+          'INVALID_USER_STATE'
+        )
+      );
+    }
+
+    let isCurrentPasswordValid = false;
+    try {
+      isCurrentPasswordValid = await verifyFirebaseCredentials(
+        normalizedEmail,
+        currentPassword
+      );
+    } catch (verificationError) {
+      logger.error('Firebase current password verification failed', {
+        userId,
+        email: normalizedEmail,
+        error: verificationError.message
+      });
+
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'Unable to verify current password. Please try again.',
+          500,
+          'FIREBASE_PASSWORD_VERIFY_FAILED'
+        )
+      );
+    }
+
+    if (!isCurrentPasswordValid) {
       return res.status(401).json(
         SecureErrorHandler.createErrorResponse(
           'Incorrect current password',
@@ -951,8 +1263,60 @@ class SecureAuthController {
       );
     }
 
-    user.password = newPassword;
-    await user.save();
+    let firebaseUid = user.firebaseUid;
+    if (!firebaseUid) {
+      try {
+        const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        firebaseUid = firebaseUser.uid;
+      } catch (firebaseLookupError) {
+        logger.error('Failed to resolve Firebase user in changePassword', {
+          userId,
+          email: normalizedEmail,
+          error: firebaseLookupError.message
+        });
+
+        return res.status(500).json(
+          SecureErrorHandler.createErrorResponse(
+            'Failed to resolve account for password update.',
+            500,
+            'FIREBASE_USER_RESOLUTION_FAILED'
+          )
+        );
+      }
+    }
+
+    try {
+      await admin.auth().updateUser(firebaseUid, { password: newPassword });
+      await admin.auth().revokeRefreshTokens(firebaseUid);
+    } catch (firebaseError) {
+      logger.error('Failed to update Firebase password in changePassword', {
+        userId,
+        firebaseUid,
+        error: firebaseError.message
+      });
+
+      return res.status(500).json(
+        SecureErrorHandler.createErrorResponse(
+          'Failed to update password. Please try again.',
+          500,
+          'FIREBASE_PASSWORD_UPDATE_FAILED'
+        )
+      );
+    }
+
+    await User.updateOne(
+      { _id: userId },
+      {
+        $set: {
+          firebaseUid,
+          passwordUpdatedAt: new Date(),
+          firebaseSyncedAt: new Date()
+        },
+        $unset: {
+          password: ''
+        }
+      }
+    );
 
     logger.business('Password changed', {
       action: 'PASSWORD_CHANGED',

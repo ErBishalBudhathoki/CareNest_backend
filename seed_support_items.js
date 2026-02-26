@@ -1,10 +1,13 @@
 const fs = require('fs');
+const path = require('path');
 const csv = require('csv-parser');
 const { MongoClient, ServerApiVersion } = require('mongodb');
 require('dotenv').config({ path: __dirname + '/.env' });
 
 const uri = process.env.MONGODB_URI;
-const csvFilePath = __dirname + '/NDIS.csv';
+const csvFilePath = fs.existsSync(path.join(__dirname, '../NDIS.csv'))
+  ? path.join(__dirname, '../NDIS.csv')
+  : path.join(__dirname, 'NDIS.csv');
 
 function parseBool(val) {
   if (typeof val === 'string') {
@@ -99,8 +102,8 @@ async function seed() {
       try {
         client = await MongoClient.connect(uri, { serverApi: ServerApiVersion.v1 });
         const db = client.db('Invoice');
-        await db.collection('supportItems').deleteMany({}); // Clear old data
-        await db.collection('supportItems').insertMany(items);
+        await db.collection('support_items').deleteMany({}); // Clear old data
+        await db.collection('support_items').insertMany(items);
         console.log(`Seeded ${items.length} support items.`);
       } catch (err) {
         console.error('Error seeding support items:', err);

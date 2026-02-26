@@ -1,11 +1,11 @@
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const User = require('../models/User');
 const Client = require('../models/Client');
 const Organization = require('../models/Organization');
 const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
+const { admin } = require('../firebase-admin-config');
 
 /**
  * Get auth collection (login collection)
@@ -91,20 +91,30 @@ class AuthService {
    */
   async createUser(userData) {
     try {
-      // Create user instance with plain password (model handles hashing)
+      const isFirebaseUser = !!userData.firebaseUid;
+      const isEmailVerified = userData.emailVerified === true;
+      
       const newUser = new User({
         email: userData.email,
-        password: userData.password, // Will be hashed by pre-save hook
         firstName: userData.firstName,
         lastName: userData.lastName,
+        abn: userData.abn,
         organizationCode: userData.organizationCode,
         organizationId: userData.organizationId,
         role: userData.role || 'user',
-        roles: ['user'], // Ensure default role in array
+        roles: ['user'],
         createdAt: new Date(),
         lastLogin: null,
         isActive: true,
-        isEmailVerified: false
+        isEmailVerified: isEmailVerified,
+        // Firebase-specific fields
+        ...(isFirebaseUser && {
+          firebaseUid: userData.firebaseUid,
+          firebaseSyncedAt: userData.firebaseSyncedAt || new Date(),
+          emailVerified: isEmailVerified
+        }),
+        // Password only for non-Firebase users
+        ...(!isFirebaseUser && { password: userData.password })
       });
 
       const savedUser = await newUser.save();
@@ -128,21 +138,23 @@ class AuthService {
         }
       }
 
-      // Create audit trail
-      await auditService.createAuditLog({
-        action: 'USER_CREATED',
-        entityType: 'user',
-        entityId: savedUser._id.toString(),
-        userEmail: userData.email,
-        organizationId: userData.organizationId,
-        details: {
-          email: userData.email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          role: userData.role
-        },
-        timestamp: new Date()
-      });
+      // Create audit trail only if organizationId exists (for owners creating new orgs, this happens later)
+      if (userData.organizationId) {
+        await auditService.createAuditLog({
+          action: 'USER_CREATED',
+          entityType: 'user',
+          entityId: savedUser._id.toString(),
+          userEmail: userData.email,
+          organizationId: userData.organizationId,
+          details: {
+            email: userData.email,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+            role: userData.role
+          },
+          timestamp: new Date()
+        });
+      }
 
       return savedUser;
     } catch (error) {
@@ -247,7 +259,8 @@ class AuthService {
           defaultOrganizationId: user.defaultOrganizationId,
           lastActiveOrganizationId: user.lastActiveOrganizationId,
           isActive: user.isActive !== false,
-          isEmailVerified: user.isEmailVerified || false,
+          isEmailVerified:
+            user.emailVerified === true || user.isEmailVerified === true,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
           lastLogin: user.lastLogin
@@ -299,8 +312,9 @@ class AuthService {
    */
   async uploadUserPhoto(email, photoUrl, contentType) {
     try {
+      const normalizedEmail = String(email).trim().toLowerCase();
       const result = await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
             photoUrl: photoUrl,
@@ -308,7 +322,8 @@ class AuthService {
             photoUpdatedAt: new Date()
           },
           $unset: {
-            photo: "" // Remove legacy buffer field to enforce R2 usage
+            photo: "", // Remove legacy buffer field to enforce R2 usage
+            photoData: ""
           }
         }
       );
@@ -318,12 +333,12 @@ class AuthService {
       }
 
       // Create audit trail
-      const user = await this.checkEmailExists(email);
+      const user = await this.checkEmailExists(normalizedEmail);
       await auditService.createAuditLog({
         action: 'PHOTO_UPLOADED',
         entityType: 'user',
         entityId: user._id.toString(),
-        userEmail: email,
+        userEmail: normalizedEmail,
         organizationId: user.organizationId,
         details: {
           contentType: contentType,
@@ -374,7 +389,8 @@ class AuthService {
    */
   async generateOTP(email) {
     try {
-      const user = await this.checkEmailExists(email);
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const user = await this.checkEmailExists(normalizedEmail);
 
       if (!user) {
         throw new Error('User not found');
@@ -385,7 +401,7 @@ class AuthService {
       const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
             otp: otp,
@@ -395,27 +411,27 @@ class AuthService {
         }
       );
 
-      // Send OTP via Email
+      const emailSubject = 'Password Reset Code - CareNest';
       const emailHtml = `
         <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
           <h2 style="color: #4CAF50;">Password Reset Request</h2>
-          <p>You requested to reset your password. Use the OTP below to verify your identity.</p>
+          <p>Use the code below to verify your identity and reset your password.</p>
           <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
             <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
           </div>
           <p>This code will expire in 10 minutes.</p>
-          <p style="color: #777; font-size: 12px;">If you did not request this, please ignore this email.</p>
+          <p style="color: #777; font-size: 12px;">If you did not request a password reset, you can ignore this email.</p>
         </div>
       `;
 
-      await emailService.sendEmail(email, 'Your OTP Code - CareNest', emailHtml);
+      await emailService.sendEmail(normalizedEmail, emailSubject, emailHtml);
 
       // Create audit trail
       await auditService.createAuditLog({
         action: 'OTP_GENERATED',
         entityType: 'user',
         entityId: user._id.toString(),
-        userEmail: email,
+        userEmail: normalizedEmail,
         organizationId: user.organizationId,
         details: {
           otpExpiry: otpExpiry
@@ -441,7 +457,8 @@ class AuthService {
    */
   async verifyOTP(email, otp, options = {}) {
     try {
-      const user = await User.findOne({ email: email });
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const user = await User.findOne({ email: normalizedEmail });
 
       if (!user) {
         throw new Error('User not found');
@@ -469,7 +486,7 @@ class AuthService {
       // Mark OTP as used (unless prevented)
       if (!options.preventConsumption && !user.otpUsed) {
         await User.updateOne(
-          { email: email },
+          { email: normalizedEmail },
           { $set: { otpUsed: true } }
         );
 
@@ -478,7 +495,7 @@ class AuthService {
           action: 'OTP_VERIFIED',
           entityType: 'user',
           entityId: user._id.toString(),
-          userEmail: email,
+          userEmail: normalizedEmail,
           organizationId: user.organizationId,
           details: {},
           timestamp: new Date()
@@ -499,25 +516,51 @@ class AuthService {
    */
   async updatePassword(email, newPassword) {
     try {
-      const user = await this.checkEmailExists(email);
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const user = await this.checkEmailExists(normalizedEmail);
 
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Generate new salt and hash password
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hashedPassword = bcrypt.hashSync(newPassword, 10);
+      let firebaseUid = user.firebaseUid;
+
+      // Resolve Firebase identity by email when firebaseUid is not yet synced.
+      if (!firebaseUid) {
+        try {
+          const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+          firebaseUid = firebaseUser.uid;
+
+          await User.updateOne(
+            { _id: user._id },
+            {
+              $set: {
+                firebaseUid,
+                firebaseSyncedAt: new Date()
+              }
+            }
+          );
+        } catch (firebaseLookupError) {
+          throw new Error(
+            'Unable to resolve Firebase account for this email. Please contact support.'
+          );
+        }
+      }
+
+      // Firebase is the source of truth for sign-in credentials.
+      await admin.auth().updateUser(firebaseUid, { password: newPassword });
+      const now = new Date();
 
       await User.updateOne(
-        { email: email },
+        { email: normalizedEmail },
         {
           $set: {
-            password: hashedPassword,
-            salt: salt,
-            passwordUpdatedAt: new Date()
+            passwordUpdatedAt: now,
+            firebaseUid,
+            firebaseSyncedAt: now
           },
           $unset: {
+            password: '',
             otp: '',
             otpExpiry: '',
             otpUsed: ''
@@ -530,12 +573,13 @@ class AuthService {
         action: 'PASSWORD_UPDATED',
         entityType: 'user',
         entityId: user._id.toString(),
-        userEmail: email,
+        userEmail: normalizedEmail,
         organizationId: user.organizationId,
         details: {
-          passwordUpdatedAt: new Date()
+          passwordUpdatedAt: now,
+          firebaseUid
         },
-        timestamp: new Date()
+        timestamp: now
       });
 
       return true;

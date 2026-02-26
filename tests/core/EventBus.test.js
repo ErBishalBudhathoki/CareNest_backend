@@ -2,10 +2,14 @@ const EventBus = require('../../core/EventBus');
 
 jest.mock('../../config/redis', () => {
   const Redis = require('ioredis-mock');
-  return new Redis();
+  const client = new Redis();
+  client.isConfigured = true;
+  client.status = 'ready';
+  return client;
 });
 jest.mock('../../config/logger', () => ({
   info: jest.fn(),
+  warn: jest.fn(),
   error: jest.fn()
 }));
 

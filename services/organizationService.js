@@ -10,6 +10,22 @@ const { generateOrganizationCode } = require('../utils/cryptoHelpers');
 const cacheService = require('./cacheService');
 
 class OrganizationService {
+  _buildNonDeletedClientQuery(organizationId) {
+    return {
+      organizationId: organizationId,
+      $or: [
+        { deletedAt: null },
+        { deletedAt: { $exists: false } }
+      ]
+    };
+  }
+
+  _buildDeletedClientQuery(organizationId) {
+    return {
+      organizationId: organizationId,
+      deletedAt: { $ne: null }
+    };
+  }
 
   async createOrganization(organizationData) {
     try {
@@ -256,6 +272,61 @@ class OrganizationService {
           joinedAt: userOrg?.joinedAt
         };
       });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getOrganizationBusinesses(organizationId) {
+    try {
+      return await Business.find({
+        organizationId: organizationId,
+        isActive: true
+      }).lean();
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getOrganizationClients(organizationId) {
+    try {
+      const clients = await Client.find(
+        this._buildNonDeletedClientQuery(organizationId)
+      ).lean();
+
+      if (!clients || clients.length === 0) {
+        return [];
+      }
+
+      return clients.map(client => ({
+        ...client,
+        isActive: !client.deletedAt && client.isActive !== false,
+        isActivated: Boolean(client.isActivated),
+        activationPending: Boolean(client.activationPending)
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getOrganizationDeletedClients(organizationId) {
+    try {
+      const clients = await Client.find(
+        this._buildDeletedClientQuery(organizationId)
+      )
+        .sort({ deletedAt: -1, updatedAt: -1 })
+        .lean();
+
+      if (!clients || clients.length === 0) {
+        return [];
+      }
+
+      return clients.map(client => ({
+        ...client,
+        isActive: false,
+        isActivated: false,
+        activationPending: Boolean(client.activationPending)
+      }));
     } catch (error) {
       throw error;
     }

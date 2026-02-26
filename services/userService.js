@@ -10,7 +10,7 @@ class UserService {
   async getAllUsers(organizationId) {
     try {
       const query = {};
-      
+
       // If organizationId is provided, filter by it.
       // If explicit null/undefined is passed (e.g. by superadmin in future), it might return all, 
       // but we will enforce organizationId presence in the controller.
@@ -19,22 +19,22 @@ class UserService {
       }
 
       const users = await User.find(query);
-      
+
       if (!users || users.length === 0) {
         return [];
       }
-      
+
       // Map the users to the expected format
       const formattedUsers = users.map(user => ({
+        id: user._id.toString(),
         firstName: user.firstName || "",
         lastName: user.lastName || "",
         email: user.email || "",
-        // REMOVED PASSWORD FIELD FOR SECURITY
         organizationId: user.organizationId,
         role: user.role,
         isActive: user.isActive
       }));
-      
+
       return formattedUsers;
     } catch (error) {
       throw error;
@@ -53,8 +53,9 @@ class UserService {
         password: 0, // Exclude sensitive fields
         salt: 0
       });
-      
+
       return employees.map(emp => ({
+        id: emp._id.toString(),
         ...emp.toObject(),
         payRate: emp.payRate || null,
         payType: emp.payType || 'Hourly',
@@ -81,11 +82,11 @@ class UserService {
         organizationId: organizationId,
         isActive: true
       });
-      
+
       if (!user) {
         throw new Error('User not authorized for this organization');
       }
-      
+
       // Update clients that have null organizationId and were created by this user
       // Note: Assuming 'createdBy' field exists in Client model or we use another way to link
       // Since Client model doesn't explicitly have createdBy in my previous definition, 
@@ -94,7 +95,7 @@ class UserService {
       // I'll assume createdBy is meant to be there or I should add it to the schema if missing.
       // Checking Client schema... I didn't add createdBy explicitly but Mongoose schemas are flexible if strict is false, 
       // but better to be explicit. For now I will use the filter as is.
-      
+
       const clientUpdateResult = await Client.updateMany(
         {
           createdBy: userEmail,
@@ -108,7 +109,7 @@ class UserService {
           }
         }
       );
-      
+
       // Update client assignments that have null organizationId for this user
       const assignmentUpdateResult = await ClientAssignment.updateMany(
         {
@@ -123,7 +124,7 @@ class UserService {
           }
         }
       );
-      
+
       return {
         clientsUpdated: clientUpdateResult.modifiedCount,
         assignmentsUpdated: assignmentUpdateResult.modifiedCount

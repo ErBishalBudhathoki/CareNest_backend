@@ -25,12 +25,37 @@ const addBusinessValidation = [
   body('businessEmail').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
   body('abn').optional().trim().matches(/^[0-9]{11}$/).withMessage('ABN must be 11 digits'),
-  body('phone').optional().trim().isMobilePhone().withMessage('Invalid phone number'),
-  body('address').optional().trim().isLength({ max: 500 })
+  body('businessPhone').optional().trim().isLength({ max: 30 }),
+  body('businessAddress').optional().trim().isLength({ max: 500 }),
+  body('businessCity').optional().trim().isLength({ max: 100 }),
+  body('businessState').optional().trim().isLength({ max: 100 }),
+  body('businessZip').optional().trim().isLength({ max: 20 }),
+  body('userEmail').optional().isEmail().normalizeEmail(),
 ];
 
 const organizationIdValidation = [
   param('organizationId').isMongoId().withMessage('Valid organization ID is required')
+];
+
+const businessIdValidation = [
+  param('businessId').isMongoId().withMessage('Valid business ID is required')
+];
+
+const updateBusinessValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('userEmail').optional().isEmail().normalizeEmail(),
+  body('businessName').optional().trim().notEmpty().withMessage('Business name cannot be empty'),
+  body('businessEmail').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('businessPhone').optional().trim().isLength({ max: 30 }),
+  body('businessAddress').optional().trim().isLength({ max: 500 }),
+  body('businessCity').optional().trim().isLength({ max: 100 }),
+  body('businessState').optional().trim().isLength({ max: 100 }),
+  body('businessZip').optional().trim().isLength({ max: 20 }),
+];
+
+const deleteBusinessValidation = [
+  body('organizationId').isMongoId().withMessage('Valid organization ID is required'),
+  body('userEmail').optional().isEmail().normalizeEmail(),
 ];
 
 // Protected routes
@@ -47,5 +72,31 @@ router.post('/addBusiness', strictLimiter, addBusinessValidation, handleValidati
  * GET /businesses/:organizationId
  */
 router.get('/businesses/:organizationId', businessLimiter, organizationIdValidation, handleValidationErrors, businessController.getBusinessesByOrganization);
+
+/**
+ * Update business
+ * PUT /business/:businessId
+ */
+router.put(
+  '/business/:businessId',
+  strictLimiter,
+  businessIdValidation,
+  updateBusinessValidation,
+  handleValidationErrors,
+  businessController.updateBusiness
+);
+
+/**
+ * Delete (soft-delete) business
+ * POST /business/:businessId/delete
+ */
+router.post(
+  '/business/:businessId/delete',
+  strictLimiter,
+  businessIdValidation,
+  deleteBusinessValidation,
+  handleValidationErrors,
+  businessController.deleteBusiness
+);
 
 module.exports = router;

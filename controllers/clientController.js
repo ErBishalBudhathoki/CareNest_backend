@@ -10,11 +10,28 @@ class ClientController {
       return res.status(400).json({ statusCode: 400, message: "Client email is required" });
     }
 
-    const result = await clientAuthService.activateClientByAdmin(email);
+    const forwardedProto = req.header('x-forwarded-proto');
+    const forwardedHost = req.header('x-forwarded-host');
+    const protocol = String(forwardedProto || req.protocol || 'https')
+      .split(',')[0]
+      .trim();
+    const host = String(forwardedHost || req.get('host') || '')
+      .split(',')[0]
+      .trim();
+    const webBaseUrl = host ? `${protocol}://${host}` : null;
+
+    const result = await clientAuthService.activateClientByAdmin(email, {
+      webBaseUrl
+    });
+    const activationMessage = result.emailSent
+      ? (result.alreadyActivated
+          ? 'Activation email sent again. Client account is now pending setup.'
+          : 'Activation email sent. Client account is pending setup.')
+      : 'Activation email could not be sent. Please retry.';
     
     res.status(200).json({
       statusCode: 200,
-      message: "Client activated successfully",
+      message: activationMessage,
       data: result
     });
   });
@@ -74,9 +91,81 @@ class ClientController {
 
   deleteClient = catchAsync(async (req, res) => {
     const { clientId } = req.params;
-    const { organizationId, userEmail } = req.body;
+    const { organizationId, userEmail, forceDelete } = req.body;
+    const forceDeleteFlag =
+      forceDelete === true || String(forceDelete).toLowerCase() == 'true';
     
-    const result = await clientService.deleteClient(clientId, organizationId, userEmail);
+    const result = await clientService.deleteClient(
+      clientId,
+      organizationId,
+      userEmail,
+      forceDeleteFlag
+    );
+    res.status(200).json({
+      statusCode: 200,
+      ...result
+    });
+  });
+
+  markClientActivated = catchAsync(async (req, res) => {
+    const { clientId } = req.params;
+    const { organizationId, userEmail } = req.body;
+
+    const result = await clientService.markClientActivatedByAdmin(
+      clientId,
+      organizationId,
+      userEmail
+    );
+
+    res.status(200).json({
+      statusCode: 200,
+      ...result
+    });
+  });
+
+  restoreClient = catchAsync(async (req, res) => {
+    const { clientId } = req.params;
+    const {
+      organizationId,
+      userEmail,
+      clientFirstName,
+      clientLastName,
+      clientPhone,
+      clientAddress,
+      clientCity,
+      clientState,
+      clientZip,
+      businessName,
+      preferences,
+      careNotes,
+      emergencyContact,
+      medicalConditions,
+      riskAssessment
+    } = req.body;
+
+    const restoreData = {
+      clientFirstName,
+      clientLastName,
+      clientPhone,
+      clientAddress,
+      clientCity,
+      clientState,
+      clientZip,
+      businessName,
+      preferences,
+      careNotes,
+      emergencyContact,
+      medicalConditions,
+      riskAssessment
+    };
+
+    const result = await clientService.restoreClient(
+      clientId,
+      organizationId,
+      userEmail,
+      restoreData
+    );
+
     res.status(200).json({
       statusCode: 200,
       ...result

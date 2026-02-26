@@ -272,6 +272,147 @@ async function deleteInvoice(req, res) {
  */
 // Removed duplicate getInvoiceStats function - using the service-based implementation below
 
+function toNumber(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    if (!normalized) return 0;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function normalizeString(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function parseDateLike(value) {
+  if (!value) return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    const fromNumber = new Date(value);
+    return Number.isNaN(fromNumber.getTime()) ? null : fromNumber;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const asIso = new Date(trimmed);
+    if (!Number.isNaN(asIso.getTime())) return asIso;
+
+    const ddmmyyyy = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (ddmmyyyy) {
+      const day = Number(ddmmyyyy[1]);
+      const month = Number(ddmmyyyy[2]);
+      const year = Number(ddmmyyyy[3]);
+      const parsed = new Date(Date.UTC(year, month - 1, day));
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+  }
+
+  return null;
+}
+
+function normalizeLineItems(rawLineItems, organizationId) {
+  if (!Array.isArray(rawLineItems)) return [];
+
+  return rawLineItems
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+
+      const supportItemNumber = normalizeString(
+        item.supportItemNumber ||
+        item.itemCode ||
+        item.ndisItemNumber ||
+        item.ndisItem?.itemNumber
+      );
+
+      const supportItemName = normalizeString(
+        item.supportItemName ||
+        item.itemName ||
+        item.description ||
+        item.ndisItemName ||
+        item.ndisItem?.itemName ||
+        'Payroll Item'
+      );
+
+      const quantity = toNumber(item.quantity ?? item.hours ?? item.totalHours);
+      const price = toNumber(item.price ?? item.rate ?? item.unitPrice);
+      let totalPrice = toNumber(
+        item.totalPrice ?? item.amount ?? item.total ?? item.lineTotal
+      );
+
+      if (totalPrice <= 0 && quantity > 0 && price > 0) {
+        totalPrice = quantity * price;
+      }
+
+      const parsedDate = parseDateLike(item.date ?? item.serviceDate);
+
+      return {
+        supportItemNumber,
+        supportItemName,
+        price: price > 0 ? price : 0,
+        quantity: quantity > 0 ? quantity : (totalPrice > 0 ? 1 : 0),
+        unit: normalizeString(item.unit) || (item.hours != null ? 'hour' : 'unit'),
+        totalPrice: totalPrice > 0 ? totalPrice : 0,
+        date: parsedDate || undefined,
+        organizationId,
+        providerType: normalizeString(item.providerType) || undefined,
+        serviceLocationPostcode:
+          normalizeString(item.serviceLocationPostcode) || undefined,
+        pricingMetadata: item.pricingMetadata && typeof item.pricingMetadata === 'object'
+          ? item.pricingMetadata
+          : undefined
+      };
+    })
+    .filter((item) => item && (item.totalPrice > 0 || item.quantity > 0));
+}
+
+function resolveEmployeeContext({
+  employeeContext,
+  metadata,
+  billedTo,
+  calculatedPayloadData
+}) {
+  const firstClient = Array.isArray(calculatedPayloadData?.clients)
+    ? calculatedPayloadData.clients[0]
+    : null;
+  const employeeDetails = firstClient?.employeeDetails || {};
+
+  const resolved = {
+    employeeId: normalizeString(
+      employeeContext?.employeeId ||
+      metadata?.employeeId ||
+      employeeDetails?.employeeId ||
+      employeeDetails?.id
+    ),
+    employeeEmail: normalizeString(
+      employeeContext?.employeeEmail ||
+      metadata?.employeeEmail ||
+      billedTo?.email ||
+      firstClient?.employeeEmail ||
+      employeeDetails?.email
+    ).toLowerCase(),
+    employeeName: normalizeString(
+      employeeContext?.employeeName ||
+      metadata?.employeeName ||
+      billedTo?.name ||
+      firstClient?.employeeName ||
+      employeeDetails?.name
+    )
+  };
+
+  return resolved;
+}
+
 /**
  * Create a new invoice
  * @param {Object} req - Express request object
@@ -289,6 +430,7 @@ async function createInvoice(req, res) {
       clientEmail,
       clientName,
       lineItems,
+      expenses = [],
       financialSummary,
       metadata = {},
       pdfPath,
@@ -297,14 +439,18 @@ async function createInvoice(req, res) {
       invoiceNumber: providedInvoiceNumber,
       invoiceType,
       issuer,
-      billedTo
+      billedTo,
+      employeeContext
     } = req.body;
 
+    const normalizedLineItems = normalizeLineItems(lineItems, organizationId);
+    const hasExpenses = Array.isArray(expenses) && expenses.length > 0;
+
     // Validate required fields
-    if (!organizationId || !clientEmail || !lineItems || !Array.isArray(lineItems) || lineItems.length === 0) {
+    if (!organizationId || !clientEmail || (!normalizedLineItems.length && !hasExpenses)) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: organizationId, clientEmail, and lineItems are required'
+        error: 'Missing required fields: organizationId, clientEmail, and at least one payable line item/expense'
       });
     }
     // Validate invoiceType and header entities
@@ -335,6 +481,17 @@ async function createInvoice(req, res) {
     console.log('Final invoice number:', invoiceNumber);
     console.log('================================')
 
+    const resolvedEmployeeContext = resolveEmployeeContext({
+      employeeContext,
+      metadata,
+      billedTo,
+      calculatedPayloadData
+    });
+    const lineItemsTotal = normalizedLineItems.reduce(
+      (sum, item) => sum + (item.totalPrice || 0),
+      0
+    );
+
     // Prepare invoice data according to schema
     const invoiceData = {
       invoiceNumber,
@@ -342,17 +499,13 @@ async function createInvoice(req, res) {
       clientId,
       clientEmail,
       clientName,
-      lineItems: lineItems.map(item => ({
-        ...item,
-        organizationId,
-        _id: undefined // Let MongoDB generate the ID
-      })),
+      lineItems: normalizedLineItems,
       financialSummary: {
-        subtotal: financialSummary?.subtotal || lineItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
+        subtotal: financialSummary?.subtotal || lineItemsTotal,
         taxAmount: financialSummary?.taxAmount || 0,
         discountAmount: financialSummary?.discountAmount || 0,
         expenseAmount: financialSummary?.expenseAmount || 0,
-        totalAmount: financialSummary?.totalAmount || lineItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
+        totalAmount: financialSummary?.totalAmount || lineItemsTotal,
         currency: financialSummary?.currency || 'AUD',
         exchangeRate: financialSummary?.exchangeRate || 1.0,
         paymentTerms: financialSummary?.paymentTerms || 30,
@@ -374,6 +527,7 @@ async function createInvoice(req, res) {
         billedTo,
       },
       calculatedPayloadData: calculatedPayloadData || null,
+      employeeContext: resolvedEmployeeContext,
       compliance: {
         ndisCompliant: true, // Will be validated
         validationPassed: true,
