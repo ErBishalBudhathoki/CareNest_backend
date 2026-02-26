@@ -299,12 +299,24 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       <form id="reset-form" novalidate>
         <div class="field">
           <label for="new-password">New Password</label>
-          <input id="new-password" name="new-password" type="password" autocomplete="new-password" required />
+          <input
+            id="new-password"
+            name="new-password"
+            type="password"
+            autocomplete="new-password"
+            required
+          />
         </div>
 
         <div class="field">
           <label for="confirm-password">Confirm Password</label>
-          <input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" required />
+          <input
+            id="confirm-password"
+            name="confirm-password"
+            type="password"
+            autocomplete="new-password"
+            required
+          />
         </div>
 
         <div class="rules">
