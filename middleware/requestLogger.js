@@ -131,8 +131,14 @@ const securityLogger = (req, res, next) => {
     { pattern: /<script/i, type: 'SCRIPT_INJECTION_ATTEMPT' }
   ];
   
-  // Check query parameters
-  const queryString = JSON.stringify(req.query);
+  // Check query values only to avoid false positives from JSON stringify quotes
+  const queryString = Object.values(req.query || {})
+    .map((value) => {
+      if (Array.isArray(value)) return value.join(' ');
+      if (value == null) return '';
+      return String(value);
+    })
+    .join(' ');
   suspiciousPatterns.forEach(({ pattern, type }) => {
     if (pattern.test(queryString)) {
       logger.security('Suspicious request detected', {
