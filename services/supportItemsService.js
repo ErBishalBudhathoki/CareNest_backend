@@ -1,4 +1,5 @@
 const { getDatabase } = require('../config/database');
+const ndisCatalogSyncService = require('./ndisCatalogSyncService');
 
 class SupportItemsService {
   async _resolveSupportItemsCollection(db) {
@@ -25,6 +26,10 @@ class SupportItemsService {
    * Search support items by text query
    */
   async searchSupportItems(searchQuery) {
+    await ndisCatalogSyncService.ensureFreshOnAccess({
+      reason: 'support_items_search',
+    });
+
     const db = await getDatabase();
     const collection = await this._resolveSupportItemsCollection(db);
     const query = (searchQuery || '').trim();
@@ -57,6 +62,10 @@ class SupportItemsService {
    * Get all support items
    */
   async getAllSupportItems() {
+    await ndisCatalogSyncService.ensureFreshOnAccess({
+      reason: 'support_items_all',
+    });
+
     const db = await getDatabase();
     const collection = await this._resolveSupportItemsCollection(db);
 
