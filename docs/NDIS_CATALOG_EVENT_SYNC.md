@@ -25,8 +25,9 @@ Set:
 
 - `NDIS_CATALOG_PROVIDER=r2` or `gcs`
 - `NDIS_CATALOG_BUCKET=...`
-- `NDIS_CATALOG_OBJECT_KEY=ndis_support_items/ndis_support_items.json`
+- `NDIS_CATALOG_OBJECT_KEY=ndis_support_items/NDIS.csv`
 - Optional: `NDIS_CATALOG_WATCH_PREFIX=ndis_support_items/`
+- Optional: `NDIS_CATALOG_ACCESS_SYNC_MIN_INTERVAL_MS=1000` (set `0` to check every access)
 
 ## Cloudflare R2 (event-driven)
 
@@ -113,8 +114,9 @@ This sync service reads the catalog object through GCS S3 interoperability keys.
 ```env
 NDIS_CATALOG_PROVIDER=gcs
 NDIS_CATALOG_BUCKET=<your-gcs-bucket>
-NDIS_CATALOG_OBJECT_KEY=ndis_support_items/ndis_support_items.json
+NDIS_CATALOG_OBJECT_KEY=ndis_support_items/NDIS.csv
 NDIS_CATALOG_WATCH_PREFIX=ndis_support_items/
+NDIS_CATALOG_ACCESS_SYNC_MIN_INTERVAL_MS=1000
 GCS_HMAC_ACCESS_KEY_ID=<hmac-access-id>
 GCS_HMAC_SECRET_ACCESS_KEY=<hmac-secret>
 ```
@@ -123,7 +125,7 @@ GCS_HMAC_SECRET_ACCESS_KEY=<hmac-secret>
 
 1. Backend extracts changed object info (R2/GCS/custom payload shapes).
 2. Validates event bucket/key against configured target or watch prefix.
-3. Downloads changed JSON object from storage.
+3. Downloads changed CSV object from storage.
 4. Bulk upserts into `support_items`.
 5. Marks missing previously managed items as inactive.
 6. Stores sync state (`reference_sync_state`) with ETag/hash for idempotency.
