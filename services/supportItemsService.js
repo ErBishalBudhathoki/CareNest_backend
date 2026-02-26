@@ -1,21 +1,56 @@
 const { getDatabase } = require('../config/database');
 
 class SupportItemsService {
+  async _resolveSupportItemsCollection(db) {
+    const canonicalCollection = db.collection('support_items');
+    try {
+      const canonicalCount = await canonicalCollection.estimatedDocumentCount();
+      if (canonicalCount > 0) {
+        return canonicalCollection;
+      }
+    } catch (_) {}
+
+    const legacyCollection = db.collection('supportItems');
+    try {
+      const legacyCount = await legacyCollection.estimatedDocumentCount();
+      if (legacyCount > 0) {
+        return legacyCollection;
+      }
+    } catch (_) {}
+
+    return canonicalCollection;
+  }
+
   /**
    * Search support items by text query
    */
   async searchSupportItems(searchQuery) {
     const db = await getDatabase();
-    
-    // Ensure text index exists (run once, then comment out for prod)
-    // await db.collection('supportItems').createIndex({ supportItemName: 'text', supportItemNumber: 'text' });
-    
-    const items = await db.collection('supportItems')
-      .find({ $text: { $search: searchQuery } })
-      .limit(20)
-      .toArray();
-      
-    return items;
+    const collection = await this._resolveSupportItemsCollection(db);
+    const query = (searchQuery || '').trim();
+
+    if (!query) {
+      return [];
+    }
+
+    try {
+      return await collection
+        .find({ $text: { $search: query } })
+        .limit(20)
+        .toArray();
+    } catch (_) {
+      // Fallback when text indexes are not available in the selected collection.
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return await collection
+        .find({
+          $or: [
+            { supportItemName: { $regex: escapedQuery, $options: 'i' } },
+            { supportItemNumber: { $regex: escapedQuery, $options: 'i' } },
+          ],
+        })
+        .limit(20)
+        .toArray();
+    }
   }
   
   /**
@@ -23,10 +58,11 @@ class SupportItemsService {
    */
   async getAllSupportItems() {
     const db = await getDatabase();
-    
-    const items = await db.collection('supportItems')
+    const collection = await this._resolveSupportItemsCollection(db);
+
+    const items = await collection
       .find({})
-      .limit(1000)
+      .limit(5000)
       .toArray();
       
     return items;

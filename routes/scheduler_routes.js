@@ -19,6 +19,7 @@ const { processDunning } = require('../cron/dunningScheduler');
 const { processAllOrganizationsRecurringExpenses } = require('../recurring_expense_scheduler');
 const { manualTrigger: triggerTimesheetReminders } = require('../timesheet_reminder_scheduler');
 const { manualTriggerExpenseReminders } = require('../expense_reminder_scheduler');
+const ndisCatalogSyncService = require('../services/ndisCatalogSyncService');
 
 // Rate limiting for scheduler endpoints (very strict as these are internal only)
 const schedulerLimiter = rateLimit({
@@ -257,6 +258,26 @@ router.post('/daily', schedulerLimiter, logSchedulerExecution('daily'), async (r
             });
         }
 
+        // Task 7: Sync NDIS catalog from object storage if changed
+        try {
+            logger.info('Checking NDIS catalog for updates...');
+            const syncResult = await ndisCatalogSyncService.syncIfChanged({
+                reason: 'daily_scheduler'
+            });
+            results.tasks.push({
+                name: 'ndis_catalog_sync',
+                status: 'success',
+                details: syncResult
+            });
+        } catch (error) {
+            logger.error('Error syncing NDIS catalog:', error);
+            results.tasks.push({
+                name: 'ndis_catalog_sync',
+                status: 'error',
+                error: error.message
+            });
+        }
+
         const hasErrors = results.tasks.some(t => t.status === 'error');
 
         res.status(hasErrors ? 500 : 200).json({
@@ -276,6 +297,36 @@ router.post('/daily', schedulerLimiter, logSchedulerExecution('daily'), async (r
 });
 
 /**
+ * POST /scheduler/ndis-catalog-sync
+ *
+ * Runs a metadata check and syncs support items only when object changed.
+ * Query params:
+ * - force=true to bypass ETag/LastModified check.
+ */
+router.post('/ndis-catalog-sync', schedulerLimiter, logSchedulerExecution('ndis-catalog-sync'), async (req, res) => {
+    try {
+        const force = req.query.force === 'true';
+        const syncResult = await ndisCatalogSyncService.syncIfChanged({
+            force,
+            reason: 'scheduler_endpoint'
+        });
+
+        res.status(200).json({
+            success: true,
+            message: syncResult.skipped ? 'NDIS catalog unchanged' : 'NDIS catalog sync completed',
+            result: syncResult
+        });
+    } catch (error) {
+        logger.error('NDIS catalog scheduler sync error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'NDIS catalog sync failed',
+            error: error.message
+        });
+    }
+});
+
+/**
  * GET /scheduler/status
  * 
  * Health check endpoint to verify scheduler routes are working
@@ -287,7 +338,8 @@ router.get('/status', (req, res) => {
         endpoints: {
             highFrequency: '/scheduler/high-frequency (POST)',
             mediumFrequency: '/scheduler/medium-frequency (POST)',
-            daily: '/scheduler/daily (POST)'
+            daily: '/scheduler/daily (POST)',
+            ndisCatalogSync: '/scheduler/ndis-catalog-sync (POST)'
         },
         environment: process.env.NODE_ENV || 'development'
     });
