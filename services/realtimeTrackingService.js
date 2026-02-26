@@ -3,8 +3,6 @@
  * Handles live worker tracking, geofencing, and ETA calculations
  */
 
-const turf = require('@turf/turf');
-
 // In-memory storage for demo (use Redis in production)
 const activeTracking = new Map();
 const geofenceStates = new Map();
@@ -97,13 +95,10 @@ exports.checkGeofence = async (params) => {
     return { triggered: false };
   }
 
-  const workerPoint = turf.point([longitude, latitude]);
-  const clientPoint = turf.point([
-    session.clientLocation.lng,
-    session.clientLocation.lat,
-  ]);
-
-  const distance = turf.distance(workerPoint, clientPoint, { units: 'meters' });
+  const distance = calculateDistance(
+    { lat: latitude, lng: longitude },
+    session.clientLocation
+  );
   const previousState = geofenceStates.get(appointmentId) || {
     insideGeofence: false,
     approaching: false,
@@ -404,4 +399,3 @@ function calculateTotalDistance(locations) {
 
   return totalDistance;
 }
-

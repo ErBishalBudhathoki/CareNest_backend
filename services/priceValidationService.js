@@ -9,6 +9,7 @@ const logger = require('../config/logger');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { mmmService } = require('./mmmService');
 const SupportItem = require('../models/SupportItem');
+const ndisCatalogSyncService = require('./ndisCatalogSyncService');
 
 /**
  * Validation result structure
@@ -44,6 +45,10 @@ class PriceValidationService {
     options = {}
   ) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'price_validation_single',
+      });
+
       // Input validation
       if (!supportItemNumber || typeof proposedPrice !== 'number' || proposedPrice < 0) {
         return {
@@ -303,6 +308,10 @@ class PriceValidationService {
    */
   async getPriceCaps(supportItemNumber) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'price_validation_caps',
+      });
+
       const supportItem = await SupportItem.findOne(
         { supportItemNumber }
       ).select('priceCaps supportItemName supportType quoteRequired');
@@ -325,6 +334,10 @@ class PriceValidationService {
    */
   async requiresQuote(supportItemNumber) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'price_validation_quote_required',
+      });
+
       const supportItem = await SupportItem.findOne(
         { supportItemNumber }
       ).select('quoteRequired supportType');

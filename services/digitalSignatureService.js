@@ -4,9 +4,10 @@
  */
 
 const crypto = require('crypto');
-const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+
+let PDFDocument = null;
 
 // In-memory storage for demo (use database in production)
 const signatures = new Map();
@@ -213,6 +214,33 @@ exports.getChecklistTemplate = async (serviceType) => {
 // ============================================================================
 
 /**
+ * Lazy-load PDF engine so route imports do not fail when optional dependency is missing.
+ * @returns {Function|null}
+ */
+function loadPdfDocument() {
+  if (PDFDocument) {
+    return PDFDocument;
+  }
+
+  try {
+    PDFDocument = require('pdfkit');
+    return PDFDocument;
+  } catch (error) {
+    const missingPdfKit =
+      error &&
+      error.code === 'MODULE_NOT_FOUND' &&
+      typeof error.message === 'string' &&
+      error.message.includes('pdfkit');
+
+    if (missingPdfKit) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+/**
  * Generate PDF service report
  * @param {Object} confirmation - Confirmation data
  * @returns {String} PDF file path
@@ -220,16 +248,30 @@ exports.getChecklistTemplate = async (serviceType) => {
 async function generateServiceReport(confirmation) {
   return new Promise((resolve, reject) => {
     try {
-      const fileName = `service-report-${confirmation.appointmentId}.pdf`;
-      const filePath = path.join(__dirname, '../reports', fileName);
-
       // Ensure reports directory exists
       const reportsDir = path.join(__dirname, '../reports');
       if (!fs.existsSync(reportsDir)) {
         fs.mkdirSync(reportsDir, { recursive: true });
       }
 
-      const doc = new PDFDocument();
+      const PdfDocumentClass = loadPdfDocument();
+      if (!PdfDocumentClass) {
+        const fallbackFileName = `service-report-${confirmation.appointmentId}.json`;
+        const fallbackFilePath = path.join(reportsDir, fallbackFileName);
+        const fallbackReport = {
+          generatedAt: new Date().toISOString(),
+          format: 'json-fallback',
+          confirmation,
+        };
+
+        fs.writeFileSync(fallbackFilePath, JSON.stringify(fallbackReport, null, 2), 'utf8');
+        resolve(`/reports/${fallbackFileName}`);
+        return;
+      }
+
+      const fileName = `service-report-${confirmation.appointmentId}.pdf`;
+      const filePath = path.join(reportsDir, fileName);
+      const doc = new PdfDocumentClass();
       const stream = fs.createWriteStream(filePath);
 
       doc.pipe(stream);
@@ -303,4 +345,3 @@ async function generateServiceReport(confirmation) {
     }
   });
 }
-

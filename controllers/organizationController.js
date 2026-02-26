@@ -246,6 +246,26 @@ class OrganizationController {
     });
   });
 
+  getOrganizationDeletedClients = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        statusCode: 400,
+        message: "Organization ID is required"
+      });
+    }
+
+    const clients = await organizationService.getOrganizationDeletedClients(
+      organizationId
+    );
+
+    res.status(200).json({
+      statusCode: 200,
+      clients: clients
+    });
+  });
+
   getOrganizationEmployees = catchAsync(async (req, res) => {
     const { organizationId } = req.params;
 
