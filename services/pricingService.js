@@ -1172,7 +1172,14 @@ class PricingService {
       }).lean();
 
       if (!settingsDoc || typeof settingsDoc.fallbackBaseRate !== 'number') {
-        throw new Error('No fallback base rate configured for this organization');
+        return {
+          organizationId,
+          fallbackBaseRate: null,
+          updatedAt: settingsDoc?.updatedAt || null,
+          updatedBy: settingsDoc?.updatedBy || null,
+          version: settingsDoc?.version || 1,
+          configured: false
+        };
       }
 
       return {
@@ -1180,7 +1187,8 @@ class PricingService {
         fallbackBaseRate: settingsDoc.fallbackBaseRate,
         updatedAt: settingsDoc.updatedAt,
         updatedBy: settingsDoc.updatedBy,
-        version: settingsDoc.version || 1
+        version: settingsDoc.version || 1,
+        configured: true
       };
     } catch (error) {
       throw error;
