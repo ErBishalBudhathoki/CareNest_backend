@@ -18,6 +18,7 @@ const connectMongoose = require('./config/mongoose');
 const logger = require('./config/logger');
 const { keepAliveService } = require('./utils/keepAlive');
 const keyRotationService = require('./services/jwtKeyRotationService');
+const ndisCatalogSyncService = require('./services/ndisCatalogSyncService');
 
 let appInstance = null;
 let bootstrapPromise = null;
@@ -152,6 +153,22 @@ else if (require.main === module) {
             });
             await new Promise(resolve => setTimeout(resolve, delayMs));
           }
+        }
+
+        console.log('⏳ Syncing NDIS catalog into MongoDB...');
+        try {
+          const ndisSyncResult = await ndisCatalogSyncService.syncIfChanged({
+            reason: 'startup_bootstrap',
+          });
+          console.log(
+            ndisSyncResult.skipped
+              ? '✅ NDIS catalog already up to date in MongoDB'
+              : '✅ NDIS catalog synced to MongoDB',
+          );
+        } catch (error) {
+          logger.warn('NDIS catalog bootstrap sync failed', {
+            error: error.message,
+          });
         }
 
         console.log('⏳ Initializing JWT key rotation...');

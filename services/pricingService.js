@@ -5,6 +5,7 @@ const User = require('../models/User');
 const auditService = require('./auditService');
 const cacheService = require('./cacheService');
 const { priceValidationService } = require('./priceValidationService');
+const ndisCatalogSyncService = require('./ndisCatalogSyncService');
 
 const PricingSettings = require('../models/PricingSettings');
 
@@ -530,6 +531,10 @@ class PricingService {
    */
   async getPricingLookup(organizationId, supportItemNumber, clientId = null) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'pricing_lookup_single',
+      });
+
       const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${clientId || 'global'}`;
       const cachedResult = await cacheService.get(cacheKey);
       
@@ -731,6 +736,10 @@ class PricingService {
    */
   async getBulkPricingLookup(organizationId, supportItemNumbers, clientId = null) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'pricing_lookup_bulk',
+      });
+
       let clientIdForQuery = null;
       let stateUsed = 'NSW';
       let stateSource = 'fallback';
@@ -1091,6 +1100,10 @@ class PricingService {
    */
   async getStandardPrice(supportItemNumber, clientId = null) {
     try {
+      await ndisCatalogSyncService.ensureFreshOnAccess({
+        reason: 'pricing_standard_price',
+      });
+
       let stateUsed = 'NSW';
       let stateSource = 'fallback';
       let providerTypeUsed = 'standard';

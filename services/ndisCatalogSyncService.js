@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const { Readable } = require('stream');
+const csv = require('csv-parser');
 const {
   S3Client,
   HeadObjectCommand,
@@ -27,6 +29,24 @@ function parseBoolean(value) {
   return ['true', 'yes', 'y', '1'].includes(normalized);
 }
 
+function parseDate(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+
+  // NDIS CSV common format: YYYYMMDD
+  if (/^\d{8}$/.test(raw)) {
+    if (raw === '99991231') return new Date('9999-12-31T00:00:00.000Z');
+    const year = raw.slice(0, 4);
+    const month = raw.slice(4, 6);
+    const day = raw.slice(6, 8);
+    const parsed = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function normalizeKey(objectKey) {
   return String(objectKey || '')
     .replace(/^\/+/, '')
@@ -46,6 +66,17 @@ async function bodyToString(body) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+async function parseCsvPayload(payload) {
+  return new Promise((resolve, reject) => {
+    const rows = [];
+    Readable.from([payload])
+      .pipe(csv())
+      .on('data', (row) => rows.push(row))
+      .on('end', () => resolve(rows))
+      .on('error', reject);
+  });
+}
+
 function stripQuotes(value) {
   return String(value ?? '').replace(/^"+|"+$/g, '');
 }
@@ -60,18 +91,29 @@ function firstNonNull(...values) {
 }
 
 class NdisCatalogSyncService {
+  constructor() {
+    this._ensureFreshPromise = null;
+    this._lastAccessCheckAtMs = 0;
+    this._lastEnsureResult = null;
+  }
+
   _getConfig({ bucketOverride, keyOverride } = {}) {
-    const provider = String(process.env.NDIS_CATALOG_PROVIDER || 'r2')
+    const provider = String(process.env.NDIS_CATALOG_PROVIDER || 'gcs')
       .trim()
       .toLowerCase();
+
+    if (provider === 'local') {
+      throw new Error(
+        'NDIS_CATALOG_PROVIDER=local is disabled. Use NDIS_CATALOG_PROVIDER=gcs (preferred) or r2.',
+      );
+    }
+
     const bucket =
       bucketOverride ||
       process.env.NDIS_CATALOG_BUCKET ||
-      process.env.R2_BUCKET_NAME;
+      (provider === 'r2' ? process.env.R2_BUCKET_NAME : null);
     const key = normalizeKey(
-      keyOverride ||
-        process.env.NDIS_CATALOG_OBJECT_KEY ||
-        'ndis_support_items/ndis_support_items.json',
+      keyOverride || process.env.NDIS_CATALOG_OBJECT_KEY || 'ndis_support_items/NDIS.csv',
     );
 
     if (!bucket || !key) {
@@ -137,6 +179,21 @@ class NdisCatalogSyncService {
     );
   }
 
+  _getAccessSyncMinIntervalMs() {
+    const configured = Number.parseInt(
+      process.env.NDIS_CATALOG_ACCESS_SYNC_MIN_INTERVAL_MS || '1000',
+      10,
+    );
+    if (!Number.isFinite(configured) || configured < 0) {
+      return 1000;
+    }
+    return configured;
+  }
+
+  _buildSyncStateId(config) {
+    return `ndis_catalog:${config.provider}:${config.bucket}:${config.key}`;
+  }
+
   _createClient(config) {
     return new S3Client({
       region: config.region,
@@ -163,6 +220,90 @@ class NdisCatalogSyncService {
       key,
       watchPrefix,
     };
+  }
+
+  async _runEnsureFreshOnAccess({ reason, force }) {
+    const db = await getDatabase();
+    const supportItemsCollection = db.collection(SUPPORT_ITEMS_COLLECTION);
+
+    let catalogCount = 0;
+    try {
+      catalogCount = await supportItemsCollection.estimatedDocumentCount();
+    } catch (_) {
+      catalogCount = 0;
+    }
+
+    const shouldForceSync = force || catalogCount === 0;
+    const effectiveReason = shouldForceSync
+      ? `${reason}_missing_catalog`
+      : reason;
+
+    try {
+      const syncResult = await this.syncIfChanged({
+        force: shouldForceSync,
+        reason: effectiveReason,
+      });
+
+      return {
+        success: true,
+        catalogCount,
+        forced: shouldForceSync,
+        sync: syncResult,
+      };
+    } catch (error) {
+      if (catalogCount === 0) {
+        throw error;
+      }
+
+      logger.warn('NDIS catalog freshness check failed, serving existing MongoDB catalog', {
+        error: error.message,
+        reason,
+      });
+
+      return {
+        success: false,
+        catalogCount,
+        forced: shouldForceSync,
+        staleFallback: true,
+        error: error.message,
+      };
+    }
+  }
+
+  async ensureFreshOnAccess({ reason = 'api_access', force = false } = {}) {
+    const nowMs = Date.now();
+    const minIntervalMs = this._getAccessSyncMinIntervalMs();
+
+    if (
+      !force &&
+      this._lastAccessCheckAtMs > 0 &&
+      nowMs - this._lastAccessCheckAtMs < minIntervalMs
+    ) {
+      return {
+        success: true,
+        skipped: true,
+        throttled: true,
+        checkedAt: new Date(this._lastAccessCheckAtMs),
+        result: this._lastEnsureResult,
+      };
+    }
+
+    if (this._ensureFreshPromise) {
+      return this._ensureFreshPromise;
+    }
+
+    this._ensureFreshPromise = (async () => {
+      const result = await this._runEnsureFreshOnAccess({ reason, force });
+      this._lastEnsureResult = result;
+      this._lastAccessCheckAtMs = Date.now();
+      return result;
+    })();
+
+    try {
+      return await this._ensureFreshPromise;
+    } finally {
+      this._ensureFreshPromise = null;
+    }
   }
 
   _toSupportItemDocument(rawItem, sourceMetadata) {
@@ -214,19 +355,49 @@ class NdisCatalogSyncService {
     const standardCaps = {};
     for (const state of AU_STATES) {
       standardCaps[state] = parsePrice(
-        firstNonNull(rawItem[` ${state} `], rawItem[state]),
+        firstNonNull(rawItem[` ${state} `], rawItem[state], rawItem[state.toLowerCase()]),
       );
     }
 
     const p01 = parsePrice(firstNonNull(rawItem.P01, rawItem.p01));
     const p02 = parsePrice(firstNonNull(rawItem.P02, rawItem.p02));
+
+    const labelledCaps = {};
+    for (const [key, value] of Object.entries(rawItem)) {
+      const normalizedKey = String(key || '')
+        .trim()
+        .toUpperCase();
+      if (!/^P\d{2}$/.test(normalizedKey)) continue;
+      const parsedLabelPrice = parsePrice(value);
+      if (parsedLabelPrice === null) continue;
+      labelledCaps[normalizedKey] = {};
+      for (const state of AU_STATES) {
+        labelledCaps[normalizedKey][state] = parsedLabelPrice;
+      }
+    }
+
     const fallbackHighIntensity = p02 ?? p01;
     const highIntensityCaps = {};
     for (const state of AU_STATES) {
-      highIntensityCaps[state] = parsePrice(rawItem[`HI_${state}`]);
+      highIntensityCaps[state] = parsePrice(
+        firstNonNull(rawItem[`HI_${state}`], rawItem[`H_${state}`], rawItem[`P02_${state}`]),
+      );
       if (highIntensityCaps[state] === null && fallbackHighIntensity !== null) {
         highIntensityCaps[state] = fallbackHighIntensity;
       }
+    }
+
+    const maxByState = {};
+    for (const state of AU_STATES) {
+      const candidates = [
+        standardCaps[state],
+        highIntensityCaps[state],
+        ...Object.values(labelledCaps)
+          .map((caps) => caps?.[state])
+          .filter((value) => value !== null && value !== undefined),
+      ].filter((value) => Number.isFinite(value));
+
+      maxByState[state] = candidates.length > 0 ? Math.max(...candidates) : null;
     }
 
     const defaultPrice = firstNonNull(
@@ -246,6 +417,12 @@ class NdisCatalogSyncService {
       firstNonNull(rawItem.Type, rawItem.supportType, rawItem.type) ??
         'Price Limited Supports',
     ).trim();
+    const startDate =
+      parseDate(firstNonNull(rawItem['Start date'], rawItem.startDate)) ||
+      new Date('2000-01-01T00:00:00.000Z');
+    const endDate =
+      parseDate(firstNonNull(rawItem['End Date'], rawItem.endDate)) ||
+      new Date('9999-12-31T00:00:00.000Z');
 
     return {
       supportItemNumber,
@@ -265,6 +442,8 @@ class NdisCatalogSyncService {
       registrationGroupName,
       unit,
       supportType,
+      startDate,
+      endDate,
       quoteRequired: parseBoolean(
         firstNonNull(rawItem.Quote, rawItem.quoteRequired, rawItem.isQuotable),
       ),
@@ -272,6 +451,8 @@ class NdisCatalogSyncService {
       priceCaps: {
         standard: standardCaps,
         highIntensity: highIntensityCaps,
+        labelled: labelledCaps,
+        maxByState,
       },
       rules: {
         allowNonFaceToFace: parseBoolean(
@@ -304,8 +485,14 @@ class NdisCatalogSyncService {
     const db = await getDatabase();
     const syncStateCollection = db.collection(SYNC_STATE_COLLECTION);
     const supportItemsCollection = db.collection(SUPPORT_ITEMS_COLLECTION);
-    const syncStateId = `ndis_catalog:${config.provider}:${config.bucket}:${config.key}`;
+    const syncStateId = this._buildSyncStateId(config);
 
+    const previousState = await syncStateCollection.findOne({ _id: syncStateId });
+
+    let payload = '';
+    let payloadHash = '';
+    let remoteEtag = null;
+    let remoteLastModified = null;
     const client = this._createClient(config);
     const head = await client.send(
       new HeadObjectCommand({
@@ -314,12 +501,11 @@ class NdisCatalogSyncService {
       }),
     );
 
-    const remoteEtag = stripQuotes(head.ETag);
-    const remoteLastModified = head.LastModified
+    remoteEtag = stripQuotes(head.ETag);
+    remoteLastModified = head.LastModified
       ? new Date(head.LastModified)
       : null;
 
-    const previousState = await syncStateCollection.findOne({ _id: syncStateId });
     if (
       !force &&
       previousState &&
@@ -350,21 +536,24 @@ class NdisCatalogSyncService {
         Key: config.key,
       }),
     );
-    const jsonPayload = await bodyToString(objectResponse.Body);
-    const payloadHash = crypto
-      .createHash('sha256')
-      .update(jsonPayload)
-      .digest('hex');
+    payload = await bodyToString(objectResponse.Body);
+    payloadHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+    const isCsvCatalog = config.key.toLowerCase().endsWith('.csv');
 
     let parsed;
-    try {
-      parsed = JSON.parse(jsonPayload);
-    } catch (error) {
-      throw new Error(`Invalid NDIS catalog JSON: ${error.message}`);
+    if (isCsvCatalog) {
+      parsed = await parseCsvPayload(payload);
+    } else {
+      try {
+        parsed = JSON.parse(payload);
+      } catch (error) {
+        throw new Error(`Invalid NDIS catalog JSON: ${error.message}`);
+      }
     }
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error('NDIS catalog must be a non-empty JSON array');
+      throw new Error('NDIS catalog must contain at least one support item row');
     }
 
     const sourceMetadata = {
