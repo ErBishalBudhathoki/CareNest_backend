@@ -13,4 +13,7 @@ const webhookLimiter = rateLimit({
 // Stripe requires the raw body for signature verification
 router.post('/stripe', webhookLimiter, express.raw({ type: 'application/json' }), (req, res) => webhookController.handleStripeWebhook(req, res));
 
+// NDIS catalog updates from object storage (R2 worker / GCS PubSub push relay)
+router.post('/ndis-catalog', webhookLimiter, express.raw({ type: '*/*', limit: '10mb' }), (req, res) => webhookController.handleNdisCatalogWebhook(req, res));
+
 module.exports = router;
