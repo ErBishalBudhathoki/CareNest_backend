@@ -166,7 +166,7 @@ class AuthController {
   });
 
   /**
-   * Get user photo (Supports R2 and Legacy)
+   * Get user photo (R2 URL flow only)
    */
   getUserPhoto = catchAsync(async (req, res) => {
     const { email } = req.params;
@@ -181,23 +181,14 @@ class AuthController {
       return res.status(404).json({ error: 'Photo not found' });
     }
     
-    if (photoResult.type === 'url') {
-      // Return JSON with URL for R2/Cloudflare
-      return res.json({ 
-        success: true, 
-        photoUrl: photoResult.url 
-      });
-    } else if (photoResult.type === 'buffer') {
-      // Return JSON with Base64 for Legacy Buffer (Frontend expects JSON)
-      const base64Data = photoResult.data.toString('base64');
-      return res.json({
-        success: true,
-        data: base64Data,
-        contentType: photoResult.contentType
-      });
-    } else {
-      return res.status(500).json({ error: 'Unknown photo type' });
+    if (photoResult.type !== 'url') {
+      return res.status(500).json({ error: 'Unexpected photo type' });
     }
+
+    return res.json({
+      success: true,
+      photoUrl: photoResult.url
+    });
   });
 
   /**
@@ -214,22 +205,48 @@ class AuthController {
       return res.status(400).json({ error: 'No photo file provided' });
     }
 
-    // Get URL from multer-s3 (R2) or fallback to file path (Disk)
-    let photoUrl;
-    if (req.file.location) {
-      photoUrl = req.file.location; // R2/S3 URL
-    } else if (req.file.path) {
-      // Local development fallback
-      photoUrl = req.file.path; 
-    } else {
-      return res.status(500).json({ error: 'File upload failed: No location returned' });
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Prefer explicit URL from multer-s3. If unavailable, derive from R2 key.
+    let photoUrl = '';
+    if (req.file.location && /^https?:\/\//i.test(req.file.location)) {
+      photoUrl = req.file.location;
+    } else if (req.file.key) {
+      const publicDomain = String(process.env.R2_PUBLIC_DOMAIN || '')
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/+$/, '');
+
+      if (publicDomain) {
+        photoUrl = `https://${publicDomain}/${req.file.key}`;
+      } else if (process.env.R2_BUCKET_NAME && process.env.R2_ACCOUNT_ID) {
+        photoUrl =
+          `https://${process.env.R2_BUCKET_NAME}.` +
+          `${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${req.file.key}`;
+      }
     }
-    
-    await authService.uploadUserPhoto(email, photoUrl, req.file.mimetype);
+
+    // Local development fallback when R2 is not configured.
+    if (!photoUrl && req.file.path) {
+      const host = req.get('host') || `localhost:${process.env.PORT || 8080}`;
+      const filename = req.file.filename || req.file.path.split('/').pop();
+      photoUrl = `${req.protocol}://${host}/uploads/${filename}`;
+    }
+
+    if (!photoUrl) {
+      return res
+        .status(500)
+        .json({ error: 'File upload failed: No resolvable URL returned' });
+    }
+
+    await authService.uploadUserPhoto(
+      normalizedEmail,
+      photoUrl,
+      req.file.mimetype
+    );
     
     logger.business('User Photo Uploaded', {
       event: 'user_photo_uploaded',
-      email,
+      email: normalizedEmail,
       photoUrl,
       timestamp: new Date().toISOString()
     });

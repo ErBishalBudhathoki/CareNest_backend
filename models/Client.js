@@ -84,6 +84,40 @@ const clientSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
     index: true
+  },
+  isActivated: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  activationPending: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  activationEmailSentAt: {
+    type: Date,
+    default: null
+  },
+  activatedAt: {
+    type: Date,
+    default: null
+  },
+  deletedAt: {
+    type: Date,
+    default: null,
+    index: true
+  },
+  deletedBy: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    default: null
+  },
+  purgeAfter: {
+    type: Date,
+    default: null,
+    index: true
   }
 }, {
   timestamps: true,
@@ -96,6 +130,10 @@ const clientSchema = new mongoose.Schema({
       
       if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
       if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+      if (ret.activationEmailSentAt) ret.activationEmailSentAt = ret.activationEmailSentAt.toISOString();
+      if (ret.activatedAt) ret.activatedAt = ret.activatedAt.toISOString();
+      if (ret.deletedAt) ret.deletedAt = ret.deletedAt.toISOString();
+      if (ret.purgeAfter) ret.purgeAfter = ret.purgeAfter.toISOString();
       return ret;
     }
   }
