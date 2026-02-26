@@ -20,6 +20,8 @@
     "db:init-fresh": "node scripts/init_fresh_database.js",
     "db:verify": "node scripts/verify_database.js",
     "db:seed": "node scripts/seed_reference_data.js",
+    "ndis:sync": "node scripts/sync_ndis_catalog.js",
+    "ndis:sync:force": "node scripts/sync_ndis_catalog.js --force",
     "secrets:upload:dev": "node scripts/upload-secrets.js dev",
     "secrets:upload:prod": "node scripts/upload-secrets.js prod",
     "secrets:upload:all": "node scripts/upload-secrets.js all",
