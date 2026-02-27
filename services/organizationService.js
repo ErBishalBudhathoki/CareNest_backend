@@ -259,19 +259,35 @@ class OrganizationService {
         isActive: true
       }, '-password -salt').lean();
 
-      // Merge user data with organization role/permissions
-      return employees.map(emp => {
-        const userOrg = userOrgs.find(uo => uo.userId === emp._id.toString());
-        return {
+      const filtered = [];
+
+      for (const emp of employees) {
+        const organizationRecord = userOrgs.find(
+          uo => String(uo.userId) === String(emp._id)
+        );
+
+        const orgRole = (organizationRecord?.role || '').toLowerCase();
+        const employeeRoles = Array.isArray(emp.roles)
+          ? emp.roles.map(role => (role || '').toLowerCase())
+          : [];
+
+        const isClient =
+          orgRole === 'client' || employeeRoles.includes('client');
+
+        if (isClient) continue;
+
+        filtered.push({
           ...emp,
           payRate: emp.payRate || null,
           payType: emp.payType || 'Hourly',
           payRates: emp.payRates || null,
-          organizationRole: userOrg?.role,
-          organizationPermissions: userOrg?.permissions,
-          joinedAt: userOrg?.joinedAt
-        };
-      });
+          organizationRole: organizationRecord?.role,
+          organizationPermissions: organizationRecord?.permissions,
+          joinedAt: organizationRecord?.joinedAt
+        });
+      }
+
+      return filtered;
     } catch (error) {
       throw error;
     }
