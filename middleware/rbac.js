@@ -1,6 +1,14 @@
 function _hasAdminRole(req) {
-  const roles = req.user && Array.isArray(req.user.roles) ? req.user.roles : [];
-  return roles.includes('admin');
+  if (!req.user) return false;
+  const roles = Array.isArray(req.user.roles) ? req.user.roles : [];
+  if (roles.includes('admin')) return true;
+  if (typeof req.user.role === 'string' && req.user.role === 'admin') {
+    return true;
+  }
+  if (req.user.customClaims && Array.isArray(req.user.customClaims.roles)) {
+    if (req.user.customClaims.roles.includes('admin')) return true;
+  }
+  return false;
 }
 
 function requireAdmin(req, res, next) {
@@ -48,4 +56,3 @@ module.exports = {
   requireSelfOrAdmin,
   requireOrganizationMatch,
 };
-
