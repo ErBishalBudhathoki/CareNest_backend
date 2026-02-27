@@ -1,39 +1,89 @@
+const UserOrganization = require('../models/UserOrganization');
+
 function _hasAdminRole(req) {
   if (!req.user) return false;
-  const roles = Array.isArray(req.user.roles) ? req.user.roles : [];
-  if (roles.includes('admin')) return true;
-  if (typeof req.user.role === 'string' && req.user.role === 'admin') {
+  const roles = Array.isArray(req.user.roles)
+    ? req.user.roles
+        .map((role) => String(role || '').toLowerCase().trim())
+        .filter(Boolean)
+    : [];
+  if (roles.includes('admin') || roles.includes('owner')) return true;
+  if (
+    typeof req.user.role === 'string' &&
+    ['admin', 'owner'].includes(req.user.role.toLowerCase().trim())
+  ) {
     return true;
   }
   if (req.user.customClaims && Array.isArray(req.user.customClaims.roles)) {
-    if (req.user.customClaims.roles.includes('admin')) return true;
+    const claimRoles = req.user.customClaims.roles
+      .map((role) => String(role || '').toLowerCase().trim())
+      .filter(Boolean);
+    if (claimRoles.includes('admin') || claimRoles.includes('owner'))
+      return true;
   }
   return false;
 }
 
-function requireAdmin(req, res, next) {
-  if (_hasAdminRole(req)) {
-    return next();
+async function _hasOrganizationAdminRole(req) {
+  const userId = req?.user?.userId || req?.user?.id;
+  if (!userId) return false;
+
+  const orgIdCandidates = [
+    req?.params?.organizationId,
+    req?.body?.organizationId,
+    req?.query?.organizationId,
+    req?.user?.lastActiveOrganizationId,
+    req?.user?.organizationId,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const query = {
+    userId: String(userId),
+    isActive: true,
+    role: { $in: ['owner', 'admin'] },
+  };
+
+  if (orgIdCandidates.length > 0) {
+    query.organizationId = { $in: [...new Set(orgIdCandidates)] };
   }
-  return res.status(403).json({
-    success: false,
-    message: 'Admin access required',
-  });
+
+  const membership = await UserOrganization.findOne(query).select('_id').lean();
+  return Boolean(membership);
 }
 
-function requireSelfOrAdmin(paramName = 'userEmail') {
-  return function (req, res, next) {
-    if (_hasAdminRole(req)) {
-      return next();
-    }
-    const requested = req.params ? req.params[paramName] : undefined;
-    if (requested && req.user && req.user.email && requested === req.user.email) {
+function requireAdmin(req, res, next) {
+  (async () => {
+    if (_hasAdminRole(req) || (await _hasOrganizationAdminRole(req))) {
       return next();
     }
     return res.status(403).json({
       success: false,
-      message: 'Unauthorized',
+      message: 'Admin access required',
     });
+  })().catch(next);
+}
+
+function requireSelfOrAdmin(paramName = 'userEmail') {
+  return function (req, res, next) {
+    (async () => {
+      if (_hasAdminRole(req) || (await _hasOrganizationAdminRole(req))) {
+        return next();
+      }
+      const requested = req.params ? req.params[paramName] : undefined;
+      if (
+        requested &&
+        req.user &&
+        req.user.email &&
+        requested === req.user.email
+      ) {
+        return next();
+      }
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized',
+      });
+    })().catch(next);
   };
 }
 
