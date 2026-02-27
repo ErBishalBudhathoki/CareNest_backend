@@ -285,14 +285,18 @@ function requireOrganizationOwnership(resourceIdField, modelGetter, orgFieldName
  * Helper middleware to ensure organization ID in request body matches context
  * Use this for POST/PUT requests where organizationId is in the body
  */
-const requireOrganizationMatch = (bodyFieldName = 'organizationId') => {
+const requireOrganizationMatch = (fieldName = 'organizationId') => {
   return (req, res, next) => {
-    const bodyOrgId = req.body[bodyFieldName];
+    const bodyOrgId = req.body[fieldName];
+    const queryOrgId = req.query[fieldName];
+    const paramOrgId = req.params[fieldName];
 
-    if (!bodyOrgId) {
+    const orgId = bodyOrgId || queryOrgId || paramOrgId;
+
+    if (!orgId) {
       return res.status(400).json(
         SecureErrorHandler.createErrorResponse(
-          `${bodyFieldName} is required in request body`,
+          `${fieldName} is required in request body or query/params`,
           400,
           'ORG_ID_REQUIRED'
         )
@@ -309,10 +313,10 @@ const requireOrganizationMatch = (bodyFieldName = 'organizationId') => {
       );
     }
 
-    if (bodyOrgId !== req.organizationContext.organizationId) {
+    if (orgId !== req.organizationContext.organizationId) {
       logger.security('Organization ID mismatch attempt', {
         userId: req.user.userId,
-        bodyOrganizationId: bodyOrgId,
+        organizationId: orgId,
         contextOrganizationId: req.organizationContext.organizationId,
         ip: req.ip,
         path: req.path
