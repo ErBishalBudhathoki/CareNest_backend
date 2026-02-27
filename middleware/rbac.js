@@ -27,6 +27,14 @@ function _hasAdminRole(req) {
 async function _hasOrganizationAdminRole(req) {
   const userId = req?.user?.userId || req?.user?.id;
   if (!userId) return false;
+  if (!UserOrganization || typeof UserOrganization.findOne !== 'function') {
+    return false;
+  }
+
+  // Avoid DB calls when model is unavailable/disconnected (e.g. unit tests).
+  if (UserOrganization.db?.readyState !== 1) {
+    return false;
+  }
 
   const orgIdCandidates = [
     req?.params?.organizationId,
@@ -51,8 +59,14 @@ async function _hasOrganizationAdminRole(req) {
     query.organizationId = { $in: [...new Set(orgIdCandidates)] };
   }
 
-  const membership = await UserOrganization.findOne(query).select('_id').lean();
-  return Boolean(membership);
+  try {
+    const membership = await UserOrganization.findOne(query)
+      .select('_id')
+      .lean();
+    return Boolean(membership);
+  } catch (_) {
+    return false;
+  }
 }
 
 function requireAdmin(req, res, next) {
