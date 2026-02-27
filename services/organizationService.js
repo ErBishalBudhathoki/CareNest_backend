@@ -267,12 +267,19 @@ class OrganizationService {
         );
 
         const orgRole = (organizationRecord?.role || '').toLowerCase();
+        const legacyRole = (emp.role || '').toLowerCase();
         const employeeRoles = Array.isArray(emp.roles)
           ? emp.roles.map(role => (role || '').toLowerCase())
           : [];
+        if (legacyRole) {
+          employeeRoles.push(legacyRole);
+        }
+        const clientId = emp.clientId ? String(emp.clientId).trim() : '';
 
         const isClient =
-          orgRole === 'client' || employeeRoles.includes('client');
+          orgRole === 'client' ||
+          employeeRoles.includes('client') ||
+          clientId.length > 0;
 
         if (isClient) continue;
 
@@ -376,10 +383,30 @@ class OrganizationService {
         isActive: true
       }, '-password -salt').lean();
 
-      // Merge user data with organization role/permissions
-      return employees.map(emp => {
-        const userOrg = userOrgs.find(uo => uo.userId === emp._id.toString());
-        return {
+      const filtered = [];
+
+      for (const emp of employees) {
+        const userOrg = userOrgs.find(
+          uo => String(uo.userId) === String(emp._id)
+        );
+        const orgRole = (userOrg?.role || '').toLowerCase();
+        const legacyRole = (emp.role || '').toLowerCase();
+        const employeeRoles = Array.isArray(emp.roles)
+          ? emp.roles.map(role => (role || '').toLowerCase())
+          : [];
+        if (legacyRole) {
+          employeeRoles.push(legacyRole);
+        }
+        const clientId = emp.clientId ? String(emp.clientId).trim() : '';
+
+        const isClient =
+          orgRole === 'client' ||
+          employeeRoles.includes('client') ||
+          clientId.length > 0;
+
+        if (isClient) continue;
+
+        filtered.push({
           ...emp,
           payRate: emp.payRate || null,
           payType: emp.payType || 'Hourly',
@@ -387,8 +414,10 @@ class OrganizationService {
           organizationRole: userOrg?.role,
           organizationPermissions: userOrg?.permissions,
           joinedAt: userOrg?.joinedAt
-        };
-      });
+        });
+      }
+
+      return filtered;
     } catch (error) {
       throw error;
     }
