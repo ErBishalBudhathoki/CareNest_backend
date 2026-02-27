@@ -41,7 +41,10 @@ async function _hasOrganizationAdminRole(req) {
   const query = {
     userId: String(userId),
     isActive: true,
-    role: { $in: ['owner', 'admin'] },
+    $or: [
+      { role: { $in: ['owner', 'admin'] } },
+      { permissions: { $in: ['*', 'manage_users'] } },
+    ],
   };
 
   if (orgIdCandidates.length > 0) {

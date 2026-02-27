@@ -16,6 +16,22 @@ const User = require('../models/User');
 
 const logger = createLogger('AuthMiddleware');
 
+function normalizeRoleList(...roleSources) {
+  const roles = [];
+  for (const source of roleSources) {
+    if (Array.isArray(source)) {
+      for (const role of source) {
+        const normalized = String(role || '').toLowerCase().trim();
+        if (normalized) roles.push(normalized);
+      }
+      continue;
+    }
+    const normalized = String(source || '').toLowerCase().trim();
+    if (normalized) roles.push(normalized);
+  }
+  return [...new Set(roles)];
+}
+
 function validateSecurityConfig({ throwOnMissing = false } = {}) {
   const jwtSecret = process.env.JWT_SECRET;
 
@@ -143,11 +159,18 @@ class AuthMiddleware {
           const user = await User.findOne({ email });
 
           if (user) {
+            const normalizedRoles = normalizeRoleList(
+              user.roles,
+              user.role,
+              decodedFirebaseToken.roles,
+              decodedFirebaseToken.role
+            );
             // Populate req.user for compatibility with existing middleware and controllers
             req.user = {
               userId: user._id.toString(),
               email: user.email,
-              roles: user.roles && user.roles.length > 0 ? user.roles : [user.role || 'user'],
+              role: String(user.role || '').toLowerCase().trim() || 'user',
+              roles: normalizedRoles.length > 0 ? normalizedRoles : ['user'],
               organizationId: user.organizationId,
               lastActiveOrganizationId: user.lastActiveOrganizationId || user.organizationId,
               iat: decodedFirebaseToken.iat,
@@ -329,10 +352,12 @@ class AuthMiddleware {
       AuthMiddleware.resetFailedAttempts(req.ip);
 
       // Add user info to request object
+      const normalizedRoles = normalizeRoleList(decoded.roles, decoded.role);
       req.user = {
         userId: userIdValidation.sanitized,
         email: emailValidation.sanitized,
-        roles: decoded.roles || ['user'],
+        role: String(decoded.role || '').toLowerCase().trim() || 'user',
+        roles: normalizedRoles.length > 0 ? normalizedRoles : ['user'],
         organizationId: decoded.organizationId,
         iat: decoded.iat,
         exp: decoded.exp
