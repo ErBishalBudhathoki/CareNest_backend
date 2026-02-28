@@ -22,14 +22,14 @@ const strictLimiter = rateLimit({
 // Validation rules
 const saveBankDetailsValidation = [
   body('accountName').trim().notEmpty().withMessage('Account name is required'),
-  body('bsb').trim().matches(/^[0-9]{6}$/).withMessage('BSB must be 6 digits'),
-  body('accountNumber').trim().matches(/^[0-9]{4,9}$/).withMessage('Account number must be 4-9 digits'),
+  body('bsb').trim().matches(/^[0-9]{3}-?[0-9]{3}$/).withMessage('BSB must be 6 digits'),
+  body('accountNumber').trim().matches(/^[0-9]{6,10}$/).withMessage('Account number must be 6-10 digits'),
   body('bankName').optional().trim().isLength({ max: 100 }),
   body('userEmail').optional().isEmail().normalizeEmail().withMessage('Invalid email format')
 ];
 
 const getBankDetailsValidation = [
-  query('userEmail').isEmail().normalizeEmail().withMessage('Valid email is required')
+  query('userEmail').optional().isEmail().normalizeEmail().withMessage('Valid email is required')
 ];
 
 // Protected routes
