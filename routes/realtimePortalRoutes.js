@@ -6,6 +6,9 @@
 const express = require('express');
 const router = express.Router();
 const realtimePortalController = require('../controllers/realtimePortalController');
+const { authenticateUser } = require('../middleware/auth');
+
+router.use(authenticateUser);
 
 // ============================================================================
 // Real-Time Tracking Routes
@@ -72,4 +75,3 @@ router.put('/family/permissions', realtimePortalController.updatePermissions);
 router.get('/family/access-log/:clientId', realtimePortalController.getAccessLog);
 
 module.exports = router;
-

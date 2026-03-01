@@ -8,6 +8,10 @@ const ServiceFeedback = require('../models/ServiceFeedback');
 const { Invoice } = require('../models/Invoice');
 const realtimeTrackingService = require('./realtimeTrackingService');
 const messagingService = require('./messagingService');
+const {
+  buildChatWindow,
+  getChatWindowClosedMessage,
+} = require('./chatWindowPolicy');
 
 const DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS = 800;
 
@@ -565,12 +569,13 @@ class ClientPortalService {
       throw createHttpError(400, 'Invalid appointment shift window');
     }
 
-    const now = new Date();
-    if (now < appointment.startAt || now > appointment.endAt) {
-      throw createHttpError(
-        403,
-        'Messaging is only available during the scheduled shift hours.'
-      );
+    const chatWindow = buildChatWindow({
+      startAt: appointment.startAt,
+      endAt: appointment.endAt,
+      now: new Date(),
+    });
+    if (!chatWindow.isOpen) {
+      throw createHttpError(403, getChatWindowClosedMessage());
     }
 
     const requestedWorkerId = (messageData.workerId || '').toString().trim();
@@ -585,26 +590,29 @@ class ClientPortalService {
       throw createHttpError(403, 'Message can only be sent to the assigned worker.');
     }
 
-    let conversation;
-    try {
-      conversation = await messagingService.getConversation(`conv-${appointmentId}`);
-    } catch (_) {
-      conversation = await messagingService.createConversation({
-        appointmentId,
-        clientId: clientContext.client._id.toString(),
-        workerId: expectedWorkerId,
-        organizationId: clientContext.client.organizationId,
-      });
-    }
+    const conversation = await messagingService.createConversation({
+      appointmentId,
+      assignmentId: appointment.assignmentId,
+      scheduleId: appointment.scheduleId,
+      clientId: clientContext.client._id.toString(),
+      clientEmail: normalizeEmail(clientContext.client.clientEmail),
+      workerId: expectedWorkerId,
+      workerEmail: expectedWorkerEmail,
+      organizationId: clientContext.client.organizationId,
+      shiftStartAt: appointment.startAt,
+      shiftEndAt: appointment.endAt,
+    });
 
     const sentMessage = await messagingService.sendMessage({
       conversationId: conversation._id,
       senderId: clientContext.client._id.toString(),
       senderType: 'client',
+      senderName: buildClientName(clientContext.client, clientContext.authEmail),
       recipientId: expectedWorkerId,
       message: text,
       attachments: Array.isArray(messageData.attachments) ? messageData.attachments : [],
       timestamp: new Date(),
+      authUser,
     });
 
     return {
