@@ -33,6 +33,7 @@ const exportValidation = [
 
 const listValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+  body('organizationId').isMongoId().withMessage('Invalid organization ID'),
   body('startDate').isISO8601().toDate().withMessage('Start date must be a valid date'),
   body('endDate').isISO8601().toDate().withMessage('End date must be a valid date'),
   body('status').optional().isIn(['draft', 'submitted', 'approved', 'rejected']).withMessage('Invalid status')
