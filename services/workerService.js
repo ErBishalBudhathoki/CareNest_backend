@@ -60,7 +60,7 @@ class WorkerService {
         isActive: true
       }).populate('clientId', 'clientFirstName clientLastName clientEmail').lean();
 
-      const pastAssignedShifts = this._extractPastAssignedShifts(assignments);
+      const pastAssignedShifts = this._extractPastAssignedShifts(assignments, { limit: 20 });
 
       return {
         activeTimer,
@@ -75,10 +75,29 @@ class WorkerService {
     }
   }
 
-  _extractPastAssignedShifts(assignments) {
+  async getPastAssignedShiftHistory(userEmail, organizationId, options = {}) {
+    try {
+      const assignments = await ClientAssignment.find({
+        userEmail: userEmail,
+        organizationId: organizationId,
+        isActive: true
+      }).populate('clientId', 'clientFirstName clientLastName clientEmail').lean();
+
+      return this._extractPastAssignedShifts(assignments, options);
+    } catch (error) {
+      throw new Error(`Error fetching worker shift history: ${error.message}`);
+    }
+  }
+
+  _extractPastAssignedShifts(assignments, options = {}) {
     if (!Array.isArray(assignments) || assignments.length === 0) return [];
 
     const now = new Date();
+    const days = Number.isInteger(options.days) && options.days > 0 ? options.days : null;
+    const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 20;
+    const startBoundary = days != null
+      ? new Date(now.getTime() - (days * 24 * 60 * 60 * 1000))
+      : null;
     const history = [];
 
     for (const assignment of assignments) {
@@ -105,6 +124,7 @@ class WorkerService {
           : endTime;
 
         if (normalizedEndTime > now) continue;
+        if (startBoundary && normalizedEndTime < startBoundary) continue;
 
         history.push({
           id: `${assignment._id?.toString() || 'assignment'}_${scheduleItem._id?.toString() || i}`,
@@ -127,7 +147,7 @@ class WorkerService {
     }
 
     history.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-    return history.slice(0, 20);
+    return history.slice(0, limit);
   }
 
   _resolveClientName(assignment) {
