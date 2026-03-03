@@ -87,6 +87,10 @@ router.post(
   '/certifications/upload', 
   authenticateUser, 
   writeLimiter,
+  (req, res, next) => {
+    req.uploadFolder = 'certifications';
+    next();
+  },
   upload.single('certification'), 
   certificationUploadValidation, 
   handleValidationErrors,
