@@ -343,11 +343,12 @@ class ActiveTimerController {
     await WorkedTime.create({
       userEmail,
       clientEmail: timerDoc.clientEmail,
-      organizationId,
-      startTime,
-      endTime: stopTime,
-      timeWorked: totalSeconds,
-      totalSeconds,
+      workDate: startTime,
+      date: startTime,
+      timeWorked: formattedTime,
+      totalHours: totalSeconds / 3600,
+      // Keep shiftDate in legacy-friendly string format for downstream readers.
+      shiftDate: startTime.toISOString().split('T')[0],
       createdAt: new Date(),
     });
     
