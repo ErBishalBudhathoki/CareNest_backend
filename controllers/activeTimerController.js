@@ -346,6 +346,8 @@ class ActiveTimerController {
       workDate: startTime,
       date: startTime,
       timeWorked: formattedTime,
+      // Keep totalSeconds for compatibility with existing tests/reporting.
+      totalSeconds,
       totalHours: totalSeconds / 3600,
       // Keep shiftDate in legacy-friendly string format for downstream readers.
       shiftDate: startTime.toISOString().split('T')[0],
