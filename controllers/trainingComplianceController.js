@@ -5,6 +5,7 @@ const ComplianceChecklist = require('../models/ComplianceChecklist');
 const UserChecklistStatus = require('../models/UserChecklistStatus');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../utils/logger');
+const fs = require('fs');
 
 class TrainingComplianceController {
   _hasAdminAccess(req) {
@@ -36,6 +37,28 @@ class TrainingComplianceController {
 
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    // Certifications must be stored in Cloudflare R2 under certifications/
+    const r2Key = req.file.key ? String(req.file.key) : '';
+    const r2Location = req.file.location ? String(req.file.location) : '';
+    const isR2Upload = Boolean(r2Key || r2Location);
+
+    if (!isR2Upload) {
+      if (req.file.path) {
+        fs.unlink(req.file.path, () => {});
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'Certification upload requires Cloudflare R2 configuration.'
+      });
+    }
+
+    if (r2Key && !r2Key.startsWith('certifications/')) {
+      return res.status(500).json({
+        success: false,
+        message: 'Certification file was not uploaded to certifications folder.'
+      });
     }
 
     // Construct file URL
