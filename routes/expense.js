@@ -101,6 +101,14 @@ router.get('/organization/:organizationId',
   expenseController.getOrganizationExpenses
 );
 
+router.get('/statistics/:organizationId',
+  expenseReadLimiter,
+  param('organizationId').isMongoId(),
+  requireOrganizationMatch('organizationId'),
+  handleValidationErrors,
+  expenseController.getExpenseStatistics
+);
+
 router.get('/:expenseId', 
   expenseReadLimiter, 
   param('expenseId').isMongoId(), 
