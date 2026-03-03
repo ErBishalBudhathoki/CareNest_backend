@@ -7,6 +7,27 @@ const catchAsync = require('../utils/catchAsync');
 const logger = require('../utils/logger');
 
 class TrainingComplianceController {
+  _hasAdminAccess(req) {
+    const role = String(req.user?.role || '').toLowerCase();
+    const roles = Array.isArray(req.user?.roles)
+      ? req.user.roles.map((r) => String(r || '').toLowerCase())
+      : [];
+    return role === 'admin' ||
+        role === 'superadmin' ||
+        role === 'owner' ||
+        roles.includes('admin') ||
+        roles.includes('superadmin') ||
+        roles.includes('owner');
+  }
+
+  _normalizeCertificationStatus(status) {
+    const normalized = String(status || '').toLowerCase().trim();
+    if (!normalized) return normalized;
+    if (normalized === 'pending') return 'pending_approval';
+    if (normalized === 'approved') return 'active';
+    return normalized;
+  }
+
   // --- Certifications ---
 
   uploadCertification = catchAsync(async (req, res) => {
@@ -49,16 +70,17 @@ class TrainingComplianceController {
   getCertifications = catchAsync(async (req, res) => {
     const { userId, status } = req.query;
     const currentUser = req.user.id;
+    const isAdminUser = this._hasAdminAccess(req);
     const query = {};
 
-    // Admin can filter by userId, otherwise users see their own
-    if (userId && req.user.role === 'admin') {
-        query.userId = userId;
+    // Admin can filter by userId; employees can only view their own certifications.
+    if (isAdminUser) {
+      if (userId) query.userId = userId;
     } else {
-        query.userId = currentUser;
+      query.userId = currentUser;
     }
 
-    if (status) query.status = status;
+    if (status) query.status = this._normalizeCertificationStatus(status);
 
     const certifications = await Certification.find(query).sort({ createdAt: -1 });
 
@@ -69,12 +91,19 @@ class TrainingComplianceController {
     const { id } = req.params;
     const { status, notes } = req.body;
     const auditorId = req.user.id;
+    const isAdminUser = this._hasAdminAccess(req);
+
+    if (!isAdminUser) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const normalizedStatus = this._normalizeCertificationStatus(status);
 
     // Use findByIdAndUpdate
     const certification = await Certification.findByIdAndUpdate(
       id,
       {
-        status,
+        status: normalizedStatus,
         notes,
         // auditedBy: auditorId, // Schema doesn't have auditedBy yet, maybe add to notes or schema update?
         // For now, logging audit action is enough or update schema if critical.
@@ -87,20 +116,76 @@ class TrainingComplianceController {
       return res.status(404).json({ success: false, message: 'Certification not found' });
     }
 
-    logger.info(`Certification ${id} audited by ${auditorId}: ${status}`);
+    logger.info(`Certification ${id} audited by ${auditorId}: ${normalizedStatus}`);
 
     res.json({ success: true, data: certification });
+  });
+
+  updateCertification = catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const { name, issuer, expiryDate, notes } = req.body;
+    const currentUserId = String(req.user.id);
+    const isAdminUser = this._hasAdminAccess(req);
+
+    const certification = await Certification.findById(id);
+    if (!certification) {
+      return res.status(404).json({ success: false, message: 'Certification not found' });
+    }
+
+    const ownerId = String(certification.userId || '');
+    if (!isAdminUser && ownerId !== currentUserId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const hasMetadataUpdate = name != null || issuer != null || expiryDate != null || notes != null;
+    if (name != null) certification.name = name;
+    if (issuer != null) certification.issuer = issuer;
+    if (notes != null) certification.notes = notes;
+    if (expiryDate != null) certification.expiryDate = new Date(expiryDate);
+
+    // Employee updates must be re-audited by admin.
+    if (hasMetadataUpdate && !isAdminUser) {
+      certification.status = 'pending_approval';
+    }
+
+    await certification.save();
+    res.json({ success: true, data: certification });
+  });
+
+  deleteCertification = catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const currentUserId = String(req.user.id);
+    const isAdminUser = this._hasAdminAccess(req);
+
+    const certification = await Certification.findById(id);
+    if (!certification) {
+      return res.status(404).json({ success: false, message: 'Certification not found' });
+    }
+
+    const ownerId = String(certification.userId || '');
+    if (!isAdminUser && ownerId !== currentUserId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await Certification.deleteOne({ _id: id });
+    res.json({ success: true, message: 'Certification deleted successfully' });
   });
 
   // --- Training ---
 
   createTrainingModule = catchAsync(async (req, res) => {
-    // Check admin role
-    if (req.user.role !== 'admin') {
+    if (!this._hasAdminAccess(req)) {
         return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const module = await TrainingModule.create(req.body);
+    const payload = {
+      ...req.body,
+      createdBy: req.user.id,
+      isPublished: req.body.isPublished ?? true,
+      contentType: req.body.contentType || 'Text',
+    };
+
+    const module = await TrainingModule.create(payload);
     
     logger.info(`Training module created: ${module.title}`);
 
@@ -108,7 +193,8 @@ class TrainingComplianceController {
   });
 
   getTrainingModules = catchAsync(async (req, res) => {
-    const modules = await TrainingModule.find({ isPublished: true }).sort({ createdAt: -1 });
+    const moduleQuery = this._hasAdminAccess(req) ? {} : { isPublished: true };
+    const modules = await TrainingModule.find(moduleQuery).sort({ createdAt: -1 });
     const userId = req.user.id;
 
     // Attach progress
@@ -121,7 +207,12 @@ class TrainingComplianceController {
       });
       return {
         ...mod.toJSON(),
-        userProgress: progress || null
+        userProgress: progress
+          ? {
+              ...progress.toJSON(),
+              progressPercentage: progress.progress ?? 0,
+            }
+          : null
       };
     }));
 
@@ -136,19 +227,6 @@ class TrainingComplianceController {
     // Using findOneAndUpdate with upsert
     // We need to handle 'completedAt' logic: set only if becoming completed for first time
     
-    let updateOps = {
-        status,
-        progress: progressPercentage, // Schema uses 'progress' not 'progressPercentage'
-        lastAccessedAt: new Date()
-    };
-
-    if (status === 'completed') { // Schema enum is lowercase 'completed'
-        // Only set completedAt if not already set? Mongoose update operators:
-        // $setOnInsert logic works for create, but for update we need conditional.
-        // Easiest is to fetch first or use $cond (aggregation) but that's complex.
-        // Let's fetch first to be safe and simple.
-    }
-
     let progress = await TrainingProgress.findOne({ userId, moduleId: id });
 
     if (progress) {
@@ -169,17 +247,34 @@ class TrainingComplianceController {
         });
     }
 
-    res.json({ success: true, data: progress });
+    const normalizedProgress = {
+      ...progress.toJSON(),
+      progressPercentage: progress.progress ?? 0,
+    };
+    res.json({ success: true, data: normalizedProgress });
   });
 
   // --- Compliance Checklists ---
 
   createChecklist = catchAsync(async (req, res) => {
-    if (req.user.role !== 'admin') {
+    if (!this._hasAdminAccess(req)) {
         return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const checklist = await ComplianceChecklist.create(req.body);
+    const items = (req.body.items || []).map((item) => {
+      if (typeof item === 'string') {
+        return { text: item, isMandatory: true };
+      }
+      return {
+        text: item.text,
+        isMandatory: item.isRequired ?? item.isMandatory ?? true,
+      };
+    });
+
+    const checklist = await ComplianceChecklist.create({
+      ...req.body,
+      items,
+    });
     
     logger.info(`Compliance checklist created: ${checklist.title}`);
 
@@ -205,13 +300,19 @@ class TrainingComplianceController {
   });
 
   updateChecklistStatus = catchAsync(async (req, res) => {
-    const { checklistId, completedItems, isCompleted } = req.body; // Schema uses completedItems (array)
+    const { checklistId, completedItems, itemsStatus, isCompleted } = req.body;
     const userId = req.user.id;
+
+    const normalizedCompletedItems = Array.isArray(completedItems)
+      ? completedItems
+      : Object.entries(itemsStatus || {})
+          .filter(([, isChecked]) => Boolean(isChecked))
+          .map(([itemId]) => itemId);
 
     const status = await UserChecklistStatus.findOneAndUpdate(
       { userId, checklistId },
       {
-          completedItems, // Array of strings
+          completedItems: normalizedCompletedItems,
           isCompleted,
           completedAt: isCompleted ? new Date() : null, // Set date if completed
           // updatedAt handled by timestamp

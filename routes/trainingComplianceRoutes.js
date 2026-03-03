@@ -34,6 +34,18 @@ const auditValidation = [
   body('notes').optional().trim().isLength({ max: 500 })
 ];
 
+const certificationUpdateValidation = [
+  param('id').isMongoId().withMessage('Invalid certification ID'),
+  body('name').optional().trim().isLength({ min: 1, max: 200 })
+    .withMessage('Name must be between 1 and 200 characters'),
+  body('issuer').optional().trim().isLength({ max: 200 })
+    .withMessage('Issuer is too long'),
+  body('expiryDate').optional().isISO8601().toDate()
+    .withMessage('Invalid expiry date'),
+  body('notes').optional().trim().isLength({ max: 500 })
+    .withMessage('Notes are too long')
+];
+
 const trainingModuleValidation = [
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('title').isLength({ max: 200 }).withMessage('Title too long'),
@@ -52,7 +64,8 @@ const checklistValidation = [
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('title').isLength({ max: 200 }).withMessage('Title too long'),
   body('items').isArray({ min: 1 }).withMessage('Items must be a non-empty array'),
-  body('items.*').trim().notEmpty().withMessage('Each item must have content'),
+  body('items.*.text').trim().notEmpty().withMessage('Each item must have content'),
+  body('items.*.isRequired').optional().isBoolean().withMessage('isRequired must be boolean'),
   body('organizationId').optional().isMongoId().withMessage('Invalid organization ID')
 ];
 
@@ -96,6 +109,24 @@ router.put(
   auditValidation, 
   handleValidationErrors,
   controller.auditCertification
+);
+
+router.put(
+  '/certifications/:id',
+  authenticateUser,
+  writeLimiter,
+  certificationUpdateValidation,
+  handleValidationErrors,
+  controller.updateCertification
+);
+
+router.delete(
+  '/certifications/:id',
+  authenticateUser,
+  writeLimiter,
+  param('id').isMongoId().withMessage('Invalid certification ID'),
+  handleValidationErrors,
+  controller.deleteCertification
 );
 
 // Training
