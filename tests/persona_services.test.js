@@ -5,6 +5,7 @@ const Shift = require('../models/Shift');
 const ActiveTimer = require('../models/ActiveTimer');
 const Expense = require('../models/Expense');
 const LeaveBalance = require('../models/LeaveBalance');
+const ClientAssignment = require('../models/ClientAssignment');
 const EmployeeDocument = require('../models/EmployeeDocument');
 const UserOrganization = require('../models/UserOrganization');
 const Invoice = require('../models/Invoice');
@@ -15,6 +16,7 @@ jest.mock('../models/Shift');
 jest.mock('../models/ActiveTimer');
 jest.mock('../models/Expense');
 jest.mock('../models/LeaveBalance');
+jest.mock('../models/ClientAssignment');
 jest.mock('../models/EmployeeDocument');
 jest.mock('../models/UserOrganization');
 jest.mock('../models/Invoice');
@@ -47,12 +49,31 @@ describe('Persona Services Tests', () => {
       Shift.findOne.mockReturnValue({ sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ id: 'nextShift' }) }) });
       Expense.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) }) });
       LeaveBalance.find.mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
+      ClientAssignment.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([{
+            _id: 'assignment-1',
+            userEmail: mockUserEmail,
+            clientEmail: 'client@test.com',
+            organizationId: mockOrgId,
+            schedule: [{
+              _id: 'schedule-1',
+              date: '2026-01-01',
+              startTime: '9:00 AM',
+              endTime: '10:00 AM',
+              break: 'No'
+            }]
+          }])
+        })
+      });
 
       const data = await workerService.getDashboardData(mockUserEmail, mockOrgId);
 
       expect(data).toHaveProperty('activeTimer');
       expect(data).toHaveProperty('todayShifts');
+      expect(data).toHaveProperty('pastAssignedShifts');
       expect(data.todayShifts).toHaveLength(1);
+      expect(data.pastAssignedShifts).toHaveLength(1);
       expect(ActiveTimer.findOne).toHaveBeenCalledWith(expect.objectContaining({ userEmail: mockUserEmail }));
     });
   });
