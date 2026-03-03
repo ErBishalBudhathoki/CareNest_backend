@@ -294,7 +294,7 @@ async function getOrganizationExpenses(organizationId, options = {}) {
 
     // Calculate summary statistics
     const summaryPipeline = [
-      { $match: { ...query, organizationId: new mongoose.Types.ObjectId(organizationId) } }, // Ensure ObjectId
+      { $match: query },
       {
         $group: {
           _id: null,
@@ -575,7 +575,10 @@ async function updateExpense(expenseId, updateData) {
       statusCode: 200,
       message: 'Expense record updated successfully',
       changesCount: changes.length,
-      approvalRequired: updateDoc.requiresApproval
+      approvalRequired: updateDoc.requiresApproval,
+      data: {
+        expense: updatedExpense
+      }
     };
 
   } catch (error) {
