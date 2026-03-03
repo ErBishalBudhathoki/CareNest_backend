@@ -343,8 +343,11 @@ class ActiveTimerController {
     await WorkedTime.create({
       userEmail,
       clientEmail: timerDoc.clientEmail,
+      organizationId,
       workDate: startTime,
       date: startTime,
+      startTime,
+      endTime: stopTime,
       timeWorked: formattedTime,
       // Keep totalSeconds for compatibility with existing tests/reporting.
       totalSeconds,
