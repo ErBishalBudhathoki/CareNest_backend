@@ -76,6 +76,45 @@ describe('Persona Services Tests', () => {
       expect(data.pastAssignedShifts).toHaveLength(1);
       expect(ActiveTimer.findOne).toHaveBeenCalledWith(expect.objectContaining({ userEmail: mockUserEmail }));
     });
+
+    it('should return filtered shift history by days', async () => {
+      const now = new Date();
+      const recentDate = new Date(now.getTime() - (2 * 24 * 60 * 60 * 1000));
+      const oldDate = new Date(now.getTime() - (45 * 24 * 60 * 60 * 1000));
+
+      const fmt = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+
+      ClientAssignment.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([{
+            _id: 'assignment-1',
+            userEmail: mockUserEmail,
+            clientEmail: 'client@test.com',
+            organizationId: mockOrgId,
+            schedule: [
+              {
+                _id: 'recent-shift',
+                date: fmt(recentDate),
+                startTime: '9:00 AM',
+                endTime: '10:00 AM',
+                break: 'No'
+              },
+              {
+                _id: 'old-shift',
+                date: fmt(oldDate),
+                startTime: '9:00 AM',
+                endTime: '10:00 AM',
+                break: 'No'
+              }
+            ]
+          }])
+        })
+      });
+
+      const history = await workerService.getPastAssignedShiftHistory(mockUserEmail, mockOrgId, { days: 30, limit: 50 });
+      expect(history).toHaveLength(1);
+      expect(history[0].id).toContain('recent-shift');
+    });
   });
 
   describe('ComplianceService', () => {
