@@ -64,6 +64,48 @@ describe('Expense Controller Contract', () => {
     });
   });
 
+  test('getExpenseStatistics returns normalized statistics payload', async () => {
+    req.params.organizationId = '507f1f77bcf86cd799439011';
+    req.query = { status: 'approved' };
+    expenseService.getOrganizationExpenses.mockResolvedValue({
+      statusCode: 200,
+      summary: {
+        totalAmount: 120,
+        averageAmount: 40,
+        reimbursableAmount: 100,
+        pendingApprovalAmount: 20
+      }
+    });
+
+    await expenseController.getExpenseStatistics(req, res, next);
+
+    expect(expenseService.getOrganizationExpenses).toHaveBeenCalledWith(
+      '507f1f77bcf86cd799439011',
+      expect.objectContaining({
+        page: 1,
+        limit: 1,
+        status: 'approved'
+      })
+    );
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      statusCode: 200,
+      statistics: {
+        totalAmount: 120,
+        averageAmount: 40,
+        reimbursableAmount: 100,
+        pendingApprovalAmount: 20
+      },
+      summary: {
+        totalAmount: 120,
+        averageAmount: 40,
+        reimbursableAmount: 100,
+        pendingApprovalAmount: 20
+      }
+    });
+  });
+
   test('deleteExpense passes authenticated user email to service', async () => {
     req.params.expenseId = '507f1f77bcf86cd799439011';
     req.body.deleteReason = 'duplicate';
