@@ -35,6 +35,34 @@ class ExpenseController {
     res.json(result);
   });
 
+  getExpenseStatistics = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+    const { status, category, startDate, endDate } = req.query;
+
+    const result = await expenseService.getOrganizationExpenses(organizationId, {
+      page: 1,
+      limit: 1,
+      status,
+      category,
+      startDate,
+      endDate
+    });
+
+    const statistics = result?.summary || {
+      totalAmount: 0,
+      averageAmount: 0,
+      reimbursableAmount: 0,
+      pendingApprovalAmount: 0
+    };
+
+    res.json({
+      success: true,
+      statusCode: 200,
+      statistics,
+      summary: statistics
+    });
+  });
+
   getExpenseById = catchAsync(async (req, res) => {
     const { expenseId } = req.params;
     const result = await expenseService.getExpenseById(expenseId);

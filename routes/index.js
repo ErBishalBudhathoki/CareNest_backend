@@ -32,6 +32,7 @@ const payrollRoutes = require('./payrollRoutes');
 const timesheetReminderRoutes = require('./timesheetReminderRoutes');
 const earningsRoutes = require('./earningsRoutes');
 const expenseRoutes = require('./expense');
+const recurringExpenseRoutes = require('./recurringExpense');
 const expenseReminderRoutes = require('./expenseReminderRoutes');
 const onboardingRoutes = require('./onboarding');
 const webhookRoutes = require('./webhookRoutes');
@@ -115,6 +116,7 @@ router.use('/payroll', payrollRoutes);
 router.use('/reminders', timesheetReminderRoutes);
 router.use('/earnings', earningsRoutes);
 router.use('/expenses', expenseRoutes);
+router.use('/', recurringExpenseRoutes);
 router.use('/reminders', expenseReminderRoutes); // Merges with timesheetReminderRoutes
 router.use('/onboarding', onboardingRoutes);
 router.use('/', businessRoutes);
