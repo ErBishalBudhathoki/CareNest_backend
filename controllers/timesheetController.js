@@ -9,10 +9,11 @@ class TimesheetController {
      * POST /api/timesheets/list
      */
     getTimesheets = catchAsync(async (req, res) => {
-        const { email, startDate, endDate } = req.body;
+        const { email, startDate, endDate, status } = req.body;
+        const organizationId = req.body.organizationId || req.organizationContext?.organizationId;
 
-        if (!email || !startDate || !endDate) {
-            return res.status(400).json({ success: false, message: 'Email, startDate, and endDate are required' });
+        if (!email || !startDate || !endDate || !organizationId) {
+            return res.status(400).json({ success: false, message: 'Email, organizationId, startDate, and endDate are required' });
         }
 
         const start = new Date(startDate);
@@ -20,26 +21,51 @@ class TimesheetController {
         end.setHours(23, 59, 59, 999);
 
         // Security check: Users can only fetch their own timesheets unless admin
-        const requestingUserEmail = req.user.email;
-        const isAdmin = req.user.role === 'admin';
+        const requestingUserEmail = (req.user.email || '').toLowerCase();
+        const normalizedEmail = email.toLowerCase();
+        const isAdmin = req.organizationContext?.isAdmin === true || req.user.role === 'admin';
         
-        if (email !== requestingUserEmail && !isAdmin) {
+        if (normalizedEmail !== requestingUserEmail && !isAdmin) {
             return res.status(403).json({ success: false, message: 'Unauthorized access to timesheets' });
         }
 
         // Query using Mongoose
         // We prioritize workDate as it's the standard Date field
         const query = {
-            userEmail: email,
+            userEmail: normalizedEmail,
+            organizationId,
             workDate: { $gte: start, $lte: end },
             isActive: true
         };
+        if (status) {
+            query.status = status;
+        }
 
         const records = await WorkedTime.find(query).sort({ workDate: -1 });
+        const totalSeconds = records.reduce((acc, record) => {
+            if (typeof record.totalSeconds === 'number') {
+                return acc + record.totalSeconds;
+            }
+            if (typeof record.timeWorked === 'string' && record.timeWorked.includes(':')) {
+                const parts = record.timeWorked.split(':');
+                if (parts.length === 3) {
+                    const h = parseInt(parts[0], 10) || 0;
+                    const m = parseInt(parts[1], 10) || 0;
+                    const s = parseInt(parts[2], 10) || 0;
+                    return acc + (h * 3600) + (m * 60) + s;
+                }
+            }
+            return acc;
+        }, 0);
 
         res.status(200).json({
             success: true,
-            data: records
+            data: records,
+            summary: {
+                count: records.length,
+                totalSeconds,
+                totalHours: totalSeconds / 3600
+            }
         });
     });
 
