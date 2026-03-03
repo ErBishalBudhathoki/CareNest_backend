@@ -383,7 +383,11 @@ class AppointmentService {
         userEmail,
         clientEmail,
         timeList,
-        shiftIndex
+        shiftIndex,
+        shiftDate: _shiftDateFromRequest,
+        shiftStartTime: _shiftStartTimeFromRequest,
+        shiftEndTime: _shiftEndTimeFromRequest,
+        shiftBreak: _shiftBreakFromRequest
       } = workedTimeData;
 
       // Validate required fields
@@ -425,11 +429,44 @@ class AppointmentService {
         shiftBreak = assignedClient.breakList ? assignedClient.breakList[shiftIndex] : null;
       }
 
+      // Strict behavior: selected shift index must resolve to an actual shift.
+      if (!shiftDate || !shiftStartTime || !shiftEndTime) {
+        throw new Error('Selected shift index is invalid or shift details are missing');
+      }
+
+      // WorkedTime schema requires workDate. Prefer selected shift date; fallback
+      // to current date to prevent validation failure on partial payloads.
+      let normalizedWorkDate = new Date();
+      if (shiftDate instanceof Date) {
+        normalizedWorkDate = shiftDate;
+      } else if (typeof shiftDate === 'string' && shiftDate.trim()) {
+        const parsedShiftDate = new Date(shiftDate);
+        if (!Number.isNaN(parsedShiftDate.getTime())) {
+          normalizedWorkDate = parsedShiftDate;
+        } else {
+          throw new Error('Selected shift date is invalid');
+        }
+      } else {
+        throw new Error('Selected shift date is missing');
+      }
+
+      // Parse HH:mm:ss into decimal hours for reporting queries.
+      const parseTotalHours = (worked) => {
+        if (!worked || typeof worked !== 'string') return 0;
+        const parts = worked.split(':').map(Number);
+        if (parts.length !== 3 || parts.some((p) => Number.isNaN(p))) return 0;
+        const [h, m, s] = parts;
+        return h + (m / 60) + (s / 3600);
+      };
+
       // Create worked time record with specific shift details
       const workedTimeRecord = new WorkedTime({
         userEmail: userEmail,
         clientEmail: clientEmail,
+        workDate: normalizedWorkDate,
+        date: normalizedWorkDate,
         timeWorked: timeList,
+        totalHours: parseTotalHours(timeList),
         shiftIndex: shiftIndex || 0,
         assignedClientId: assignedClient._id,
         // Add specific shift details for better linking
