@@ -2,6 +2,7 @@ const Shift = require('../models/Shift');
 const ActiveTimer = require('../models/ActiveTimer');
 const Expense = require('../models/Expense');
 const LeaveBalance = require('../models/LeaveBalance');
+const ClientAssignment = require('../models/ClientAssignment');
 
 class WorkerService {
   /**
@@ -52,16 +53,165 @@ class WorkerService {
         userEmail: userEmail
       }).lean();
 
+      // 6. Get Past Assigned Shifts (from assignment schedules)
+      const assignments = await ClientAssignment.find({
+        userEmail: userEmail,
+        organizationId: organizationId,
+        isActive: true
+      }).populate('clientId', 'clientFirstName clientLastName clientEmail').lean();
+
+      const pastAssignedShifts = this._extractPastAssignedShifts(assignments);
+
       return {
         activeTimer,
         todayShifts,
         nextShift,
         recentExpenses,
-        leaveBalances
+        leaveBalances,
+        pastAssignedShifts
       };
     } catch (error) {
       throw new Error(`Error fetching worker dashboard data: ${error.message}`);
     }
+  }
+
+  _extractPastAssignedShifts(assignments) {
+    if (!Array.isArray(assignments) || assignments.length === 0) return [];
+
+    const now = new Date();
+    const history = [];
+
+    for (const assignment of assignments) {
+      if (!Array.isArray(assignment.schedule) || assignment.schedule.length === 0) {
+        continue;
+      }
+
+      const clientName = this._resolveClientName(assignment);
+      const clientEmail = assignment.clientEmail || assignment.clientId?.clientEmail || null;
+
+      for (let i = 0; i < assignment.schedule.length; i += 1) {
+        const scheduleItem = assignment.schedule[i];
+
+        if (!scheduleItem?.date || !scheduleItem?.startTime || !scheduleItem?.endTime) {
+          continue;
+        }
+
+        const startTime = this._combineDateAndTime(scheduleItem.date, scheduleItem.startTime);
+        const endTime = this._combineDateAndTime(scheduleItem.date, scheduleItem.endTime);
+        if (!startTime || !endTime) continue;
+
+        const normalizedEndTime = endTime < startTime
+          ? new Date(endTime.getTime() + (24 * 60 * 60 * 1000))
+          : endTime;
+
+        if (normalizedEndTime > now) continue;
+
+        history.push({
+          id: `${assignment._id?.toString() || 'assignment'}_${scheduleItem._id?.toString() || i}`,
+          employeeEmail: assignment.userEmail,
+          clientId: assignment.clientId?._id?.toString?.() || assignment.clientId?.toString?.() || null,
+          clientEmail,
+          clientName,
+          organizationId: assignment.organizationId,
+          startTime: startTime.toISOString(),
+          endTime: normalizedEndTime.toISOString(),
+          status: 'completed',
+          breakDuration: this._parseBreakDuration(scheduleItem.break),
+          supportItems: this._toSupportItems(scheduleItem.ndisItem),
+          notes: null,
+          isRecurring: false,
+          createdAt: assignment.createdAt || null,
+          updatedAt: assignment.updatedAt || null
+        });
+      }
+    }
+
+    history.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+    return history.slice(0, 20);
+  }
+
+  _resolveClientName(assignment) {
+    const first = assignment?.clientId?.clientFirstName;
+    const last = assignment?.clientId?.clientLastName;
+    const full = `${first || ''} ${last || ''}`.trim();
+    if (full) return full;
+    return assignment?.clientEmail || assignment?.clientId?.clientEmail || 'Unknown Client';
+  }
+
+  _combineDateAndTime(dateStr, timeStr) {
+    if (!dateStr || !timeStr) return null;
+    const parsedTime = this._parseTimeToHoursAndMinutes(timeStr);
+    if (!parsedTime) return null;
+
+    const [year, month, day] = String(dateStr).split('-').map((part) => Number(part));
+    if (!year || !month || !day) return null;
+
+    return new Date(year, month - 1, day, parsedTime.hours, parsedTime.minutes, 0, 0);
+  }
+
+  _parseTimeToHoursAndMinutes(timeStr) {
+    if (!timeStr || typeof timeStr !== 'string') return null;
+    const normalized = timeStr.trim();
+    if (!normalized) return null;
+
+    const twelveHourMatch = normalized.match(/^(\d{1,2}):(\d{2})\s*([aApP][mM])$/);
+    if (twelveHourMatch) {
+      let hours = Number(twelveHourMatch[1]);
+      const minutes = Number(twelveHourMatch[2]);
+      const period = twelveHourMatch[3].toUpperCase();
+      if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes < 0 || minutes > 59) {
+        return null;
+      }
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      return { hours, minutes };
+    }
+
+    const twentyFourHourMatch = normalized.match(/^(\d{1,2}):(\d{2})$/);
+    if (twentyFourHourMatch) {
+      const hours = Number(twentyFourHourMatch[1]);
+      const minutes = Number(twentyFourHourMatch[2]);
+      if (Number.isNaN(hours) || Number.isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+        return null;
+      }
+      return { hours, minutes };
+    }
+
+    return null;
+  }
+
+  _parseBreakDuration(breakValue) {
+    if (breakValue == null) return 0;
+    if (typeof breakValue === 'number') return breakValue >= 0 ? breakValue : 0;
+
+    const text = String(breakValue).trim();
+    if (!text || text.toLowerCase() === 'no') return 0;
+
+    const numeric = Number(text);
+    if (!Number.isNaN(numeric) && numeric >= 0) return numeric;
+
+    const mins = text.match(/(\d+)\s*min/i);
+    if (mins) return Number(mins[1]) || 0;
+
+    const hours = text.match(/(\d+(?:\.\d+)?)\s*hour/i);
+    if (hours) {
+      const parsedHours = Number(hours[1]);
+      if (Number.isNaN(parsedHours) || parsedHours < 0) return 0;
+      return Math.round(parsedHours * 60);
+    }
+
+    return 0;
+  }
+
+  _toSupportItems(ndisItem) {
+    if (!ndisItem || typeof ndisItem !== 'object') return [];
+    return [{
+      itemNumber: ndisItem.itemNumber || '',
+      itemName: ndisItem.itemName || '',
+      unit: ndisItem.unit || null,
+      supportCategoryNumber: ndisItem.supportCategoryNumber || null,
+      supportCategoryName: ndisItem.supportCategoryName || null
+    }];
   }
 }
 
