@@ -100,18 +100,29 @@ class AppointmentController {
    * POST /setWorkedTime
    */
   static setWorkedTime = catchAsync(async (req, res) => {
+    const parsedShiftIndex =
+      Number.isInteger(req.body.shiftIndex) ? req.body.shiftIndex : parseInt(req.body.shiftIndex, 10);
+
     const {
-      'User-Email': userEmail,
-      'Client-Email': clientEmail,
-      'TimeList': timeList,
-      shiftIndex
+      userEmail,
+      clientEmail,
+      timeList,
+      shiftIndex,
+      date,
+      startTime,
+      endTime,
+      breakDuration
     } = req.body;
     
     const workedTimeData = {
       userEmail,
       clientEmail,
       timeList,
-      shiftIndex
+      shiftIndex: Number.isNaN(parsedShiftIndex) ? 0 : parsedShiftIndex,
+      shiftDate: date,
+      shiftStartTime: startTime,
+      shiftEndTime: endTime,
+      shiftBreak: breakDuration
     };
     
     const result = await appointmentService.setWorkedTime(workedTimeData);
