@@ -14,7 +14,14 @@ class InvoiceController {
     const service = InvoiceGenerationService;
     
     try {
-      const { userEmail, clientEmail, startDate, endDate, includeExpenses = false } = req.body;
+      const {
+        userEmail,
+        clientEmail,
+        startDate,
+        endDate,
+        includeExpenses = false,
+        invoiceType = 'client'
+      } = req.body;
       
       // Security Check: IDOR Prevention
       // Ensure the authenticated user is generating invoice for themselves OR has admin role
@@ -44,7 +51,8 @@ class InvoiceController {
         clientEmail,
         startDate,
         endDate,
-        includeExpenses
+        includeExpenses,
+        invoiceType
       });
       
       // Validate input parameters
@@ -82,7 +90,11 @@ class InvoiceController {
           result.metadata.organizationId,
           result.metadata.clientId,
           startDate,
-          endDate
+          endDate,
+          {
+            invoiceType,
+            submittedBy: userEmail
+          }
         );
         
         // Convert expenses to line items and add to main line items array
