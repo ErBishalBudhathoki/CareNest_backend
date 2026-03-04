@@ -228,7 +228,19 @@ function requireOrganizationOwnership(resourceIdField, modelGetter, orgFieldName
       }
 
       // Fetch resource
-      const Model = modelGetter();
+      const rawModel = modelGetter();
+      const modelCandidates = [
+        rawModel,
+        rawModel && rawModel.default,
+        rawModel && rawModel.Invoice,
+        ...(rawModel && typeof rawModel === 'object' ? Object.values(rawModel) : [])
+      ];
+      const Model = modelCandidates.find(
+        (candidate) => candidate && typeof candidate.findById === 'function'
+      );
+      if (!Model) {
+        throw new Error(`Invalid model provided for ownership check: ${resourceIdField}`);
+      }
       const resource = await Model.findById(resourceId).select(orgFieldName);
 
       if (!resource) {
@@ -242,11 +254,21 @@ function requireOrganizationOwnership(resourceIdField, modelGetter, orgFieldName
       }
 
       // Validate organization ownership
-      if (resource[orgFieldName].toString() !== req.organizationContext.organizationId) {
+      const resourceOrgId = resource[orgFieldName];
+      if (!resourceOrgId) {
+        return res.status(404).json(
+          SecureErrorHandler.createErrorResponse(
+            'Resource organization not found',
+            404,
+            'RESOURCE_ORG_NOT_FOUND'
+          )
+        );
+      }
+      if (resourceOrgId.toString() !== req.organizationContext.organizationId) {
         logger.security('Organization ownership violation attempt', {
           userId: req.user.userId,
           resourceId,
-          resourceOrganizationId: resource[orgFieldName],
+          resourceOrganizationId: resourceOrgId,
           userOrganizationId: req.organizationContext.organizationId,
           ip: req.ip,
           path: req.path
