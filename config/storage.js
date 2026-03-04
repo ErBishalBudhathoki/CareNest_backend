@@ -55,9 +55,34 @@ const resolveUploadFolder = (req, file) => {
     const explicitFolder = sanitizeFolder(req.uploadFolder);
     if (explicitFolder) return explicitFolder;
 
+    const requestUploadType = String(
+        req?.query?.uploadType ||
+        req?.query?.folder ||
+        req?.headers?.['x-upload-type'] ||
+        req?.body?.uploadType ||
+        ''
+    ).trim().toLowerCase();
+
+    const uploadTypeToFolder = {
+        receipt: 'receipts',
+        receipts: 'receipts',
+        expense_receipt: 'receipts',
+        logo: 'logos',
+        logos: 'logos',
+        certification: 'certifications',
+        certifications: 'certifications',
+        photo: 'profileImage',
+        profile: 'profileImage'
+    };
+
+    if (uploadTypeToFolder[requestUploadType]) {
+        return uploadTypeToFolder[requestUploadType];
+    }
+
     // Default folder mapping by field name
     if (file.fieldname === 'logo') return 'logos';
     if (file.fieldname === 'receipt') return 'receipts';
+    if (file.fieldname === 'receipts') return 'receipts';
     if (file.fieldname === 'certification') return 'certifications';
     if (file.fieldname === 'photo') return 'profileImage';
     return 'others';
