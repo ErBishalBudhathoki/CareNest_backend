@@ -131,7 +131,7 @@ const statsValidation = [
 ];
 
 // Create a new invoice
-router.post('/api/invoices', 
+router.post('/invoices', 
   authenticateUser, 
   organizationContextMiddleware,
   standardLimiter, 
@@ -141,7 +141,7 @@ router.post('/api/invoices',
 );
 
 // Get list of invoices for an organization
-router.get('/api/invoices', 
+router.get('/invoices', 
   authenticateUser, 
   organizationContextMiddleware,
   standardLimiter, 
@@ -151,7 +151,7 @@ router.get('/api/invoices',
 );
 
 // Get details of a specific invoice
-router.get('/api/invoices/:invoiceId', 
+router.get('/invoices/:invoiceId', 
   authenticateUser, 
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
@@ -162,7 +162,7 @@ router.get('/api/invoices/:invoiceId',
 );
 
 // Update payment status
-router.patch('/api/invoices/:invoiceId/payment-status', 
+router.patch('/invoices/:invoiceId/payment-status', 
   authenticateUser, 
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
@@ -173,7 +173,7 @@ router.patch('/api/invoices/:invoiceId/payment-status',
 );
 
 // Share an invoice
-router.post('/api/invoices/:invoiceId/share', 
+router.post('/invoices/:invoiceId/share', 
   authenticateUser, 
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
@@ -184,7 +184,7 @@ router.post('/api/invoices/:invoiceId/share',
 );
 
 // Share an invoice as PDF
-router.post('/api/invoices/:invoiceId/share/pdf', 
+router.post('/invoices/:invoiceId/share/pdf', 
   authenticateUser, 
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
@@ -195,7 +195,7 @@ router.post('/api/invoices/:invoiceId/share/pdf',
 );
 
 // Delete an invoice
-router.delete('/api/invoices/:invoiceId', 
+router.delete('/invoices/:invoiceId', 
   authenticateUser, 
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
@@ -207,7 +207,7 @@ router.delete('/api/invoices/:invoiceId',
 
 // Get invoice statistics
 router.get(
-  '/api/invoices/stats/:organizationId',
+  '/invoices/stats/:organizationId',
   authenticateUser,
   organizationContextMiddleware,
   standardLimiter,
