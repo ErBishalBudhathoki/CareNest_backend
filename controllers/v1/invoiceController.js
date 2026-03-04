@@ -1,4 +1,6 @@
 const InvoiceGenerationService = require('../../services/invoiceGenerationService');
+const ClientAssignment = require('../../models/ClientAssignment');
+const Client = require('../../models/Client');
 const auditService = require('../../services/auditService');
 const logger = require('../../config/logger');
 const catchAsync = require('../../utils/catchAsync');
@@ -9,7 +11,7 @@ class InvoiceController {
    * POST /api/invoice/generate-line-items
    */
   generateInvoiceLineItems = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { userEmail, clientEmail, startDate, endDate, includeExpenses = false } = req.body;
@@ -19,7 +21,12 @@ class InvoiceController {
       const requestingUserEmail = req.user.email;
       const requestingUserRoles = req.user.roles || [];
       
-      if (userEmail !== requestingUserEmail && !requestingUserRoles.includes('admin') && !requestingUserRoles.includes('superadmin')) {
+      if (
+        userEmail !== requestingUserEmail &&
+        !requestingUserRoles.includes('admin') &&
+        !requestingUserRoles.includes('superadmin') &&
+        !requestingUserRoles.includes('owner')
+      ) {
          logger.security('Unauthorized invoice generation attempt (IDOR)', {
             requestingUser: requestingUserEmail,
             targetUser: userEmail,
@@ -179,7 +186,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -188,7 +194,7 @@ class InvoiceController {
    * GET /api/invoice/preview/:userEmail/:clientEmail
    */
   getInvoicePreview = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { userEmail, clientEmail } = req.params;
@@ -198,7 +204,12 @@ class InvoiceController {
       const requestingUserEmail = req.user.email;
       const requestingUserRoles = req.user.roles || [];
       
-      if (userEmail !== requestingUserEmail && !requestingUserRoles.includes('admin') && !requestingUserRoles.includes('superadmin')) {
+      if (
+        userEmail !== requestingUserEmail &&
+        !requestingUserRoles.includes('admin') &&
+        !requestingUserRoles.includes('superadmin') &&
+        !requestingUserRoles.includes('owner')
+      ) {
          logger.security('Unauthorized invoice preview attempt (IDOR)', {
             requestingUser: requestingUserEmail,
             targetUser: userEmail,
@@ -302,7 +313,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -311,7 +321,7 @@ class InvoiceController {
    * GET /api/invoice/available-assignments/:userEmail
    */
   getAvailableAssignments = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { userEmail } = req.params;
@@ -320,7 +330,12 @@ class InvoiceController {
       const requestingUserEmail = req.user.email;
       const requestingUserRoles = req.user.roles || [];
       
-      if (userEmail !== requestingUserEmail && !requestingUserRoles.includes('admin') && !requestingUserRoles.includes('superadmin')) {
+      if (
+        userEmail !== requestingUserEmail &&
+        !requestingUserRoles.includes('admin') &&
+        !requestingUserRoles.includes('superadmin') &&
+        !requestingUserRoles.includes('owner')
+      ) {
          logger.security('Unauthorized assignments access attempt (IDOR)', {
             requestingUser: requestingUserEmail,
             targetUser: userEmail,
@@ -345,21 +360,19 @@ class InvoiceController {
         });
       }
 
-      await service.connect();
-      
       // Get all active assignments for the user
-      const assignments = await service.db.collection('clientAssignments').find({
+      const assignments = await ClientAssignment.find({
         userEmail: userEmail,
         isActive: true
-      }).toArray();
+      }).lean();
 
       // Enrich with client details
       const enrichedAssignments = [];
       for (const assignment of assignments) {
-        const client = await service.db.collection('clients').findOne({
+        const client = await Client.findOne({
           clientEmail: assignment.clientEmail,
           isActive: true
-        });
+        }).lean();
         
         if (client) {
           enrichedAssignments.push({
@@ -405,7 +418,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -414,7 +426,7 @@ class InvoiceController {
    * POST /api/invoice/validate-generation-data
    */
   validateInvoiceGenerationData = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { userEmail, clientEmail, startDate, endDate, validatePricing = true } = req.body;
@@ -438,20 +450,18 @@ class InvoiceController {
         });
       }
 
-      await service.connect();
-      
       // Check if assignment exists
-      const assignment = await service.db.collection('clientAssignments').findOne({
+      const assignment = await ClientAssignment.findOne({
         userEmail: userEmail,
         clientEmail: clientEmail,
         isActive: true
-      });
+      }).lean();
 
       // Check if client exists
-      const client = await service.db.collection('clients').findOne({
+      const client = await Client.findOne({
         clientEmail: clientEmail,
         isActive: true
-      });
+      }).lean();
 
       // Check for worked time data
       const workedTimeData = await service.getWorkedTimeData(userEmail, clientEmail, startDate, endDate);
@@ -597,7 +607,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -605,7 +614,7 @@ class InvoiceController {
    * Generate bulk invoices for multiple clients with pre-configured pricing
    */
   generateBulkInvoices = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const {
@@ -767,7 +776,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -776,7 +784,7 @@ class InvoiceController {
    * POST /api/invoice/validate-line-items
    */
   validateExistingInvoiceLineItems = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { 
@@ -864,7 +872,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -873,7 +880,7 @@ class InvoiceController {
    * POST /api/invoice/validate-pricing-realtime
    */
   validatePricingRealtime = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { 
@@ -949,7 +956,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 
@@ -958,7 +964,7 @@ class InvoiceController {
    * POST /api/invoice/validation-report
    */
   getInvoiceValidationReport = catchAsync(async (req, res) => {
-    const service = new InvoiceGenerationService();
+    const service = InvoiceGenerationService;
     
     try {
       const { 
@@ -988,8 +994,6 @@ class InvoiceController {
         });
       }
 
-      await service.connect();
-      
       // Generate invoice preview for validation
       const invoiceResult = await service.generateInvoiceLineItems(userEmail, clientEmail, startDate, endDate);
       
@@ -1000,16 +1004,16 @@ class InvoiceController {
       });
 
       // Get assignment and client details for context
-      const assignment = await service.db.collection('clientAssignments').findOne({
+      const assignment = await ClientAssignment.findOne({
         userEmail: userEmail,
         clientEmail: clientEmail,
         isActive: true
-      });
+      }).lean();
 
-      const client = await service.db.collection('clients').findOne({
+      const client = await Client.findOne({
         clientEmail: clientEmail,
         isActive: true
-      });
+      }).lean();
 
       // Create comprehensive report
       const report = {
@@ -1120,7 +1124,6 @@ class InvoiceController {
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     } finally {
-      await service.disconnect();
     }
   });
 }
