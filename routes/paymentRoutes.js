@@ -10,6 +10,7 @@ const {
   requireOrganizationOwnership,
   requireOrganizationMatch 
 } = require('../middleware/organizationContext');
+const { Invoice } = require('../models/Invoice');
 
 // Rate limiting
 const paymentLimiter = rateLimit({
@@ -80,7 +81,7 @@ router.post('/onboarding-link',
 router.post('/record', 
   authenticateUser,
   organizationContextMiddleware,
-  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  requireOrganizationOwnership('invoiceId', () => Invoice),
   paymentLimiter, 
   recordPaymentValidation, 
   handleValidationErrors, 
@@ -91,7 +92,7 @@ router.post('/record',
 router.post('/credit-note', 
   authenticateUser,
   organizationContextMiddleware,
-  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  requireOrganizationOwnership('invoiceId', () => Invoice),
   paymentLimiter, 
   creditNoteValidation, 
   handleValidationErrors, 
@@ -111,7 +112,7 @@ router.post('/credit-note/apply',
 router.post('/refund', 
   authenticateUser,
   organizationContextMiddleware,
-  requireOrganizationOwnership('invoiceId', () => require('../models/Invoice')),
+  requireOrganizationOwnership('invoiceId', () => Invoice),
   refundLimiter, 
   refundValidation, 
   handleValidationErrors, 
