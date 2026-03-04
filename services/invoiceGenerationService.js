@@ -974,36 +974,79 @@ class InvoiceGenerationService {
    * Task 2.4: Implement automatic expense inclusion in invoice generation
    * Returns raw expense data instead of converting to line items
    */
-  async getApprovedExpensesForInvoice(organizationId, clientId, startDate, endDate) {
+  async getApprovedExpensesForInvoice(
+    organizationId,
+    clientId,
+    startDate,
+    endDate,
+    options = {}
+  ) {
     try {
+      const invoiceType = (options.invoiceType || 'client').toLowerCase();
+      const submittedBy = options.submittedBy
+        ? options.submittedBy.toString().trim().toLowerCase()
+        : null;
+      const normalizedOrganizationId = organizationId?.toString?.() ?? '';
+      const normalizedClientId = clientId?.toString?.() ?? '';
+
       logger.debug('getApprovedExpensesForInvoice called', {
-      organizationId,
-      organizationIdType: typeof organizationId,
-      clientId,
-      clientIdType: typeof clientId,
-      startDate,
-      startDateType: typeof startDate,
-      endDate,
-      endDateType: typeof endDate
-    });
-      
-      // Keep clientId as string if it's stored as string, or ObjectId if model uses ObjectId
-      // Since we migrated to Mongoose models, clientId in Expense model is ObjectId.
-      // We should cast it if it's a string.
-      
-      const query = {
-        organizationId: new mongoose.Types.ObjectId(organizationId),
-        clientId: new mongoose.Types.ObjectId(clientId),
-        expenseDate: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate)
-        },
-        approvalStatus: 'approved',
-        isActive: true,
-        isReimbursable: true // Only include reimbursable expenses in invoices
-      };
-      
-      // Query for approved expenses within the date range
+        organizationId: normalizedOrganizationId,
+        organizationIdType: typeof organizationId,
+        clientId: normalizedClientId,
+        clientIdType: typeof clientId,
+        startDate,
+        startDateType: typeof startDate,
+        endDate,
+        endDateType: typeof endDate,
+        invoiceType,
+        submittedBy
+      });
+
+      const queryFilters = [
+        { organizationId: normalizedOrganizationId },
+        { isActive: true },
+        { isReimbursable: true },
+        { approvalStatus: 'approved' }
+      ];
+
+      const parsedStartDate = startDate ? new Date(startDate) : null;
+      const parsedEndDate = endDate ? new Date(endDate) : null;
+      const expenseDateFilter = {};
+      if (parsedStartDate && !isNaN(parsedStartDate.getTime())) {
+        expenseDateFilter.$gte = parsedStartDate;
+      }
+      if (parsedEndDate && !isNaN(parsedEndDate.getTime())) {
+        expenseDateFilter.$lte = parsedEndDate;
+      }
+      if (Object.keys(expenseDateFilter).length > 0) {
+        queryFilters.push({ expenseDate: expenseDateFilter });
+      }
+
+      // Expenses should reimburse the employee whose invoice is being generated.
+      if (submittedBy) {
+        const escapedSubmittedBy = submittedBy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        queryFilters.push({
+          submittedBy: { $regex: `^${escapedSubmittedBy}$`, $options: 'i' }
+        });
+      }
+
+      if (invoiceType === 'employee') {
+        // Employee reimbursement invoices may include approved expenses not linked to a client.
+        queryFilters.push({
+          $or: [
+            ...(normalizedClientId ? [{ clientId: normalizedClientId }] : []),
+            { clientId: null },
+            { clientId: '' },
+            { clientId: { $exists: false } }
+          ]
+        });
+      } else if (normalizedClientId) {
+        // Client invoices should only include expenses linked to that client.
+        queryFilters.push({ clientId: normalizedClientId });
+      }
+
+      const query = { $and: queryFilters };
+
       const expenses = await Expense.find(query);
       
       // Return raw expense data with formatted fields for invoice display
