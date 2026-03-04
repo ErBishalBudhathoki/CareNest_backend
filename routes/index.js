@@ -58,6 +58,7 @@ const holidayRoutes = require('./holidayRoutes');
 const supportItemsRoutes = require('./supportItems');
 const notesRoutes = require('./notesRoutes');
 const notificationRoutes = require('./notificationRoutes');
+const filesRoutes = require('./files');
 const employeeTrackingRoutes = require('./employeeTracking');
 const scheduleRoutes = require('./schedule'); // Import schedule routes
 const jwtKeyRotationRoutes = require('./jwtKeyRotation'); // JWT Key Rotation admin routes
@@ -141,6 +142,7 @@ router.use('/holidays', holidayRoutes);
 router.use('/support-items', supportItemsRoutes);
 router.use('/notes', notesRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/files', filesRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
 router.use('/schedule', scheduleRoutes); // Mount schedule routes
 router.use('/admin/jwt-keys', jwtKeyRotationRoutes); // JWT Key Rotation admin API
