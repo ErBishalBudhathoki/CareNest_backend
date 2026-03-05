@@ -16,7 +16,10 @@ class TripController {
       endLocation, 
       distance, 
       tripType, 
-      clientId 
+      clientId,
+      startCoordinates,
+      endCoordinates,
+      routePath
     } = req.body;
 
     const parsedDistance = parseFloat(distance);
@@ -56,7 +59,10 @@ class TripController {
       endLocation,
       distance: parsedDistance,
       tripType,
-      clientId
+      clientId,
+      startCoordinates,
+      endCoordinates,
+      routePath
     };
 
     const result = await TripService.createTrip(tripData);
