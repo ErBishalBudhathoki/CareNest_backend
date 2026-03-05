@@ -28,6 +28,21 @@ const tripSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  startCoordinates: {
+    lat: { type: Number },
+    lng: { type: Number }
+  },
+  endCoordinates: {
+    lat: { type: Number },
+    lng: { type: Number }
+  },
+  routePath: [
+    {
+      lat: { type: Number },
+      lng: { type: Number },
+      timestamp: { type: Date }
+    }
+  ],
   distance: {
     type: Number,
     required: true
