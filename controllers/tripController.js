@@ -84,12 +84,13 @@ class TripController {
    * GET /api/trips
    */
   getAllTrips = catchAsync(async (req, res) => {
-    const { startDate, endDate, status, userId } = req.query;
+    const { startDate, endDate, status, userId, clientId } = req.query;
     const organizationId = req.user?.organizationId;
 
     const filters = {
       organizationId,
       userId,
+      clientId,
       startDate,
       endDate,
       status
@@ -195,8 +196,14 @@ class TripController {
   getTripsByEmployee = catchAsync(async (req, res) => {
     const { userId } = req.params;
     const { startDate, endDate, status } = req.query;
+    const organizationId = req.user?.organizationId;
 
-    const trips = await TripService.getTripsByEmployee(userId, { startDate, endDate, status });
+    const trips = await TripService.getTripsByEmployee(userId, {
+      organizationId,
+      startDate,
+      endDate,
+      status,
+    });
 
     logger.business('Employee Trips Retrieved', {
       event: 'trips_retrieved_employee',
