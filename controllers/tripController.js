@@ -1,6 +1,7 @@
 const TripService = require('../services/tripService');
-const logger = require('../utils/logger');
+const { createLogger } = require('../utils/logger');
 const catchAsync = require('../utils/catchAsync');
+const logger = createLogger('TripController');
 
 class TripController {
   
