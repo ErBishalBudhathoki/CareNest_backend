@@ -60,6 +60,10 @@ const createTripValidation = [
 ];
 
 const getAllTripsValidation = [
+  query('userId')
+    .optional()
+    .isMongoId()
+    .withMessage('User ID must be a valid MongoDB ObjectId'),
   query('startDate')
     .optional()
     .isISO8601()
@@ -71,7 +75,11 @@ const getAllTripsValidation = [
   query('status')
     .optional()
     .isIn(['PENDING', 'APPROVED', 'REJECTED'])
-    .withMessage('Status must be PENDING, APPROVED, or REJECTED')
+    .withMessage('Status must be PENDING, APPROVED, or REJECTED'),
+  query('clientId')
+    .optional()
+    .isMongoId()
+    .withMessage('Client ID must be a valid MongoDB ObjectId')
 ];
 
 const getEmployeeTripsValidation = [
