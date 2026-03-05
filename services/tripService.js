@@ -2,6 +2,29 @@ const mongoose = require('mongoose');
 const Trip = require('../models/Trip');
 const Organization = require('../models/Organization');
 
+const normalizeCoordinate = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  const lat = Number(value.lat);
+  const lng = Number(value.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+};
+
+const normalizeRoutePath = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((point) => {
+      const normalized = normalizeCoordinate(point);
+      if (!normalized) return null;
+      return {
+        ...normalized,
+        timestamp: point?.timestamp ? new Date(point.timestamp) : undefined,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 2000);
+};
+
 class TripService {
   /**
    * Create a new trip
@@ -13,10 +36,13 @@ class TripService {
         userId, 
         date, 
         startLocation, 
-        endLocation, 
-        distance, 
-        tripType, 
-        clientId 
+      endLocation, 
+      distance, 
+      tripType, 
+      clientId,
+      startCoordinates,
+      endCoordinates,
+      routePath,
       } = tripData;
 
       // Business Logic for Reimbursable/Billable
@@ -44,6 +70,9 @@ class TripService {
         date: new Date(date),
         startLocation,
         endLocation,
+        startCoordinates: normalizeCoordinate(startCoordinates),
+        endCoordinates: normalizeCoordinate(endCoordinates),
+        routePath: normalizeRoutePath(routePath),
         distance: Number(distance),
         tripType,
         status: 'PENDING',
