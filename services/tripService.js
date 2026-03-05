@@ -78,11 +78,18 @@ class TripService {
         query.userId = new mongoose.Types.ObjectId(filters.userId);
       }
 
-      if (filters.startDate && filters.endDate) {
-        query.date = {
-          $gte: new Date(filters.startDate),
-          $lte: new Date(filters.endDate)
-        };
+      if (filters.clientId) {
+        query.clientId = new mongoose.Types.ObjectId(filters.clientId);
+      }
+
+      if (filters.startDate || filters.endDate) {
+        query.date = {};
+        if (filters.startDate) {
+          query.date.$gte = new Date(filters.startDate);
+        }
+        if (filters.endDate) {
+          query.date.$lte = new Date(filters.endDate);
+        }
       }
 
       if (filters.status) {
@@ -196,13 +203,20 @@ class TripService {
    */
   async getTripsByEmployee(userId, filters = {}) {
     try {
-      const query = { userId: userId };
+      const query = { userId: new mongoose.Types.ObjectId(userId) };
+
+      if (filters.organizationId) {
+        query.organizationId = new mongoose.Types.ObjectId(filters.organizationId);
+      }
       
-      if (filters.startDate && filters.endDate) {
-        query.date = {
-          $gte: new Date(filters.startDate),
-          $lte: new Date(filters.endDate)
-        };
+      if (filters.startDate || filters.endDate) {
+        query.date = {};
+        if (filters.startDate) {
+          query.date.$gte = new Date(filters.startDate);
+        }
+        if (filters.endDate) {
+          query.date.$lte = new Date(filters.endDate);
+        }
       }
 
       if (filters.status) {
