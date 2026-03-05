@@ -18,8 +18,17 @@ class TripController {
       clientId 
     } = req.body;
 
+    const parsedDistance = parseFloat(distance);
+
     // Basic validation
-    if (!date || !startLocation || !endLocation || !distance || !tripType) {
+    if (
+      !date ||
+      !startLocation ||
+      !endLocation ||
+      Number.isNaN(parsedDistance) ||
+      parsedDistance < 0 ||
+      !tripType
+    ) {
       return res.status(400).json({ 
         success: false, 
         code: 'VALIDATION_ERROR',
@@ -27,7 +36,7 @@ class TripController {
       });
     }
 
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     const organizationId = req.user?.organizationId;
 
     if (!userId || !organizationId) {
@@ -44,7 +53,7 @@ class TripController {
       date,
       startLocation,
       endLocation,
-      distance,
+      distance: parsedDistance,
       tripType,
       clientId
     };
@@ -109,7 +118,7 @@ class TripController {
   updateTripDetails = catchAsync(async (req, res) => {
     const { tripId } = req.params;
     const updateData = req.body;
-    const adminId = req.user?.id;
+    const adminId = req.user?.userId;
 
     const success = await TripService.updateTripDetails(tripId, updateData, adminId);
 
@@ -143,7 +152,7 @@ class TripController {
   updateTripStatus = catchAsync(async (req, res) => {
     const { tripId } = req.params;
     const { status } = req.body;
-    const adminId = req.user?.id;
+    const adminId = req.user?.userId;
 
     if (!status) {
       return res.status(400).json({ 
