@@ -413,6 +413,24 @@ function resolveEmployeeContext({
   return resolved;
 }
 
+function isDuplicateInvoiceNumberError(result = {}) {
+  const combined = [
+    result.error,
+    result.message,
+    result.details
+  ]
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).toLowerCase())
+    .join(' ');
+
+  if (result.duplicateKey === true || result.errorCode === 11000) {
+    return true;
+  }
+
+  return combined.includes('e11000') &&
+    (combined.includes('invoice') || combined.includes('invoicenumber'));
+}
+
 /**
  * Create a new invoice
  * @param {Object} req - Express request object
@@ -473,14 +491,6 @@ async function createInvoice(req, res) {
       });
     }
 
-    // Use provided invoice number or generate a new one
-    const invoiceNumber = providedInvoiceNumber || await invoiceManagementService.generateInvoiceNumber(organizationId);
-
-    console.log('=== INVOICE NUMBER HANDLING ===');
-    console.log('Provided invoice number:', providedInvoiceNumber);
-    console.log('Final invoice number:', invoiceNumber);
-    console.log('================================')
-
     const resolvedEmployeeContext = resolveEmployeeContext({
       employeeContext,
       metadata,
@@ -494,7 +504,7 @@ async function createInvoice(req, res) {
 
     // Prepare invoice data according to schema
     const invoiceData = {
-      invoiceNumber,
+      invoiceNumber: providedInvoiceNumber || '',
       organizationId,
       clientId,
       clientEmail,
@@ -590,8 +600,46 @@ async function createInvoice(req, res) {
     console.log('HEADER VALIDATION:', { invoiceType, issuer, billedTo });
     console.log('METADATA AFTER BUILD:', invoiceData.metadata);
 
-    // Create the invoice
-    const result = await invoiceManagementService.createInvoice(invoiceData);
+    // Create the invoice with duplicate number retry.
+    // If frontend-provided invoiceNumber collides, backend regenerates and retries.
+    const maxCreateAttempts = 4;
+    let attempt = 0;
+    let result = null;
+    let invoiceNumber = normalizeString(providedInvoiceNumber);
+
+    while (attempt < maxCreateAttempts) {
+      attempt += 1;
+
+      if (!invoiceNumber) {
+        invoiceNumber = await invoiceManagementService.generateInvoiceNumber(organizationId);
+      }
+
+      invoiceData.invoiceNumber = invoiceNumber;
+
+      console.log('=== INVOICE NUMBER HANDLING ===');
+      console.log('Attempt:', attempt);
+      console.log('Provided invoice number:', providedInvoiceNumber);
+      console.log('Final invoice number for attempt:', invoiceNumber);
+      console.log('================================');
+
+      result = await invoiceManagementService.createInvoice(invoiceData);
+      if (result.success) {
+        break;
+      }
+
+      if (!isDuplicateInvoiceNumberError(result) || attempt >= maxCreateAttempts) {
+        break;
+      }
+
+      logger.warn('Invoice number collision detected, retrying with new number', {
+        organizationId,
+        clientEmail,
+        attemptedInvoiceNumber: invoiceNumber,
+        attempt,
+      });
+
+      invoiceNumber = '';
+    }
 
     if (result.success) {
       logger.info('Invoice created successfully', {
@@ -617,7 +665,7 @@ async function createInvoice(req, res) {
     } else {
       console.log('=== CREATE INVOICE FAILED ===');
       console.log('Service result:', result);
-      res.status(500).json({
+      res.status(isDuplicateInvoiceNumberError(result) ? 409 : 500).json({
         success: false,
         error: result.error || 'Failed to create invoice'
       });
