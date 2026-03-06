@@ -611,7 +611,14 @@ async function createInvoice(req, res) {
       attempt += 1;
 
       if (!invoiceNumber) {
-        invoiceNumber = await invoiceManagementService.generateInvoiceNumber(organizationId);
+        invoiceNumber = await invoiceManagementService.generateInvoiceNumber(
+          organizationId,
+          {
+            clientId,
+            clientName,
+            clientEmail,
+          }
+        );
       }
 
       invoiceData.invoiceNumber = invoiceNumber;
