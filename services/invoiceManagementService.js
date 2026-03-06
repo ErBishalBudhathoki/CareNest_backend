@@ -548,7 +548,9 @@ class InvoiceManagementService {
       logger.error('Error creating invoice:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        errorCode: error.code,
+        duplicateKey: error?.code === 11000
       };
     }
   }
