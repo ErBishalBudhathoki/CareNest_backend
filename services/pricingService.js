@@ -2,6 +2,7 @@ const CustomPricing = require('../models/CustomPricing');
 const SupportItem = require('../models/SupportItem');
 const Client = require('../models/Client');
 const User = require('../models/User');
+const mongoose = require('mongoose');
 const auditService = require('./auditService');
 const cacheService = require('./cacheService');
 const { priceValidationService } = require('./priceValidationService');
@@ -10,6 +11,85 @@ const ndisCatalogSyncService = require('./ndisCatalogSyncService');
 const PricingSettings = require('../models/PricingSettings');
 
 class PricingService {
+  /**
+   * Resolve client identifier variants (Mongo _id and email) to avoid
+   * mismatches between screens that pass different identifier types.
+   */
+  async resolveClientContext(clientIdentifier) {
+    const rawInput =
+      typeof clientIdentifier === 'string'
+        ? clientIdentifier.trim()
+        : clientIdentifier?.toString?.().trim?.() || '';
+
+    if (!rawInput) {
+      return {
+        normalizedInput: null,
+        canonicalClientId: null,
+        normalizedEmail: null,
+        matchIdentifiers: [],
+        stateUsed: 'NSW',
+        stateSource: 'fallback'
+      };
+    }
+
+    const normalizedInput = rawInput;
+    const normalizedLower = rawInput.toLowerCase();
+    const orConditions = [];
+
+    if (mongoose.Types.ObjectId.isValid(normalizedInput)) {
+      orConditions.push({ _id: normalizedInput });
+    }
+    orConditions.push({ clientEmail: normalizedLower });
+
+    const clientDoc =
+      orConditions.length > 0
+        ? await Client.findOne(
+            { $or: orConditions },
+            { _id: 1, clientEmail: 1, clientState: 1 }
+          ).lean()
+        : null;
+
+    const identifiers = new Set();
+    identifiers.add(normalizedInput);
+    if (normalizedLower.includes('@')) {
+      identifiers.add(normalizedLower);
+    }
+
+    let canonicalClientId = null;
+    let normalizedEmail = null;
+    let stateUsed = 'NSW';
+    let stateSource = 'fallback';
+
+    if (clientDoc) {
+      canonicalClientId = clientDoc._id?.toString?.() || null;
+      if (clientDoc.clientEmail !== undefined && clientDoc.clientEmail !== null) {
+        normalizedEmail = String(clientDoc.clientEmail).trim().toLowerCase();
+      }
+
+      if (canonicalClientId) {
+        identifiers.add(canonicalClientId);
+      }
+      if (normalizedEmail) {
+        identifiers.add(normalizedEmail);
+      }
+
+      const clientState = clientDoc.clientState?.toString?.().trim?.();
+      if (clientState) {
+        stateUsed = clientState.toUpperCase();
+        stateSource = 'client';
+      }
+    }
+
+    return {
+      normalizedInput,
+      canonicalClientId,
+      normalizedEmail,
+      matchIdentifiers: [...identifiers].filter(Boolean),
+      stateUsed,
+      stateSource
+    };
+  }
+
   /**
    * Process custom pricing for an NDIS item (Upsert logic)
    * Used during assignment creation
@@ -131,6 +211,17 @@ class PricingService {
         expiryDate
       } = pricingData;
 
+      let resolvedClientId = null;
+      if (clientSpecific) {
+        const clientContext = await this.resolveClientContext(clientId);
+        resolvedClientId =
+          clientContext.canonicalClientId || clientContext.normalizedInput;
+
+        if (!resolvedClientId) {
+          throw new Error('clientId is required for client-specific pricing');
+        }
+      }
+
       // Check for existing pricing
       const duplicateCheckQuery = {
         organizationId,
@@ -139,8 +230,8 @@ class PricingService {
         isActive: true
       };
 
-      if (clientSpecific && clientId) {
-        duplicateCheckQuery.clientId = clientId;
+      if (clientSpecific && resolvedClientId) {
+        duplicateCheckQuery.clientId = resolvedClientId;
       } else {
         duplicateCheckQuery.clientId = null;
       }
@@ -158,7 +249,7 @@ class PricingService {
         pricingType,
         customPrice: pricingType === 'fixed' ? customPrice : null,
         multiplier: pricingType === 'multiplier' ? multiplier : null,
-        clientId: clientSpecific ? clientId : null,
+        clientId: clientSpecific ? resolvedClientId : null,
         clientSpecific: clientSpecific || false,
         ndisCompliant: ndisCompliant !== undefined ? ndisCompliant : true,
         exceedsNdisCap: exceedsNdisCap || false,
@@ -535,7 +626,13 @@ class PricingService {
         reason: 'pricing_lookup_single',
       });
 
-      const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${clientId || 'global'}`;
+      const clientContext = await this.resolveClientContext(clientId);
+      const cacheClientKey =
+        clientContext.canonicalClientId ||
+        clientContext.normalizedEmail ||
+        clientContext.normalizedInput ||
+        'global';
+      const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${cacheClientKey}`;
       const cachedResult = await cacheService.get(cacheKey);
       
       if (cachedResult) {
@@ -544,43 +641,22 @@ class PricingService {
 
       const lookupLogic = async () => {
       const currentDate = new Date();
-      let clientIdForQuery = null;
-      let stateUsed = 'NSW'; // default fallback
-      let stateSource = 'fallback';
+      let stateUsed = clientContext.stateUsed || 'NSW'; // default fallback
+      let stateSource = clientContext.stateSource || 'fallback';
       let providerTypeUsed = 'standard';
+      const clientMatchIdentifiers = clientContext.matchIdentifiers || [];
 
       // Pre-fetch support item for caps and metadata
       const supportItemDoc = await SupportItem.findOne({
         supportItemNumber
       });
 
-      // Convert clientId to string for consistent querying
-      if (clientId) {
-        clientIdForQuery = clientId.toString();
-
-        // Resolve client state for accurate cap selection
-        try {
-          const clientDoc = await Client.findOne(
-            { _id: clientIdForQuery },
-            { clientState: 1 }
-          );
-          if (clientDoc && clientDoc.clientState) {
-            stateUsed = String(clientDoc.clientState).toUpperCase();
-            stateSource = 'client';
-          }
-        } catch {
-          // Keep fallback on errors; include no sensitive error surfaces
-          stateUsed = 'NSW';
-          stateSource = 'fallback';
-        }
-      }
-
       // Priority 1: Client-specific pricing
-      if (clientIdForQuery) {
+      if (clientMatchIdentifiers.length > 0) {
         const clientSpecificPricing = await CustomPricing.findOne({
           organizationId,
           supportItemNumber,
-          clientId: clientIdForQuery,
+          clientId: { $in: clientMatchIdentifiers },
           clientSpecific: true,
           isActive: true,
           approvalStatus: 'approved',
@@ -740,28 +816,11 @@ class PricingService {
         reason: 'pricing_lookup_bulk',
       });
 
-      let clientIdForQuery = null;
-      let stateUsed = 'NSW';
-      let stateSource = 'fallback';
+      const clientContext = await this.resolveClientContext(clientId);
+      const clientMatchIdentifiers = clientContext.matchIdentifiers || [];
+      let stateUsed = clientContext.stateUsed || 'NSW';
+      let stateSource = clientContext.stateSource || 'fallback';
       let providerTypeUsed = 'standard';
-      if (clientId) {
-        clientIdForQuery = clientId.toString();
-
-        // Resolve state from client when possible
-        try {
-          const clientDoc = await Client.findOne(
-            { _id: clientIdForQuery },
-            { clientState: 1 }
-          );
-          if (clientDoc && clientDoc.clientState) {
-            stateUsed = String(clientDoc.clientState).toUpperCase();
-            stateSource = 'client';
-          }
-        } catch {
-          stateUsed = 'NSW';
-          stateSource = 'fallback';
-        }
-      }
 
       const currentDate = new Date();
       const results = {};
@@ -785,7 +844,12 @@ class PricingService {
           $addFields: {
             priority: {
               $cond: {
-                if: { $and: [{ $eq: ['$clientSpecific', true] }, { $eq: ['$clientId', clientIdForQuery] }] },
+                if: {
+                  $and: [
+                    { $eq: ['$clientSpecific', true] },
+                    { $in: ['$clientId', clientMatchIdentifiers] }
+                  ]
+                },
                 then: 1,
                 else: {
                   $cond: {
