@@ -11,9 +11,11 @@ const messagingService = require('./messagingService');
 const {
   buildChatWindow,
   getChatWindowClosedMessage,
+  toShiftDateTime,
 } = require('./chatWindowPolicy');
 
 const DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS = 800;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const normalizeEmail = (value) => (value || '').toString().trim().toLowerCase();
 
@@ -30,28 +32,26 @@ const createHttpError = (statusCode, message) => {
   return error;
 };
 
-const normalizeTimeString = (timeValue) => {
-  const raw = (timeValue || '').toString().trim();
-  if (!raw) return '00:00:00';
-  if (/^\d{1}:\d{2}$/.test(raw)) return `0${raw}:00`;
-  if (/^\d{2}:\d{2}$/.test(raw)) return `${raw}:00`;
-  return raw;
-};
+const buildShiftBounds = (dateValue, startTimeValue, endTimeValue) => {
+  const startAt = toShiftDateTime(dateValue, startTimeValue);
+  const endCandidate = toShiftDateTime(dateValue, endTimeValue);
 
-const toShiftDateTime = (dateValue, timeValue) => {
-  const dateStr = (dateValue || '').toString().trim();
-  if (!dateStr) return null;
-
-  const normalizedTime = normalizeTimeString(timeValue);
-  const isoCandidate = `${dateStr}T${normalizedTime}`;
-  const isoParsed = new Date(isoCandidate);
-
-  if (!Number.isNaN(isoParsed.getTime())) {
-    return isoParsed;
+  if (!startAt || !endCandidate) {
+    return {
+      startAt,
+      endAt: endCandidate,
+    };
   }
 
-  const fallback = new Date(`${dateStr} ${timeValue || ''}`);
-  return Number.isNaN(fallback.getTime()) ? null : fallback;
+  const endAt =
+    endCandidate.getTime() <= startAt.getTime()
+      ? new Date(endCandidate.getTime() + DAY_MS)
+      : endCandidate;
+
+  return {
+    startAt,
+    endAt,
+  };
 };
 
 const isSameCalendarDate = (dateA, dateB) => {
@@ -226,8 +226,11 @@ class ClientPortalService {
           ? item._id.toString()
           : `${assignment._id.toString()}_${index}`;
 
-        const startAt = toShiftDateTime(item?.date, item?.startTime);
-        const endAt = toShiftDateTime(item?.date, item?.endTime);
+        const { startAt, endAt } = buildShiftBounds(
+          item?.date,
+          item?.startTime,
+          item?.endTime
+        );
 
         appointments.push({
           appointmentId,
@@ -290,16 +293,28 @@ class ClientPortalService {
 
     const todayAppointments = appointments
       .filter((appt) => appt.startAt && isSameCalendarDate(appt.startAt, now))
-      .map((appt) => ({
-        appointmentId: appt.appointmentId,
-        workerName: appt.workerName,
-        serviceName: appt.serviceName,
-        startTime: appt.startTime,
-        endTime: appt.endTime,
-        status: deriveShiftStatus(appt.startAt, appt.endAt, now),
-        eta: null,
-        workerPhoto: appt.workerDoc?.profilePic || appt.workerDoc?.photoURL || null,
-      }));
+      .map((appt) => {
+        const chatWindow = buildChatWindow({
+          startAt: appt.startAt,
+          endAt: appt.endAt,
+          now,
+        });
+
+        return {
+          appointmentId: appt.appointmentId,
+          workerName: appt.workerName,
+          serviceName: appt.serviceName,
+          startTime: appt.startTime,
+          endTime: appt.endTime,
+          status: deriveShiftStatus(appt.startAt, appt.endAt, now),
+          eta: null,
+          workerPhoto: appt.workerDoc?.profilePic || appt.workerDoc?.photoURL || null,
+          canMessage: chatWindow.isOpen,
+          chatWindowStatus: chatWindow.status,
+          chatStartAt: safeIso(chatWindow.chatStartAt),
+          chatEndAt: safeIso(chatWindow.chatEndAt),
+        };
+      });
 
     const upcomingAppointments = appointments
       .filter((appt) => appt.startAt && appt.startAt > now)
@@ -401,8 +416,11 @@ class ClientPortalService {
     }).lean();
 
     const now = new Date();
-    const startAt = toShiftDateTime(scheduleItem.date, scheduleItem.startTime);
-    const endAt = toShiftDateTime(scheduleItem.date, scheduleItem.endTime);
+    const { startAt, endAt } = buildShiftBounds(
+      scheduleItem.date,
+      scheduleItem.startTime,
+      scheduleItem.endTime
+    );
 
     const detail = {
       id: scheduleId,

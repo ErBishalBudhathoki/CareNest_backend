@@ -7,6 +7,26 @@
 const activeTracking = new Map();
 const geofenceStates = new Map();
 
+const toNumberOrNull = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const normalizeCoordinatePoint = (point) => {
+  if (!point || typeof point !== 'object') return null;
+
+  const lat = toNumberOrNull(point.lat ?? point.latitude);
+  const lng = toNumberOrNull(point.lng ?? point.longitude);
+
+  if (lat == null || lng == null) return null;
+
+  return { lat, lng };
+};
+
 /**
  * Start tracking session
  * @param {Object} params - Tracking parameters
@@ -14,11 +34,16 @@ const geofenceStates = new Map();
  */
 exports.startTrackingSession = async (params) => {
   const { appointmentId, workerId, clientLocation } = params;
+  const normalizedClientLocation = normalizeCoordinatePoint(clientLocation);
+
+  if (!normalizedClientLocation) {
+    throw new Error('Invalid clientLocation. Expected lat/lng or latitude/longitude.');
+  }
 
   const session = {
     appointmentId,
     workerId,
-    clientLocation,
+    clientLocation: normalizedClientLocation,
     startTime: new Date(),
     status: 'active',
     locations: [],
@@ -65,18 +90,19 @@ exports.updateWorkerLocation = async (params) => {
   );
 
   // Calculate ETA (simple calculation, can be enhanced with traffic data)
-  const eta = calculateETA(distance, session.locations);
+  const eta = Number.isFinite(distance) ? calculateETA(distance, session.locations) : null;
 
   // Update session
   activeTracking.set(appointmentId, session);
 
   return {
     appointmentId,
+    workerId: session.workerId,
     latitude,
     longitude,
     accuracy,
     timestamp,
-    distance,
+    distance: Number.isFinite(distance) ? Math.round(distance) : null,
     eta,
     status: session.status,
   };
@@ -103,6 +129,15 @@ exports.checkGeofence = async (params) => {
     insideGeofence: false,
     approaching: false,
   };
+
+  if (!Number.isFinite(distance)) {
+    return {
+      triggered: false,
+      distance: null,
+      insideGeofence: previousState.insideGeofence,
+      approaching: previousState.approaching,
+    };
+  }
 
   let event = null;
   let triggered = false;
@@ -250,7 +285,7 @@ exports.getLiveTrackingData = async (appointmentId) => {
     session.clientLocation
   );
 
-  const eta = calculateETA(distance, session.locations);
+  const eta = Number.isFinite(distance) ? calculateETA(distance, session.locations) : null;
 
   return {
     appointmentId,
@@ -265,7 +300,7 @@ exports.getLiveTrackingData = async (appointmentId) => {
       timestamp: lastLocation.timestamp,
     },
     clientLocation: session.clientLocation,
-    distance: Math.round(distance),
+    distance: Number.isFinite(distance) ? Math.round(distance) : null,
     eta,
     insideGeofence: session.insideGeofence,
     lastUpdate: session.lastUpdate,
@@ -309,6 +344,17 @@ exports.createEmergencyAlert = async (params) => {
  * @returns {Number} Distance in meters
  */
 function calculateDistance(point1, point2) {
+  if (
+    !point1 ||
+    !point2 ||
+    !Number.isFinite(point1.lat) ||
+    !Number.isFinite(point1.lng) ||
+    !Number.isFinite(point2.lat) ||
+    !Number.isFinite(point2.lng)
+  ) {
+    return NaN;
+  }
+
   const R = 6371e3; // Earth's radius in meters
   const φ1 = (point1.lat * Math.PI) / 180;
   const φ2 = (point2.lat * Math.PI) / 180;
