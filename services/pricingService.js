@@ -807,7 +807,23 @@ class PricingService {
         }
       ];
 
-      const customPricingResults = await CustomPricing.aggregate(customPricingPipeline);
+      const [customPricingResults, allNdisItems, settingsDoc] =
+        await Promise.all([
+          CustomPricing.aggregate(customPricingPipeline),
+          SupportItem.find({
+            supportItemNumber: { $in: supportItemNumbers }
+          }),
+          PricingSettings.findOne(
+            { organizationId, isActive: true },
+            { fallbackBaseRate: 1 }
+          ).lean()
+        ]);
+
+      const organizationFallbackBaseRate =
+        (typeof settingsDoc?.fallbackBaseRate === 'number' &&
+          settingsDoc.fallbackBaseRate > 0)
+          ? settingsDoc.fallbackBaseRate
+          : null;
 
       // Map custom pricing results
       const customPricingMap = {};
@@ -828,8 +844,6 @@ class PricingService {
       // Get NDIS default pricing for items without custom pricing
       let ndisDefaultPricing = {};
       let priceCapsData = {};
-
-      const allNdisItems = await SupportItem.find({ supportItemNumber: { $in: supportItemNumbers } });
 
       allNdisItems.forEach(item => {
         priceCapsData[item.supportItemNumber] = {
@@ -946,7 +960,9 @@ class PricingService {
           totalItems: supportItemNumbers.length,
           customPricingItems: Object.keys(customPricingMap).length,
           ndisDefaultItems: Object.keys(ndisDefaultPricing).length,
-          notFoundItems: supportItemNumbers.length - Object.keys(customPricingMap).length - Object.keys(ndisDefaultPricing).length
+          notFoundItems: supportItemNumbers.length - Object.keys(customPricingMap).length - Object.keys(ndisDefaultPricing).length,
+          fallbackBaseRate: organizationFallbackBaseRate,
+          fallbackBaseRateConfigured: organizationFallbackBaseRate !== null
         }
       };
     } catch (error) {
