@@ -14,6 +14,7 @@ const {
   buildChatWindow,
   getChatWindowClosedMessage,
   toShiftDateTime,
+  ENFORCE_SHIFT_CHAT_WINDOW,
 } = require('./chatWindowPolicy');
 
 const encryptionSeed =
@@ -397,7 +398,7 @@ exports.sendMessage = async (params) => {
     endAt: shiftWindow.endAt,
     now: new Date(),
   });
-  if (!chatWindow.isOpen) {
+  if (ENFORCE_SHIFT_CHAT_WINDOW && !chatWindow.isOpen) {
     throw createForbiddenError(getChatWindowClosedMessage());
   }
 
@@ -654,7 +655,7 @@ exports.sendVoiceMessage = async (params) => {
     endAt: shiftWindow.endAt,
     now: new Date(),
   });
-  if (!chatWindow.isOpen) {
+  if (ENFORCE_SHIFT_CHAT_WINDOW && !chatWindow.isOpen) {
     throw createForbiddenError(getChatWindowClosedMessage());
   }
 
@@ -791,7 +792,7 @@ exports.assertCanSendInConversation = async (conversationId, authUser) => {
     endAt: shiftWindow.endAt,
     now: new Date(),
   });
-  if (!chatWindow.isOpen) {
+  if (ENFORCE_SHIFT_CHAT_WINDOW && !chatWindow.isOpen) {
     throw createForbiddenError(getChatWindowClosedMessage());
   }
 
