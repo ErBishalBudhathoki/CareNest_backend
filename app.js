@@ -82,6 +82,7 @@ app.use('/webhooks', require('./routes/webhookRoutes'));
 
 // Body parsing
 app.use(express.json({
+  limit: process.env.REQUEST_BODY_LIMIT || '25mb',
   verify: (req, res, buf, encoding) => {
     // Skip parsing for multipart/form-data - let Multer handle it
     if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
@@ -91,6 +92,7 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({
   extended: true,
+  limit: process.env.REQUEST_BODY_LIMIT || '25mb',
   verify: (req, res, buf, encoding) => {
     if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
       throw new Error('Multipart data should not be parsed by express.urlencoded()');
