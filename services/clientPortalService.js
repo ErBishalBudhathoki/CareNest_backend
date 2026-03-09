@@ -520,6 +520,19 @@ class ClientPortalService {
       ],
     }).lean();
 
+    const workerGeofenceEnabled =
+      workerPreference == null
+        ? true
+        : workerPreference.geofenceEnabled !== false &&
+          workerPreference?.categoryEnabled?.geofence !== false;
+
+    if (!workerGeofenceEnabled) {
+      return {
+        success: false,
+        message: 'Worker has disabled location sharing in geofence settings.',
+      };
+    }
+
     const workerPreferenceRadiusKm = Number(workerPreference?.geofenceRadiusKm);
     const workerPreferenceRadiusMeters =
       Number.isFinite(workerPreferenceRadiusKm) && workerPreferenceRadiusKm > 0
