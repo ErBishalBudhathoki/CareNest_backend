@@ -107,7 +107,13 @@ const sanitizePreferenceUpdates = (updates = {}) => {
 };
 
 const resolvePreferenceTarget = (reqUser, requestedUserId) => {
-  const requested = normalizeValue(requestedUserId);
+  const requestedRaw = normalizeValue(requestedUserId);
+  const isSelfAlias =
+    requestedRaw === '' ||
+    requestedRaw.toLowerCase() === 'current-user-id' ||
+    requestedRaw.toLowerCase() === 'me' ||
+    requestedRaw.toLowerCase() === 'self';
+  const requested = isSelfAlias ? '' : requestedRaw;
   const requestUserId = normalizeValue(reqUser?.userId);
   const requestUserEmail = normalizeEmail(reqUser?.email);
   const isAdmin = hasAdminPrivileges(reqUser);
@@ -296,17 +302,16 @@ class NotificationController {
         target.targetUserId,
         target.targetUserEmail
       );
-      const created = await NotificationPreference.findOneAndUpdate(
-        { userId: target.targetUserId },
-        {
-          $setOnInsert: defaultPreferences,
-          ...(target.targetUserEmail
-            ? { $set: { userEmail: target.targetUserEmail } }
-            : {}),
-        },
-        { upsert: true, new: true, runValidators: true }
-      ).lean();
-      preferences = created;
+      try {
+        const created = await NotificationPreference.create(defaultPreferences);
+        preferences = created.toObject();
+      } catch (createError) {
+        const duplicateKey = Number(createError?.code) === 11000;
+        if (!duplicateKey) {
+          throw createError;
+        }
+        preferences = await NotificationPreference.findOne(query).lean();
+      }
     }
 
     logger.business('Notification Preferences Retrieved', {
@@ -363,15 +368,12 @@ class NotificationController {
             ? { userEmail: target.targetUserEmail }
             : {}),
         },
-        $setOnInsert: buildDefaultPreferences(
-          target.targetUserId,
-          target.targetUserEmail
-        ),
       },
       {
         upsert: true,
-        new: true,
+        returnDocument: 'after',
         runValidators: true,
+        setDefaultsOnInsert: true,
       }
     ).lean();
 
