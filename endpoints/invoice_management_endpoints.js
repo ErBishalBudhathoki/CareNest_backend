@@ -376,6 +376,105 @@ function normalizeLineItems(rawLineItems, organizationId) {
     .filter((item) => item && (item.totalPrice > 0 || item.quantity > 0));
 }
 
+function normalizeObject(value, fallback = null) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function ensureInvoiceNumberInRenderPayload(renderPayload, invoiceNumber) {
+  if (!renderPayload || typeof renderPayload !== 'object') return;
+  const normalizedNumber = normalizeString(invoiceNumber);
+  if (!normalizedNumber) return;
+
+  renderPayload.invoiceNumber = normalizedNumber;
+  if (Array.isArray(renderPayload.clients)) {
+    renderPayload.clients = renderPayload.clients.map((client, index) => {
+      if (!client || typeof client !== 'object') return client;
+      if (index === 0) {
+        return {
+          ...client,
+          invoiceNumber: normalizedNumber,
+        };
+      }
+      return client;
+    });
+  }
+}
+
+function buildPdfRenderSnapshot({
+  providedSnapshot,
+  invoiceNumber,
+  calculatedPayloadData,
+  pdfGenerationParams,
+  pdfArtifact,
+  financialSummary,
+  metadata,
+  invoiceType,
+  issuer,
+  billedTo,
+  lineItems,
+  expenses,
+  recurrence,
+}) {
+  const nowIso = new Date().toISOString();
+  const normalizedNumber = normalizeString(invoiceNumber);
+  const renderPayload = normalizeObject(calculatedPayloadData, null);
+  const renderParams = normalizeObject(pdfGenerationParams, {});
+  const safePdfArtifact = normalizeObject(pdfArtifact, null);
+  const sourceMetadata = normalizeObject(metadata, {});
+  const safeIssuer = normalizeObject(issuer, {});
+  const safeBilledTo = normalizeObject(billedTo, {});
+  const safeRecurrence = normalizeObject(recurrence, null);
+  const safeSummary = normalizeObject(financialSummary, {});
+  const safeLineItems = Array.isArray(lineItems) ? lineItems : [];
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+
+  if (renderPayload) {
+    ensureInvoiceNumberInRenderPayload(renderPayload, normalizedNumber);
+  }
+
+  if (providedSnapshot && typeof providedSnapshot === 'object') {
+    const merged = {
+      ...providedSnapshot,
+      version: providedSnapshot.version || 'invoice-render-snapshot:v1',
+      capturedAt: providedSnapshot.capturedAt || nowIso,
+      invoiceNumber:
+        normalizeString(providedSnapshot.invoiceNumber) || normalizedNumber,
+      renderPayload:
+        normalizeObject(providedSnapshot.renderPayload, null) || renderPayload,
+      renderParams: {
+        ...renderParams,
+        ...(normalizeObject(providedSnapshot.renderParams, {}) || {}),
+      },
+      financialSummary:
+        normalizeObject(providedSnapshot.financialSummary, null) || safeSummary,
+    };
+
+    ensureInvoiceNumberInRenderPayload(merged.renderPayload, normalizedNumber);
+    return merged;
+  }
+
+  return {
+    version: 'invoice-render-snapshot:v1',
+    capturedAt: nowIso,
+    invoiceNumber: normalizedNumber,
+    renderPayload,
+    renderParams,
+    financialSummary: safeSummary,
+    sourceContext: {
+      invoiceType: normalizeString(invoiceType),
+      metadata: sourceMetadata,
+      issuer: safeIssuer,
+      billedTo: safeBilledTo,
+      lineItems: safeLineItems,
+      expenses: safeExpenses,
+      recurrence: safeRecurrence,
+      pdfArtifact: safePdfArtifact,
+    },
+  };
+}
+
 function resolveEmployeeContext({
   employeeContext,
   metadata,
@@ -454,11 +553,15 @@ async function createInvoice(req, res) {
       pdfPath,
       userEmail,
       calculatedPayloadData,
+      pdfGenerationParams,
+      pdfRenderSnapshot,
+      pdfArtifact,
       invoiceNumber: providedInvoiceNumber,
       invoiceType,
       issuer,
       billedTo,
-      employeeContext
+      employeeContext,
+      recurrence
     } = req.body;
 
     const normalizedLineItems = normalizeLineItems(lineItems, organizationId);
@@ -510,6 +613,7 @@ async function createInvoice(req, res) {
       clientEmail,
       clientName,
       lineItems: normalizedLineItems,
+      expenses: hasExpenses ? expenses : [],
       financialSummary: {
         subtotal: financialSummary?.subtotal || lineItemsTotal,
         taxAmount: financialSummary?.taxAmount || 0,
@@ -530,14 +634,33 @@ async function createInvoice(req, res) {
         category: metadata.category || 'standard',
         priority: metadata.priority || 'normal',
         internalNotes: metadata.internalNotes || '',
-        pdfPath: pdfPath || null
+        pdfPath: pdfPath || null,
+        pdfArtifactUrl: normalizeObject(pdfArtifact, null)?.url || metadata?.pdfArtifactUrl || null
       },
       header: {
         issuer,
         billedTo,
       },
       calculatedPayloadData: calculatedPayloadData || null,
+      pdfGenerationParams: normalizeObject(pdfGenerationParams, {}) || {},
+      pdfArtifact: normalizeObject(pdfArtifact, null),
+      pdfRenderSnapshot: buildPdfRenderSnapshot({
+        providedSnapshot: normalizeObject(pdfRenderSnapshot, null),
+        invoiceNumber: providedInvoiceNumber || '',
+        calculatedPayloadData,
+        pdfGenerationParams,
+        pdfArtifact,
+        financialSummary,
+        metadata,
+        invoiceType,
+        issuer,
+        billedTo,
+        lineItems: normalizedLineItems,
+        expenses: hasExpenses ? expenses : [],
+        recurrence: normalizeObject(recurrence, null),
+      }),
       employeeContext: resolvedEmployeeContext,
+      recurrence: normalizeObject(recurrence, null),
       compliance: {
         ndisCompliant: true, // Will be validated
         validationPassed: true,
@@ -622,6 +745,21 @@ async function createInvoice(req, res) {
       }
 
       invoiceData.invoiceNumber = invoiceNumber;
+      if (invoiceData.pdfRenderSnapshot && typeof invoiceData.pdfRenderSnapshot === 'object') {
+        invoiceData.pdfRenderSnapshot.invoiceNumber = invoiceNumber;
+        if (normalizeObject(invoiceData.pdfRenderSnapshot.renderPayload, null)) {
+          ensureInvoiceNumberInRenderPayload(
+            invoiceData.pdfRenderSnapshot.renderPayload,
+            invoiceNumber
+          );
+        }
+      }
+      if (normalizeObject(invoiceData.calculatedPayloadData, null)) {
+        ensureInvoiceNumberInRenderPayload(
+          invoiceData.calculatedPayloadData,
+          invoiceNumber
+        );
+      }
 
       console.log('=== INVOICE NUMBER HANDLING ===');
       console.log('Attempt:', attempt);
