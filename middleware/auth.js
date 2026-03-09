@@ -149,6 +149,19 @@ class AuthMiddleware {
         );
       }
 
+      // Avoid duplicate token verification when authenticateUser is mounted
+      // multiple times in a single route chain. Reuse auth context for this
+      // request if the same bearer token was already validated.
+      if (
+        req.authContext &&
+        req.authContext.verified === true &&
+        req.authContext.token === token &&
+        req.user &&
+        req.user.userId
+      ) {
+        return next();
+      }
+
       // 1. Try to verify as Firebase ID token first
       try {
         const decodedFirebaseToken = await admin.auth().verifyIdToken(token);
@@ -184,6 +197,12 @@ class AuthMiddleware {
               ip: req.ip,
               path: req.path
             });
+
+            req.authContext = {
+              verified: true,
+              provider: 'firebase',
+              token
+            };
 
             // Reset failed attempts on success
             AuthMiddleware.resetFailedAttempts(req.ip);
@@ -371,6 +390,12 @@ class AuthMiddleware {
         path: req.path,
         userAgent: req.get('User-Agent')
       });
+
+      req.authContext = {
+        verified: true,
+        provider: 'jwt',
+        token
+      };
 
       next();
     } catch (error) {
