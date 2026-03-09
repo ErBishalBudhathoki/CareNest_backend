@@ -286,16 +286,23 @@ class InvoiceManagementService {
       }
 
       let pdfData = null;
+      let source = null;
 
       // Primary: backend-managed artifact in Firebase Storage.
       if (invoice.pdfArtifact && typeof invoice.pdfArtifact === 'object') {
         pdfData = await invoiceArtifactService.downloadPdfAsBase64(invoice.pdfArtifact);
+        if (pdfData) {
+          source = 'artifact_storage';
+        }
 
         // Legacy migration path: older invoices may only have a direct URL.
         if (!pdfData && invoice.pdfArtifact.url) {
           pdfData = await invoiceArtifactService.downloadPdfFromUrlAsBase64(
             invoice.pdfArtifact.url
           );
+          if (pdfData) {
+            source = 'legacy_url_fallback';
+          }
         }
       }
 
@@ -305,6 +312,7 @@ class InvoiceManagementService {
           const bytes = await fs.readFile(invoice.metadata.pdfPath);
           if (bytes?.length) {
             pdfData = bytes.toString('base64');
+            source = 'legacy_pdf_path';
           }
         } catch (error) {
           logger.warn('Failed to read legacy invoice pdfPath', {
@@ -328,7 +336,8 @@ class InvoiceManagementService {
           pdfData,
           filename: `invoice-${invoice.invoiceNumber || invoiceId}.pdf`,
           invoiceNumber: invoice.invoiceNumber,
-          clientName: invoice.clientName
+          clientName: invoice.clientName,
+          source: source || 'unknown',
         }
       };
       
