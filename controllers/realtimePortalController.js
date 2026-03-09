@@ -20,10 +20,10 @@ exports.startTracking = async (req, res) => {
   try {
     const { appointmentId, workerId, clientLocation } = req.body;
 
-    if (!appointmentId || !workerId || !clientLocation) {
+    if (!appointmentId || !workerId) {
       return res.status(400).json({
         success: false,
-        message: 'appointmentId, workerId, and clientLocation are required',
+        message: 'appointmentId and workerId are required',
       });
     }
 
@@ -55,7 +55,7 @@ exports.updateLocation = async (req, res) => {
   try {
     const { appointmentId, workerId, latitude, longitude, accuracy } = req.body;
 
-    if (!appointmentId || !latitude || !longitude) {
+    if (!appointmentId || latitude == null || longitude == null) {
       return res.status(400).json({
         success: false,
         message: 'appointmentId, latitude, and longitude are required',

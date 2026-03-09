@@ -1,10 +1,11 @@
 /**
  * Real-Time Tracking Service
- * Handles live worker tracking, geofencing, and ETA calculations
+ * Handles live worker tracking, geofencing, and ETA calculations.
+ * Uses MongoDB-backed sessions so tracking works across Cloud Run instances.
  */
 
-// In-memory storage for demo (use Redis in production)
-const activeTracking = new Map();
+const RealtimeTrackingSession = require('../models/RealtimeTrackingSession');
+
 const geofenceStates = new Map();
 
 const toNumberOrNull = (value) => {
@@ -36,27 +37,39 @@ exports.startTrackingSession = async (params) => {
   const { appointmentId, workerId, clientLocation } = params;
   const normalizedClientLocation = normalizeCoordinatePoint(clientLocation);
 
-  if (!normalizedClientLocation) {
-    throw new Error('Invalid clientLocation. Expected lat/lng or latitude/longitude.');
-  }
-
-  const session = {
-    appointmentId,
-    workerId,
-    clientLocation: normalizedClientLocation,
-    startTime: new Date(),
-    status: 'active',
-    locations: [],
-    geofenceRadius: 100, // meters
-    insideGeofence: false,
-  };
-
-  activeTracking.set(appointmentId, session);
+  const now = new Date();
+  await RealtimeTrackingSession.findOneAndUpdate(
+    { appointmentId: appointmentId.toString().trim() },
+    {
+      $set: {
+        appointmentId: appointmentId.toString().trim(),
+        workerId: workerId.toString().trim(),
+        clientLocation: normalizedClientLocation || null,
+        startTime: now,
+        endTime: null,
+        status: 'active',
+        locations: [],
+        geofenceRadius: 100,
+        insideGeofence: false,
+        arrivalTime: null,
+        departureTime: null,
+        lastUpdate: null,
+        progress: 0,
+        notes: '',
+        statusHistory: [],
+      },
+    },
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    }
+  );
 
   return {
     sessionId: appointmentId,
     status: 'started',
-    startTime: session.startTime,
+    startTime: now,
   };
 };
 
@@ -67,41 +80,70 @@ exports.startTrackingSession = async (params) => {
  */
 exports.updateWorkerLocation = async (params) => {
   const { appointmentId, workerId, latitude, longitude, accuracy, timestamp } = params;
+  const parsedLatitude = toNumberOrNull(latitude);
+  const parsedLongitude = toNumberOrNull(longitude);
+  const parsedAccuracy = toNumberOrNull(accuracy) ?? 10;
 
-  const session = activeTracking.get(appointmentId);
+  if (parsedLatitude == null || parsedLongitude == null) {
+    throw new Error('Invalid latitude/longitude values');
+  }
+
+  const normalizedAppointmentId = appointmentId.toString().trim();
+  const updateTime = timestamp ? new Date(timestamp) : new Date();
+
+  let session = await RealtimeTrackingSession.findOne({
+    appointmentId: normalizedAppointmentId,
+    status: 'active',
+  });
+
   if (!session) {
-    throw new Error('No active tracking session found');
+    session = await RealtimeTrackingSession.create({
+      appointmentId: normalizedAppointmentId,
+      workerId: (workerId || '').toString().trim() || 'unknown-worker',
+      clientLocation: null,
+      startTime: updateTime,
+      status: 'active',
+      locations: [],
+      geofenceRadius: 100,
+      insideGeofence: false,
+    });
   }
 
   const locationUpdate = {
-    latitude,
-    longitude,
-    accuracy,
-    timestamp,
+    latitude: parsedLatitude,
+    longitude: parsedLongitude,
+    accuracy: parsedAccuracy,
+    timestamp: updateTime,
   };
 
-  session.locations.push(locationUpdate);
-  session.lastUpdate = timestamp;
+  session.locations = [...(session.locations || []), locationUpdate];
+  session.lastUpdate = updateTime;
 
-  // Calculate distance to client
-  const distance = calculateDistance(
-    { lat: latitude, lng: longitude },
-    session.clientLocation
-  );
+  let distance = NaN;
+  if (
+    session.clientLocation &&
+    Number.isFinite(session.clientLocation.lat) &&
+    Number.isFinite(session.clientLocation.lng)
+  ) {
+    distance = calculateDistance(
+      { lat: parsedLatitude, lng: parsedLongitude },
+      session.clientLocation
+    );
+  }
 
-  // Calculate ETA (simple calculation, can be enhanced with traffic data)
-  const eta = Number.isFinite(distance) ? calculateETA(distance, session.locations) : null;
+  const eta = Number.isFinite(distance)
+    ? calculateETA(distance, session.locations || [])
+    : null;
 
-  // Update session
-  activeTracking.set(appointmentId, session);
+  await session.save();
 
   return {
-    appointmentId,
+    appointmentId: normalizedAppointmentId,
     workerId: session.workerId,
-    latitude,
-    longitude,
-    accuracy,
-    timestamp,
+    latitude: parsedLatitude,
+    longitude: parsedLongitude,
+    accuracy: parsedAccuracy,
+    timestamp: updateTime,
     distance: Number.isFinite(distance) ? Math.round(distance) : null,
     eta,
     status: session.status,
@@ -116,16 +158,34 @@ exports.updateWorkerLocation = async (params) => {
 exports.checkGeofence = async (params) => {
   const { appointmentId, latitude, longitude } = params;
 
-  const session = activeTracking.get(appointmentId);
+  const normalizedAppointmentId = appointmentId.toString().trim();
+  const session = await RealtimeTrackingSession.findOne({
+    appointmentId: normalizedAppointmentId,
+    status: 'active',
+  });
+
   if (!session) {
     return { triggered: false };
+  }
+
+  if (
+    !session.clientLocation ||
+    !Number.isFinite(session.clientLocation.lat) ||
+    !Number.isFinite(session.clientLocation.lng)
+  ) {
+    return {
+      triggered: false,
+      distance: null,
+      insideGeofence: Boolean(session.insideGeofence),
+      approaching: false,
+    };
   }
 
   const distance = calculateDistance(
     { lat: latitude, lng: longitude },
     session.clientLocation
   );
-  const previousState = geofenceStates.get(appointmentId) || {
+  const previousState = geofenceStates.get(normalizedAppointmentId) || {
     insideGeofence: false,
     approaching: false,
   };
@@ -168,8 +228,8 @@ exports.checkGeofence = async (params) => {
     session.departureTime = new Date();
   }
 
-  geofenceStates.set(appointmentId, previousState);
-  activeTracking.set(appointmentId, session);
+  geofenceStates.set(normalizedAppointmentId, previousState);
+  await session.save();
 
   return {
     triggered,
@@ -188,7 +248,12 @@ exports.checkGeofence = async (params) => {
 exports.updateAppointmentStatus = async (params) => {
   const { appointmentId, workerId, status, progress, notes, timestamp } = params;
 
-  const session = activeTracking.get(appointmentId);
+  const normalizedAppointmentId = appointmentId.toString().trim();
+  const session = await RealtimeTrackingSession.findOne({
+    appointmentId: normalizedAppointmentId,
+    status: 'active',
+  });
+
   if (!session) {
     throw new Error('No active tracking session found');
   }
@@ -196,7 +261,7 @@ exports.updateAppointmentStatus = async (params) => {
   session.status = status;
   session.progress = progress || 0;
   session.notes = notes || '';
-  session.lastStatusUpdate = timestamp;
+  session.lastStatusUpdate = timestamp ? new Date(timestamp) : new Date();
 
   // Track status history
   if (!session.statusHistory) {
@@ -206,13 +271,13 @@ exports.updateAppointmentStatus = async (params) => {
     status,
     progress,
     notes,
-    timestamp,
+    timestamp: timestamp ? new Date(timestamp) : new Date(),
   });
 
-  activeTracking.set(appointmentId, session);
+  await session.save();
 
   return {
-    appointmentId,
+    appointmentId: normalizedAppointmentId,
     status,
     progress,
     notes,
@@ -228,7 +293,12 @@ exports.updateAppointmentStatus = async (params) => {
 exports.stopTrackingSession = async (params) => {
   const { appointmentId } = params;
 
-  const session = activeTracking.get(appointmentId);
+  const normalizedAppointmentId = appointmentId.toString().trim();
+  const session = await RealtimeTrackingSession.findOne({
+    appointmentId: normalizedAppointmentId,
+    status: 'active',
+  });
+
   if (!session) {
     throw new Error('No active tracking session found');
   }
@@ -241,7 +311,7 @@ exports.stopTrackingSession = async (params) => {
   const totalDistance = calculateTotalDistance(session.locations);
 
   const summary = {
-    appointmentId,
+    appointmentId: normalizedAppointmentId,
     workerId: session.workerId,
     startTime: session.startTime,
     endTime: session.endTime,
@@ -253,9 +323,8 @@ exports.stopTrackingSession = async (params) => {
     departureTime: session.departureTime,
   };
 
-  // Remove from active tracking
-  activeTracking.delete(appointmentId);
-  geofenceStates.delete(appointmentId);
+  await session.save();
+  geofenceStates.delete(normalizedAppointmentId);
 
   return summary;
 };
@@ -266,29 +335,42 @@ exports.stopTrackingSession = async (params) => {
  * @returns {Object} Live tracking data
  */
 exports.getLiveTrackingData = async (appointmentId) => {
-  const session = activeTracking.get(appointmentId);
+  const normalizedAppointmentId = appointmentId.toString().trim();
+  const session = await RealtimeTrackingSession.findOne({
+    appointmentId: normalizedAppointmentId,
+    status: 'active',
+  });
+
   if (!session) {
     return null;
   }
 
-  const lastLocation = session.locations[session.locations.length - 1];
+  const locations = Array.isArray(session.locations) ? session.locations : [];
+  const lastLocation = locations[locations.length - 1];
   if (!lastLocation) {
     return {
-      appointmentId,
+      appointmentId: normalizedAppointmentId,
       status: session.status,
       tracking: false,
     };
   }
 
-  const distance = calculateDistance(
-    { lat: lastLocation.latitude, lng: lastLocation.longitude },
-    session.clientLocation
-  );
+  let distance = NaN;
+  if (
+    session.clientLocation &&
+    Number.isFinite(session.clientLocation.lat) &&
+    Number.isFinite(session.clientLocation.lng)
+  ) {
+    distance = calculateDistance(
+      { lat: lastLocation.latitude, lng: lastLocation.longitude },
+      session.clientLocation
+    );
+  }
 
-  const eta = Number.isFinite(distance) ? calculateETA(distance, session.locations) : null;
+  const eta = Number.isFinite(distance) ? calculateETA(distance, locations) : null;
 
   return {
-    appointmentId,
+    appointmentId: normalizedAppointmentId,
     workerId: session.workerId,
     status: session.status,
     progress: session.progress || 0,
