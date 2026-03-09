@@ -9,8 +9,10 @@ const Organization = require('../models/Organization');
 const Client = require('../models/Client');
 const AuditTrail = require('../models/AuditTrail');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
+const { invoiceArtifactService } = require('./invoiceArtifactService');
 const logger = require('../config/logger');
 const crypto = require('crypto');
+const fs = require('fs').promises;
 
 class InvoiceManagementService {
   _sanitizeAlphaNumeric(value = '') {
@@ -282,21 +284,48 @@ class InvoiceManagementService {
           error: 'Invoice not found or access denied'
         };
       }
-      
-      // Check if PDF path exists
-      const pdfPath = invoice.metadata?.pdfPath;
-      if (!pdfPath) {
+
+      let pdfData = null;
+
+      // Primary: backend-managed artifact in Firebase Storage.
+      if (invoice.pdfArtifact && typeof invoice.pdfArtifact === 'object') {
+        pdfData = await invoiceArtifactService.downloadPdfAsBase64(invoice.pdfArtifact);
+
+        // Legacy migration path: older invoices may only have a direct URL.
+        if (!pdfData && invoice.pdfArtifact.url) {
+          pdfData = await invoiceArtifactService.downloadPdfFromUrlAsBase64(
+            invoice.pdfArtifact.url
+          );
+        }
+      }
+
+      // Last fallback for legacy server-local artifacts.
+      if (!pdfData && invoice.metadata?.pdfPath) {
+        try {
+          const bytes = await fs.readFile(invoice.metadata.pdfPath);
+          if (bytes?.length) {
+            pdfData = bytes.toString('base64');
+          }
+        } catch (error) {
+          logger.warn('Failed to read legacy invoice pdfPath', {
+            invoiceId: String(invoiceId),
+            pdfPath: invoice.metadata.pdfPath,
+            error: error.message,
+          });
+        }
+      }
+
+      if (!pdfData) {
         return {
           success: false,
           error: 'PDF not available for this invoice'
         };
       }
-      
-      // Return PDF metadata
+
       return {
         success: true,
         data: {
-          pdfPath: pdfPath,
+          pdfData,
           filename: `invoice-${invoice.invoiceNumber || invoiceId}.pdf`,
           invoiceNumber: invoice.invoiceNumber,
           clientName: invoice.clientName
@@ -309,6 +338,84 @@ class InvoiceManagementService {
         success: false,
         error: 'Failed to retrieve invoice PDF',
         details: error.message
+      };
+    }
+  }
+
+  async attachPdfArtifact(invoiceId, organizationId, artifact) {
+    try {
+      if (!artifact || typeof artifact !== 'object') {
+        return {
+          success: false,
+          error: 'Invalid invoice artifact payload'
+        };
+      }
+
+      const update = {
+        pdfArtifact: artifact,
+        'metadata.pdfArtifactUrl': artifact.url || artifact.gsUri || null,
+        'auditTrail.updatedAt': new Date(),
+      };
+
+      const invoice = await Invoice.findOneAndUpdate(
+        {
+          _id: invoiceId,
+          organizationId,
+          'deletion.isDeleted': { $ne: true },
+        },
+        {
+          $set: update,
+          $push: {
+            'auditTrail.changeHistory': {
+              timestamp: new Date(),
+              userId: 'system',
+              action: 'pdf_artifact_attached',
+              changes: {
+                provider: artifact.provider || 'firebase_storage',
+                bucket: artifact.bucket || '',
+                path: artifact.path || '',
+              },
+              reason: 'Stored immutable invoice PDF artifact',
+            },
+          },
+        },
+        {
+          returnDocument: 'after',
+        }
+      );
+
+      if (!invoice) {
+        return {
+          success: false,
+          error: 'Invoice not found for artifact update',
+        };
+      }
+
+      // Keep immutable snapshot source context in sync where possible.
+      if (invoice.pdfRenderSnapshot && typeof invoice.pdfRenderSnapshot === 'object') {
+        const nextSnapshot = {
+          ...invoice.pdfRenderSnapshot,
+          sourceContext: {
+            ...(invoice.pdfRenderSnapshot.sourceContext || {}),
+            pdfArtifact: artifact,
+          },
+        };
+
+        await Invoice.updateOne(
+          { _id: invoiceId, organizationId },
+          { $set: { pdfRenderSnapshot: nextSnapshot } }
+        );
+      }
+
+      return {
+        success: true,
+        data: invoice,
+      };
+    } catch (error) {
+      logger.error('Error attaching invoice PDF artifact:', error);
+      return {
+        success: false,
+        error: error.message,
       };
     }
   }

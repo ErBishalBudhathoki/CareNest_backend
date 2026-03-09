@@ -5,6 +5,7 @@
  */
 
 const { InvoiceManagementService: invoiceManagementService } = require('../services/invoiceManagementService');
+const { invoiceArtifactService } = require('../services/invoiceArtifactService');
 const logger = require('../config/logger');
 
 // Service is already instantiated in the module export
@@ -537,8 +538,12 @@ function isDuplicateInvoiceNumberError(result = {}) {
  */
 async function createInvoice(req, res) {
   try {
+    const requestBodyForLog = { ...(req.body || {}) };
+    if (typeof requestBodyForLog.pdfBase64 === 'string') {
+      requestBodyForLog.pdfBase64 = `[base64:${requestBodyForLog.pdfBase64.length} chars]`;
+    }
     console.log('=== CREATE INVOICE REQUEST ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('Request body:', JSON.stringify(requestBodyForLog, null, 2));
     console.log('Request headers:', req.headers);
 
     const {
@@ -556,6 +561,7 @@ async function createInvoice(req, res) {
       pdfGenerationParams,
       pdfRenderSnapshot,
       pdfArtifact,
+      pdfBase64,
       invoiceNumber: providedInvoiceNumber,
       invoiceType,
       issuer,
@@ -787,6 +793,48 @@ async function createInvoice(req, res) {
     }
 
     if (result.success) {
+      const resolvedArtifactPayload = normalizeObject(pdfArtifact, null);
+      const hasBackendUploadPayload =
+        typeof pdfBase64 === 'string' && pdfBase64.trim().length > 0;
+      const hasClientArtifactOnly = resolvedArtifactPayload && !hasBackendUploadPayload;
+
+      if (hasBackendUploadPayload || hasClientArtifactOnly) {
+        try {
+          let artifactToPersist = resolvedArtifactPayload;
+
+          if (hasBackendUploadPayload) {
+            artifactToPersist = await invoiceArtifactService.uploadPdfBase64({
+              pdfBase64,
+              organizationId,
+              clientEmail,
+              invoiceNumber: result.data.invoiceNumber,
+            });
+          }
+
+          if (artifactToPersist) {
+            const attachResult = await invoiceManagementService.attachPdfArtifact(
+              result.data._id,
+              organizationId,
+              artifactToPersist
+            );
+
+            if (!attachResult.success) {
+              logger.warn('Invoice created but failed to attach PDF artifact', {
+                invoiceId: result.data._id,
+                organizationId,
+                reason: attachResult.error,
+              });
+            }
+          }
+        } catch (artifactError) {
+          logger.warn('Invoice created but PDF artifact upload failed', {
+            invoiceId: result.data._id,
+            organizationId,
+            error: artifactError.message,
+          });
+        }
+      }
+
       logger.info('Invoice created successfully', {
         invoiceId: result.data._id,
         invoiceNumber: result.data.invoiceNumber,
