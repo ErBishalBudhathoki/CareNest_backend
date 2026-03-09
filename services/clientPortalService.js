@@ -12,6 +12,7 @@ const {
   buildChatWindow,
   getChatWindowClosedMessage,
   toShiftDateTime,
+  ENFORCE_SHIFT_CHAT_WINDOW,
 } = require('./chatWindowPolicy');
 
 const DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS = 800;
@@ -592,7 +593,7 @@ class ClientPortalService {
       endAt: appointment.endAt,
       now: new Date(),
     });
-    if (!chatWindow.isOpen) {
+    if (ENFORCE_SHIFT_CHAT_WINDOW && !chatWindow.isOpen) {
       throw createHttpError(403, getChatWindowClosedMessage());
     }
 
