@@ -108,6 +108,32 @@ const safeIso = (value) => {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
+const calculateDistanceMeters = (pointA, pointB) => {
+  if (
+    !pointA ||
+    !pointB ||
+    !Number.isFinite(pointA.lat) ||
+    !Number.isFinite(pointA.lng) ||
+    !Number.isFinite(pointB.lat) ||
+    !Number.isFinite(pointB.lng)
+  ) {
+    return null;
+  }
+
+  const earthRadius = 6371e3;
+  const phi1 = (pointA.lat * Math.PI) / 180;
+  const phi2 = (pointB.lat * Math.PI) / 180;
+  const deltaPhi = ((pointB.lat - pointA.lat) * Math.PI) / 180;
+  const deltaLambda = ((pointB.lng - pointA.lng) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadius * c;
+};
+
 const buildClientName = (clientDoc, fallbackEmail) => {
   if (!clientDoc) return fallbackEmail || 'Client';
   const first = (clientDoc.clientFirstName || '').toString().trim();
@@ -466,10 +492,17 @@ class ClientPortalService {
 
     const liveTracking = await realtimeTrackingService.getLiveTrackingData(appointmentId);
 
-    if (!liveTracking || !liveTracking.tracking || !liveTracking.currentLocation) {
+    if (!liveTracking) {
       return {
         success: false,
         message: 'Worker location is unavailable until tracking is started by the worker.',
+      };
+    }
+
+    if (!liveTracking.tracking || !liveTracking.currentLocation) {
+      return {
+        success: false,
+        message: 'Tracking is active, but waiting for the worker\'s first GPS update.',
       };
     }
 
@@ -500,9 +533,28 @@ class ClientPortalService {
       100
     );
 
+    const geofenceLatitude = Number(geofence?.coordinates?.latitude);
+    const geofenceLongitude = Number(geofence?.coordinates?.longitude);
+
+    const distanceFromClientAreaMeters = Number.isFinite(geofenceLatitude) &&
+      Number.isFinite(geofenceLongitude)
+      ? calculateDistanceMeters(
+          {
+            lat: Number(liveTracking.currentLocation.latitude),
+            lng: Number(liveTracking.currentLocation.longitude),
+          },
+          {
+            lat: geofenceLatitude,
+            lng: geofenceLongitude,
+          }
+        )
+      : (typeof liveTracking.distance === 'number' ? liveTracking.distance : null);
+
     const isInsideVisibilityRegion =
       liveTracking.insideGeofence === true ||
-      (typeof liveTracking.distance === 'number' && liveTracking.distance <= visibilityRadius);
+      (typeof distanceFromClientAreaMeters === 'number' &&
+        distanceFromClientAreaMeters <= visibilityRadius) ||
+      (!geofence && typeof distanceFromClientAreaMeters !== 'number');
 
     if (!isInsideVisibilityRegion) {
       return {
@@ -512,7 +564,7 @@ class ClientPortalService {
         data: {
           appointmentId,
           trackingAvailable: false,
-          distanceRemaining: liveTracking.distance,
+          distanceRemaining: distanceFromClientAreaMeters,
         },
       };
     }
@@ -531,8 +583,8 @@ class ClientPortalService {
           ? `${liveTracking.eta} minutes`
           : null,
       distanceRemaining:
-        typeof liveTracking.distance === 'number'
-          ? Number((liveTracking.distance / 1000).toFixed(2))
+        typeof distanceFromClientAreaMeters === 'number'
+          ? Number((distanceFromClientAreaMeters / 1000).toFixed(2))
           : null,
       lastUpdated:
         safeIso(liveTracking.lastUpdate) || new Date().toISOString(),
