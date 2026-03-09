@@ -163,12 +163,20 @@ async function shareInvoice(req, res) {
       }
 
       // Return PDF data as base64
+      logger.info('Invoice PDF share source resolved', {
+        invoiceId,
+        organizationId,
+        source: result?.data?.source || 'unknown',
+        event: 'invoice_pdf_source_resolved',
+      });
+
       return res.json({
         success: true,
         data: {
           pdfData: result.data.pdfData,
           filename: result.data.filename || `invoice-${invoiceId}.pdf`,
-          mimeType: 'application/pdf'
+          mimeType: 'application/pdf',
+          source: result.data.source || 'unknown',
         }
       });
     }
