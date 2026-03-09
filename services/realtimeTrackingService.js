@@ -28,6 +28,59 @@ const normalizeCoordinatePoint = (point) => {
   return { lat, lng };
 };
 
+const buildLiveTrackingFromSession = (session, appointmentIdOverride = null) => {
+  if (!session) return null;
+
+  const normalizedAppointmentId = (
+    appointmentIdOverride || session.appointmentId || ''
+  )
+    .toString()
+    .trim();
+
+  const locations = Array.isArray(session.locations) ? session.locations : [];
+  const lastLocation = locations[locations.length - 1];
+  if (!lastLocation) {
+    return {
+      appointmentId: normalizedAppointmentId,
+      status: session.status,
+      tracking: false,
+    };
+  }
+
+  let distance = NaN;
+  if (
+    session.clientLocation &&
+    Number.isFinite(session.clientLocation.lat) &&
+    Number.isFinite(session.clientLocation.lng)
+  ) {
+    distance = calculateDistance(
+      { lat: lastLocation.latitude, lng: lastLocation.longitude },
+      session.clientLocation
+    );
+  }
+
+  const eta = Number.isFinite(distance) ? calculateETA(distance, locations) : null;
+
+  return {
+    appointmentId: normalizedAppointmentId,
+    workerId: session.workerId,
+    status: session.status,
+    progress: session.progress || 0,
+    tracking: true,
+    currentLocation: {
+      latitude: lastLocation.latitude,
+      longitude: lastLocation.longitude,
+      accuracy: lastLocation.accuracy,
+      timestamp: lastLocation.timestamp,
+    },
+    clientLocation: session.clientLocation,
+    distance: Number.isFinite(distance) ? Math.round(distance) : null,
+    eta,
+    insideGeofence: session.insideGeofence,
+    lastUpdate: session.lastUpdate,
+  };
+};
+
 /**
  * Start tracking session
  * @param {Object} params - Tracking parameters
@@ -344,49 +397,44 @@ exports.getLiveTrackingData = async (appointmentId) => {
   if (!session) {
     return null;
   }
+  return buildLiveTrackingFromSession(session, normalizedAppointmentId);
+};
 
-  const locations = Array.isArray(session.locations) ? session.locations : [];
-  const lastLocation = locations[locations.length - 1];
-  if (!lastLocation) {
-    return {
-      appointmentId: normalizedAppointmentId,
-      status: session.status,
-      tracking: false,
-    };
+/**
+ * Get the freshest active live tracking for any appointment in the provided list.
+ * @param {String[]} appointmentIds - Candidate appointment IDs.
+ * @returns {Object|null} Live tracking payload or null when unavailable.
+ */
+exports.getLatestLiveTrackingDataForAppointments = async (appointmentIds = []) => {
+  const normalizedIds = [...new Set(
+    (Array.isArray(appointmentIds) ? appointmentIds : [])
+      .map((value) => (value || '').toString().trim())
+      .filter(Boolean)
+  )];
+
+  if (!normalizedIds.length) {
+    return null;
   }
 
-  let distance = NaN;
-  if (
-    session.clientLocation &&
-    Number.isFinite(session.clientLocation.lat) &&
-    Number.isFinite(session.clientLocation.lng)
-  ) {
-    distance = calculateDistance(
-      { lat: lastLocation.latitude, lng: lastLocation.longitude },
-      session.clientLocation
-    );
+  const sessions = await RealtimeTrackingSession.find({
+    appointmentId: { $in: normalizedIds },
+    status: 'active',
+  })
+    .sort({ lastUpdate: -1, updatedAt: -1, createdAt: -1 })
+    .lean();
+
+  for (const session of sessions) {
+    const livePayload = buildLiveTrackingFromSession(session, session.appointmentId);
+    if (livePayload?.tracking === true && livePayload.currentLocation) {
+      return livePayload;
+    }
   }
 
-  const eta = Number.isFinite(distance) ? calculateETA(distance, locations) : null;
-
-  return {
-    appointmentId: normalizedAppointmentId,
-    workerId: session.workerId,
-    status: session.status,
-    progress: session.progress || 0,
-    tracking: true,
-    currentLocation: {
-      latitude: lastLocation.latitude,
-      longitude: lastLocation.longitude,
-      accuracy: lastLocation.accuracy,
-      timestamp: lastLocation.timestamp,
-    },
-    clientLocation: session.clientLocation,
-    distance: Number.isFinite(distance) ? Math.round(distance) : null,
-    eta,
-    insideGeofence: session.insideGeofence,
-    lastUpdate: session.lastUpdate,
-  };
+  // Return the freshest active session even if the first GPS point is not yet available.
+  const firstSession = sessions[0];
+  return firstSession
+    ? buildLiveTrackingFromSession(firstSession, firstSession.appointmentId)
+    : null;
 };
 
 /**
