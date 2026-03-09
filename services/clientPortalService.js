@@ -6,6 +6,7 @@ const WorkedTime = require('../models/WorkedTime');
 const GeofenceLocation = require('../models/GeofenceLocation');
 const ServiceFeedback = require('../models/ServiceFeedback');
 const { Invoice } = require('../models/Invoice');
+const NotificationPreference = require('../models/NotificationPreference');
 const realtimeTrackingService = require('./realtimeTrackingService');
 const messagingService = require('./messagingService');
 const {
@@ -479,8 +480,23 @@ class ClientPortalService {
       .sort({ updatedAt: -1 })
       .lean();
 
+    const workerPreference = await NotificationPreference.findOne({
+      $or: [
+        { userId: (appointment.workerId || '').toString() },
+        { userEmail: normalizeEmail(appointment.workerEmail) },
+      ],
+    }).lean();
+
+    const workerPreferenceRadiusKm = Number(workerPreference?.geofenceRadiusKm);
+    const workerPreferenceRadiusMeters =
+      Number.isFinite(workerPreferenceRadiusKm) && workerPreferenceRadiusKm > 0
+        ? workerPreferenceRadiusKm * 1000
+        : null;
+
     const visibilityRadius = Math.max(
-      geofence?.radius || DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS,
+      workerPreferenceRadiusMeters ||
+        geofence?.radius ||
+        DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS,
       100
     );
 
