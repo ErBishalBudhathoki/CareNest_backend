@@ -488,9 +488,48 @@ class ClientPortalService {
 
   async getWorkerLocation(appointmentId, authUser) {
     const clientContext = await this.resolveClientContext({ authUser });
-    const { appointment } = await this.findAppointmentContext(clientContext, appointmentId);
+    const appointmentContext = await this.findAppointmentContext(clientContext, appointmentId);
+    const appointments = appointmentContext.appointments;
+    const appointmentById = new Map(
+      appointments.map((item) => [item.appointmentId, item])
+    );
+    let resolvedAppointment = appointmentContext.appointment;
+    let liveTracking = await realtimeTrackingService.getLiveTrackingData(appointmentId);
 
-    const liveTracking = await realtimeTrackingService.getLiveTrackingData(appointmentId);
+    const hasUsableTracking =
+      liveTracking && liveTracking.tracking === true && !!liveTracking.currentLocation;
+
+    // If the requested appointment is not the actively tracked one, resolve
+    // from the latest active session among this client's known appointments.
+    if (!hasUsableTracking) {
+      const candidateIds = appointments.map((item) => item.appointmentId).filter(Boolean);
+      const candidateTracking =
+        await realtimeTrackingService.getLatestLiveTrackingDataForAppointments(candidateIds);
+      if (candidateTracking) {
+        liveTracking = candidateTracking;
+      }
+    }
+
+    if (liveTracking?.appointmentId) {
+      resolvedAppointment =
+        appointmentById.get(liveTracking.appointmentId) || resolvedAppointment;
+    }
+
+    // Fallback: match by worker identifier token if appointment IDs diverge.
+    if (liveTracking?.workerId) {
+      const trackingWorkerToken = (liveTracking.workerId || '').toString().trim().toLowerCase();
+      const byWorker = appointments.find((item) => {
+        const tokens = [
+          (item.workerId || '').toString().trim().toLowerCase(),
+          normalizeEmail(item.workerEmail),
+          normalizeEmail(item.userEmail),
+        ].filter(Boolean);
+        return tokens.includes(trackingWorkerToken);
+      });
+      if (byWorker) {
+        resolvedAppointment = byWorker;
+      }
+    }
 
     if (!liveTracking) {
       return {
@@ -515,8 +554,8 @@ class ClientPortalService {
 
     const workerPreference = await NotificationPreference.findOne({
       $or: [
-        { userId: (appointment.workerId || '').toString() },
-        { userEmail: normalizeEmail(appointment.workerEmail) },
+        { userId: (resolvedAppointment.workerId || '').toString() },
+        { userEmail: normalizeEmail(resolvedAppointment.workerEmail) },
       ],
     }).lean();
 
@@ -575,7 +614,7 @@ class ClientPortalService {
         message:
           'Location is hidden until your worker enters your service area geofence.',
         data: {
-          appointmentId,
+          appointmentId: resolvedAppointment.appointmentId || appointmentId,
           trackingAvailable: false,
           distanceRemaining: distanceFromClientAreaMeters,
         },
@@ -583,8 +622,8 @@ class ClientPortalService {
     }
 
     const location = {
-      appointmentId,
-      workerName: appointment.workerName,
+      appointmentId: resolvedAppointment.appointmentId || appointmentId,
+      workerName: resolvedAppointment.workerName,
       latitude: liveTracking.currentLocation.latitude,
       longitude: liveTracking.currentLocation.longitude,
       accuracy: liveTracking.currentLocation.accuracy || 10,
