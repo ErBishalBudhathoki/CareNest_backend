@@ -134,6 +134,13 @@ const calculateDistanceMeters = (pointA, pointB) => {
   return earthRadius * c;
 };
 
+const estimateEtaMinutesFromDistance = (distanceMeters, averageSpeedKmh = 40) => {
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return null;
+  if (!Number.isFinite(averageSpeedKmh) || averageSpeedKmh <= 0) return null;
+  const etaMinutes = Math.round((distanceMeters / 1000 / averageSpeedKmh) * 60);
+  return Math.max(1, etaMinutes);
+};
+
 const buildClientName = (clientDoc, fallbackEmail) => {
   if (!clientDoc) return fallbackEmail || 'Client';
   const first = (clientDoc.clientFirstName || '').toString().trim();
@@ -601,6 +608,10 @@ class ClientPortalService {
           }
         )
       : (typeof liveTracking.distance === 'number' ? liveTracking.distance : null);
+    const etaMinutes =
+      typeof liveTracking.eta === 'number'
+        ? liveTracking.eta
+        : estimateEtaMinutesFromDistance(distanceFromClientAreaMeters);
 
     const isInsideVisibilityRegion =
       liveTracking.insideGeofence === true ||
@@ -631,8 +642,8 @@ class ClientPortalService {
         safeIso(liveTracking.currentLocation.timestamp) || new Date().toISOString(),
       isEnRoute: !liveTracking.insideGeofence,
       eta:
-        typeof liveTracking.eta === 'number'
-          ? `${liveTracking.eta} minutes`
+        typeof etaMinutes === 'number'
+          ? `${etaMinutes} minutes`
           : null,
       distanceRemaining:
         typeof distanceFromClientAreaMeters === 'number'
