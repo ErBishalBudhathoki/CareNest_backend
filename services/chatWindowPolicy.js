@@ -1,6 +1,7 @@
 const CHAT_WINDOW_BUFFER_HOURS = 2;
 const CHAT_WINDOW_BUFFER_MS = CHAT_WINDOW_BUFFER_HOURS * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const ENFORCE_SHIFT_CHAT_WINDOW = process.env.ENFORCE_SHIFT_CHAT_WINDOW === 'true';
 
 const normalizeTimeString = (timeValue) => {
   const raw = (timeValue || '').toString().trim();
@@ -167,6 +168,7 @@ const getChatWindowClosedMessage = () =>
 module.exports = {
   CHAT_WINDOW_BUFFER_HOURS,
   CHAT_WINDOW_BUFFER_MS,
+  ENFORCE_SHIFT_CHAT_WINDOW,
   normalizeTimeString,
   toShiftDateTime,
   buildChatWindow,
