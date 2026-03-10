@@ -272,6 +272,29 @@ class RequestService {
       }
     }
 
+    if (status === 'Approved' && originalRequest.type === 'ACCOUNT_DELETION') {
+      try {
+        const targetUserId = originalRequest.userId;
+        const targetUser = await User.findById(targetUserId);
+        if (targetUser) {
+          targetUser.isActive = false;
+          targetUser.isDeleted = true;
+          const scheduledDate = new Date();
+          scheduledDate.setDate(scheduledDate.getDate() + 90);
+          targetUser.deletionScheduledAt = scheduledDate;
+          
+          // Clear current sessions/tokens if any
+          targetUser.refreshTokens = [];
+          
+          await targetUser.save();
+          console.log(`Account deletion scheduled for user ${targetUserId} in 90 days`);
+        }
+      } catch (err) {
+        console.error('Failed to schedule account deletion', err);
+        throw new Error(`Failed to schedule account deletion: ${err.message}`);
+      }
+    }
+
     let finalStatus = status;
     let unsetFields = {};
 
