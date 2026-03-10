@@ -55,6 +55,13 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletionScheduledAt: {
+    type: Date
+  },
   roles: {
     type: [String],
     default: []
