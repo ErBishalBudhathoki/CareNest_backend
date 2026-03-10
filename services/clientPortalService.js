@@ -867,7 +867,8 @@ class ClientPortalService {
     const history = completedAppointments.slice(0, parsedLimit).map((appt) => {
       const feedback = feedbackByAppointmentId.get(appt.appointmentId);
       return {
-        serviceId: `${appt.assignmentId}_${appt.scheduleId}`,
+        serviceId: appt.appointmentId,
+        appointmentId: appt.appointmentId,
         workerName: appt.workerName,
         serviceName: appt.serviceName,
         date: appt.date,
