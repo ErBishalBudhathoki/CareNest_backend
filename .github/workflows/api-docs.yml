@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: '22'
 
 jobs:
   validate-openapi:
@@ -33,7 +33,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install tools
         run: npm install -g @apidevtools/swagger-cli @stoplight/spectral-cli
@@ -42,7 +42,7 @@ jobs:
         run: swagger-cli validate docs/api/openapi.yaml
 
       - name: Lint spec
-        run: spectral lint docs/api/openapi.yaml --ruleset https://raw.githubusercontent.com/stoplightio/spectral/develop/rulesets/oas/index.json
+        run: spectral lint docs/api/openapi.yaml --ruleset spectral:oas
 
   postman-smoke:
     name: Postman Smoke (Optional)
@@ -55,7 +55,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Newman
         run: npm install -g newman
