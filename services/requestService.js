@@ -184,7 +184,62 @@ class RequestService {
     if (filters.status) query.status = filters.status;
     if (filters.type) query.type = filters.type;
 
-    return await Request.find(query).sort({ createdAt: -1 });
+    const requests = await Request.find(query).sort({ createdAt: -1 }).lean();
+
+    if (!requests.length) {
+      return requests;
+    }
+
+    const userIdSet = new Set();
+    const emailSet = new Set();
+
+    for (const request of requests) {
+      const rawUserId = request.userId;
+      if (rawUserId && mongoose.Types.ObjectId.isValid(rawUserId)) {
+        userIdSet.add(rawUserId.toString());
+      } else if (typeof rawUserId === 'string' && rawUserId.includes('@')) {
+        emailSet.add(rawUserId.toLowerCase());
+      }
+
+      if (typeof request.createdBy === 'string' && request.createdBy.includes('@')) {
+        emailSet.add(request.createdBy.toLowerCase());
+      }
+    }
+
+    const userDocs = await User.find({
+      $or: [
+        ...(userIdSet.size
+          ? [{ _id: { $in: Array.from(userIdSet) } }]
+          : []),
+        ...(emailSet.size ? [{ email: { $in: Array.from(emailSet) } }] : [])
+      ]
+    }).select('firstName lastName email');
+
+    const userById = new Map();
+    const userByEmail = new Map();
+    for (const user of userDocs) {
+      const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+      if (user._id) {
+        userById.set(user._id.toString(), fullName || user.email);
+      }
+      if (user.email) {
+        userByEmail.set(user.email.toLowerCase(), fullName || user.email);
+      }
+    }
+
+    return requests.map((request) => {
+      const createdByEmail = request.createdBy?.toString().toLowerCase();
+      const requesterName =
+        (createdByEmail && userByEmail.get(createdByEmail)) ||
+        userById.get(request.userId?.toString()) ||
+        (typeof request.userId === 'string' && request.userId.includes('@')
+          ? userByEmail.get(request.userId.toLowerCase())
+          : null);
+
+      return requesterName
+        ? { ...request, requesterName }
+        : request;
+    });
   }
 
   async claimRequest(requestId, claimantId, claimantName, claimantEmail) {
