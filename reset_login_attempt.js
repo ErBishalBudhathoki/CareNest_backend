@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Reset Login Attempts Script
  * 
