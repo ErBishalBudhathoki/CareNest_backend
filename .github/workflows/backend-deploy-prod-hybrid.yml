@@ -33,6 +33,7 @@ env:
   GCP_PROJECT_ID: 'carenest-prod'  # Prod project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-prod'
   CLOUD_RUN_SERVICE_ACCOUNT: 'carenest-prod@appspot.gserviceaccount.com'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # Enhanced Security Checks for Production
