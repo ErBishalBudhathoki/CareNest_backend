@@ -31,6 +31,7 @@ env:
   GCP_PROJECT_ID: 'invoice-660f3'  # Dev project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-dev'
   CLOUD_RUN_SERVICE_ACCOUNT: 'invoice-660f3@appspot.gserviceaccount.com'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # Security and Quality Checks
