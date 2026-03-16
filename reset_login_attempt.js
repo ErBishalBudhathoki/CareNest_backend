@@ -1,87 +1,74 @@
 #!/usr/bin/env node
+
 /**
- * Reset Login Attempts Script
+ * Script to reset login attempts for a specific user.
  * 
- * This script resets login attempts for users who are locked out due to too many failed login attempts.
- * It can reset attempts for a specific user by email or reset all locked accounts.
+ * Usage: node backend/reset_login_attempt.js <email>
  */
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
-// Get command line arguments
-const args = process.argv.slice(2);
-const email = args[0]; // Optional: specific user email to reset
-const resetAll = args.includes('--all');
-
-// MongoDB connection URI
 const uri = process.env.MONGODB_URI;
+const dbName = process.env.DB_NAME || process.env.MONGODB_DATABASE || 'Invoice';
 
-async function resetLoginAttempts() {
-  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1, tls: true, family: 4 });
+async function resetAttempt() {
+  const emailArg = process.argv[2];
+  if (!emailArg) {
+    console.error('Usage: node backend/reset_login_attempt.js <email>');
+    process.exit(1);
+  }
+
+  const email = emailArg.toLowerCase().trim();
+
+  if (!uri) {
+    console.error('Error: MONGODB_URI not found in .env');
+    process.exit(1);
+  }
+
+  const client = new MongoClient(uri, { tls: true, family: 4 });
   
   try {
     await client.connect();
-    console.log('Connected to MongoDB');
+    console.log(`Connected to MongoDB. Database: ${dbName}`);
     
-    const db = client.db('Invoice');
-    const usersCollection = db.collection('login');
+    const db = client.db(dbName);
     
-    let query = {};
-    let updateResult;
-    
-    if (email && !resetAll) {
-      // Reset for specific user
-      query = { email: email };
-      updateResult = await usersCollection.updateOne(
-        query,
-        { 
-          $set: { 
+    // Check in both collections
+    const collections = ['login', 'users'];
+    let found = false;
+
+    for (const colName of collections) {
+      const collection = db.collection(colName);
+      const result = await collection.updateOne(
+        { email },
+        {
+          $set: {
             loginAttempts: 0,
-            lockUntil: null
+            lockUntil: null,
+            lockedUntil: null,
+            lastFailedLogin: null
           }
         }
       );
-      
-      if (updateResult.matchedCount === 0) {
-        console.log(`No user found with email: ${email}`);
-      } else if (updateResult.modifiedCount === 0) {
-        console.log(`User ${email} found but no changes were needed`);
-      } else {
-        console.log(`Successfully reset login attempts for user: ${email}`);
+
+      if (result.matchedCount > 0) {
+        console.log(`✅ Success: Reset attempts for ${email} in '${colName}'`);
+        found = true;
       }
-    } else if (resetAll) {
-      // Reset for all users with login attempts > 0 or lockUntil set
-      query = { 
-        $or: [
-          { loginAttempts: { $gt: 0 } },
-          { lockUntil: { $ne: null } }
-        ]
-      };
-      
-      updateResult = await usersCollection.updateMany(
-        query,
-        { 
-          $set: { 
-            loginAttempts: 0,
-            lockUntil: null
-          }
-        }
-      );
-      
-      console.log(`Reset login attempts for ${updateResult.modifiedCount} users`);
-    } else {
-      console.log('Usage: node reset_login_attempt.js [email] [--all]');
-      console.log('  - Provide an email to reset a specific user');
-      console.log('  - Use --all flag to reset all locked accounts');
     }
+
+    if (!found) {
+      console.log(`❌ Error: User ${email} not found in database.`);
+    }
+
   } catch (error) {
-    console.error('Error resetting login attempts:', error);
+    console.error('Error:', error.message);
+    process.exit(1);
   } finally {
     await client.close();
-    console.log('Disconnected from MongoDB');
   }
 }
 
-resetLoginAttempts();
+resetAttempt();
