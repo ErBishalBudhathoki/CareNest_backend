@@ -43,7 +43,7 @@ jobs:
         run: swagger-cli validate docs/api/openapi.yaml
 
       - name: Lint spec
-        run: spectral lint docs/api/openapi.yaml --ruleset spectral:oas
+        run: spectral lint docs/api/openapi.yaml --ruleset https://unpkg.com/@stoplight/spectral-rulesets@latest/dist/oas/index.json
 
   postman-smoke:
     name: Postman Smoke (Optional)
