@@ -43,7 +43,7 @@ jobs:
         run: swagger-cli validate docs/api/openapi.yaml
 
       - name: Lint spec
-        run: spectral lint docs/api/openapi.yaml
+        run: spectral lint docs/api/openapi.yaml --fail-severity=error
 
   postman-smoke:
     name: Postman Smoke (Optional)
