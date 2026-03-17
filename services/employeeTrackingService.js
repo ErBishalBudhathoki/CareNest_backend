@@ -1,4 +1,4 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const logger = require('../config/logger');
 const uri = process.env.MONGODB_URI;
 
@@ -190,10 +190,25 @@ class EmployeeTrackingService {
       // If no assignments found, get employees directly from login collection
       let employeesFromLogin = [];
       if (assignments.length === 0) {
-        employeesFromLogin = await db.collection("login").find({
-          organizationId: organizationId,
-          isActive: true
-        }).toArray();
+        const organizationObjectId =
+          typeof organizationId === 'string' &&
+          organizationId.length === 24 &&
+          /^[a-f0-9]{24}$/i.test(organizationId)
+            ? new ObjectId(organizationId)
+            : null;
+
+        const loginQuery = organizationObjectId
+          ? {
+              isActive: true,
+              $or: [
+                { organizationId: organizationId },
+                { organizationId: organizationObjectId },
+                { organizationId: organizationId.toString() },
+              ],
+            }
+          : { organizationId: organizationId, isActive: true };
+
+        employeesFromLogin = await db.collection("login").find(loginQuery).toArray();
         
         // Transform login collection data to match assignment structure
         employeesFromLogin.forEach(employee => {
