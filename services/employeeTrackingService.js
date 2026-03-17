@@ -208,7 +208,10 @@ class EmployeeTrackingService {
             }
           : { organizationId: organizationId, isActive: true };
 
-        employeesFromLogin = await db.collection("login").find(loginQuery).toArray();
+        employeesFromLogin = await db.collection("users").find(loginQuery).toArray();
+        if (employeesFromLogin.length === 0) {
+          employeesFromLogin = await db.collection("login").find(loginQuery).toArray();
+        }
         
         // Transform login collection data to match assignment structure
         employeesFromLogin.forEach(employee => {
