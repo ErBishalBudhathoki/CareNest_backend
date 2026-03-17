@@ -12,6 +12,15 @@ const mongoose = require('mongoose');
  * Handles requests for workforce analytics and financial metrics.
  */
 
+const toDateOnlyString = (value) => {
+  if (!value) return '';
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0];
+  }
+  const str = String(value);
+  return str.includes('T') ? str.split('T')[0] : str;
+};
+
 /**
  * Helper to parse duration string to decimal hours
  * Supports "HH:MM:SS" and numeric strings
@@ -63,8 +72,8 @@ const getFinancialMetrics = catchAsync(async (req, res) => {
     endDateTime.setHours(23, 59, 59, 999);
 
     // Extract YYYY-MM-DD part for string comparison against workedTime.shiftDate
-    const startStr = startDate.includes('T') ? startDate.split('T')[0] : startDate;
-    const endStr = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+    const startStr = toDateOnlyString(startDate);
+    const endStr = toDateOnlyString(endDate);
 
     // 1. Revenue (from invoiceLineItems)
     const revenueData = await InvoiceLineItem.aggregate([
@@ -425,8 +434,8 @@ const getReliabilityMetrics = catchAsync(async (req, res) => {
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Extract YYYY-MM-DD part for string comparison against date fields
-    const startStr = startDate.includes('T') ? startDate.split('T')[0] : startDate;
-    const endStr = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+    const startStr = toDateOnlyString(startDate);
+    const endStr = toDateOnlyString(endDate);
 
     // 1. Get All Scheduled Shifts in Range (Past dates only for reliability)
     const scheduledShifts = await ClientAssignment.aggregate([
