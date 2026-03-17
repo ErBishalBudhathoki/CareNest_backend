@@ -37,13 +37,13 @@ jobs:
           node-version: '22'
 
       - name: Install tools
-        run: npm install -g @apidevtools/swagger-cli @stoplight/spectral-cli
+        run: npm install -g @apidevtools/swagger-cli @redocly/cli
 
       - name: Validate spec
         run: swagger-cli validate docs/api/openapi.yaml
 
       - name: Lint spec
-        run: spectral lint docs/api/openapi.yaml --ruleset https://unpkg.com/@stoplight/spectral-rulesets@latest/dist/oas/index.json
+        run: redocly lint docs/api/openapi.yaml
 
   postman-smoke:
     name: Postman Smoke (Optional)
