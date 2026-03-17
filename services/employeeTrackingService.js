@@ -209,6 +209,15 @@ class EmployeeTrackingService {
           : { organizationId: organizationId, isActive: true };
 
         employeesFromLogin = await db.collection("users").find(loginQuery).toArray();
+        if (employeesFromLogin.length > 0) {
+          employeesFromLogin = employeesFromLogin.filter((user) => {
+            const role = (user.role || '').toString().toLowerCase();
+            const roles = Array.isArray(user.roles)
+              ? user.roles.map((r) => r.toString().toLowerCase())
+              : [];
+            return role !== 'client' && !roles.includes('client');
+          });
+        }
         if (employeesFromLogin.length === 0) {
           employeesFromLogin = await db.collection("login").find(loginQuery).toArray();
         }
