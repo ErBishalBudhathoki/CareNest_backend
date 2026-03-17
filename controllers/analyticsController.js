@@ -141,13 +141,13 @@ const getFinancialMetrics = catchAsync(async (req, res) => {
       // Join with Users to get PayRate
       {
         $lookup: {
-          from: 'login',
+          from: 'users',
           localField: 'userEmail',
           foreignField: 'email',
           as: 'user'
         }
       },
-      { $unwind: '$user' },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
 
       // Calculate Hours and Cost
       {
@@ -254,7 +254,7 @@ const getUtilizationMetrics = catchAsync(async (req, res) => {
       },
       {
         $lookup: {
-          from: 'login',
+          from: 'users',
           localField: 'employeeObjId',
           foreignField: '_id',
           as: 'employee'
@@ -388,7 +388,7 @@ const getOvertimeMetrics = catchAsync(async (req, res) => {
       // Lookup User Details
       {
         $lookup: {
-          from: 'login',
+          from: 'users',
           localField: '_id',
           foreignField: 'email',
           as: 'user'
