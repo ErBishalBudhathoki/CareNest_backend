@@ -321,12 +321,21 @@ class OrganizationService {
         return [];
       }
 
-      return clients.map(client => ({
-        ...client,
-        isActive: !client.deletedAt && client.isActive !== false,
-        isActivated: Boolean(client.isActivated),
-        activationPending: Boolean(client.activationPending)
-      }));
+      return clients.map(client => {
+        const firstName = client.clientFirstName || client.firstName || '';
+        const lastName = client.clientLastName || client.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+        return {
+          ...client,
+          firstName,
+          lastName,
+          name: client.name || fullName || client.clientEmail || client.email || 'Client',
+          email: client.clientEmail || client.email,
+          isActive: !client.deletedAt && client.isActive !== false,
+          isActivated: Boolean(client.isActivated),
+          activationPending: Boolean(client.activationPending)
+        };
+      });
     } catch (error) {
       throw error;
     }
