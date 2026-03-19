@@ -8,7 +8,7 @@ class TeamController {
   // --- Teams ---
 
   create = catchAsync(async (req, res) => {
-    const managerId = req.user.id;
+    const managerId = req.user.userId; // auth middleware sets req.user.userId
     const { name, settings } = req.body;
 
     const team = await Team.create({
@@ -29,7 +29,7 @@ class TeamController {
   });
 
   getMyTeams = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     
     // Find all memberships
     const memberships = await TeamMember.find({ userId }).populate('teamId');
@@ -39,18 +39,10 @@ class TeamController {
       .filter(m => m.teamId) // Ensure populated
       .map(m => m.teamId);
 
-    // TODO: Ideally we should attach member role/status to the team object if needed by frontend
-    // But frontend Team model has 'members' list.
-    // For summary view, basic team info is enough.
-    // We can populate members for each team if needed, but that's heavy.
-    // Let's return teams. The frontend might fetch details later?
-    // Frontend 'Team' model has 'members' list. 
-    // I should populate members for each team.
-    
     const populatedTeams = await Promise.all(teams.map(async (team) => {
-        const members = await TeamMember.find({ teamId: team.id }).populate('userId', 'firstName lastName email profilePic'); // Adjusted populate fields
+        const members = await TeamMember.find({ teamId: team.id }).populate('userId', 'firstName lastName email profilePic');
         const teamObj = team.toJSON();
-        teamObj.members = members; // Attach members
+        teamObj.members = members;
         return teamObj;
     }));
 
@@ -61,11 +53,7 @@ class TeamController {
     const { teamId } = req.params;
     const { email, role } = req.body;
     
-    // Find user by email (assuming User model has email)
-    // Needs User model import if searching by email
-    // For now, assuming we receive userId or skipping email lookup logic implementation details
-    // I'll assume we need to look up User.
-    const User = require('../models/User'); // Lazy import to avoid circular dep if any
+    const User = require('../models/User');
     const user = await User.findOne({ email });
     
     if (!user) {
@@ -97,7 +85,7 @@ class TeamController {
     const matrix = members.map(m => ({
       userId: m.userId ? m.userId.id : null,
       name: m.userId ? `${m.userId.firstName} ${m.userId.lastName}`.trim() : 'Unknown',
-      status: m.availabilitySettings.status,
+      status: m.availabilitySettings ? m.availabilitySettings.status : 'unknown',
       role: m.role,
       profilePic: m.userId ? m.userId.profilePic : null
     }));
@@ -106,7 +94,7 @@ class TeamController {
   });
 
   updateStatus = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const { teamId, status } = req.body;
     
     const member = await TeamMember.findOneAndUpdate(
@@ -122,23 +110,21 @@ class TeamController {
 
   sendBroadcast = catchAsync(async (req, res) => {
     const { teamId, message, type } = req.body;
-    const initiatorId = req.user.id;
+    const initiatorId = req.user.userId;
 
     const broadcast = await EmergencyBroadcast.create({
         teamId,
         initiatorId,
         message,
-        type: type || 'alert', // 'medical', 'fire', etc.
+        type: type || 'alert',
         status: 'active'
     });
-
-    // TODO: Trigger push notifications here via NotificationService
 
     res.status(201).json({ success: true, data: broadcast });
   });
 
   getActiveBroadcasts = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     // Find teams user belongs to
     const memberships = await TeamMember.find({ userId });
     const teamIds = memberships.map(m => m.teamId);
@@ -152,12 +138,12 @@ class TeamController {
   });
 
   acknowledgeBroadcast = catchAsync(async (req, res) => {
-    const { id } = req.params; // broadcastId
-    const userId = req.user.id;
+    const { id } = req.params;
+    const userId = req.user.userId;
 
     const broadcast = await EmergencyBroadcast.findByIdAndUpdate(
         id,
-        { $addToSet: { acknowledgments: userId } }, // Add userId to acknowledgments array (simple schema)
+        { $addToSet: { acknowledgments: userId } },
         { new: true }
     );
 
