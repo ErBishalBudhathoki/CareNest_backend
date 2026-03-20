@@ -30,7 +30,7 @@ env:
   REGION: 'australia-southeast1'
   SERVICE_NAME: 'backend-prod'
   REGISTRY: 'australia-southeast1-docker.pkg.dev'
-  IMAGE_REPOSITORY: 'api'
+  IMAGE_REPOSITORY: 'invoice-backend-repo'
   GCP_PROJECT_ID: 'carenest-prod'  # Prod project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-prod'
   CLOUD_RUN_SERVICE_ACCOUNT: 'carenest-prod@appspot.gserviceaccount.com'
