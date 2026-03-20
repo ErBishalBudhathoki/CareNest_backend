@@ -488,6 +488,9 @@ class VoiceService {
     const missingFields = Array.isArray(agentResult.missingFields)
       ? agentResult.missingFields
       : this._getAssignmentMissingFields(draft);
+    const candidateNdisItems = Array.isArray(agentResult.candidates?.ndisItems)
+      ? agentResult.candidates.ndisItems
+      : [];
 
     if (agentResult.status === 'completed' && missingFields.length === 0) {
       const employeeName = draft.employee?.name || draft.employee?.email || 'employee';
@@ -537,11 +540,15 @@ class VoiceService {
       draft.employee && draft.client
         ? SUPPORTED_ROUTE_TARGETS.assignment_schedule
         : SUPPORTED_ROUTE_TARGETS.assign_c2e;
+    const shouldClarifyInAssistant = this._shouldClarifyInAssistant({
+      missingFields,
+      candidateNdisItems,
+    });
 
     return {
       detectedIntent: 'assignment_manage',
       executed: false,
-      actionType: 'navigate',
+      actionType: shouldClarifyInAssistant ? 'clarify' : 'navigate',
       parameters: {
         missingFields,
         employeeEmail: draft.employee?.email || null,
@@ -550,9 +557,14 @@ class VoiceService {
       responseText:
         String(agentResult.responseText || '').trim() ||
         `I still need ${this._humanizeMissingFields(missingFields)} to finish the assignment.`,
-      suggestedRoute: routeTarget,
+      suggestedRoute: shouldClarifyInAssistant
+        ? SUPPORTED_ROUTE_TARGETS.voice_assistant
+        : routeTarget,
       suggestions: Array.isArray(agentResult.suggestions)
-        ? agentResult.suggestions
+        ? this._mergeAssignmentSuggestions(
+            agentResult.suggestions,
+            candidateNdisItems
+          )
         : this._buildAssignmentSuggestions(missingFields, draft),
       resultData: {
         status: 'pending',
@@ -1002,19 +1014,30 @@ class VoiceService {
     responseParts.push(
       `I still need ${this._humanizeMissingFields(missingFields)} to finish the assignment.`
     );
+    const candidateNdisItems = Array.isArray(supportResolution?.matches)
+      ? supportResolution.matches
+      : [];
+    const shouldClarifyInAssistant = this._shouldClarifyInAssistant({
+      missingFields,
+      candidateNdisItems,
+    });
 
     return {
       detectedIntent: 'assignment_manage',
       executed: false,
-      actionType: 'navigate',
+      actionType: shouldClarifyInAssistant ? 'clarify' : 'navigate',
       parameters: {
         missingFields,
         employeeEmail: draft.employee?.email || null,
         clientEmail: draft.client?.email || null,
       },
       responseText: responseParts.join(' '),
-      suggestedRoute: routeTarget,
-      suggestions: this._buildAssignmentSuggestions(missingFields, draft),
+      suggestedRoute: shouldClarifyInAssistant
+        ? SUPPORTED_ROUTE_TARGETS.voice_assistant
+        : routeTarget,
+      suggestions: shouldClarifyInAssistant
+        ? this._mergeAssignmentSuggestions([], candidateNdisItems)
+        : this._buildAssignmentSuggestions(missingFields, draft),
       resultData: {
         status: 'pending',
         missingFields,
@@ -1022,7 +1045,7 @@ class VoiceService {
         candidates: {
           employees: actorResolution?.candidates?.employees || [],
           clients: actorResolution?.candidates?.clients || [],
-          ndisItems: supportResolution?.matches || [],
+          ndisItems: candidateNdisItems,
         },
         navigationContext: this._buildAssignmentNavigationContext(
           draft,
@@ -1051,6 +1074,38 @@ class VoiceService {
     }
 
     return suggestions.slice(0, 4);
+  }
+
+  _shouldClarifyInAssistant({ missingFields = [], candidateNdisItems = [] }) {
+    return (
+      missingFields.length === 1 &&
+      missingFields[0] === 'ndisItem' &&
+      Array.isArray(candidateNdisItems) &&
+      candidateNdisItems.length > 1
+    );
+  }
+
+  _mergeAssignmentSuggestions(existingSuggestions = [], candidateNdisItems = []) {
+    const suggestions = Array.isArray(existingSuggestions)
+      ? existingSuggestions.map((item) => String(item))
+      : [];
+
+    for (const item of candidateNdisItems) {
+      const itemNumber = item?.itemNumber?.toString().trim() || '';
+      const itemName = item?.itemName?.toString().trim() || '';
+      if (!itemNumber) {
+        continue;
+      }
+
+      const suggestion = itemName.isNotEmpty
+        ? `Use ${itemNumber} ${itemName}`
+        : `Use NDIS item ${itemNumber}`;
+      if (!suggestions.includes(suggestion)) {
+        suggestions.push(suggestion);
+      }
+    }
+
+    return suggestions.slice(0, 5);
   }
 
   _buildAssignmentNavigationContext(draft, organizationId) {
