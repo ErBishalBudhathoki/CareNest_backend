@@ -1,6 +1,6 @@
 process.env.GCP_PROJECT_ID = 'test-project';
 process.env.REGION = 'australia-southeast1';
-process.env.VOICE_AGENT_MODEL = 'gemini-3-flash-preview';
+process.env.VOICE_AGENT_MODEL = 'gemini-2.5-flash';
 
 const mockGenerateContent = jest.fn();
 const mockStartChat = jest.fn();
