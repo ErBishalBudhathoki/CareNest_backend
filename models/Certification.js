@@ -16,6 +16,14 @@ const certificationSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  certificationNumber: {
+    type: String,
+    trim: true
+  },
+  requirementId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'CertificationRequirement'
+  },
   issueDate: {
     type: Date
   },
@@ -42,6 +50,7 @@ const certificationSchema = new mongoose.Schema({
       ret.id = ret._id.toString();
       delete ret._id;
       delete ret.__v;
+      if (ret.requirementId) ret.requirementId = ret.requirementId.toString();
       if (ret.issueDate) ret.issueDate = ret.issueDate.toISOString();
       if (ret.expiryDate) ret.expiryDate = ret.expiryDate.toISOString();
       if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();

@@ -107,7 +107,7 @@ describe('RBAC', () => {
     });
 
     const res = await request(app)
-      .get('/api/api/invoices/stats/507f1f77bcf86cd799439012')
+      .get('/api/invoices/stats/507f1f77bcf86cd799439012')
       .set('Authorization', `Bearer ${token}`)
       .set('x-organization-id', '507f1f77bcf86cd799439012');
 
@@ -122,7 +122,7 @@ describe('RBAC', () => {
     });
 
     const res = await request(app)
-      .get('/api/api/invoices/stats/507f1f77bcf86cd799439013') // Different valid ID
+      .get('/api/invoices/stats/507f1f77bcf86cd799439013') // Different valid ID
       .set('Authorization', `Bearer ${token}`)
       .set('x-organization-id', '507f1f77bcf86cd799439013');
 
@@ -137,7 +137,7 @@ describe('RBAC', () => {
     });
 
     const res = await request(app)
-      .get('/api/api/invoices/stats/507f1f77bcf86cd799439012')
+      .get('/api/invoices/stats/507f1f77bcf86cd799439012')
       .set('Authorization', `Bearer ${token}`)
       .set('x-organization-id', '507f1f77bcf86cd799439012');
 

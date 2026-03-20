@@ -118,6 +118,10 @@ describe('Schedule API Tests', () => {
             catch: (reject) => Promise.resolve(result).catch(reject)
         });
 
+        ClientAssignment.find.mockReturnValue(mockQuery([]));
+        User.find.mockReturnValue(mockQuery([]));
+        Client.find.mockReturnValue(mockQuery([]));
+
         // Default Mocks
         Shift.find.mockImplementation(() => mockQuery([]));
         Shift.findOne.mockImplementation(() => mockQuery(null));
@@ -485,6 +489,76 @@ describe('Schedule API Tests', () => {
                 expect(res.status).toBe(200);
                 expect(res.body.success).toBe(true);
                 expect(res.body.data).toHaveLength(1);
+            });
+
+            it('should include assignment-backed shifts created from client assignments', async () => {
+                Shift.find.mockImplementation(() => ({
+                    sort: jest.fn().mockResolvedValue([])
+                }));
+
+                ClientAssignment.find.mockReturnValue(
+                    mockQuery([
+                        {
+                            _id: generateObjectId(),
+                            organizationId: '507f1f77bcf86cd799439011',
+                            userEmail: 'emp1@example.com',
+                            clientEmail: 'client@example.com',
+                            clientId: generateObjectId(),
+                            isActive: true,
+                            createdAt: new Date('2026-03-20T00:00:00Z'),
+                            updatedAt: new Date('2026-03-20T00:00:00Z'),
+                            schedule: [
+                                {
+                                    date: '2026-03-24',
+                                    startTime: '09:00',
+                                    endTime: '11:00',
+                                    break: 'No',
+                                    highIntensity: false,
+                                    ndisItem: {
+                                        itemNumber: '01_001_0107_1_1',
+                                        itemName: 'Assistance With Self-Care Activities'
+                                    }
+                                }
+                            ]
+                        }
+                    ])
+                );
+                User.find.mockReturnValue(
+                    mockQuery([
+                        {
+                            firstName: 'Pratiksha',
+                            lastName: 'Tiwari',
+                            email: 'emp1@example.com'
+                        }
+                    ])
+                );
+                Client.find.mockReturnValue(
+                    mockQuery([
+                        {
+                            _id: generateObjectId(),
+                            clientFirstName: 'Harry',
+                            clientLastName: 'James',
+                            clientEmail: 'client@example.com'
+                        }
+                    ])
+                );
+
+                const res = await request(app)
+                    .get('/api/schedule/shifts/507f1f77bcf86cd799439011')
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
+                    .query({
+                        startDate: '2026-03-23T00:00:00.000Z',
+                        endDate: '2026-03-30T00:00:00.000Z'
+                    });
+
+                expect(res.status).toBe(200);
+                expect(res.body.success).toBe(true);
+                expect(res.body.data).toHaveLength(1);
+                expect(res.body.data[0].employeeEmail).toBe('emp1@example.com');
+                expect(res.body.data[0].clientEmail).toBe('client@example.com');
+                expect(res.body.data[0].status).toBe('approved');
+                expect(res.body.data[0].supportItems).toHaveLength(1);
             });
         });
 

@@ -1,7 +1,6 @@
 const VoiceService = require('../services/voiceService');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../utils/logger');
-const VoiceCommand = require('../models/VoiceCommand');
 
 class VoiceController {
   /**
@@ -9,17 +8,22 @@ class VoiceController {
    * @route POST /api/voice/command
    */
   processCommand = catchAsync(async (req, res) => {
-    const userId = req.user.id; // Corrected from req.user.userId (standard middleware sets req.user.id)
-    const { audioData, commandText, language } = req.body;
+    const userId = req.user?.id || req.user?.userId || req.user?._id;
+    const { audioData, commandText, language, context } = req.body;
 
     // Log request
     logger.info(`Voice command received from user ${userId}`, { language, hasAudio: !!audioData, hasText: !!commandText });
 
     let result;
     if (audioData) {
-      result = await VoiceService.processAudio(userId, audioData, language);
+      result = await VoiceService.processAudio(req.user, audioData, language);
     } else if (commandText) {
-      result = await VoiceService.processText(userId, commandText, language);
+      result = await VoiceService.processText(
+        req.user,
+        commandText,
+        language,
+        context
+      );
     } else {
       return res.status(400).json({
         success: false,
@@ -40,25 +44,17 @@ class VoiceController {
    * @route GET /api/voice/history
    */
   getHistory = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user?.id || req.user?.userId || req.user?._id;
     const { limit = 20, page = 1 } = req.query;
-
-    const skip = (page - 1) * limit;
-
-    const history = await VoiceCommand.find({ userId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean(); // Use lean for performance
+    const history = await VoiceService.getHistory(req.user, {
+      limit,
+      page,
+    });
 
     res.status(200).json({
       success: true,
       code: 'HISTORY_FETCHED',
-      data: history // Mongoose lean docs might need manual ID transform if not using global plugin
-      // But our schema toJSON handles it for instances. For lean queries, we might need manual transform or rely on frontend handling both _id and id.
-      // Ideally, avoid lean() if relying on schema toJSON, or manually map.
-      // Let's rely on schema toJSON for consistency and remove lean() or map manually.
-      // Removing lean() to ensure virtuals/transforms run.
+      data: history
     });
   });
 }

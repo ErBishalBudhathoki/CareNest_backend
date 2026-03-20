@@ -33,6 +33,7 @@ env:
   GCP_PROJECT_ID: 'carenest-prod'  # Prod project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-prod'
   CLOUD_RUN_SERVICE_ACCOUNT: 'carenest-prod@appspot.gserviceaccount.com'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # Enhanced Security Checks for Production
@@ -40,6 +41,9 @@ jobs:
     name: Security & Quality Gates
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2
+      TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1,public.ecr.aws/aquasecurity/trivy-java-db:1
     defaults:
       run:
         working-directory: .
@@ -61,7 +65,7 @@ jobs:
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -96,9 +100,6 @@ jobs:
     services:
       mongodb:
         image: mongo:7
-        env:
-          MONGO_INITDB_ROOT_USERNAME: test
-          MONGO_INITDB_ROOT_PASSWORD: testpass
         ports:
           - 27017:27017
       redis:
@@ -128,7 +129,7 @@ jobs:
       - name: Run integration tests
         env:
           NODE_ENV: test
-          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          MONGODB_URI: mongodb://localhost:27017/test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
         run: npm run test:integration
@@ -136,7 +137,7 @@ jobs:
       - name: Run E2E tests
         env:
           NODE_ENV: test
-          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          MONGODB_URI: mongodb://localhost:27017/test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
         run: npm run test:e2e
@@ -203,6 +204,9 @@ jobs:
 
       - name: Scan production image
         uses: aquasecurity/trivy-action@master
+        env:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1,public.ecr.aws/aquasecurity/trivy-java-db:1
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
           format: 'sarif'
@@ -284,7 +288,7 @@ jobs:
             --cpu-boost \
             --port 8080 \
             --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
-            --set-env-vars "GCP_PROJECT_ID=carenest-prod" \
+            --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --no-traffic \
             --tag prod-${{ github.sha }} \
