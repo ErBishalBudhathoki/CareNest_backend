@@ -8,18 +8,20 @@ class TeamController {
   // --- Teams ---
 
   create = catchAsync(async (req, res) => {
-    const managerId = req.user.userId; // auth middleware sets req.user.userId
+    const managerId = req.user.userId;
+    const organizationId = req.user.organizationId;
     const { name, settings } = req.body;
 
     const team = await Team.create({
       name,
       managerId,
+      organizationId,
       settings: settings || {}
     });
 
-    // Add manager as admin/manager member
+    // Add manager as active member with manager role
     await TeamMember.create({
-      teamId: team.id,
+      teamId: team._id,
       userId: managerId,
       role: 'manager',
       status: 'active'
@@ -39,9 +41,10 @@ class TeamController {
       .filter(m => m.teamId) // Ensure populated
       .map(m => m.teamId);
 
-    const populatedTeams = await Promise.all(teams.map(async (team) => {
-        const members = await TeamMember.find({ teamId: team.id }).populate('userId', 'firstName lastName email profilePic');
-        const teamObj = team.toJSON();
+    const populatedTeams = await Promise.all(teams.map(async (teamDoc) => {
+        const teamId = teamDoc._id || teamDoc.id;
+        const members = await TeamMember.find({ teamId }).populate('userId', 'firstName lastName email profilePic');
+        const teamObj = teamDoc.toJSON();
         teamObj.members = members;
         return teamObj;
     }));
@@ -61,14 +64,15 @@ class TeamController {
     }
 
     // Check if already member
-    const existing = await TeamMember.findOne({ teamId, userId: user.id });
+    const targetUserId = user._id || user.id;
+    const existing = await TeamMember.findOne({ teamId, userId: targetUserId });
     if (existing) {
         return res.status(400).json({ success: false, message: 'User already in team' });
     }
 
     await TeamMember.create({
         teamId,
-        userId: user.id,
+        userId: targetUserId,
         role: role || 'member',
         status: 'invited'
     });
@@ -82,13 +86,17 @@ class TeamController {
     const { teamId } = req.params;
     const members = await TeamMember.find({ teamId }).populate('userId', 'firstName lastName email profilePic');
     
-    const matrix = members.map(m => ({
-      userId: m.userId ? m.userId.id : null,
-      name: m.userId ? `${m.userId.firstName} ${m.userId.lastName}`.trim() : 'Unknown',
-      status: m.availabilitySettings ? m.availabilitySettings.status : 'unknown',
-      role: m.role,
-      profilePic: m.userId ? m.userId.profilePic : null
-    }));
+    const matrix = members.map(m => {
+      const u = m.userId;
+      const uid = u ? (u._id || u.id) : null;
+      return {
+        userId: uid,
+        name: u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : 'Unknown',
+        status: m.availabilitySettings ? (m.availabilitySettings.status || 'available') : 'available',
+        role: m.role,
+        profilePic: u ? u.profilePic : null
+      };
+    });
     
     res.json({ success: true, data: matrix });
   });
