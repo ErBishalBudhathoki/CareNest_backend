@@ -3,6 +3,43 @@ const nodemailer = require('nodemailer');
 const logger = require('../config/logger');
 const { securityMonitor } = require('../utils/securityMonitor');
 const catchAsync = require('../utils/catchAsync');
+const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+
+// Lazy-init R2 client (reused across requests)
+let _r2Client = null;
+function getR2Client() {
+  if (_r2Client) return _r2Client;
+  if (
+    !process.env.R2_ACCOUNT_ID ||
+    !process.env.R2_ACCESS_KEY_ID ||
+    !process.env.R2_SECRET_ACCESS_KEY
+  ) {
+    return null;
+  }
+  _r2Client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    },
+  });
+  return _r2Client;
+}
+
+/**
+ * Extract the R2 object key from a stored photo URL.
+ * Handles both private R2 API URLs and public-domain URLs.
+ */
+function extractR2Key(photoUrl) {
+  try {
+    const parsed = new URL(photoUrl);
+    // Remove leading slashes to get the key
+    return parsed.pathname.replace(/^\/+/, '');
+  } catch {
+    return null;
+  }
+}
 
 class AuthController {
   /**
@@ -166,7 +203,9 @@ class AuthController {
   });
 
   /**
-   * Get user photo (R2 URL flow only)
+   * Get user photo — streams image bytes from R2 through the backend.
+   * The client receives raw image data (Content-Type: image/*) instead of a
+   * JSON payload, so it never needs direct R2 access.
    */
   getUserPhoto = catchAsync(async (req, res) => {
     const { email } = req.params;
@@ -177,18 +216,70 @@ class AuthController {
     
     const photoResult = await authService.getUserPhoto(email);
     
-    if (!photoResult) {
+    if (!photoResult || !photoResult.url) {
       return res.status(404).json({ error: 'Photo not found' });
     }
-    
-    if (photoResult.type !== 'url') {
-      return res.status(500).json({ error: 'Unexpected photo type' });
+
+    const photoUrl = photoResult.url;
+    const r2Key = extractR2Key(photoUrl);
+    const bucket = process.env.R2_BUCKET_NAME;
+    const client = getR2Client();
+
+    // Strategy 1: Fetch from R2 via S3 SDK (preferred — works for private buckets)
+    if (client && bucket && r2Key) {
+      try {
+        const object = await client.send(
+          new GetObjectCommand({ Bucket: bucket, Key: r2Key })
+        );
+
+        res.set('Content-Type', object.ContentType || 'image/jpeg');
+        if (object.ContentLength != null) {
+          res.set('Content-Length', String(object.ContentLength));
+        }
+        res.set('Cache-Control', 'public, max-age=3600');
+
+        if (object.Body && typeof object.Body.pipe === 'function') {
+          object.Body.pipe(res);
+          return;
+        }
+
+        // Some SDK versions return a ReadableStream instead of Node stream
+        const chunks = [];
+        for await (const chunk of object.Body) {
+          chunks.push(chunk);
+        }
+        return res.send(Buffer.concat(chunks));
+      } catch (r2Error) {
+        logger.error('R2 photo fetch failed, trying HTTP fallback', {
+          error: r2Error.message,
+          key: r2Key,
+          bucket
+        });
+        // Fall through to HTTP fallback
+      }
     }
 
-    return res.json({
-      success: true,
-      photoUrl: photoResult.url
-    });
+    // Strategy 2: HTTP fallback (works for public URLs or local dev)
+    try {
+      const fetch = (await import('node-fetch')).default;
+      const httpResponse = await fetch(photoUrl, { timeout: 10000 });
+      if (!httpResponse.ok) {
+        return res.status(404).json({ error: 'Photo file not accessible' });
+      }
+      res.set('Content-Type', httpResponse.headers.get('content-type') || 'image/jpeg');
+      const contentLength = httpResponse.headers.get('content-length');
+      if (contentLength) {
+        res.set('Content-Length', contentLength);
+      }
+      res.set('Cache-Control', 'public, max-age=3600');
+      httpResponse.body.pipe(res);
+    } catch (fetchError) {
+      logger.error('HTTP photo fetch fallback also failed', {
+        error: fetchError.message,
+        photoUrl
+      });
+      return res.status(404).json({ error: 'Photo file not found in storage' });
+    }
   });
 
   /**

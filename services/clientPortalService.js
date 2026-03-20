@@ -6,10 +6,18 @@ const WorkedTime = require('../models/WorkedTime');
 const GeofenceLocation = require('../models/GeofenceLocation');
 const ServiceFeedback = require('../models/ServiceFeedback');
 const { Invoice } = require('../models/Invoice');
+const NotificationPreference = require('../models/NotificationPreference');
 const realtimeTrackingService = require('./realtimeTrackingService');
 const messagingService = require('./messagingService');
+const {
+  buildChatWindow,
+  getChatWindowClosedMessage,
+  toShiftDateTime,
+  ENFORCE_SHIFT_CHAT_WINDOW,
+} = require('./chatWindowPolicy');
 
 const DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS = 800;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const normalizeEmail = (value) => (value || '').toString().trim().toLowerCase();
 
@@ -26,28 +34,26 @@ const createHttpError = (statusCode, message) => {
   return error;
 };
 
-const normalizeTimeString = (timeValue) => {
-  const raw = (timeValue || '').toString().trim();
-  if (!raw) return '00:00:00';
-  if (/^\d{1}:\d{2}$/.test(raw)) return `0${raw}:00`;
-  if (/^\d{2}:\d{2}$/.test(raw)) return `${raw}:00`;
-  return raw;
-};
+const buildShiftBounds = (dateValue, startTimeValue, endTimeValue) => {
+  const startAt = toShiftDateTime(dateValue, startTimeValue);
+  const endCandidate = toShiftDateTime(dateValue, endTimeValue);
 
-const toShiftDateTime = (dateValue, timeValue) => {
-  const dateStr = (dateValue || '').toString().trim();
-  if (!dateStr) return null;
-
-  const normalizedTime = normalizeTimeString(timeValue);
-  const isoCandidate = `${dateStr}T${normalizedTime}`;
-  const isoParsed = new Date(isoCandidate);
-
-  if (!Number.isNaN(isoParsed.getTime())) {
-    return isoParsed;
+  if (!startAt || !endCandidate) {
+    return {
+      startAt,
+      endAt: endCandidate,
+    };
   }
 
-  const fallback = new Date(`${dateStr} ${timeValue || ''}`);
-  return Number.isNaN(fallback.getTime()) ? null : fallback;
+  const endAt =
+    endCandidate.getTime() <= startAt.getTime()
+      ? new Date(endCandidate.getTime() + DAY_MS)
+      : endCandidate;
+
+  return {
+    startAt,
+    endAt,
+  };
 };
 
 const isSameCalendarDate = (dateA, dateB) => {
@@ -100,6 +106,39 @@ const safeIso = (value) => {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const calculateDistanceMeters = (pointA, pointB) => {
+  if (
+    !pointA ||
+    !pointB ||
+    !Number.isFinite(pointA.lat) ||
+    !Number.isFinite(pointA.lng) ||
+    !Number.isFinite(pointB.lat) ||
+    !Number.isFinite(pointB.lng)
+  ) {
+    return null;
+  }
+
+  const earthRadius = 6371e3;
+  const phi1 = (pointA.lat * Math.PI) / 180;
+  const phi2 = (pointB.lat * Math.PI) / 180;
+  const deltaPhi = ((pointB.lat - pointA.lat) * Math.PI) / 180;
+  const deltaLambda = ((pointB.lng - pointA.lng) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadius * c;
+};
+
+const estimateEtaMinutesFromDistance = (distanceMeters, averageSpeedKmh = 40) => {
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return null;
+  if (!Number.isFinite(averageSpeedKmh) || averageSpeedKmh <= 0) return null;
+  const etaMinutes = Math.round((distanceMeters / 1000 / averageSpeedKmh) * 60);
+  return Math.max(1, etaMinutes);
 };
 
 const buildClientName = (clientDoc, fallbackEmail) => {
@@ -222,8 +261,11 @@ class ClientPortalService {
           ? item._id.toString()
           : `${assignment._id.toString()}_${index}`;
 
-        const startAt = toShiftDateTime(item?.date, item?.startTime);
-        const endAt = toShiftDateTime(item?.date, item?.endTime);
+        const { startAt, endAt } = buildShiftBounds(
+          item?.date,
+          item?.startTime,
+          item?.endTime
+        );
 
         appointments.push({
           appointmentId,
@@ -286,16 +328,28 @@ class ClientPortalService {
 
     const todayAppointments = appointments
       .filter((appt) => appt.startAt && isSameCalendarDate(appt.startAt, now))
-      .map((appt) => ({
-        appointmentId: appt.appointmentId,
-        workerName: appt.workerName,
-        serviceName: appt.serviceName,
-        startTime: appt.startTime,
-        endTime: appt.endTime,
-        status: deriveShiftStatus(appt.startAt, appt.endAt, now),
-        eta: null,
-        workerPhoto: appt.workerDoc?.profilePic || appt.workerDoc?.photoURL || null,
-      }));
+      .map((appt) => {
+        const chatWindow = buildChatWindow({
+          startAt: appt.startAt,
+          endAt: appt.endAt,
+          now,
+        });
+
+        return {
+          appointmentId: appt.appointmentId,
+          workerName: appt.workerName,
+          serviceName: appt.serviceName,
+          startTime: appt.startTime,
+          endTime: appt.endTime,
+          status: deriveShiftStatus(appt.startAt, appt.endAt, now),
+          eta: null,
+          workerPhoto: appt.workerDoc?.profilePic || appt.workerDoc?.photoURL || null,
+          canMessage: chatWindow.isOpen,
+          chatWindowStatus: chatWindow.status,
+          chatStartAt: safeIso(chatWindow.chatStartAt),
+          chatEndAt: safeIso(chatWindow.chatEndAt),
+        };
+      });
 
     const upcomingAppointments = appointments
       .filter((appt) => appt.startAt && appt.startAt > now)
@@ -397,8 +451,11 @@ class ClientPortalService {
     }).lean();
 
     const now = new Date();
-    const startAt = toShiftDateTime(scheduleItem.date, scheduleItem.startTime);
-    const endAt = toShiftDateTime(scheduleItem.date, scheduleItem.endTime);
+    const { startAt, endAt } = buildShiftBounds(
+      scheduleItem.date,
+      scheduleItem.startTime,
+      scheduleItem.endTime
+    );
 
     const detail = {
       id: scheduleId,
@@ -438,14 +495,60 @@ class ClientPortalService {
 
   async getWorkerLocation(appointmentId, authUser) {
     const clientContext = await this.resolveClientContext({ authUser });
-    const { appointment } = await this.findAppointmentContext(clientContext, appointmentId);
+    const appointmentContext = await this.findAppointmentContext(clientContext, appointmentId);
+    const appointments = appointmentContext.appointments;
+    const appointmentById = new Map(
+      appointments.map((item) => [item.appointmentId, item])
+    );
+    let resolvedAppointment = appointmentContext.appointment;
+    let liveTracking = await realtimeTrackingService.getLiveTrackingData(appointmentId);
 
-    const liveTracking = await realtimeTrackingService.getLiveTrackingData(appointmentId);
+    const hasUsableTracking =
+      liveTracking && liveTracking.tracking === true && !!liveTracking.currentLocation;
 
-    if (!liveTracking || !liveTracking.tracking || !liveTracking.currentLocation) {
+    // If the requested appointment is not the actively tracked one, resolve
+    // from the latest active session among this client's known appointments.
+    if (!hasUsableTracking) {
+      const candidateIds = appointments.map((item) => item.appointmentId).filter(Boolean);
+      const candidateTracking =
+        await realtimeTrackingService.getLatestLiveTrackingDataForAppointments(candidateIds);
+      if (candidateTracking) {
+        liveTracking = candidateTracking;
+      }
+    }
+
+    if (liveTracking?.appointmentId) {
+      resolvedAppointment =
+        appointmentById.get(liveTracking.appointmentId) || resolvedAppointment;
+    }
+
+    // Fallback: match by worker identifier token if appointment IDs diverge.
+    if (liveTracking?.workerId) {
+      const trackingWorkerToken = (liveTracking.workerId || '').toString().trim().toLowerCase();
+      const byWorker = appointments.find((item) => {
+        const tokens = [
+          (item.workerId || '').toString().trim().toLowerCase(),
+          normalizeEmail(item.workerEmail),
+          normalizeEmail(item.userEmail),
+        ].filter(Boolean);
+        return tokens.includes(trackingWorkerToken);
+      });
+      if (byWorker) {
+        resolvedAppointment = byWorker;
+      }
+    }
+
+    if (!liveTracking) {
       return {
         success: false,
         message: 'Worker location is unavailable until tracking is started by the worker.',
+      };
+    }
+
+    if (!liveTracking.tracking || !liveTracking.currentLocation) {
+      return {
+        success: false,
+        message: 'Tracking is active, but waiting for the worker\'s first GPS update.',
       };
     }
 
@@ -456,14 +559,65 @@ class ClientPortalService {
       .sort({ updatedAt: -1 })
       .lean();
 
+    const workerPreference = await NotificationPreference.findOne({
+      $or: [
+        { userId: (resolvedAppointment.workerId || '').toString() },
+        { userEmail: normalizeEmail(resolvedAppointment.workerEmail) },
+      ],
+    }).lean();
+
+    const workerGeofenceEnabled =
+      workerPreference == null
+        ? true
+        : workerPreference.geofenceEnabled !== false &&
+          workerPreference?.categoryEnabled?.geofence !== false;
+
+    if (!workerGeofenceEnabled) {
+      return {
+        success: false,
+        message: 'Worker has disabled location sharing in geofence settings.',
+      };
+    }
+
+    const workerPreferenceRadiusKm = Number(workerPreference?.geofenceRadiusKm);
+    const workerPreferenceRadiusMeters =
+      Number.isFinite(workerPreferenceRadiusKm) && workerPreferenceRadiusKm > 0
+        ? workerPreferenceRadiusKm * 1000
+        : null;
+
     const visibilityRadius = Math.max(
-      geofence?.radius || DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS,
+      workerPreferenceRadiusMeters ||
+        geofence?.radius ||
+        DEFAULT_GEOFENCE_VISIBILITY_RADIUS_METERS,
       100
     );
 
+    const geofenceLatitude = Number(geofence?.coordinates?.latitude);
+    const geofenceLongitude = Number(geofence?.coordinates?.longitude);
+
+    const distanceFromClientAreaMeters = Number.isFinite(geofenceLatitude) &&
+      Number.isFinite(geofenceLongitude)
+      ? calculateDistanceMeters(
+          {
+            lat: Number(liveTracking.currentLocation.latitude),
+            lng: Number(liveTracking.currentLocation.longitude),
+          },
+          {
+            lat: geofenceLatitude,
+            lng: geofenceLongitude,
+          }
+        )
+      : (typeof liveTracking.distance === 'number' ? liveTracking.distance : null);
+    const etaMinutes =
+      typeof liveTracking.eta === 'number'
+        ? liveTracking.eta
+        : estimateEtaMinutesFromDistance(distanceFromClientAreaMeters);
+
     const isInsideVisibilityRegion =
       liveTracking.insideGeofence === true ||
-      (typeof liveTracking.distance === 'number' && liveTracking.distance <= visibilityRadius);
+      (typeof distanceFromClientAreaMeters === 'number' &&
+        distanceFromClientAreaMeters <= visibilityRadius) ||
+      (!geofence && typeof distanceFromClientAreaMeters !== 'number');
 
     if (!isInsideVisibilityRegion) {
       return {
@@ -471,16 +625,16 @@ class ClientPortalService {
         message:
           'Location is hidden until your worker enters your service area geofence.',
         data: {
-          appointmentId,
+          appointmentId: resolvedAppointment.appointmentId || appointmentId,
           trackingAvailable: false,
-          distanceRemaining: liveTracking.distance,
+          distanceRemaining: distanceFromClientAreaMeters,
         },
       };
     }
 
     const location = {
-      appointmentId,
-      workerName: appointment.workerName,
+      appointmentId: resolvedAppointment.appointmentId || appointmentId,
+      workerName: resolvedAppointment.workerName,
       latitude: liveTracking.currentLocation.latitude,
       longitude: liveTracking.currentLocation.longitude,
       accuracy: liveTracking.currentLocation.accuracy || 10,
@@ -488,12 +642,12 @@ class ClientPortalService {
         safeIso(liveTracking.currentLocation.timestamp) || new Date().toISOString(),
       isEnRoute: !liveTracking.insideGeofence,
       eta:
-        typeof liveTracking.eta === 'number'
-          ? `${liveTracking.eta} minutes`
+        typeof etaMinutes === 'number'
+          ? `${etaMinutes} minutes`
           : null,
       distanceRemaining:
-        typeof liveTracking.distance === 'number'
-          ? Number((liveTracking.distance / 1000).toFixed(2))
+        typeof distanceFromClientAreaMeters === 'number'
+          ? Number((distanceFromClientAreaMeters / 1000).toFixed(2))
           : null,
       lastUpdated:
         safeIso(liveTracking.lastUpdate) || new Date().toISOString(),
@@ -565,12 +719,13 @@ class ClientPortalService {
       throw createHttpError(400, 'Invalid appointment shift window');
     }
 
-    const now = new Date();
-    if (now < appointment.startAt || now > appointment.endAt) {
-      throw createHttpError(
-        403,
-        'Messaging is only available during the scheduled shift hours.'
-      );
+    const chatWindow = buildChatWindow({
+      startAt: appointment.startAt,
+      endAt: appointment.endAt,
+      now: new Date(),
+    });
+    if (ENFORCE_SHIFT_CHAT_WINDOW && !chatWindow.isOpen) {
+      throw createHttpError(403, getChatWindowClosedMessage());
     }
 
     const requestedWorkerId = (messageData.workerId || '').toString().trim();
@@ -585,26 +740,29 @@ class ClientPortalService {
       throw createHttpError(403, 'Message can only be sent to the assigned worker.');
     }
 
-    let conversation;
-    try {
-      conversation = await messagingService.getConversation(`conv-${appointmentId}`);
-    } catch (_) {
-      conversation = await messagingService.createConversation({
-        appointmentId,
-        clientId: clientContext.client._id.toString(),
-        workerId: expectedWorkerId,
-        organizationId: clientContext.client.organizationId,
-      });
-    }
+    const conversation = await messagingService.createConversation({
+      appointmentId,
+      assignmentId: appointment.assignmentId,
+      scheduleId: appointment.scheduleId,
+      clientId: clientContext.client._id.toString(),
+      clientEmail: normalizeEmail(clientContext.client.clientEmail),
+      workerId: expectedWorkerId,
+      workerEmail: expectedWorkerEmail,
+      organizationId: clientContext.client.organizationId,
+      shiftStartAt: appointment.startAt,
+      shiftEndAt: appointment.endAt,
+    });
 
     const sentMessage = await messagingService.sendMessage({
       conversationId: conversation._id,
       senderId: clientContext.client._id.toString(),
       senderType: 'client',
+      senderName: buildClientName(clientContext.client, clientContext.authEmail),
       recipientId: expectedWorkerId,
       message: text,
       attachments: Array.isArray(messageData.attachments) ? messageData.attachments : [],
       timestamp: new Date(),
+      authUser,
     });
 
     return {
@@ -709,7 +867,8 @@ class ClientPortalService {
     const history = completedAppointments.slice(0, parsedLimit).map((appt) => {
       const feedback = feedbackByAppointmentId.get(appt.appointmentId);
       return {
-        serviceId: `${appt.assignmentId}_${appt.scheduleId}`,
+        serviceId: appt.appointmentId,
+        appointmentId: appt.appointmentId,
         workerName: appt.workerName,
         serviceName: appt.serviceName,
         date: appt.date,

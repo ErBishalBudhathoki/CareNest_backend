@@ -23,7 +23,7 @@ const strictLimiter = rateLimit({
 const createValidation = [
   body('organizationId').isMongoId().withMessage('Invalid organization ID'),
   body('userId').isMongoId().withMessage('Invalid user ID'),
-  body('type').isIn(['Shift', 'TimeOff', 'SHIFT_SWAP_OFFER', 'SHIFT_OFFER']).withMessage('Invalid request type'),
+  body('type').isIn(['Shift', 'TimeOff', 'SHIFT_SWAP_OFFER', 'SHIFT_OFFER', 'ACCOUNT_DELETION']).withMessage('Invalid request type'),
   body('details').isObject().withMessage('Details must be an object'),
   body('details.startTime').optional().isISO8601().withMessage('Invalid start time'),
   body('details.endTime').optional().isISO8601().withMessage('Invalid end time'),

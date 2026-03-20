@@ -81,6 +81,10 @@ class Logger {
     }
   }
 
+  business(message, data = {}) {
+    this.log('info', message, { ...data, type: 'BUSINESS' });
+  }
+
   security(message, data = {}) {
     this.log('security', message, data);
     
@@ -100,4 +104,9 @@ function createLogger(context) {
   return new Logger(context);
 }
 
-module.exports = { Logger, createLogger };
+// Backward-compatible export:
+// - `require('../utils/logger')` returns a logger instance (legacy usage)
+// - `{ createLogger } = require('../utils/logger')` still works
+const defaultLogger = createLogger('App');
+
+module.exports = Object.assign(defaultLogger, { Logger, createLogger });

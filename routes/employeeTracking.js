@@ -29,7 +29,7 @@ router.use(authenticateUser);
  * GET /api/employee-tracking/:organizationId
  */
 router.get(
-  '/api/employee-tracking/:organizationId', 
+  '/:organizationId',
   trackingLimiter, 
   orgValidation, 
   handleValidationErrors,

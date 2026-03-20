@@ -5,11 +5,11 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
 const {
-  processDueRecurringExpenses,
-  createRecurringExpenseTemplate,
-  getRecurringExpenseTemplates,
-  updateRecurringExpenseTemplate,
-  deactivateRecurringExpenseTemplate,
+  processRecurringExpenses,
+  createRecurringExpense,
+  getRecurringExpenses,
+  updateRecurringExpense,
+  deactivateRecurringExpense,
   getRecurringExpenseStats
 } = require('../services/recurringExpenseService');
 const logger = require('../config/logger');
@@ -69,8 +69,7 @@ const getTemplatesValidation = [
 ];
 
 const deactivateValidation = [
-  param('templateId').isMongoId().withMessage('Valid template ID is required'),
-  body('deactivatedBy').isMongoId().withMessage('Valid deactivator ID is required')
+  param('templateId').isMongoId().withMessage('Valid template ID is required')
 ];
 
 const statsValidation = [
@@ -83,11 +82,11 @@ const statsValidation = [
 router.use(authenticateUser);
 
 // Process due recurring expenses (admin only)
-router.post('/api/recurring-expenses/process', requireRoles(['admin']), processLimiter, processValidation, handleValidationErrors, async (req, res) => {
+router.post('/recurring-expenses/process', requireRoles(['admin']), processLimiter, processValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId, processDate } = req.body;
     
-    const result = await processDueRecurringExpenses({
+    const result = await processRecurringExpenses({
       organizationId,
       processDate: processDate || new Date()
     });
@@ -103,10 +102,10 @@ router.post('/api/recurring-expenses/process', requireRoles(['admin']), processL
 });
 
 // Create a new recurring expense template
-router.post('/api/recurring-expenses/templates', strictLimiter, createTemplateValidation, handleValidationErrors, async (req, res) => {
+router.post('/recurring-expenses/templates', strictLimiter, createTemplateValidation, handleValidationErrors, async (req, res) => {
   try {
     const templateData = req.body;
-    const result = await createRecurringExpenseTemplate(templateData);
+    const result = await createRecurringExpense(templateData);
     res.json(result);
   } catch (error) {
     logger.error('Recurring expense template creation failed', {
@@ -119,15 +118,18 @@ router.post('/api/recurring-expenses/templates', strictLimiter, createTemplateVa
 });
 
 // Get recurring expense templates for an organization
-router.get('/api/recurring-expenses/templates/:organizationId', recurringExpenseLimiter, getTemplatesValidation, handleValidationErrors, async (req, res) => {
+router.get('/recurring-expenses/templates/:organizationId', recurringExpenseLimiter, getTemplatesValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { active = true, page = 1, limit = 50 } = req.query;
-    
-    const result = await getRecurringExpenseTemplates(organizationId, {
-      active: active === 'true',
-      page: parseInt(page),
-      limit: parseInt(limit)
+
+    const parsedPage = parseInt(page, 10);
+    const parsedLimit = parseInt(limit, 10);
+
+    const result = await getRecurringExpenses(organizationId, {
+      isActive: active === 'true',
+      skip: (parsedPage - 1) * parsedLimit,
+      limit: parsedLimit
     });
     
     res.json(result);
@@ -142,12 +144,12 @@ router.get('/api/recurring-expenses/templates/:organizationId', recurringExpense
 });
 
 // Update a recurring expense template
-router.put('/api/recurring-expenses/templates/:templateId', strictLimiter, updateTemplateValidation, handleValidationErrors, async (req, res) => {
+router.put('/recurring-expenses/templates/:templateId', strictLimiter, updateTemplateValidation, handleValidationErrors, async (req, res) => {
   try {
     const { templateId } = req.params;
     const updateData = req.body;
     
-    const result = await updateRecurringExpenseTemplate(templateId, updateData);
+    const result = await updateRecurringExpense(templateId, updateData);
     res.json(result);
   } catch (error) {
     logger.error('Recurring expense template update failed', {
@@ -160,12 +162,11 @@ router.put('/api/recurring-expenses/templates/:templateId', strictLimiter, updat
 });
 
 // Deactivate a recurring expense template
-router.delete('/api/recurring-expenses/templates/:templateId', strictLimiter, deactivateValidation, handleValidationErrors, async (req, res) => {
+router.delete('/recurring-expenses/templates/:templateId', strictLimiter, deactivateValidation, handleValidationErrors, async (req, res) => {
   try {
     const { templateId } = req.params;
-    const { deactivatedBy } = req.body;
-    
-    const result = await deactivateRecurringExpenseTemplate(templateId, deactivatedBy);
+    const deactivatedBy = req.body?.userEmail || req.user?.email;
+    const result = await deactivateRecurringExpense(templateId, deactivatedBy);
     res.json(result);
   } catch (error) {
     logger.error('Recurring expense template deactivation failed', {
@@ -178,7 +179,7 @@ router.delete('/api/recurring-expenses/templates/:templateId', strictLimiter, de
 });
 
 // Get recurring expense statistics
-router.get('/api/recurring-expenses/stats/:organizationId', recurringExpenseLimiter, statsValidation, handleValidationErrors, async (req, res) => {
+router.get('/recurring-expenses/stats/:organizationId', recurringExpenseLimiter, statsValidation, handleValidationErrors, async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { startDate, endDate } = req.query;

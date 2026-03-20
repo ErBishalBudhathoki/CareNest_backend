@@ -31,6 +31,21 @@ const getDashboardValidation = [
     .isISO8601().withMessage('Invalid date format')
 ];
 
+const getShiftHistoryValidation = [
+  query('organizationId')
+    .optional()
+    .isMongoId().withMessage('Invalid organization ID format')
+    .trim(),
+  query('days')
+    .optional()
+    .isInt({ min: 1, max: 3650 }).withMessage('days must be between 1 and 3650')
+    .toInt(),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 500 }).withMessage('limit must be between 1 and 500')
+    .toInt()
+];
+
 /**
  * @route GET /api/worker/dashboard
  * @desc Get worker dashboard data (today's shifts, next shift, recent expenses, leave balances)
@@ -44,6 +59,21 @@ router.get(
   getDashboardValidation,
   handleValidationErrors,
   workerController.getDashboard
+);
+
+/**
+ * @route GET /api/worker/shift-history
+ * @desc Get past assigned shift history for worker
+ * @access Private - Authenticated workers only
+ * @rate-limit 100 requests per 15 minutes
+ */
+router.get(
+  '/shift-history',
+  workerDashboardLimiter,
+  authenticateUser,
+  getShiftHistoryValidation,
+  handleValidationErrors,
+  workerController.getShiftHistory
 );
 
 module.exports = router;

@@ -1,0 +1,15 @@
+# Gitleaks ignore file
+# Documentation files with example curl commands that trigger false positives
+
+# Documentation files with placeholder tokens in curl examples
+docs/
+
+# Test and utility scripts with test credentials
+reset_rate_limits.js
+
+# Backup files that should not be tracked
+.backup/
+
+# Test files
+*.test.js
+*.spec.js

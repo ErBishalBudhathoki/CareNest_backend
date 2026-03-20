@@ -20,9 +20,24 @@ const workedTimeSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  organizationId: {
+    type: String,
+    index: true
+  },
   // Legacy fields kept for backward compatibility if needed, but workDate is primary
   shiftDate: { type: String }, // YYYY-MM-DD
   date: { type: Date }, // Legacy alias?
+  shiftStartTime: { type: String },
+  shiftEndTime: { type: String },
+  shiftBreak: { type: mongoose.Schema.Types.Mixed },
+  shiftIndex: { type: Number, default: 0 },
+  shiftKey: { type: String },
+  assignedClientId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientAssignment' },
+  ndisItem: { type: mongoose.Schema.Types.Mixed },
+  highIntensity: { type: Boolean, default: false },
+  startTime: { type: Date },
+  endTime: { type: Date },
+  totalSeconds: { type: Number, default: 0 },
   
   isActive: { 
     type: Boolean, 
@@ -66,6 +81,8 @@ const workedTimeSchema = new mongoose.Schema({
       
       if (ret.workDate) ret.workDate = ret.workDate.toISOString();
       if (ret.date) ret.date = ret.date.toISOString();
+      if (ret.startTime) ret.startTime = ret.startTime.toISOString();
+      if (ret.endTime) ret.endTime = ret.endTime.toISOString();
       if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
       if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
       return ret;
@@ -76,5 +93,6 @@ const workedTimeSchema = new mongoose.Schema({
 // Indexes
 workedTimeSchema.index({ userEmail: 1, clientEmail: 1, workDate: 1 });
 workedTimeSchema.index({ userEmail: 1, workDate: 1 });
+workedTimeSchema.index({ organizationId: 1, workDate: 1 });
 
 module.exports = mongoose.model('WorkedTime', workedTimeSchema);

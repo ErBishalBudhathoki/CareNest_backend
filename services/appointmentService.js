@@ -383,7 +383,11 @@ class AppointmentService {
         userEmail,
         clientEmail,
         timeList,
-        shiftIndex
+        shiftIndex,
+        shiftDate: _shiftDateFromRequest,
+        shiftStartTime: _shiftStartTimeFromRequest,
+        shiftEndTime: _shiftEndTimeFromRequest,
+        shiftBreak: _shiftBreakFromRequest
       } = workedTimeData;
 
       // Validate required fields
@@ -407,6 +411,8 @@ class AppointmentService {
       let shiftStartTime = null;
       let shiftEndTime = null;
       let shiftBreak = null;
+      let shiftNdisItem = null;
+      let shiftHighIntensity = false;
 
       // Extract shift details based on shiftIndex
       if (assignedClient.schedule && assignedClient.schedule.length > shiftIndex) {
@@ -416,6 +422,8 @@ class AppointmentService {
         shiftStartTime = shift.startTime;
         shiftEndTime = shift.endTime;
         shiftBreak = shift.break;
+        shiftNdisItem = shift.ndisItem || null;
+        shiftHighIntensity = !!shift.highIntensity;
       } else if (assignedClient.dateList && assignedClient.dateList.length > shiftIndex) {
         // Fallback to legacy format - though schema might not have these if strict
         // But assuming mixed usage or migration
@@ -425,11 +433,69 @@ class AppointmentService {
         shiftBreak = assignedClient.breakList ? assignedClient.breakList[shiftIndex] : null;
       }
 
+      // Strict behavior: selected shift index must resolve to an actual shift.
+      if (!shiftDate || !shiftStartTime || !shiftEndTime) {
+        throw new Error('Selected shift index is invalid or shift details are missing');
+      }
+
+      // WorkedTime schema requires workDate. Prefer selected shift date; fallback
+      // to current date to prevent validation failure on partial payloads.
+      let normalizedWorkDate = new Date();
+      if (shiftDate instanceof Date) {
+        normalizedWorkDate = shiftDate;
+      } else if (typeof shiftDate === 'string' && shiftDate.trim()) {
+        const parsedShiftDate = new Date(shiftDate);
+        if (!Number.isNaN(parsedShiftDate.getTime())) {
+          normalizedWorkDate = parsedShiftDate;
+        } else {
+          throw new Error('Selected shift date is invalid');
+        }
+      } else {
+        throw new Error('Selected shift date is missing');
+      }
+
+      // Parse HH:mm:ss into decimal hours for reporting queries.
+      const parseTotalHours = (worked) => {
+        if (!worked || typeof worked !== 'string') return 0;
+        const parts = worked.split(':').map(Number);
+        if (parts.length !== 3 || parts.some((p) => Number.isNaN(p))) return 0;
+        const [h, m, s] = parts;
+        return h + (m / 60) + (s / 3600);
+      };
+
+      const parseTotalSeconds = (worked) => {
+        if (!worked || typeof worked !== 'string') return 0;
+        const parts = worked.split(':').map(Number);
+        if (parts.length !== 3 || parts.some((p) => Number.isNaN(p))) return 0;
+        const [h, m, s] = parts;
+        return (h * 3600) + (m * 60) + s;
+      };
+
+      const combineDateAndTime = (dateValue, timeValue) => {
+        if (!dateValue || !timeValue) return null;
+        const datePart = dateValue instanceof Date
+          ? dateValue.toISOString().split('T')[0]
+          : dateValue.toString().split('T')[0];
+        const timePart = timeValue.toString().trim();
+        const parsed = new Date(`${datePart} ${timePart}`);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+        return null;
+      };
+
+      const normalizedStartDateTime = combineDateAndTime(shiftDate, shiftStartTime);
+      const normalizedEndDateTime = combineDateAndTime(shiftDate, shiftEndTime);
+      const totalSeconds = parseTotalSeconds(timeList);
+
       // Create worked time record with specific shift details
       const workedTimeRecord = new WorkedTime({
         userEmail: userEmail,
         clientEmail: clientEmail,
+        organizationId: assignedClient.organizationId,
+        workDate: normalizedWorkDate,
+        date: normalizedWorkDate,
         timeWorked: timeList,
+        totalSeconds: totalSeconds,
+        totalHours: parseTotalHours(timeList),
         shiftIndex: shiftIndex || 0,
         assignedClientId: assignedClient._id,
         // Add specific shift details for better linking
@@ -437,6 +503,10 @@ class AppointmentService {
         shiftStartTime: shiftStartTime,
         shiftEndTime: shiftEndTime,
         shiftBreak: shiftBreak,
+        ndisItem: shiftNdisItem,
+        highIntensity: shiftHighIntensity,
+        startTime: normalizedStartDateTime,
+        endTime: normalizedEndDateTime,
         // Create a unique shift identifier
         shiftKey: shiftDate && shiftStartTime ? `${shiftDate}_${shiftStartTime}` : null,
         createdAt: new Date(),

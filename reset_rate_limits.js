@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Reset Rate Limits Script
  * 

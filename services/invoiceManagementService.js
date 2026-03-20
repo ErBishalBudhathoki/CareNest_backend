@@ -9,10 +9,28 @@ const Organization = require('../models/Organization');
 const Client = require('../models/Client');
 const AuditTrail = require('../models/AuditTrail');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
+const { invoiceArtifactService } = require('./invoiceArtifactService');
 const logger = require('../config/logger');
 const crypto = require('crypto');
+const fs = require('fs').promises;
 
 class InvoiceManagementService {
+  _sanitizeAlphaNumeric(value = '') {
+    return String(value)
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .toUpperCase();
+  }
+
+  _generateCompactCode(value = '', length = 3, fallback = 'X') {
+    const cleaned = this._sanitizeAlphaNumeric(value);
+    if (!cleaned) {
+      return fallback.repeat(length);
+    }
+    if (cleaned.length >= length) {
+      return cleaned.substring(0, length);
+    }
+    return (cleaned + fallback.repeat(length)).substring(0, length);
+  }
   
   /**
    * Get paginated list of invoices for an organization
@@ -266,24 +284,60 @@ class InvoiceManagementService {
           error: 'Invoice not found or access denied'
         };
       }
-      
-      // Check if PDF path exists
-      const pdfPath = invoice.metadata?.pdfPath;
-      if (!pdfPath) {
+
+      let pdfData = null;
+      let source = null;
+
+      // Primary: backend-managed artifact in Firebase Storage.
+      if (invoice.pdfArtifact && typeof invoice.pdfArtifact === 'object') {
+        pdfData = await invoiceArtifactService.downloadPdfAsBase64(invoice.pdfArtifact);
+        if (pdfData) {
+          source = 'artifact_storage';
+        }
+
+        // Legacy migration path: older invoices may only have a direct URL.
+        if (!pdfData && invoice.pdfArtifact.url) {
+          pdfData = await invoiceArtifactService.downloadPdfFromUrlAsBase64(
+            invoice.pdfArtifact.url
+          );
+          if (pdfData) {
+            source = 'legacy_url_fallback';
+          }
+        }
+      }
+
+      // Last fallback for legacy server-local artifacts.
+      if (!pdfData && invoice.metadata?.pdfPath) {
+        try {
+          const bytes = await fs.readFile(invoice.metadata.pdfPath);
+          if (bytes?.length) {
+            pdfData = bytes.toString('base64');
+            source = 'legacy_pdf_path';
+          }
+        } catch (error) {
+          logger.warn('Failed to read legacy invoice pdfPath', {
+            invoiceId: String(invoiceId),
+            pdfPath: invoice.metadata.pdfPath,
+            error: error.message,
+          });
+        }
+      }
+
+      if (!pdfData) {
         return {
           success: false,
           error: 'PDF not available for this invoice'
         };
       }
-      
-      // Return PDF metadata
+
       return {
         success: true,
         data: {
-          pdfPath: pdfPath,
+          pdfData,
           filename: `invoice-${invoice.invoiceNumber || invoiceId}.pdf`,
           invoiceNumber: invoice.invoiceNumber,
-          clientName: invoice.clientName
+          clientName: invoice.clientName,
+          source: source || 'unknown',
         }
       };
       
@@ -293,6 +347,84 @@ class InvoiceManagementService {
         success: false,
         error: 'Failed to retrieve invoice PDF',
         details: error.message
+      };
+    }
+  }
+
+  async attachPdfArtifact(invoiceId, organizationId, artifact) {
+    try {
+      if (!artifact || typeof artifact !== 'object') {
+        return {
+          success: false,
+          error: 'Invalid invoice artifact payload'
+        };
+      }
+
+      const update = {
+        pdfArtifact: artifact,
+        'metadata.pdfArtifactUrl': artifact.url || artifact.gsUri || null,
+        'auditTrail.updatedAt': new Date(),
+      };
+
+      const invoice = await Invoice.findOneAndUpdate(
+        {
+          _id: invoiceId,
+          organizationId,
+          'deletion.isDeleted': { $ne: true },
+        },
+        {
+          $set: update,
+          $push: {
+            'auditTrail.changeHistory': {
+              timestamp: new Date(),
+              userId: 'system',
+              action: 'pdf_artifact_attached',
+              changes: {
+                provider: artifact.provider || 'firebase_storage',
+                bucket: artifact.bucket || '',
+                path: artifact.path || '',
+              },
+              reason: 'Stored immutable invoice PDF artifact',
+            },
+          },
+        },
+        {
+          returnDocument: 'after',
+        }
+      );
+
+      if (!invoice) {
+        return {
+          success: false,
+          error: 'Invoice not found for artifact update',
+        };
+      }
+
+      // Keep immutable snapshot source context in sync where possible.
+      if (invoice.pdfRenderSnapshot && typeof invoice.pdfRenderSnapshot === 'object') {
+        const nextSnapshot = {
+          ...invoice.pdfRenderSnapshot,
+          sourceContext: {
+            ...(invoice.pdfRenderSnapshot.sourceContext || {}),
+            pdfArtifact: artifact,
+          },
+        };
+
+        await Invoice.updateOne(
+          { _id: invoiceId, organizationId },
+          { $set: { pdfRenderSnapshot: nextSnapshot } }
+        );
+      }
+
+      return {
+        success: true,
+        data: invoice,
+      };
+    } catch (error) {
+      logger.error('Error attaching invoice PDF artifact:', error);
+      return {
+        success: false,
+        error: error.message,
       };
     }
   }
@@ -548,7 +680,9 @@ class InvoiceManagementService {
       logger.error('Error creating invoice:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        errorCode: error.code,
+        duplicateKey: error?.code === 11000
       };
     }
   }
@@ -556,47 +690,79 @@ class InvoiceManagementService {
   /**
    * Generate unique invoice number for organization
    */
-  async generateInvoiceNumber(organizationId) {
+  async generateInvoiceNumber(organizationId, options = {}) {
     try {
-      // Get current year and month
+      const {
+        clientId = '',
+        clientName = '',
+        clientEmail = ''
+      } = options;
+
       const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      
-      // Create prefix: ORG-YYYY-MM-
-      const prefix = `${organizationId.toUpperCase()}-${year}-${month}-`;
-      
-      // Find the highest existing invoice number for this prefix
-      const lastInvoice = await Invoice.findOne(
+      const shortYear = String(now.getFullYear()).slice(-1); // 2026 => "6"
+      const shortMonth = String(now.getMonth() + 1).slice(-1); // 03 => "3", 10 => "0"
+
+      // Prefer organization code for human-readable compact numbers.
+      const org = await Organization.findById(organizationId)
+        .select('code organizationCode name')
+        .lean();
+
+      const orgCode = this._generateCompactCode(
+        org?.code || org?.organizationCode || organizationId,
+        3,
+        'X'
+      );
+
+      const clientCode = this._generateCompactCode(
+        `${clientName}${clientEmail}${clientId}`,
+        2,
+        'C'
+      );
+
+      // Compact format aligned with previous behavior:
+      // INV + ORG(3) + Y(1) + M(1) + SEQ(2+) + CLIENT(2)
+      const prefix = `INV${orgCode}${shortYear}${shortMonth}`;
+
+      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const sequenceMatcher = new RegExp(
+        `^${escapedPrefix}(\\d+)[A-Z0-9]{2}$`
+      );
+
+      // Compute max sequence for this org/month from compact-format invoices.
+      const existingInvoices = await Invoice.find(
         {
           organizationId,
-          invoiceNumber: { $regex: `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` }
+          invoiceNumber: { $regex: `^${escapedPrefix}` },
         },
-        null,
-        {
-          sort: { invoiceNumber: -1 }
-        }
-      ).select('invoiceNumber');
-      
-      let nextNumber = 1;
-      if (lastInvoice && lastInvoice.invoiceNumber) {
-        const lastNumberStr = lastInvoice.invoiceNumber.replace(prefix, '');
-        const lastNumber = parseInt(lastNumberStr, 10);
-        if (!isNaN(lastNumber)) {
-          nextNumber = lastNumber + 1;
+        { invoiceNumber: 1 }
+      ).lean();
+
+      let maxSequence = 0;
+      for (const invoice of existingInvoices) {
+        const value = invoice?.invoiceNumber;
+        if (!value) continue;
+        const match = sequenceMatcher.exec(value);
+        if (!match) continue;
+        const parsed = parseInt(match[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxSequence) {
+          maxSequence = parsed;
         }
       }
-      
-      // Format with leading zeros (4 digits)
-      const formattedNumber = String(nextNumber).padStart(4, '0');
-      
-      return `${prefix}${formattedNumber}`;
-      
+
+      const nextSequence = maxSequence + 1;
+      const sequenceStr = String(nextSequence).padStart(2, '0');
+
+      return `${prefix}${sequenceStr}${clientCode}`;
     } catch (error) {
       logger.error('Error generating invoice number:', error);
-      // Fallback to timestamp-based number
-      const timestamp = Date.now();
-      return `${organizationId.toUpperCase()}-${timestamp}`;
+
+      // Compact fallback: INV + ORG + Y + M + random + FB
+      const now = new Date();
+      const shortYear = String(now.getFullYear()).slice(-1);
+      const shortMonth = String(now.getMonth() + 1).slice(-1);
+      const orgCode = this._generateCompactCode(organizationId, 3, 'X');
+      const randomSeq = String(Math.floor(Math.random() * 90) + 10); // 10..99
+      return `INV${orgCode}${shortYear}${shortMonth}${randomSeq}FB`;
     }
   }
 
