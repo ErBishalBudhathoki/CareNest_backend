@@ -9,7 +9,7 @@ const User = require('../models/User');
 const logger = require('../utils/logger');
 const clientService = require('./clientService');
 
-const DEFAULT_VOICE_AGENT_MODEL = 'gemini-3.0-flash';
+const DEFAULT_VOICE_AGENT_MODEL = 'gemini-3-flash-preview';
 const MAX_AGENT_STEPS = 6;
 
 class AssignmentVoiceAgentService {
