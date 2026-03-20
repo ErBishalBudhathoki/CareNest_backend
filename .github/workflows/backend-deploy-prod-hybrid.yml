@@ -30,6 +30,7 @@ env:
   REGION: 'australia-southeast1'
   SERVICE_NAME: 'backend-prod'
   REGISTRY: 'australia-southeast1-docker.pkg.dev'
+  IMAGE_REPOSITORY: 'api'
   GCP_PROJECT_ID: 'carenest-prod'  # Prod project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-prod'
   CLOUD_RUN_SERVICE_ACCOUNT: 'carenest-prod@appspot.gserviceaccount.com'
@@ -183,8 +184,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_REPOSITORY }}/${{ env.SERVICE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -195,7 +196,7 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          image: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
           format: spdx-json
           output-file: backend-sbom.spdx.json
 
@@ -211,7 +212,7 @@ jobs:
           TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2
           TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1,public.ecr.aws/aquasecurity/trivy-java-db:1
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
           scanners: 'vuln'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
@@ -222,7 +223,7 @@ jobs:
       - name: Set image URI output
         id: set_image_uri
         run: |
-          IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
           echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
   # Manual Approval Gate
