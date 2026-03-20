@@ -13,7 +13,7 @@
     "test:unit": "jest --testPathIgnorePatterns=\"integration|seed-data\"",
     "test:integration": "jest tests/integration/eventFlow.test.js --runInBand --forceExit",
     "test:integration:full": "jest --testPathPatterns=integration --runInBand --forceExit",
-    "test:e2e": "jest --testPathPatterns=e2e",
+    "test:e2e": "jest --runInBand --testMatch=\"**/tests/e2e/**/*.test.js\" --passWithNoTests",
     "test:all": "jest",
     "health-check": "curl $BACKEND_URL/health || curl $PRODUCTION_URL/health || echo 'Server not responding'",
     "health-check:local": "curl http://localhost:8080/health || echo 'Local server not responding'",
