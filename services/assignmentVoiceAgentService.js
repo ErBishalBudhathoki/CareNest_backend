@@ -32,6 +32,12 @@ class AssignmentVoiceAgentService {
       !projectId ||
       !location
     ) {
+      logger.warn('Assignment voice agent disabled by runtime configuration.', {
+        voiceAgentEnabled: process.env.VOICE_AGENT_ENABLED !== 'false',
+        hasProjectId: !!projectId,
+        hasLocation: !!location,
+        modelName,
+      });
       this.model = null;
       return;
     }
