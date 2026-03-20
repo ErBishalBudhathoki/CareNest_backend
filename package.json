@@ -92,7 +92,9 @@
     "gcp-metadata": "^6.1.1",
     "minimatch": "^10.2.1",
     "glob": "^11.0.0",
-    "ajv": "^8.18.0"
+    "ajv": "^8.18.0",
+    "fast-xml-parser": "5.5.8",
+    "@aws-sdk/xml-builder": "3.972.14"
   },
   "jest": {
     "testEnvironment": "node",
