@@ -20,10 +20,10 @@ exports.startTracking = async (req, res) => {
   try {
     const { appointmentId, workerId, clientLocation } = req.body;
 
-    if (!appointmentId || !workerId || !clientLocation) {
+    if (!appointmentId || !workerId) {
       return res.status(400).json({
         success: false,
-        message: 'appointmentId, workerId, and clientLocation are required',
+        message: 'appointmentId and workerId are required',
       });
     }
 
@@ -55,7 +55,7 @@ exports.updateLocation = async (req, res) => {
   try {
     const { appointmentId, workerId, latitude, longitude, accuracy } = req.body;
 
-    if (!appointmentId || !latitude || !longitude) {
+    if (!appointmentId || latitude == null || longitude == null) {
       return res.status(400).json({
         success: false,
         message: 'appointmentId, latitude, and longitude are required',
@@ -176,6 +176,7 @@ exports.sendMessage = async (req, res) => {
       message,
       attachments,
       timestamp: new Date(),
+      authUser: req.user,
     });
 
     res.json({
@@ -184,9 +185,9 @@ exports.sendMessage = async (req, res) => {
     });
   } catch (error) {
     console.error('Error sending message:', error);
-    res.status(500).json({
+    res.status(Number(error?.statusCode) || 500).json({
       success: false,
-      message: 'Error sending message',
+      message: error?.message || 'Error sending message',
       error: error.message,
     });
   }
@@ -201,10 +202,14 @@ exports.getMessages = async (req, res) => {
     const { conversationId } = req.params;
     const { limit, before } = req.query;
 
-    const messages = await messagingService.getMessages(conversationId, {
-      limit: limit ? parseInt(limit) : 50,
-      before,
-    });
+    const messages = await messagingService.getMessages(
+      conversationId,
+      {
+        limit: limit ? parseInt(limit, 10) : 50,
+        before,
+      },
+      req.user
+    );
 
     res.json({
       success: true,
@@ -212,9 +217,9 @@ exports.getMessages = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting messages:', error);
-    res.status(500).json({
+    res.status(Number(error?.statusCode) || 500).json({
       success: false,
-      message: 'Error getting messages',
+      message: error?.message || 'Error getting messages',
       error: error.message,
     });
   }
@@ -226,7 +231,18 @@ exports.getMessages = async (req, res) => {
  */
 exports.createConversation = async (req, res) => {
   try {
-    const { appointmentId, clientId, workerId, organizationId } = req.body;
+    const {
+      appointmentId,
+      assignmentId,
+      scheduleId,
+      clientId,
+      clientEmail,
+      workerId,
+      workerEmail,
+      organizationId,
+      shiftStartAt,
+      shiftEndAt,
+    } = req.body;
 
     if (!appointmentId || !clientId || !workerId) {
       return res.status(400).json({
@@ -237,9 +253,15 @@ exports.createConversation = async (req, res) => {
 
     const conversation = await messagingService.createConversation({
       appointmentId,
+      assignmentId,
+      scheduleId,
       clientId,
+      clientEmail,
       workerId,
+      workerEmail,
       organizationId,
+      shiftStartAt,
+      shiftEndAt,
     });
 
     res.json({
@@ -248,9 +270,9 @@ exports.createConversation = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating conversation:', error);
-    res.status(500).json({
+    res.status(Number(error?.statusCode) || 500).json({
       success: false,
-      message: 'Error creating conversation',
+      message: error?.message || 'Error creating conversation',
       error: error.message,
     });
   }
@@ -264,7 +286,27 @@ exports.getUserConversations = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const conversations = await messagingService.getUserConversations(userId);
+    const authEmail = (req.user?.email || '').toString().trim().toLowerCase();
+    const authUserId = (req.user?.userId || '').toString().trim().toLowerCase();
+    const requested = (userId || '').toString().trim().toLowerCase();
+    const userIsOwner = requested === authEmail || requested === authUserId;
+    const userIsAdmin = Array.isArray(req.user?.roles)
+      ? req.user.roles
+          .map((role) => role.toString().trim().toLowerCase())
+          .some((role) => role === 'admin' || role === 'superadmin')
+      : false;
+
+    if (!userIsOwner && !userIsAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only load your own conversations.',
+      });
+    }
+
+    const conversations = await messagingService.getUserConversations(userId, {
+      authUser: req.user,
+      provisionFromAssignments: true,
+    });
 
     res.json({
       success: true,
@@ -272,9 +314,9 @@ exports.getUserConversations = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting conversations:', error);
-    res.status(500).json({
+    res.status(Number(error?.statusCode) || 500).json({
       success: false,
-      message: 'Error getting conversations',
+      message: error?.message || 'Error getting conversations',
       error: error.message,
     });
   }
@@ -560,4 +602,3 @@ exports.getAccessLog = async (req, res) => {
     });
   }
 };
-

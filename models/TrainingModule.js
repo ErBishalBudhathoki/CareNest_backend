@@ -10,7 +10,15 @@ const trainingModuleSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  contentType: {
+    type: String,
+    enum: ['Video', 'Text', 'Link'],
+    default: 'Text'
+  },
   contentUrl: {
+    type: String
+  },
+  contentText: {
     type: String
   },
   thumbnailUrl: {
@@ -30,7 +38,11 @@ const trainingModuleSchema = new mongoose.Schema({
   },
   isPublished: {
     type: Boolean,
-    default: false
+    default: true
+  },
+  createdBy: {
+    type: String,
+    default: ''
   },
   roles: {
     type: [String], // Roles this module is assigned to

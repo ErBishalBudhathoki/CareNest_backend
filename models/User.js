@@ -35,7 +35,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'admin', 'superadmin', 'moderator', 'client'],
+    enum: ['user', 'admin', 'superadmin', 'moderator', 'client', 'manager'],
     default: 'user'
   },
   clientId: {
@@ -54,6 +54,13 @@ const userSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletionScheduledAt: {
+    type: Date
   },
   roles: {
     type: [String],
@@ -148,8 +155,14 @@ const userSchema = new mongoose.Schema({
       delete ret.refreshTokens; // Security: Don't expose refresh tokens
 
       // Handle legacy 'role' field (singular) → 'roles' (array)
-      if (ret.role && (!ret.roles || ret.roles.length === 0)) {
-        ret.roles = [ret.role];
+      if (ret.role) {
+        if (!Array.isArray(ret.roles)) {
+          ret.roles = [];
+        }
+        const normalized = String(ret.role).toLowerCase().trim();
+        if (normalized && !ret.roles.map(r => String(r).toLowerCase().trim()).includes(normalized)) {
+          ret.roles.push(ret.role);
+        }
       }
       delete ret.role; // Remove legacy field
 
