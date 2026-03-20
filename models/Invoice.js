@@ -93,6 +93,15 @@ const invoiceSchema = new mongoose.Schema({
   },
 
   calculatedPayloadData: mongoose.Schema.Types.Mixed,
+  // Full input used to generate the invoice PDF (immutable snapshot).
+  // This allows deterministic re-rendering without re-calculating business logic.
+  pdfRenderSnapshot: mongoose.Schema.Types.Mixed,
+  // Stored PDF artifact metadata (Firebase/R2/etc) for direct retrieval.
+  pdfArtifact: mongoose.Schema.Types.Mixed,
+  // Runtime params/flags used by PDF generator (tax, expenses, attachments, etc).
+  pdfGenerationParams: mongoose.Schema.Types.Mixed,
+  // Keep original expense rows used during generation.
+  expenses: [mongoose.Schema.Types.Mixed],
 
   employeeContext: {
     employeeId: String,

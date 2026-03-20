@@ -32,6 +32,7 @@ const payrollRoutes = require('./payrollRoutes');
 const timesheetReminderRoutes = require('./timesheetReminderRoutes');
 const earningsRoutes = require('./earningsRoutes');
 const expenseRoutes = require('./expense');
+const recurringExpenseRoutes = require('./recurringExpense');
 const expenseReminderRoutes = require('./expenseReminderRoutes');
 const onboardingRoutes = require('./onboarding');
 const webhookRoutes = require('./webhookRoutes');
@@ -57,6 +58,7 @@ const holidayRoutes = require('./holidayRoutes');
 const supportItemsRoutes = require('./supportItems');
 const notesRoutes = require('./notesRoutes');
 const notificationRoutes = require('./notificationRoutes');
+const filesRoutes = require('./files');
 const employeeTrackingRoutes = require('./employeeTracking');
 const scheduleRoutes = require('./schedule'); // Import schedule routes
 const jwtKeyRotationRoutes = require('./jwtKeyRotation'); // JWT Key Rotation admin routes
@@ -77,6 +79,7 @@ const workforceOptimizationRoutes = require('./workforceOptimizationRoutes'); //
 const financialIntelligenceRoutes = require('./financialIntelligenceRoutes'); // Financial intelligence (Phase 10)
 const careIntelligenceRoutes = require('./careIntelligenceRoutes'); // Care intelligence
 const invoicingEmailLegacyRoutes = require('./invoicingEmailLegacyRoutes'); // Legacy invoicing email endpoints
+const trainingComplianceRoutes = require('./trainingComplianceRoutes'); // Training & compliance hub routes
 
 // Mount Routes
 
@@ -114,6 +117,7 @@ router.use('/payroll', payrollRoutes);
 router.use('/reminders', timesheetReminderRoutes);
 router.use('/earnings', earningsRoutes);
 router.use('/expenses', expenseRoutes);
+router.use('/', recurringExpenseRoutes);
 router.use('/reminders', expenseReminderRoutes); // Merges with timesheetReminderRoutes
 router.use('/onboarding', onboardingRoutes);
 router.use('/', businessRoutes);
@@ -138,6 +142,7 @@ router.use('/holidays', holidayRoutes);
 router.use('/support-items', supportItemsRoutes);
 router.use('/notes', notesRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/files', filesRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
 router.use('/schedule', scheduleRoutes); // Mount schedule routes
 router.use('/admin/jwt-keys', jwtKeyRotationRoutes); // JWT Key Rotation admin API
@@ -157,6 +162,7 @@ router.use('/firebase-auth', firebaseAuthRoutes); // Firebase authentication API
 router.use('/workforce', workforceOptimizationRoutes); // Workforce optimization API (Phase 8)
 router.use('/financial-intelligence', financialIntelligenceRoutes); // Financial intelligence API (Phase 10)
 router.use('/care-intelligence', careIntelligenceRoutes); // Care intelligence API
+router.use('/training-compliance', trainingComplianceRoutes); // Training & certification API
 router.use('/', invoicingEmailLegacyRoutes); // Legacy invoicing email compatibility API
 // router.use('/upload', uploadRoutes); // TODO: Add uploadRoutes import if needed
 

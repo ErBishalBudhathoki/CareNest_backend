@@ -45,6 +45,49 @@ const limits = {
     fileSize: 10 * 1024 * 1024 // 10MB limit
 };
 
+const sanitizeFolder = (folder) =>
+    String(folder || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/\.\./g, '');
+
+const resolveUploadFolder = (req, file) => {
+    const explicitFolder = sanitizeFolder(req.uploadFolder);
+    if (explicitFolder) return explicitFolder;
+
+    const requestUploadType = String(
+        req?.query?.uploadType ||
+        req?.query?.folder ||
+        req?.headers?.['x-upload-type'] ||
+        req?.body?.uploadType ||
+        ''
+    ).trim().toLowerCase();
+
+    const uploadTypeToFolder = {
+        receipt: 'receipts',
+        receipts: 'receipts',
+        expense_receipt: 'receipts',
+        logo: 'logos',
+        logos: 'logos',
+        certification: 'certifications',
+        certifications: 'certifications',
+        photo: 'profileImage',
+        profile: 'profileImage'
+    };
+
+    if (uploadTypeToFolder[requestUploadType]) {
+        return uploadTypeToFolder[requestUploadType];
+    }
+
+    // Default folder mapping by field name
+    if (file.fieldname === 'logo') return 'logos';
+    if (file.fieldname === 'receipt') return 'receipts';
+    if (file.fieldname === 'receipts') return 'receipts';
+    if (file.fieldname === 'certification') return 'certifications';
+    if (file.fieldname === 'photo') return 'profileImage';
+    return 'others';
+};
+
 let upload;
 let s3Client;
 
@@ -80,12 +123,7 @@ if (isR2Configured) {
             contentType: multerS3.AUTO_CONTENT_TYPE,
             key: function (req, file, cb) {
                 const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-                let folder = 'others';
-                if (file.fieldname === 'logo') folder = 'logos';
-                if (file.fieldname === 'receipt') folder = 'receipts';
-                if (file.fieldname === 'certification') folder = 'certifications';
-                // For profile photos, store in 'profileImage' folder
-                if (file.fieldname === 'photo') folder = 'profileImage';
+                const folder = resolveUploadFolder(req, file);
                 
                 const key = `${folder}/${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`;
                 console.log(`Uploading file to R2: ${key}`);

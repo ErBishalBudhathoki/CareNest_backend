@@ -31,6 +31,7 @@ env:
   GCP_PROJECT_ID: 'invoice-660f3'  # Dev project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-dev'
   CLOUD_RUN_SERVICE_ACCOUNT: 'invoice-660f3@appspot.gserviceaccount.com'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # Security and Quality Checks
@@ -38,6 +39,9 @@ jobs:
     name: Security & Quality Checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2
+      TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1,public.ecr.aws/aquasecurity/trivy-java-db:1
     defaults:
       run:
         working-directory: .
@@ -58,7 +62,7 @@ jobs:
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -94,9 +98,6 @@ jobs:
     services:
       mongodb:
         image: mongo:7
-        env:
-          MONGO_INITDB_ROOT_USERNAME: test
-          MONGO_INITDB_ROOT_PASSWORD: testpass
         ports:
           - 27017:27017
       redis:
@@ -126,7 +127,7 @@ jobs:
       - name: Run integration tests
         env:
           NODE_ENV: test
-          MONGODB_URI: mongodb://test:testpass@localhost:27017/test?authSource=admin
+          MONGODB_URI: mongodb://localhost:27017/test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: test-secret-key
         run: npm run test:integration
@@ -260,7 +261,7 @@ jobs:
             --port 8080 \
             --remove-secrets APP_SECRETS \
             --set-env-vars "NODE_ENV=development,APP_CHECK_ENFORCEMENT=true" \
-            --set-env-vars "GCP_PROJECT_ID=invoice-660f3" \
+            --set-env-vars "GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --tag "$PREVIEW_TAG" \
             --no-traffic \

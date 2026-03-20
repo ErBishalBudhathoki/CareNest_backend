@@ -5,6 +5,7 @@
  */
 
 const { InvoiceManagementService: invoiceManagementService } = require('../services/invoiceManagementService');
+const { invoiceArtifactService } = require('../services/invoiceArtifactService');
 const logger = require('../config/logger');
 
 // Service is already instantiated in the module export
@@ -162,12 +163,20 @@ async function shareInvoice(req, res) {
       }
 
       // Return PDF data as base64
+      logger.info('Invoice PDF share source resolved', {
+        invoiceId,
+        organizationId,
+        source: result?.data?.source || 'unknown',
+        event: 'invoice_pdf_source_resolved',
+      });
+
       return res.json({
         success: true,
         data: {
           pdfData: result.data.pdfData,
           filename: result.data.filename || `invoice-${invoiceId}.pdf`,
-          mimeType: 'application/pdf'
+          mimeType: 'application/pdf',
+          source: result.data.source || 'unknown',
         }
       });
     }
@@ -376,6 +385,105 @@ function normalizeLineItems(rawLineItems, organizationId) {
     .filter((item) => item && (item.totalPrice > 0 || item.quantity > 0));
 }
 
+function normalizeObject(value, fallback = null) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function ensureInvoiceNumberInRenderPayload(renderPayload, invoiceNumber) {
+  if (!renderPayload || typeof renderPayload !== 'object') return;
+  const normalizedNumber = normalizeString(invoiceNumber);
+  if (!normalizedNumber) return;
+
+  renderPayload.invoiceNumber = normalizedNumber;
+  if (Array.isArray(renderPayload.clients)) {
+    renderPayload.clients = renderPayload.clients.map((client, index) => {
+      if (!client || typeof client !== 'object') return client;
+      if (index === 0) {
+        return {
+          ...client,
+          invoiceNumber: normalizedNumber,
+        };
+      }
+      return client;
+    });
+  }
+}
+
+function buildPdfRenderSnapshot({
+  providedSnapshot,
+  invoiceNumber,
+  calculatedPayloadData,
+  pdfGenerationParams,
+  pdfArtifact,
+  financialSummary,
+  metadata,
+  invoiceType,
+  issuer,
+  billedTo,
+  lineItems,
+  expenses,
+  recurrence,
+}) {
+  const nowIso = new Date().toISOString();
+  const normalizedNumber = normalizeString(invoiceNumber);
+  const renderPayload = normalizeObject(calculatedPayloadData, null);
+  const renderParams = normalizeObject(pdfGenerationParams, {});
+  const safePdfArtifact = normalizeObject(pdfArtifact, null);
+  const sourceMetadata = normalizeObject(metadata, {});
+  const safeIssuer = normalizeObject(issuer, {});
+  const safeBilledTo = normalizeObject(billedTo, {});
+  const safeRecurrence = normalizeObject(recurrence, null);
+  const safeSummary = normalizeObject(financialSummary, {});
+  const safeLineItems = Array.isArray(lineItems) ? lineItems : [];
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+
+  if (renderPayload) {
+    ensureInvoiceNumberInRenderPayload(renderPayload, normalizedNumber);
+  }
+
+  if (providedSnapshot && typeof providedSnapshot === 'object') {
+    const merged = {
+      ...providedSnapshot,
+      version: providedSnapshot.version || 'invoice-render-snapshot:v1',
+      capturedAt: providedSnapshot.capturedAt || nowIso,
+      invoiceNumber:
+        normalizeString(providedSnapshot.invoiceNumber) || normalizedNumber,
+      renderPayload:
+        normalizeObject(providedSnapshot.renderPayload, null) || renderPayload,
+      renderParams: {
+        ...renderParams,
+        ...(normalizeObject(providedSnapshot.renderParams, {}) || {}),
+      },
+      financialSummary:
+        normalizeObject(providedSnapshot.financialSummary, null) || safeSummary,
+    };
+
+    ensureInvoiceNumberInRenderPayload(merged.renderPayload, normalizedNumber);
+    return merged;
+  }
+
+  return {
+    version: 'invoice-render-snapshot:v1',
+    capturedAt: nowIso,
+    invoiceNumber: normalizedNumber,
+    renderPayload,
+    renderParams,
+    financialSummary: safeSummary,
+    sourceContext: {
+      invoiceType: normalizeString(invoiceType),
+      metadata: sourceMetadata,
+      issuer: safeIssuer,
+      billedTo: safeBilledTo,
+      lineItems: safeLineItems,
+      expenses: safeExpenses,
+      recurrence: safeRecurrence,
+      pdfArtifact: safePdfArtifact,
+    },
+  };
+}
+
 function resolveEmployeeContext({
   employeeContext,
   metadata,
@@ -413,6 +521,24 @@ function resolveEmployeeContext({
   return resolved;
 }
 
+function isDuplicateInvoiceNumberError(result = {}) {
+  const combined = [
+    result.error,
+    result.message,
+    result.details
+  ]
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).toLowerCase())
+    .join(' ');
+
+  if (result.duplicateKey === true || result.errorCode === 11000) {
+    return true;
+  }
+
+  return combined.includes('e11000') &&
+    (combined.includes('invoice') || combined.includes('invoicenumber'));
+}
+
 /**
  * Create a new invoice
  * @param {Object} req - Express request object
@@ -420,8 +546,12 @@ function resolveEmployeeContext({
  */
 async function createInvoice(req, res) {
   try {
+    const requestBodyForLog = { ...(req.body || {}) };
+    if (typeof requestBodyForLog.pdfBase64 === 'string') {
+      requestBodyForLog.pdfBase64 = `[base64:${requestBodyForLog.pdfBase64.length} chars]`;
+    }
     console.log('=== CREATE INVOICE REQUEST ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('Request body:', JSON.stringify(requestBodyForLog, null, 2));
     console.log('Request headers:', req.headers);
 
     const {
@@ -436,11 +566,16 @@ async function createInvoice(req, res) {
       pdfPath,
       userEmail,
       calculatedPayloadData,
+      pdfGenerationParams,
+      pdfRenderSnapshot,
+      pdfArtifact,
+      pdfBase64,
       invoiceNumber: providedInvoiceNumber,
       invoiceType,
       issuer,
       billedTo,
-      employeeContext
+      employeeContext,
+      recurrence
     } = req.body;
 
     const normalizedLineItems = normalizeLineItems(lineItems, organizationId);
@@ -473,14 +608,6 @@ async function createInvoice(req, res) {
       });
     }
 
-    // Use provided invoice number or generate a new one
-    const invoiceNumber = providedInvoiceNumber || await invoiceManagementService.generateInvoiceNumber(organizationId);
-
-    console.log('=== INVOICE NUMBER HANDLING ===');
-    console.log('Provided invoice number:', providedInvoiceNumber);
-    console.log('Final invoice number:', invoiceNumber);
-    console.log('================================')
-
     const resolvedEmployeeContext = resolveEmployeeContext({
       employeeContext,
       metadata,
@@ -494,12 +621,13 @@ async function createInvoice(req, res) {
 
     // Prepare invoice data according to schema
     const invoiceData = {
-      invoiceNumber,
+      invoiceNumber: providedInvoiceNumber || '',
       organizationId,
       clientId,
       clientEmail,
       clientName,
       lineItems: normalizedLineItems,
+      expenses: hasExpenses ? expenses : [],
       financialSummary: {
         subtotal: financialSummary?.subtotal || lineItemsTotal,
         taxAmount: financialSummary?.taxAmount || 0,
@@ -520,14 +648,33 @@ async function createInvoice(req, res) {
         category: metadata.category || 'standard',
         priority: metadata.priority || 'normal',
         internalNotes: metadata.internalNotes || '',
-        pdfPath: pdfPath || null
+        pdfPath: pdfPath || null,
+        pdfArtifactUrl: normalizeObject(pdfArtifact, null)?.url || metadata?.pdfArtifactUrl || null
       },
       header: {
         issuer,
         billedTo,
       },
       calculatedPayloadData: calculatedPayloadData || null,
+      pdfGenerationParams: normalizeObject(pdfGenerationParams, {}) || {},
+      pdfArtifact: normalizeObject(pdfArtifact, null),
+      pdfRenderSnapshot: buildPdfRenderSnapshot({
+        providedSnapshot: normalizeObject(pdfRenderSnapshot, null),
+        invoiceNumber: providedInvoiceNumber || '',
+        calculatedPayloadData,
+        pdfGenerationParams,
+        pdfArtifact,
+        financialSummary,
+        metadata,
+        invoiceType,
+        issuer,
+        billedTo,
+        lineItems: normalizedLineItems,
+        expenses: hasExpenses ? expenses : [],
+        recurrence: normalizeObject(recurrence, null),
+      }),
       employeeContext: resolvedEmployeeContext,
+      recurrence: normalizeObject(recurrence, null),
       compliance: {
         ndisCompliant: true, // Will be validated
         validationPassed: true,
@@ -590,10 +737,112 @@ async function createInvoice(req, res) {
     console.log('HEADER VALIDATION:', { invoiceType, issuer, billedTo });
     console.log('METADATA AFTER BUILD:', invoiceData.metadata);
 
-    // Create the invoice
-    const result = await invoiceManagementService.createInvoice(invoiceData);
+    // Create the invoice with duplicate number retry.
+    // If frontend-provided invoiceNumber collides, backend regenerates and retries.
+    const maxCreateAttempts = 4;
+    let attempt = 0;
+    let result = null;
+    let invoiceNumber = normalizeString(providedInvoiceNumber);
+
+    while (attempt < maxCreateAttempts) {
+      attempt += 1;
+
+      if (!invoiceNumber) {
+        invoiceNumber = await invoiceManagementService.generateInvoiceNumber(
+          organizationId,
+          {
+            clientId,
+            clientName,
+            clientEmail,
+          }
+        );
+      }
+
+      invoiceData.invoiceNumber = invoiceNumber;
+      if (invoiceData.pdfRenderSnapshot && typeof invoiceData.pdfRenderSnapshot === 'object') {
+        invoiceData.pdfRenderSnapshot.invoiceNumber = invoiceNumber;
+        if (normalizeObject(invoiceData.pdfRenderSnapshot.renderPayload, null)) {
+          ensureInvoiceNumberInRenderPayload(
+            invoiceData.pdfRenderSnapshot.renderPayload,
+            invoiceNumber
+          );
+        }
+      }
+      if (normalizeObject(invoiceData.calculatedPayloadData, null)) {
+        ensureInvoiceNumberInRenderPayload(
+          invoiceData.calculatedPayloadData,
+          invoiceNumber
+        );
+      }
+
+      console.log('=== INVOICE NUMBER HANDLING ===');
+      console.log('Attempt:', attempt);
+      console.log('Provided invoice number:', providedInvoiceNumber);
+      console.log('Final invoice number for attempt:', invoiceNumber);
+      console.log('================================');
+
+      result = await invoiceManagementService.createInvoice(invoiceData);
+      if (result.success) {
+        break;
+      }
+
+      if (!isDuplicateInvoiceNumberError(result) || attempt >= maxCreateAttempts) {
+        break;
+      }
+
+      logger.warn('Invoice number collision detected, retrying with new number', {
+        organizationId,
+        clientEmail,
+        attemptedInvoiceNumber: invoiceNumber,
+        attempt,
+      });
+
+      invoiceNumber = '';
+    }
 
     if (result.success) {
+      const resolvedArtifactPayload = normalizeObject(pdfArtifact, null);
+      const hasBackendUploadPayload =
+        typeof pdfBase64 === 'string' && pdfBase64.trim().length > 0;
+      const hasClientArtifactOnly = resolvedArtifactPayload && !hasBackendUploadPayload;
+
+      if (hasBackendUploadPayload || hasClientArtifactOnly) {
+        try {
+          let artifactToPersist = resolvedArtifactPayload;
+
+          if (hasBackendUploadPayload) {
+            artifactToPersist = await invoiceArtifactService.uploadPdfBase64({
+              pdfBase64,
+              organizationId,
+              clientEmail,
+              invoiceNumber: result.data.invoiceNumber,
+            });
+          }
+
+          if (artifactToPersist) {
+            const attachResult = await invoiceManagementService.attachPdfArtifact(
+              result.data._id,
+              organizationId,
+              artifactToPersist
+            );
+
+            if (!attachResult.success) {
+              logger.warn('Invoice created but failed to attach PDF artifact', {
+                invoiceId: result.data._id,
+                organizationId,
+                reason: attachResult.error,
+              });
+            }
+          }
+        } catch (artifactError) {
+          logger.warn('Invoice created but PDF artifact upload failed', {
+            invoiceId: result.data._id,
+            organizationId,
+            error: artifactError.message,
+          });
+        }
+      }
+
       logger.info('Invoice created successfully', {
         invoiceId: result.data._id,
         invoiceNumber: result.data.invoiceNumber,
@@ -617,7 +866,7 @@ async function createInvoice(req, res) {
     } else {
       console.log('=== CREATE INVOICE FAILED ===');
       console.log('Service result:', result);
-      res.status(500).json({
+      res.status(isDuplicateInvoiceNumberError(result) ? 409 : 500).json({
         success: false,
         error: result.error || 'Failed to create invoice'
       });

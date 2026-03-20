@@ -8,18 +8,20 @@ class TeamController {
   // --- Teams ---
 
   create = catchAsync(async (req, res) => {
-    const managerId = req.user.id;
+    const managerId = req.user.userId;
+    const organizationId = req.user.organizationId;
     const { name, settings } = req.body;
 
     const team = await Team.create({
       name,
       managerId,
+      organizationId,
       settings: settings || {}
     });
 
-    // Add manager as admin/manager member
+    // Add manager as active member with manager role
     await TeamMember.create({
-      teamId: team.id,
+      teamId: team._id,
       userId: managerId,
       role: 'manager',
       status: 'active'
@@ -29,7 +31,7 @@ class TeamController {
   });
 
   getMyTeams = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     
     // Find all memberships
     const memberships = await TeamMember.find({ userId }).populate('teamId');
@@ -39,18 +41,11 @@ class TeamController {
       .filter(m => m.teamId) // Ensure populated
       .map(m => m.teamId);
 
-    // TODO: Ideally we should attach member role/status to the team object if needed by frontend
-    // But frontend Team model has 'members' list.
-    // For summary view, basic team info is enough.
-    // We can populate members for each team if needed, but that's heavy.
-    // Let's return teams. The frontend might fetch details later?
-    // Frontend 'Team' model has 'members' list. 
-    // I should populate members for each team.
-    
-    const populatedTeams = await Promise.all(teams.map(async (team) => {
-        const members = await TeamMember.find({ teamId: team.id }).populate('userId', 'firstName lastName email profilePic'); // Adjusted populate fields
-        const teamObj = team.toJSON();
-        teamObj.members = members; // Attach members
+    const populatedTeams = await Promise.all(teams.map(async (teamDoc) => {
+        const teamId = teamDoc._id || teamDoc.id;
+        const members = await TeamMember.find({ teamId }).populate('userId', 'firstName lastName email profilePic');
+        const teamObj = teamDoc.toJSON();
+        teamObj.members = members;
         return teamObj;
     }));
 
@@ -61,11 +56,7 @@ class TeamController {
     const { teamId } = req.params;
     const { email, role } = req.body;
     
-    // Find user by email (assuming User model has email)
-    // Needs User model import if searching by email
-    // For now, assuming we receive userId or skipping email lookup logic implementation details
-    // I'll assume we need to look up User.
-    const User = require('../models/User'); // Lazy import to avoid circular dep if any
+    const User = require('../models/User');
     const user = await User.findOne({ email });
     
     if (!user) {
@@ -73,14 +64,15 @@ class TeamController {
     }
 
     // Check if already member
-    const existing = await TeamMember.findOne({ teamId, userId: user.id });
+    const targetUserId = user._id || user.id;
+    const existing = await TeamMember.findOne({ teamId, userId: targetUserId });
     if (existing) {
         return res.status(400).json({ success: false, message: 'User already in team' });
     }
 
     await TeamMember.create({
         teamId,
-        userId: user.id,
+        userId: targetUserId,
         role: role || 'member',
         status: 'invited'
     });
@@ -94,19 +86,23 @@ class TeamController {
     const { teamId } = req.params;
     const members = await TeamMember.find({ teamId }).populate('userId', 'firstName lastName email profilePic');
     
-    const matrix = members.map(m => ({
-      userId: m.userId ? m.userId.id : null,
-      name: m.userId ? `${m.userId.firstName} ${m.userId.lastName}`.trim() : 'Unknown',
-      status: m.availabilitySettings.status,
-      role: m.role,
-      profilePic: m.userId ? m.userId.profilePic : null
-    }));
+    const matrix = members.map(m => {
+      const u = m.userId;
+      const uid = u ? (u._id || u.id) : null;
+      return {
+        userId: uid,
+        name: u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : 'Unknown',
+        status: m.availabilitySettings ? (m.availabilitySettings.status || 'available') : 'available',
+        role: m.role,
+        profilePic: u ? u.profilePic : null
+      };
+    });
     
     res.json({ success: true, data: matrix });
   });
 
   updateStatus = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const { teamId, status } = req.body;
     
     const member = await TeamMember.findOneAndUpdate(
@@ -122,23 +118,21 @@ class TeamController {
 
   sendBroadcast = catchAsync(async (req, res) => {
     const { teamId, message, type } = req.body;
-    const initiatorId = req.user.id;
+    const initiatorId = req.user.userId;
 
     const broadcast = await EmergencyBroadcast.create({
         teamId,
         initiatorId,
         message,
-        type: type || 'alert', // 'medical', 'fire', etc.
+        type: type || 'alert',
         status: 'active'
     });
-
-    // TODO: Trigger push notifications here via NotificationService
 
     res.status(201).json({ success: true, data: broadcast });
   });
 
   getActiveBroadcasts = catchAsync(async (req, res) => {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     // Find teams user belongs to
     const memberships = await TeamMember.find({ userId });
     const teamIds = memberships.map(m => m.teamId);
@@ -152,12 +146,12 @@ class TeamController {
   });
 
   acknowledgeBroadcast = catchAsync(async (req, res) => {
-    const { id } = req.params; // broadcastId
-    const userId = req.user.id;
+    const { id } = req.params;
+    const userId = req.user.userId;
 
     const broadcast = await EmergencyBroadcast.findByIdAndUpdate(
         id,
-        { $addToSet: { acknowledgments: userId } }, // Add userId to acknowledgments array (simple schema)
+        { $addToSet: { acknowledgments: userId } },
         { new: true }
     );
 

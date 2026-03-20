@@ -7,7 +7,7 @@ const requestSchema = new mongoose.Schema({
     type: {
         type: String,
         required: true,
-        enum: ['Shift', 'TimeOff', 'SHIFT_SWAP_OFFER', 'SHIFT_OFFER'] 
+        enum: ['Shift', 'TimeOff', 'SHIFT_SWAP_OFFER', 'SHIFT_OFFER', 'ACCOUNT_DELETION'] 
     },
     status: {
         type: String,

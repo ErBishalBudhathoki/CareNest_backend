@@ -62,8 +62,20 @@ const approvalValidation = [
     .isMongoId()
     .withMessage('Valid expense ID is required'),
   body('status')
-    .isIn(['approved', 'rejected'])
-    .withMessage('Status must be approved or rejected')
+    .optional()
+    .isIn(['approved', 'rejected', 'pending'])
+    .withMessage('Status must be approved, rejected, or pending'),
+  body('approvalStatus')
+    .optional()
+    .isIn(['approved', 'rejected', 'pending'])
+    .withMessage('approvalStatus must be approved, rejected, or pending'),
+  body()
+    .custom((payload) => {
+      if (!payload?.status && !payload?.approvalStatus) {
+        throw new Error('status or approvalStatus is required');
+      }
+      return true;
+    })
 ];
 
 // Protected routes
@@ -87,6 +99,14 @@ router.get('/organization/:organizationId',
   requireOrganizationMatch('organizationId'),
   handleValidationErrors, 
   expenseController.getOrganizationExpenses
+);
+
+router.get('/statistics/:organizationId',
+  expenseReadLimiter,
+  param('organizationId').isMongoId(),
+  requireOrganizationMatch('organizationId'),
+  handleValidationErrors,
+  expenseController.getExpenseStatistics
 );
 
 router.get('/:expenseId', 

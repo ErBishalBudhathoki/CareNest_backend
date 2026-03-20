@@ -9,8 +9,14 @@ class ExpenseController {
   });
 
   getExpenseCategories = catchAsync(async (req, res) => {
-    const categories = await expenseService.getExpenseCategories();
-    res.json(categories);
+    const result = await expenseService.getExpenseCategories();
+    const categories = result?.data ?? {};
+    res.json({
+      success: true,
+      statusCode: result?.statusCode ?? 200,
+      categories,
+      data: categories
+    });
   });
 
   getOrganizationExpenses = catchAsync(async (req, res) => {
@@ -29,15 +35,44 @@ class ExpenseController {
     res.json(result);
   });
 
+  getExpenseStatistics = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+    const { status, category, startDate, endDate } = req.query;
+
+    const result = await expenseService.getOrganizationExpenses(organizationId, {
+      page: 1,
+      limit: 1,
+      status,
+      category,
+      startDate,
+      endDate
+    });
+
+    const statistics = result?.summary || {
+      totalAmount: 0,
+      averageAmount: 0,
+      reimbursableAmount: 0,
+      pendingApprovalAmount: 0
+    };
+
+    res.json({
+      success: true,
+      statusCode: 200,
+      statistics,
+      summary: statistics
+    });
+  });
+
   getExpenseById = catchAsync(async (req, res) => {
     const { expenseId } = req.params;
-    const expense = await expenseService.getExpenseById(expenseId);
+    const result = await expenseService.getExpenseById(expenseId);
+    const expense = result?.data;
 
     if (!expense) {
       return res.status(404).json({ error: 'Expense not found' });
     }
 
-    res.json(expense);
+    res.json(result);
   });
 
   updateExpense = catchAsync(async (req, res) => {
@@ -48,17 +83,23 @@ class ExpenseController {
 
   deleteExpense = catchAsync(async (req, res) => {
     const { expenseId } = req.params;
-    const result = await expenseService.deleteExpense(expenseId);
+    const userEmail = req.user?.email || req.body?.userEmail;
+    const deleteReason = req.body?.deleteReason;
+    const result = await expenseService.deleteExpense(
+      expenseId,
+      userEmail,
+      deleteReason
+    );
     res.json(result);
   });
 
   updateExpenseApproval = catchAsync(async (req, res) => {
     const { expenseId } = req.params;
-    const { status, approvedBy, approvalNotes } = req.body;
+    const { status, approvalStatus, approvedBy, userEmail, approvalNotes } = req.body;
 
     const result = await expenseService.updateExpenseApproval(expenseId, {
-      status,
-      approvedBy,
+      approvalStatus: approvalStatus || status,
+      userEmail: userEmail || approvedBy || req.user?.email,
       approvalNotes
     });
 
@@ -66,8 +107,12 @@ class ExpenseController {
   });
 
   bulkImportExpenses = catchAsync(async (req, res) => {
-    const { expenses, organizationId } = req.body;
-    const result = await expenseService.bulkImportExpenses(expenses, organizationId);
+    const result = await expenseService.bulkImportExpenses({
+      expenses: req.body?.expenses,
+      organizationId: req.body?.organizationId,
+      userEmail: req.body?.userEmail || req.user?.email,
+      importNotes: req.body?.importNotes
+    });
     res.json(result);
   });
 }

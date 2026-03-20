@@ -1,6 +1,7 @@
 const TripService = require('../services/tripService');
-const logger = require('../utils/logger');
+const { createLogger } = require('../utils/logger');
 const catchAsync = require('../utils/catchAsync');
+const logger = createLogger('TripController');
 
 class TripController {
   
@@ -15,11 +16,23 @@ class TripController {
       endLocation, 
       distance, 
       tripType, 
-      clientId 
+      clientId,
+      startCoordinates,
+      endCoordinates,
+      routePath
     } = req.body;
 
+    const parsedDistance = parseFloat(distance);
+
     // Basic validation
-    if (!date || !startLocation || !endLocation || !distance || !tripType) {
+    if (
+      !date ||
+      !startLocation ||
+      !endLocation ||
+      Number.isNaN(parsedDistance) ||
+      parsedDistance < 0 ||
+      !tripType
+    ) {
       return res.status(400).json({ 
         success: false, 
         code: 'VALIDATION_ERROR',
@@ -27,7 +40,7 @@ class TripController {
       });
     }
 
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     const organizationId = req.user?.organizationId;
 
     if (!userId || !organizationId) {
@@ -44,9 +57,12 @@ class TripController {
       date,
       startLocation,
       endLocation,
-      distance,
+      distance: parsedDistance,
       tripType,
-      clientId
+      clientId,
+      startCoordinates,
+      endCoordinates,
+      routePath
     };
 
     const result = await TripService.createTrip(tripData);
@@ -74,12 +90,13 @@ class TripController {
    * GET /api/trips
    */
   getAllTrips = catchAsync(async (req, res) => {
-    const { startDate, endDate, status, userId } = req.query;
+    const { startDate, endDate, status, userId, clientId } = req.query;
     const organizationId = req.user?.organizationId;
 
     const filters = {
       organizationId,
       userId,
+      clientId,
       startDate,
       endDate,
       status
@@ -109,7 +126,7 @@ class TripController {
   updateTripDetails = catchAsync(async (req, res) => {
     const { tripId } = req.params;
     const updateData = req.body;
-    const adminId = req.user?.id;
+    const adminId = req.user?.userId;
 
     const success = await TripService.updateTripDetails(tripId, updateData, adminId);
 
@@ -143,7 +160,7 @@ class TripController {
   updateTripStatus = catchAsync(async (req, res) => {
     const { tripId } = req.params;
     const { status } = req.body;
-    const adminId = req.user?.id;
+    const adminId = req.user?.userId;
 
     if (!status) {
       return res.status(400).json({ 
@@ -185,8 +202,14 @@ class TripController {
   getTripsByEmployee = catchAsync(async (req, res) => {
     const { userId } = req.params;
     const { startDate, endDate, status } = req.query;
+    const organizationId = req.user?.organizationId;
 
-    const trips = await TripService.getTripsByEmployee(userId, { startDate, endDate, status });
+    const trips = await TripService.getTripsByEmployee(userId, {
+      organizationId,
+      startDate,
+      endDate,
+      status,
+    });
 
     logger.business('Employee Trips Retrieved', {
       event: 'trips_retrieved_employee',

@@ -56,12 +56,8 @@ router.use(requireRoles(['admin']));
  * GET /api/analytics/api-usage/:organizationId
  * Get comprehensive API usage analytics
  */
-router.get('/api-usage/:organizationId', strictLimiter, organizationIdValidation, dateRangeValidation, handleValidationErrors, async (req, res, next) => {
+router.get('/api-usage/:organizationId([a-fA-F0-9]{24})', strictLimiter, organizationIdValidation, dateRangeValidation, handleValidationErrors, async (req, res) => {
   try {
-    const reserved = ['realtime', 'rate-limits', 'stream', 'unblock-ip'];
-    if (reserved.includes(req.params.organizationId)) {
-      return next();
-    }
     await getApiUsageAnalytics(req, res);
   } catch (error) {
     logger.error('Error in API usage analytics route:', { error: error.message });

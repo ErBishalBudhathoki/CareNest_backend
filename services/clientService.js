@@ -2,6 +2,7 @@ const Client = require('../models/Client');
 const User = require('../models/User');
 const UserOrganization = require('../models/UserOrganization');
 const ClientAssignment = require('../models/ClientAssignment');
+const GeofenceLocation = require('../models/GeofenceLocation');
 const CustomPricing = require('../models/CustomPricing');
 const auditService = require('./auditService');
 const { processCustomPricing } = require('../utils/pricingHelpers');
@@ -1094,8 +1095,54 @@ class ClientService {
           $unwind: "$clientDetails"
         }
       ]);
-      
-      return assignments;
+
+      if (!assignments.length) {
+        return assignments;
+      }
+
+      const clientIds = [
+        ...new Set(
+          assignments
+            .map((assignment) => assignment.clientId?.toString?.() || assignment.clientId)
+            .filter(Boolean)
+        ),
+      ];
+
+      const geofences = await GeofenceLocation.find({
+        clientId: { $in: clientIds },
+        isActive: true,
+      })
+        .sort({ updatedAt: -1 })
+        .lean();
+
+      const geofenceByClientId = new Map();
+      for (const geofence of geofences) {
+        const key = geofence.clientId?.toString();
+        if (!key || geofenceByClientId.has(key)) continue;
+        geofenceByClientId.set(key, geofence);
+      }
+
+      return assignments.map((assignment) => {
+        const clientId = assignment.clientId?.toString?.() || assignment.clientId?.toString();
+        const geofence = clientId ? geofenceByClientId.get(clientId) : null;
+        const latitude = geofence?.coordinates?.latitude;
+        const longitude = geofence?.coordinates?.longitude;
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          return assignment;
+        }
+
+        return {
+          ...assignment,
+          clientLatitude: latitude,
+          clientLongitude: longitude,
+          clientLocation: {
+            lat: latitude,
+            lng: longitude,
+          },
+          geofenceRadius: geofence?.radius,
+        };
+      });
     } catch (error) {
       throw error;
     }
