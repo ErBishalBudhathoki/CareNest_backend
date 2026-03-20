@@ -270,4 +270,67 @@ describe('voiceService', () => {
     );
     expect(result.resultData.assignmentId).toBe('507f1f77bcf86cd799439099');
   });
+
+  it('keeps ambiguous NDIS clarification inside the voice assistant', async () => {
+    mockAssignmentVoiceAgentProcessCommand.mockResolvedValueOnce({
+      executionMode: 'agent',
+      agentModel: 'gemini-2.5-flash',
+      toolCalls: ['resolve_ndis_support_item'],
+      status: 'pending',
+      responseText:
+        'I found multiple NDIS support items for "assistance with self care". Please choose one.',
+      missingFields: ['ndisItem'],
+      suggestions: [],
+      assignmentDraft: {
+        employee: {
+          name: 'Pratiksha Tiwari',
+          email: 'pratiksha@example.com',
+        },
+        client: {
+          id: '507f1f77bcf86cd799439021',
+          name: 'Harry James',
+          email: 'harry@example.com',
+        },
+        schedule: {
+          date: '2026-03-24',
+          startTime: '09:00',
+          endTime: '11:00',
+          break: 'No',
+          highIntensity: false,
+        },
+      },
+      candidates: {
+        ndisItems: [
+          {
+            itemNumber: '01_002_0107_1_1',
+            itemName:
+              'Assistance With Self-Care Activities - Standard - Weekday Night',
+          },
+          {
+            itemNumber: '01_011_0107_1_1_T',
+            itemName:
+              'Assistance With Self-Care Activities - Standard - Weekday Daytime - TTP',
+          },
+        ],
+      },
+    });
+
+    const result = await voiceService.processText(
+      { id: '507f1f77bcf86cd799439012', organizationId: 'org-1' },
+      'assign Pratiksha to Harry next Tuesday 9 to 11 with assistance with self care'
+    );
+
+    expect(result.detectedIntent).toBe('assignment_manage');
+    expect(result.executed).toBe(false);
+    expect(result.actionType).toBe('clarify');
+    expect(result.suggestedRoute).toBe('voice_assistant');
+    expect(result.executionMode).toBe('agent');
+    expect(result.resultData.candidates.ndisItems).toHaveLength(2);
+    expect(result.suggestions).toEqual(
+      expect.arrayContaining([
+        'Use 01_002_0107_1_1 Assistance With Self-Care Activities - Standard - Weekday Night',
+        'Use 01_011_0107_1_1_T Assistance With Self-Care Activities - Standard - Weekday Daytime - TTP',
+      ])
+    );
+  });
 });

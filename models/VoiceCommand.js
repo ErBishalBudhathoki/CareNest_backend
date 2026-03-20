@@ -51,7 +51,7 @@ const voiceCommandSchema = new mongoose.Schema({
   },
   actionType: {
     type: String,
-    enum: ['query', 'mutation', 'navigate', 'help', 'unsupported'],
+    enum: ['query', 'mutation', 'navigate', 'clarify', 'help', 'unsupported'],
     default: 'unsupported'
   },
   responseText: {
