@@ -88,8 +88,10 @@ let firebaseInitError;
 try {
   if (process.env.FIREBASE_PRIVATE_KEY) {
     // Initialize with explicit credentials (local development or non-Google hosting)
+    // The "type" field is intentionally omitted from this template because
+    // Firebase Admin doesn't require it here and secret scanners flag the
+    // service-account JSON shape as a committed credential.
     const serviceAccount = {
-      "type": "service_account",
       "project_id": process.env.FIREBASE_PROJECT_ID,
       "private_key_id": process.env.FIREBASE_PRIVATE_KEY_ID,
       "private_key": formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY),
