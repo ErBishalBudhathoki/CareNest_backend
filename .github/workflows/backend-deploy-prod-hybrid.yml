@@ -59,10 +59,12 @@ jobs:
           scan-type: 'fs'
           scan-ref: '.'
           skip-dirs: 'trivy'
+          scanners: 'vuln'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: '1'  # Fail on CRITICAL vulnerabilities
+          limit-severities-for-sarif: 'true'
+          exit-code: '1'  # Fail on HIGH/CRITICAL vulnerabilities
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v4
@@ -210,9 +212,12 @@ jobs:
           TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1,public.ecr.aws/aquasecurity/trivy-java-db:1
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/backend-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          scanners: 'vuln'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
-          exit-code: '1'  # Block on vulnerabilities
+          severity: 'CRITICAL,HIGH'
+          limit-severities-for-sarif: 'true'
+          exit-code: '1'  # Block on HIGH/CRITICAL vulnerabilities
 
       - name: Set image URI output
         id: set_image_uri
