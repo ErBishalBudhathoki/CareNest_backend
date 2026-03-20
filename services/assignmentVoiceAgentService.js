@@ -25,6 +25,7 @@ class AssignmentVoiceAgentService {
       process.env.GOOGLE_CLOUD_LOCATION;
     const modelName =
       process.env.VOICE_AGENT_MODEL || DEFAULT_VOICE_AGENT_MODEL;
+    this.modelName = modelName;
 
     if (
       process.env.VOICE_AGENT_ENABLED === 'false' ||
@@ -69,6 +70,7 @@ class AssignmentVoiceAgentService {
       clients: [],
       ndisItems: [],
     };
+    const toolCalls = [];
     const contents = [
       {
         role: 'user',
@@ -105,6 +107,7 @@ class AssignmentVoiceAgentService {
 
           const functionResponseParts = [];
           for (const functionCall of functionCalls) {
+            toolCalls.push(functionCall.name);
             const toolResult = await this._executeTool({
               userContext,
               name: functionCall.name,
@@ -143,6 +146,7 @@ class AssignmentVoiceAgentService {
           finalResult: parsed,
           pendingDraft,
           observedCandidates,
+          toolCalls,
         });
       }
     } catch (error) {
@@ -164,6 +168,7 @@ class AssignmentVoiceAgentService {
       'Scope: only the CareNest app. Never suggest external actions.',
       'Your job is to complete or continue a client-to-employee assignment workflow.',
       'Use tools to resolve employee names, client names, NDIS items, schedule details, and to create the assignment.',
+      'If the user gives a full or partial NDIS support item name, use resolve_ndis_support_item to map that spoken name to the correct support item number before creating the assignment.',
       'Never invent emails, IDs, dates, times, or support items. Use tool outputs only.',
       'If anything required is missing or ambiguous, ask only for the missing app data.',
       'If the request can be completed, call create_assignment before responding.',
@@ -226,6 +231,20 @@ class AssignmentVoiceAgentService {
             name: 'search_clients',
             description:
               'Search active clients within the current organization by name or email.',
+            parameters: {
+              type: FunctionDeclarationSchemaType.OBJECT,
+              properties: {
+                query: {
+                  type: FunctionDeclarationSchemaType.STRING,
+                },
+              },
+              required: ['query'],
+            },
+          },
+          {
+            name: 'resolve_ndis_support_item',
+            description:
+              'Resolve the most likely NDIS support item from a spoken full name, partial name, or item number. Returns the best match and alternatives.',
             parameters: {
               type: FunctionDeclarationSchemaType.OBJECT,
               properties: {
@@ -317,6 +336,8 @@ class AssignmentVoiceAgentService {
         return this._searchEmployees(userContext.organizationId, args.query);
       case 'search_clients':
         return this._searchClients(userContext.organizationId, args.query);
+      case 'resolve_ndis_support_item':
+        return this._resolveNdisSupportItem(args.query);
       case 'search_ndis_items':
         return this._searchNdisItems(args.query);
       case 'parse_schedule_details':
@@ -421,34 +442,73 @@ class AssignmentVoiceAgentService {
     };
   }
 
+  async _resolveNdisSupportItem(rawQuery) {
+    const result = await this._searchNdisItems(rawQuery);
+    return {
+      ...result,
+      entityType: 'ndisItem',
+      query: String(rawQuery || '').trim(),
+      requiresClarification: !result.primary && result.matches.length > 0,
+    };
+  }
+
   async _searchNdisItems(rawQuery) {
-    const query = String(rawQuery || '').trim();
+    const query = this._cleanSupportItemQuery(rawQuery);
     if (!query) {
       return { success: true, matches: [] };
     }
 
-    const exactNumber = /^[0-9]{2}_[0-9]{3}_[0-9]{4}_[a-z0-9]+_[a-z0-9]+(?:_t)?$/i.test(
-      query
-    )
-      ? query.toUpperCase()
-      : null;
+    const numberVariants = this._getSupportItemNumberVariants(query);
+    const exactNumber = numberVariants[0] || null;
 
     let items;
     if (exactNumber) {
       items = await SupportItem.find({
-        supportItemNumber: exactNumber,
+        supportItemNumber: { $in: numberVariants },
         isActive: true,
       })
         .limit(5)
         .lean();
     } else {
       const regex = new RegExp(this._escapeRegExp(query), 'i');
+      const queryTokens = query
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2);
+      const nameTokenAnd =
+          queryTokens.length > 1
+              ? [
+                  {
+                    $and: queryTokens.map((token) => ({
+                      supportItemName: {
+                        $regex: this._escapeRegExp(token),
+                        $options: 'i',
+                      },
+                    })),
+                  },
+                ]
+              : [];
+      const descriptionTokenAnd =
+          queryTokens.length > 1
+              ? [
+                  {
+                    $and: queryTokens.map((token) => ({
+                      description: {
+                        $regex: this._escapeRegExp(token),
+                        $options: 'i',
+                      },
+                    })),
+                  },
+                ]
+              : [];
       items = await SupportItem.find({
         isActive: true,
         $or: [
           { supportItemNumber: regex },
           { supportItemName: regex },
           { description: regex },
+          ...nameTokenAnd,
+          ...descriptionTokenAnd,
         ],
       })
         .limit(10)
@@ -503,9 +563,10 @@ class AssignmentVoiceAgentService {
     const date = String(args.date || '').trim();
     const startTime = this._normalizeTimeValue(args.startTime);
     const endTime = this._normalizeTimeValue(args.endTime);
-    const ndisItemNumber = String(args.ndisItemNumber || '')
-      .trim()
-      .toUpperCase();
+    const ndisItemNumberVariants = this._getSupportItemNumberVariants(
+      String(args.ndisItemNumber || '').trim()
+    );
+    const ndisItemNumber = ndisItemNumberVariants[0] || '';
     const breakValue =
       String(args.breakValue || '').trim() === 'Yes' ? 'Yes' : 'No';
     const highIntensity = args.highIntensity === true;
@@ -525,7 +586,7 @@ class AssignmentVoiceAgentService {
     }
 
     const supportItem = await SupportItem.findOne({
-      supportItemNumber: ndisItemNumber,
+      supportItemNumber: { $in: ndisItemNumberVariants },
       isActive: true,
     }).lean();
     if (!supportItem) {
@@ -594,7 +655,12 @@ class AssignmentVoiceAgentService {
     }
   }
 
-  _normalizeFinalResult({ finalResult, pendingDraft, observedCandidates }) {
+  _normalizeFinalResult({
+    finalResult,
+    pendingDraft,
+    observedCandidates,
+    toolCalls,
+  }) {
     const baseDraft = this._normalizeDraft(pendingDraft);
     const modelDraft = this._normalizeDraft(finalResult.assignmentDraft);
     const mergedDraft = this._mergeDraft(baseDraft, modelDraft);
@@ -603,6 +669,9 @@ class AssignmentVoiceAgentService {
       : this._calculateMissingFields(mergedDraft);
 
     return {
+      executionMode: 'agent',
+      agentModel: this.modelName || DEFAULT_VOICE_AGENT_MODEL,
+      toolCalls,
       status:
         finalResult.status === 'completed' && missingFields.length === 0
           ? 'completed'
@@ -845,6 +914,7 @@ class AssignmentVoiceAgentService {
     const number = this._normalizeSearchText(item.supportItemNumber || '');
     const name = this._normalizeSearchText(item.supportItemName || '');
     const description = this._normalizeSearchText(item.description || '');
+    const queryTokens = normalizedQuery.split(' ').filter(Boolean);
 
     let score = 0;
     if (number === normalizedQuery) score = Math.max(score, 130);
@@ -852,7 +922,28 @@ class AssignmentVoiceAgentService {
     if (number.startsWith(normalizedQuery)) score = Math.max(score, 108);
     if (name.includes(normalizedQuery)) score = Math.max(score, 95);
     if (description.includes(normalizedQuery)) score = Math.max(score, 82);
+    if (
+      queryTokens.length > 1 &&
+      queryTokens.every((token) => name.includes(token))
+    ) {
+      score = Math.max(score, 104);
+    }
+    if (
+      queryTokens.length > 1 &&
+      queryTokens.every((token) => description.includes(token))
+    ) {
+      score = Math.max(score, 90);
+    }
     return score;
+  }
+
+  _cleanSupportItemQuery(rawValue) {
+    return String(rawValue || '')
+      .replace(/\b(with|using|for)\b/gi, ' ')
+      .replace(/\b(ndis|support)\s+item\b/gi, ' ')
+      .replace(/\bitem\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _cleanEntityName(value) {
@@ -986,6 +1077,37 @@ class AssignmentVoiceAgentService {
     }
 
     return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  _getSupportItemNumberVariants(rawValue) {
+    const value = String(rawValue || '').trim().toUpperCase();
+    if (!value) {
+      return [];
+    }
+
+    const exactPattern =
+      /^(\d{2})_(\d{3})_(\d{3,4})_([A-Z0-9]+)_([A-Z0-9]+(?:_T)?)$/i;
+    const match = value.match(exactPattern);
+    if (!match) {
+      return [];
+    }
+
+    const normalized = [
+      match[1],
+      match[2],
+      match[3].padStart(4, '0'),
+      match[4],
+      match[5],
+    ].join('_');
+    const compact = [
+      match[1],
+      match[2],
+      String(Number(match[3])),
+      match[4],
+      match[5],
+    ].join('_');
+
+    return Array.from(new Set([normalized, value, compact])).filter(Boolean);
   }
 
   _normalizeSearchText(value) {
