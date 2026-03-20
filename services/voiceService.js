@@ -1097,7 +1097,7 @@ class VoiceService {
         continue;
       }
 
-      const suggestion = itemName.isNotEmpty
+      const suggestion = itemName
         ? `Use ${itemNumber} ${itemName}`
         : `Use NDIS item ${itemNumber}`;
       if (!suggestions.includes(suggestion)) {
