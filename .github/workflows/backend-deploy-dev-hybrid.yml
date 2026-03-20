@@ -261,7 +261,7 @@ jobs:
             --port 8080 \
             --remove-secrets APP_SECRETS \
             --set-env-vars "NODE_ENV=development,APP_CHECK_ENFORCEMENT=true" \
-            --set-env-vars "GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-3.0-flash" \
+            --set-env-vars "GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-3-flash-preview" \
             --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
             --tag "$PREVIEW_TAG" \
             --no-traffic \
