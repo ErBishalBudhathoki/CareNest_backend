@@ -98,8 +98,7 @@ class ClientPortalController {
       }
 
       const result = await clientPortalService.getWorkerLocation(appointmentId, req.user);
-      const statusCode = result.success ? 200 : 403;
-      return res.status(statusCode).json(result);
+      return res.status(200).json(result);
     } catch (error) {
       console.error('Error in getWorkerLocation controller:', error);
       return handleError(res, error, 'Internal server error');

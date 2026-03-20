@@ -703,11 +703,18 @@ class SchedulerService {
             }
 
             const shifts = await Shift.find(query).sort({ startTime: 1 });
+            const assignmentShifts = await this.getAssignmentBackedShifts(
+                organizationId,
+                filters
+            );
+            const mergedShifts = [...shifts, ...assignmentShifts].sort(
+                (left, right) => new Date(left.startTime) - new Date(right.startTime)
+            );
 
             return {
                 success: true,
-                data: shifts,
-                count: shifts.length
+                data: mergedShifts,
+                count: mergedShifts.length
             };
 
         } catch (error) {
@@ -717,6 +724,186 @@ class SchedulerService {
             });
             throw error;
         }
+    }
+
+    static async getAssignmentBackedShifts(organizationId, filters = {}) {
+        const assignmentQuery = {
+            organizationId,
+            isActive: true
+        };
+
+        if (filters.employeeEmail) {
+            assignmentQuery.userEmail = filters.employeeEmail;
+        }
+        if (filters.clientEmail) {
+            assignmentQuery.clientEmail = filters.clientEmail;
+        }
+
+        const assignments = await ClientAssignment.find(assignmentQuery).lean();
+        if (!assignments.length) {
+            return [];
+        }
+
+        const employeeEmails = Array.from(
+            new Set(
+                assignments
+                    .map((assignment) => assignment.userEmail)
+                    .filter(Boolean)
+            )
+        );
+        const clientEmails = Array.from(
+            new Set(
+                assignments
+                    .map((assignment) => assignment.clientEmail)
+                    .filter(Boolean)
+            )
+        );
+
+        const [employees, clients] = await Promise.all([
+            employeeEmails.length
+                ? User.find({ email: { $in: employeeEmails } })
+                    .select('firstName lastName email')
+                    .lean()
+                : [],
+            clientEmails.length
+                ? Client.find({ clientEmail: { $in: clientEmails } })
+                    .select('clientFirstName clientLastName clientEmail')
+                    .lean()
+                : []
+        ]);
+
+        const employeeNameByEmail = new Map(
+            employees.map((employee) => [
+                employee.email,
+                `${employee.firstName || ''} ${employee.lastName || ''}`.trim()
+            ])
+        );
+        const clientByEmail = new Map(
+            clients.map((client) => [
+                client.clientEmail,
+                {
+                    id: client._id?.toString?.() || null,
+                    name: `${client.clientFirstName || ''} ${client.clientLastName || ''}`.trim()
+                }
+            ])
+        );
+
+        const startDate = this._toDateOnly(filters.startDate);
+        const endDate = this._toDateOnly(filters.endDate);
+
+        return assignments.flatMap((assignment) => {
+            const clientInfo = clientByEmail.get(assignment.clientEmail) || {};
+            const employeeName =
+                employeeNameByEmail.get(assignment.userEmail) || assignment.userEmail;
+
+            return (assignment.schedule || [])
+                .filter((entry) =>
+                    this._matchesAssignmentScheduleFilters(entry, {
+                        startDate,
+                        endDate,
+                        status: filters.status
+                    })
+                )
+                .map((entry, index) =>
+                    this._mapAssignmentScheduleToShift({
+                        assignment,
+                        scheduleEntry: entry,
+                        scheduleIndex: index,
+                        employeeName,
+                        clientInfo
+                    })
+                );
+        });
+    }
+
+    static _matchesAssignmentScheduleFilters(
+        scheduleEntry,
+        { startDate = null, endDate = null, status = null } = {}
+    ) {
+        const entryDate = String(scheduleEntry?.date || '').trim();
+        if (!entryDate) {
+            return false;
+        }
+
+        if (startDate && entryDate < startDate) {
+            return false;
+        }
+        if (endDate && entryDate > endDate) {
+            return false;
+        }
+        if (status && status !== 'approved') {
+            return false;
+        }
+
+        return true;
+    }
+
+    static _mapAssignmentScheduleToShift({
+        assignment,
+        scheduleEntry,
+        scheduleIndex,
+        employeeName,
+        clientInfo = {}
+    }) {
+        const startTime = this._combineDateAndTime(
+            scheduleEntry.date,
+            scheduleEntry.startTime
+        );
+        const endTime = this._combineDateAndTime(
+            scheduleEntry.date,
+            scheduleEntry.endTime
+        );
+
+        return {
+            _id: `${assignment._id.toString()}::${scheduleIndex}`,
+            id: `${assignment._id.toString()}::${scheduleIndex}`,
+            employeeId: null,
+            employeeEmail: assignment.userEmail || null,
+            employeeName: employeeName || null,
+            clientId: clientInfo.id || assignment.clientId?.toString?.() || null,
+            clientEmail: assignment.clientEmail || null,
+            clientName: clientInfo.name || assignment.clientEmail || null,
+            organizationId: assignment.organizationId,
+            startTime,
+            endTime,
+            supportItems: scheduleEntry.ndisItem ? [scheduleEntry.ndisItem] : [],
+            location: null,
+            status: 'approved',
+            isRecurring: false,
+            recurringTemplateId: null,
+            notes: 'Assignment-backed shift',
+            breakDuration: this._parseBreakDuration(scheduleEntry.break),
+            createdAt: assignment.createdAt || null,
+            updatedAt: assignment.updatedAt || null,
+            sourceCollection: 'clientAssignments',
+            assignmentId: assignment._id.toString(),
+            highIntensity: scheduleEntry.highIntensity === true
+        };
+    }
+
+    static _parseBreakDuration(rawValue) {
+        const value = String(rawValue || '').trim().toLowerCase();
+        if (!value || value === 'no') {
+            return 0;
+        }
+
+        const numericValue = Number.parseInt(value, 10);
+        return Number.isFinite(numericValue) ? numericValue : 0;
+    }
+
+    static _combineDateAndTime(dateValue, timeValue) {
+        const safeDate = String(dateValue || '').trim();
+        const safeTime = String(timeValue || '').trim();
+        return new Date(`${safeDate}T${safeTime}:00.000Z`);
+    }
+
+    static _toDateOnly(rawValue) {
+        if (!rawValue) {
+            return null;
+        }
+
+        const isoString = new Date(rawValue).toISOString();
+        return isoString.split('T')[0];
     }
 
     /**

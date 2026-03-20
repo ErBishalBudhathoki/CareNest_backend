@@ -1,3 +1,5 @@
+const EmergencyBroadcast = require('../models/EmergencyBroadcast');
+const TeamMember = require('../models/TeamMember');
 const EmergencyService = require('../services/emergencyService');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
@@ -58,6 +60,47 @@ class EmergencyController {
       code: 'EMERGENCY_ACKNOWLEDGED',
       data: updatedBroadcast
     });
+  });
+
+  /**
+   * GET /api/emergency/active
+   * Returns all active broadcasts for teams the current user belongs to.
+   * Flutter TeamRepository calls this endpoint directly.
+   */
+  getActive = catchAsync(async (req, res) => {
+    const userId = req.user.userId;
+
+    // Find all teams the user is a member of
+    const memberships = await TeamMember.find({ userId });
+    const teamIds = memberships.map(m => m.teamId);
+
+    const broadcasts = await EmergencyBroadcast.find({
+      teamId: { $in: teamIds },
+      status: 'active'
+    }).sort({ createdAt: -1 });
+
+    res.json({ success: true, data: broadcasts });
+  });
+
+  /**
+   * POST /api/emergency/acknowledge/:broadcastId
+   * Alias that matches the Flutter client's endpoint path.
+   */
+  acknowledgeByParam = catchAsync(async (req, res) => {
+    const userId = req.user.userId;
+    const { broadcastId } = req.params;
+
+    const broadcast = await EmergencyBroadcast.findByIdAndUpdate(
+      broadcastId,
+      { $addToSet: { acknowledgments: userId } },
+      { new: true }
+    );
+
+    if (!broadcast) {
+      return res.status(404).json({ success: false, message: 'Broadcast not found' });
+    }
+
+    res.json({ success: true, data: broadcast });
   });
 }
 

@@ -13,6 +13,15 @@ const pricingReadLimiter = rateLimit({
   message: { success: false, message: 'Too many pricing read requests.' }
 });
 
+const fallbackBaseRateReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  message: {
+    success: false,
+    message: 'Too many fallback base rate requests.'
+  }
+});
+
 const pricingWriteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 50,
@@ -197,7 +206,7 @@ router.post(
 // Get fallback base rate
 router.get(
   '/fallback-base-rate/:organizationId',
-  pricingReadLimiter,
+  fallbackBaseRateReadLimiter,
   [
     param('organizationId').isString().trim().notEmpty()
   ],
