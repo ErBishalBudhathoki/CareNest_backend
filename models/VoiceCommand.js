@@ -7,15 +7,70 @@ const voiceCommandSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  organizationId: {
+    type: String,
+    default: null,
+    index: true
+  },
   commandText: {
     type: String,
     required: true,
     trim: true,
     maxLength: 1000 // Reasonable limit
   },
+  source: {
+    type: String,
+    enum: ['text', 'voice'],
+    default: 'text'
+  },
   audioData: {
     type: String, // path to stored audio file or base64 (if small)
     select: false // Don't return heavy audio data by default
+  },
+  detectedIntent: {
+    type: String,
+    trim: true,
+    default: 'unknown',
+    index: true
+  },
+  parameters: {
+    type: Map,
+    of: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  confidence: {
+    type: Number,
+    min: 0,
+    max: 1,
+    default: 0
+  },
+  executed: {
+    type: Boolean,
+    required: true,
+    default: false
+  },
+  actionType: {
+    type: String,
+    enum: ['query', 'mutation', 'navigate', 'help', 'unsupported'],
+    default: 'unsupported'
+  },
+  responseText: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  suggestedRoute: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  suggestions: {
+    type: [String],
+    default: []
+  },
+  resultData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
   },
   nlpEntities: {
     intent: { type: String, trim: true },
