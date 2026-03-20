@@ -6,6 +6,7 @@ const Organization = require('../models/Organization');
 const SupportItem = require('../models/SupportItem');
 const User = require('../models/User');
 const VoiceCommand = require('../models/VoiceCommand');
+const logger = require('../utils/logger');
 const assignmentVoiceAgentService = require('./assignmentVoiceAgentService');
 const clientService = require('./clientService');
 
@@ -32,6 +33,13 @@ class VoiceService {
       safeCommandText,
       context
     );
+    const normalizedExecution = {
+      executionMode: 'fallback_rule',
+      agentModel: null,
+      toolCalls: [],
+      ...execution,
+      toolCalls: Array.isArray(execution?.toolCalls) ? execution.toolCalls : [],
+    };
 
     const commandRecord = await VoiceCommand.create({
       userId: normalizedUser.userId,
@@ -39,23 +47,35 @@ class VoiceService {
       commandText: safeCommandText,
       source: 'text',
       language,
-      detectedIntent: execution.detectedIntent,
-      parameters: execution.parameters,
+      detectedIntent: normalizedExecution.detectedIntent,
+      parameters: normalizedExecution.parameters,
       confidence: parsedIntent.confidence,
-      executed: execution.executed,
-      actionType: execution.actionType,
-      responseText: execution.responseText,
-      suggestedRoute: execution.suggestedRoute,
-      suggestions: execution.suggestions,
-      resultData: execution.resultData,
+      executed: normalizedExecution.executed,
+      actionType: normalizedExecution.actionType,
+      responseText: normalizedExecution.responseText,
+      suggestedRoute: normalizedExecution.suggestedRoute,
+      suggestions: normalizedExecution.suggestions,
+      resultData: normalizedExecution.resultData,
+      executionMode: normalizedExecution.executionMode,
+      agentModel: normalizedExecution.agentModel,
+      toolCalls: normalizedExecution.toolCalls,
       nlpEntities: {
-        intent: execution.detectedIntent,
-        parameters: execution.parameters,
+        intent: normalizedExecution.detectedIntent,
+        parameters: normalizedExecution.parameters,
         confidence: parsedIntent.confidence,
       },
-      success: execution.executed,
+      success: normalizedExecution.executed,
       processingTime: Date.now() - startedAt,
-      errorMessage: execution.errorMessage || null,
+      errorMessage: normalizedExecution.errorMessage || null,
+    });
+
+    logger.info('Voice command processed', {
+      userId: normalizedUser.userId,
+      detectedIntent: normalizedExecution.detectedIntent,
+      executionMode: normalizedExecution.executionMode,
+      agentModel: normalizedExecution.agentModel,
+      toolCalls: normalizedExecution.toolCalls,
+      executed: normalizedExecution.executed,
     });
 
     return this._formatVoiceCommand(commandRecord.toObject());
@@ -507,6 +527,9 @@ class VoiceService {
           ),
           candidates: agentResult.candidates || null,
         },
+        executionMode: agentResult.executionMode || 'agent',
+        agentModel: agentResult.agentModel || null,
+        toolCalls: agentResult.toolCalls || [],
       };
     }
 
@@ -545,6 +568,9 @@ class VoiceService {
           organizationId
         ),
       },
+      executionMode: agentResult.executionMode || 'agent',
+      agentModel: agentResult.agentModel || null,
+      toolCalls: agentResult.toolCalls || [],
     };
   }
 
@@ -846,14 +872,15 @@ class VoiceService {
       };
     }
 
-    const exactNumber = extracted.ndisItemNumber
-      ? extracted.ndisItemNumber.toUpperCase()
-      : null;
+    const exactNumberVariants = extracted.ndisItemNumber
+      ? this._getSupportItemNumberVariants(extracted.ndisItemNumber)
+      : [];
+    const exactNumber = exactNumberVariants[0] || null;
 
     let items;
     if (exactNumber) {
       items = await SupportItem.find({
-        supportItemNumber: exactNumber,
+        supportItemNumber: { $in: exactNumberVariants },
         isActive: true,
       })
         .limit(5)
@@ -1041,6 +1068,24 @@ class VoiceService {
     }
     if (draft.client?.id) {
       context.clientId = draft.client.id;
+    }
+    if (draft.schedule?.date) {
+      context.date = draft.schedule.date;
+    }
+    if (draft.schedule?.startTime) {
+      context.startTime = draft.schedule.startTime;
+    }
+    if (draft.schedule?.endTime) {
+      context.endTime = draft.schedule.endTime;
+    }
+    if (draft.schedule?.break) {
+      context.breakValue = draft.schedule.break;
+    }
+    if (typeof draft.schedule?.highIntensity === 'boolean') {
+      context.highIntensity = draft.schedule.highIntensity;
+    }
+    if (draft.ndisItem) {
+      context.ndisItem = draft.ndisItem;
     }
 
     return context;
@@ -1771,6 +1816,37 @@ class VoiceService {
     return null;
   }
 
+  _getSupportItemNumberVariants(rawValue) {
+    const value = String(rawValue || '').trim().toUpperCase();
+    if (!value) {
+      return [];
+    }
+
+    const exactPattern =
+      /^(\d{2})_(\d{3})_(\d{3,4})_([A-Z0-9]+)_([A-Z0-9]+(?:_T)?)$/i;
+    const match = value.match(exactPattern);
+    if (!match) {
+      return [];
+    }
+
+    const normalized = [
+      match[1],
+      match[2],
+      match[3].padStart(4, '0'),
+      match[4],
+      match[5],
+    ].join('_');
+    const compact = [
+      match[1],
+      match[2],
+      String(Number(match[3])),
+      match[4],
+      match[5],
+    ].join('_');
+
+    return Array.from(new Set([normalized, value, compact])).filter(Boolean);
+  }
+
   _extractInvoiceFilter(normalizedCommand) {
     if (normalizedCommand.includes('overdue')) return 'overdue';
     if (normalizedCommand.includes('paid')) return 'paid';
@@ -1935,6 +2011,9 @@ class VoiceService {
       suggestedRoute: record.suggestedRoute || null,
       suggestions,
       resultData,
+      executionMode: record.executionMode || 'fallback_rule',
+      agentModel: record.agentModel || null,
+      toolCalls: Array.isArray(record.toolCalls) ? record.toolCalls : [],
       source: record.source || (record.audioData ? 'voice' : 'text'),
       language: record.language || 'en-US',
       errorMessage: record.errorMessage || null,
