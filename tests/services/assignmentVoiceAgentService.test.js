@@ -265,4 +265,225 @@ describe('assignmentVoiceAgentService', () => {
     expect(result.assignmentId).toBe('assignment-1');
     expect(result.assignmentDraft.ndisItem.itemNumber).toBe('01_001_0107_1_1');
   });
+
+  it('normalizes spoken NDIS item numbers with missing zero padding', async () => {
+    mockSupportItemFindOne.mockReturnValueOnce({
+      lean: jest.fn().mockResolvedValue({
+        supportItemNumber: '01_001_0107_1_1',
+        supportItemName: 'Assistance With Self-Care Activities',
+        unit: 'H',
+        isActive: true,
+      }),
+    });
+
+    mockAssignClientToUser.mockResolvedValueOnce({
+      assignmentId: 'assignment-2',
+      message: 'Assignment created successfully',
+    });
+
+    mockGenerateContent
+      .mockResolvedValueOnce(
+        buildResponse([
+          {
+            functionCall: {
+              name: 'create_assignment',
+              args: {
+                employeeEmail: 'pratiksha@example.com',
+                clientEmail: 'harry@example.com',
+                date: '2026-03-24',
+                startTime: '09:00',
+                endTime: '11:00',
+                ndisItemNumber: '01_001_107_1_1',
+              },
+            },
+          },
+        ])
+      )
+      .mockResolvedValueOnce(
+        buildResponse([
+          {
+            text: JSON.stringify({
+              status: 'completed',
+              responseText: 'Assigned Pratiksha to Harry.',
+              missingFields: [],
+              assignmentDraft: {
+                employee: {
+                  email: 'pratiksha@example.com',
+                },
+                client: {
+                  email: 'harry@example.com',
+                },
+                schedule: {
+                  date: '2026-03-24',
+                  startTime: '09:00',
+                  endTime: '11:00',
+                },
+                ndisItem: {
+                  itemNumber: '01_001_0107_1_1',
+                  itemName: 'Assistance With Self-Care Activities',
+                },
+              },
+              assignmentId: 'assignment-2',
+            }),
+          },
+        ])
+      );
+
+    const result = await assignmentVoiceAgentService.processCommand({
+      userContext: {
+        organizationId: 'org-1',
+        email: 'admin@example.com',
+      },
+      commandText:
+        'assign Pratiksha to Harry next Tuesday 9 to 11 with ndis item 01_001_107_1_1',
+      pendingDraft: null,
+    });
+
+    expect(mockAssignClientToUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ndisItem: expect.objectContaining({
+          itemNumber: '01_001_0107_1_1',
+        }),
+      })
+    );
+    expect(result.status).toBe('completed');
+  });
+
+  it('resolves a spoken NDIS support item name through the agent tool before creating the assignment', async () => {
+    mockSupportItemFind.mockReturnValueOnce({
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([
+        {
+          supportItemNumber: '01_001_0107_1_1',
+          supportItemName: 'Assistance With Self-Care Activities',
+          description: 'Support for assistance with self care activities.',
+          unit: 'H',
+          isActive: true,
+        },
+      ]),
+    });
+
+    mockSupportItemFindOne.mockReturnValueOnce({
+      lean: jest.fn().mockResolvedValue({
+        supportItemNumber: '01_001_0107_1_1',
+        supportItemName: 'Assistance With Self-Care Activities',
+        unit: 'H',
+        isActive: true,
+      }),
+    });
+
+    mockAssignClientToUser.mockResolvedValueOnce({
+      assignmentId: 'assignment-3',
+      message: 'Assignment created successfully',
+    });
+
+    mockGenerateContent
+      .mockResolvedValueOnce(
+        buildResponse([
+          {
+            functionCall: {
+              name: 'resolve_ndis_support_item',
+              args: {
+                query: 'assistance with self care activities',
+              },
+            },
+          },
+        ])
+      )
+      .mockResolvedValueOnce(
+        buildResponse([
+          {
+            functionCall: {
+              name: 'create_assignment',
+              args: {
+                employeeEmail: 'pratiksha@example.com',
+                clientEmail: 'harry@example.com',
+                date: '2026-03-24',
+                startTime: '09:00',
+                endTime: '11:00',
+                ndisItemNumber: '01_001_0107_1_1',
+              },
+            },
+          },
+        ])
+      )
+      .mockResolvedValueOnce(
+        buildResponse([
+          {
+            text: JSON.stringify({
+              status: 'completed',
+              responseText:
+                'Assigned Pratiksha to Harry with Assistance With Self-Care Activities.',
+              missingFields: [],
+              suggestions: ['Open schedule'],
+              assignmentDraft: {
+                employee: {
+                  email: 'pratiksha@example.com',
+                },
+                client: {
+                  email: 'harry@example.com',
+                },
+                schedule: {
+                  date: '2026-03-24',
+                  startTime: '09:00',
+                  endTime: '11:00',
+                },
+                ndisItem: {
+                  itemNumber: '01_001_0107_1_1',
+                  itemName: 'Assistance With Self-Care Activities',
+                },
+              },
+              assignmentId: 'assignment-3',
+              backendMessage: 'Assignment created successfully',
+            }),
+          },
+        ])
+      );
+
+    const result = await assignmentVoiceAgentService.processCommand({
+      userContext: {
+        organizationId: 'org-1',
+        email: 'admin@example.com',
+      },
+      commandText:
+        'assign Pratiksha to Harry next Tuesday 9 to 11 with assistance with self care activities',
+      pendingDraft: {
+        employee: {
+          name: 'Pratiksha Sharma',
+          email: 'pratiksha@example.com',
+        },
+        client: {
+          id: 'client-1',
+          name: 'Harry Stone',
+          email: 'harry@example.com',
+        },
+        schedule: {
+          date: '2026-03-24',
+          startTime: '09:00',
+          endTime: '11:00',
+          break: 'No',
+          highIntensity: false,
+        },
+      },
+    });
+
+    expect(mockSupportItemFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isActive: true,
+      })
+    );
+    expect(mockAssignClientToUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ndisItem: expect.objectContaining({
+          itemNumber: '01_001_0107_1_1',
+          itemName: 'Assistance With Self-Care Activities',
+        }),
+      })
+    );
+    expect(result.status).toBe('completed');
+    expect(result.executionMode).toBe('agent');
+    expect(result.toolCalls).toEqual(
+      expect.arrayContaining(['resolve_ndis_support_item', 'create_assignment'])
+    );
+  });
 });

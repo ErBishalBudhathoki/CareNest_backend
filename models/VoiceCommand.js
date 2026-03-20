@@ -72,6 +72,19 @@ const voiceCommandSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: null
   },
+  executionMode: {
+    type: String,
+    enum: ['agent', 'fallback_rule'],
+    default: 'fallback_rule'
+  },
+  agentModel: {
+    type: String,
+    default: null
+  },
+  toolCalls: {
+    type: [String],
+    default: []
+  },
   nlpEntities: {
     intent: { type: String, trim: true },
     parameters: { type: Map, of: mongoose.Schema.Types.Mixed }, // Flexible parameters
