@@ -380,45 +380,45 @@ jobs:
             # Immediate 100% rollout (emergency only)
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=100
+              --to-latest
             echo "::notice::Traffic immediately migrated to 100%"
             
           elif [ "$DEPLOY_TYPE" = "canary" ]; then
             # Canary: 10% for 10 minutes, then 100%
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=10
+              --to-revisions=LATEST=10
             echo "::notice::Canary deployed at 10% - monitoring for 10 minutes"
             sleep 600
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=100
+              --to-latest
             echo "::notice::Traffic fully migrated to new version"
             
           else
             # Gradual: 25% -> 50% -> 75% -> 100%
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=25
+              --to-revisions=LATEST=25
             echo "::notice::Traffic at 25% - monitoring for 5 minutes"
             sleep 300
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=50
+              --to-revisions=LATEST=50
             echo "::notice::Traffic at 50% - monitoring for 5 minutes"
             sleep 300
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=75
+              --to-revisions=LATEST=75
             echo "::notice::Traffic at 75% - monitoring for 5 minutes"
             sleep 300
             
             gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
               --region ${{ env.REGION }} \
-              --to-latest=100
+              --to-latest
             echo "::notice::Traffic fully migrated to new version"
           fi
 
