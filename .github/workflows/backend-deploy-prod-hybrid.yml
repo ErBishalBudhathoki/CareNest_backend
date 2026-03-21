@@ -261,30 +261,64 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Check whether Cloud Run service already exists
+        id: service_check
+        run: |
+          if gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "::notice::Existing Cloud Run service found"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::notice::Cloud Run service does not exist yet; deploying as first production release"
+          fi
+
       - name: Deploy to Cloud Run
         id: deploy
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
-          
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image "$IMAGE_URI" \
-            --region ${{ env.REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
-            --min-instances 1 \
-            --max-instances 50 \
-            --cpu 2 \
-            --memory 1Gi \
-            --timeout 300 \
-            --cpu-boost \
-            --port 8080 \
-            --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
-            --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
-            --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
-            --no-traffic \
-            --tag prod-${{ github.sha }} \
-            --quiet
+
+          if [ "${{ steps.service_check.outputs.exists }}" = "true" ]; then
+            gcloud run deploy ${{ env.SERVICE_NAME }} \
+              --image "$IMAGE_URI" \
+              --region ${{ env.REGION }} \
+              --platform managed \
+              --allow-unauthenticated \
+              --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
+              --min-instances 1 \
+              --max-instances 50 \
+              --cpu 2 \
+              --memory 1Gi \
+              --timeout 300 \
+              --cpu-boost \
+              --port 8080 \
+              --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
+              --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
+              --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+              --no-traffic \
+              --tag prod-${{ github.sha }} \
+              --quiet
+          else
+            gcloud run deploy ${{ env.SERVICE_NAME }} \
+              --image "$IMAGE_URI" \
+              --region ${{ env.REGION }} \
+              --platform managed \
+              --allow-unauthenticated \
+              --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
+              --min-instances 1 \
+              --max-instances 50 \
+              --cpu 2 \
+              --memory 1Gi \
+              --timeout 300 \
+              --cpu-boost \
+              --port 8080 \
+              --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
+              --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
+              --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+              --tag prod-${{ github.sha }} \
+              --quiet
+          fi
           
           # DO NOT capture or output URL for security
           echo "deployment-status=success" >> $GITHUB_OUTPUT
@@ -333,6 +367,11 @@ jobs:
 
       - name: Gradual traffic rollout
         run: |
+          if [ "${{ steps.service_check.outputs.exists }}" != "true" ]; then
+            echo "::notice::Skipping traffic rollout because this is the first Cloud Run deployment and the service was created on the latest revision."
+            exit 0
+          fi
+
           DEPLOY_TYPE="${{ github.event.inputs.deploy_type || 'gradual' }}"
           
           echo "Starting $DEPLOY_TYPE deployment..."
