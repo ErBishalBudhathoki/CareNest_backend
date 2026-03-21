@@ -278,6 +278,7 @@ jobs:
         id: deploy
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
+          TRAFFIC_TAG="prod-${GITHUB_SHA::7}"
 
           if [ "${{ steps.service_check.outputs.exists }}" = "true" ]; then
             gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -297,7 +298,7 @@ jobs:
               --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
               --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
               --no-traffic \
-              --tag prod-${{ github.sha }} \
+              --tag "$TRAFFIC_TAG" \
               --quiet
           else
             gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -316,7 +317,7 @@ jobs:
               --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
               --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
               --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
-              --tag prod-${{ github.sha }} \
+              --tag "$TRAFFIC_TAG" \
               --quiet
           fi
           
