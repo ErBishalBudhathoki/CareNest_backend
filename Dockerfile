@@ -8,6 +8,10 @@ FROM node:22-alpine AS dependencies
 # Install security updates
 RUN apk upgrade --no-cache
 
+# The base image currently ships npm 10.x, which bundles vulnerable
+# glob/minimatch/tar versions that Trivy flags in the final image.
+RUN npm install -g npm@11.12.0
+
 # Create app directory
 WORKDIR /app
 
@@ -20,12 +24,9 @@ RUN npm ci --include=dev
 # ============================================
 # Stage 2: Build
 # ============================================
-FROM node:22-alpine AS build
+FROM dependencies AS build
 
 WORKDIR /app
-
-# Copy dependencies from previous stage
-COPY --from=dependencies /app/node_modules ./node_modules
 
 # Copy source code
 COPY . .
@@ -44,6 +45,9 @@ FROM node:22-alpine AS production
 # Install security updates and dumb-init
 RUN apk upgrade --no-cache && \
     apk add --no-cache dumb-init
+
+# Keep runtime npm aligned with the patched version used in build stages.
+RUN npm install -g npm@11.12.0
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
