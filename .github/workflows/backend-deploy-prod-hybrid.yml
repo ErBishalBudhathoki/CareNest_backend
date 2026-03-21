@@ -261,21 +261,6 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Verify consolidated Secret Manager secret exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud secrets describe "${CONSOLIDATED_SECRET_NAME}" --project="${GCP_PROJECT_ID}" >/dev/null
-
-      - name: Grant Cloud Run runtime access to consolidated secret
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud secrets add-iam-policy-binding "${CONSOLIDATED_SECRET_NAME}" \
-            --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
-            --role="roles/secretmanager.secretAccessor" \
-            --project="${GCP_PROJECT_ID}" || true
-
       - name: Deploy to Cloud Run
         id: deploy
         run: |
