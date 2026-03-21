@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   security-events: write
   id-token: write
   pull-requests: write
@@ -322,49 +322,48 @@ jobs:
           fi
           
           # DO NOT capture or output URL for security
+          echo "traffic-tag=$TRAFFIC_TAG" >> $GITHUB_OUTPUT
           echo "deployment-status=success" >> $GITHUB_OUTPUT
           echo "::notice::Production deployment completed successfully (URL hidden for security)"
 
       - name: Run smoke tests
         run: |
           set -euo pipefail
-          
-          # Use gcloud proxy to test without exposing URL
-          echo "Starting secure proxy for smoke tests..."
-          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+
+          TAGGED_URL="$(gcloud run services describe ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
-            --port 8080 &
-          PROXY_PID=$!
-          
-          # Wait for proxy to be ready
-          sleep 15
-          
-          # Health check
-          echo "Testing health endpoint..."
-          HEALTH_STATUS=$(curl -sS -o /tmp/health.out -w "%{http_code}" \
-            "http://localhost:8080/health" || true)
-          
-          if [[ "$HEALTH_STATUS" != "200" ]]; then
-            echo "::error::Health check failed with status $HEALTH_STATUS"
-            cat /tmp/health.out || true
-            kill $PROXY_PID || true
+            --project ${{ env.GCP_PROJECT_ID }} \
+            --format=json | jq -r --arg TAG "${{ steps.deploy.outputs.traffic-tag }}" '.status.traffic[] | select(.tag == $TAG) | .url' | head -n 1)"
+
+          if [[ -z "$TAGGED_URL" || "$TAGGED_URL" == "null" ]]; then
+            echo "::error::Could not resolve tagged Cloud Run URL for smoke tests"
             exit 1
           fi
-          
-          # API health check
-          echo "Testing API health..."
-          API_STATUS=$(curl -sS -o /tmp/api_health.out -w "%{http_code}" \
-            "http://localhost:8080/api/health" || true)
-          
-          if [[ "$API_STATUS" != "200" ]]; then
-            echo "::error::API health check failed with status $API_STATUS"
-            cat /tmp/api_health.out || true
-            kill $PROXY_PID || true
-            exit 1
-          fi
-          
-          echo "::notice::All smoke tests passed via secure proxy!"
-          kill $PROXY_PID || true
+
+          check_endpoint() {
+            local path="$1"
+            local label="$2"
+            local tmp_file="$3"
+            local status=""
+
+            for attempt in 1 2 3 4 5 6; do
+              status=$(curl -sS -o "$tmp_file" -w "%{http_code}" "${TAGGED_URL}${path}" || true)
+              if [[ "$status" == "200" ]]; then
+                echo "::notice::${label} passed on attempt ${attempt}"
+                return 0
+              fi
+              sleep 10
+            done
+
+            echo "::error::${label} failed with status ${status}"
+            cat "$tmp_file" || true
+            return 1
+          }
+
+          echo "Testing tagged revision API health endpoint..."
+          check_endpoint "/api/health" "Smoke test /api/health" /tmp/api_health.out
+
+          echo "::notice::All smoke tests passed against the tagged revision!"
 
       - name: Gradual traffic rollout
         run: |
@@ -426,22 +425,40 @@ jobs:
       - name: Post-deployment validation
         run: |
           set -euo pipefail
-          
-          # Use gcloud proxy for validation without exposing URL
-          echo "Starting secure proxy for validation..."
-          gcloud run services proxy ${{ env.SERVICE_NAME }} \
+
+          SERVICE_URL="$(gcloud run services describe ${{ env.SERVICE_NAME }} \
             --region ${{ env.REGION }} \
-            --port 8080 &
-          PROXY_PID=$!
-          
-          sleep 10
-          
-          # Final health checks
+            --project ${{ env.GCP_PROJECT_ID }} \
+            --format='value(status.url)')"
+
+          if [[ -z "$SERVICE_URL" ]]; then
+            echo "::error::Could not resolve Cloud Run service URL for post-deployment validation"
+            exit 1
+          fi
+
+          check_endpoint() {
+            local path="$1"
+            local label="$2"
+            local tmp_file="$3"
+            local status=""
+
+            for attempt in 1 2 3 4 5 6; do
+              status=$(curl -sS -o "$tmp_file" -w "%{http_code}" "${SERVICE_URL}${path}" || true)
+              if [[ "$status" == "200" ]]; then
+                echo "::notice::${label} passed on attempt ${attempt}"
+                return 0
+              fi
+              sleep 10
+            done
+
+            echo "::error::${label} failed with status ${status}"
+            cat "$tmp_file" || true
+            return 1
+          }
+
           echo "Running post-deployment validation..."
-          curl -f "http://localhost:8080/health" || (echo "::error::Post-deployment health check failed" && kill $PROXY_PID || true && exit 1)
-          curl -f "http://localhost:8080/api/health" || (echo "::error::Post-deployment API check failed" && kill $PROXY_PID || true && exit 1)
-          
-          kill $PROXY_PID || true
+          check_endpoint "/api/health" "Post-deployment /api/health" /tmp/post_api_health.out
+
           echo "::notice::✅ Production deployment validated successfully!"
 
       - name: Create deployment summary
