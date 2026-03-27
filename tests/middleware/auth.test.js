@@ -64,6 +64,14 @@ describe('AuthMiddleware.authenticateUser', () => {
         expect(next).toHaveBeenCalled();
     });
 
+    test('should allow newly shared public auth endpoints', async () => {
+        req.originalUrl = '/api/auth/verify-organization/ABC123';
+        await AuthMiddleware.authenticateUser(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(res.status).not.toHaveBeenCalled();
+    });
+
     test('should reject if authorization header is missing', async () => {
         await AuthMiddleware.authenticateUser(req, res, next);
         expect(res.status).toHaveBeenCalledWith(401);
