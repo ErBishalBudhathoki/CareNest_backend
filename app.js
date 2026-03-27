@@ -17,6 +17,7 @@ const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { errorTrackingMiddleware } = require('./middleware/errorTracking');
 const { systemHealthMiddleware } = require('./middleware/systemHealth');
 const { requestLogger, securityLogger } = require('./middleware/requestLogger');
+const { apiSecurityGate } = require('./middleware/apiSecurityGate');
 const { apiUsageMonitor } = require('./utils/apiUsageMonitor');
 const { renderClientSetPasswordPage } = require('./utils/clientSetPasswordPage');
 
@@ -193,7 +194,13 @@ app.get('/client/set-password', (req, res) => {
 });
 
 // Main API Routes
-app.use('/api', require('./routes'));
+// Security model:
+// - Public bootstrap/auth flows are explicitly bypassed inside apiSecurityGate.
+// - Protected /api routes require App Check first, then bearer auth.
+// - /api/scheduler bypasses this gate because it already uses Cloud Scheduler OIDC auth.
+// - Future server-to-server callers should use an explicit bypass or gateway path,
+//   not weaken the default mobile-oriented gate.
+app.use('/api', apiSecurityGate, require('./routes'));
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
