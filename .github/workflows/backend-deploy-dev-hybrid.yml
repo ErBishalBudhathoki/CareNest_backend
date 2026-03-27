@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       skip_tests:
-        description: 'Skip tests (emergency only)'
+        description: 'Skip tests (emergency only, warning will be added to run summary)'
         required: false
         default: false
         type: boolean
@@ -52,7 +52,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -83,7 +83,24 @@ jobs:
         run: npm ci
 
       - name: Run npm audit
-        run: npm audit --audit-level=high || true
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  warn-skipped-tests:
+    name: Warn when tests are skipped
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: ${{ github.event.inputs.skip_tests == 'true' }}
+    steps:
+      - name: Record test skip warning
+        run: |
+          echo "::warning::Backend tests were skipped via workflow_dispatch emergency bypass."
+          {
+            echo "## Warning: Tests Skipped"
+            echo ""
+            echo "This deployment was run with \`skip_tests=true\`."
+            echo "Only use this bypass for emergencies and follow up with a validated test run."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Testing
   test:
@@ -253,6 +270,8 @@ jobs:
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
           PREVIEW_TAG="preview"
           
+          # This service remains publicly reachable for mobile clients.
+          # Firebase/AuthZ is enforced in application middleware, not Cloud Run IAM.
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
@@ -279,15 +298,6 @@ jobs:
           echo "deployment-status=success" >> $GITHUB_OUTPUT
           echo "::notice::Deployment completed successfully (URL hidden for security)"
 
-      - name: Ensure public invoker access for mobile clients (Dev)
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud run services add-iam-policy-binding "${{ env.SERVICE_NAME }}" \
-            --region "${{ env.REGION }}" \
-            --member="allUsers" \
-            --role="roles/run.invoker"
-
       - name: Grant GitHub deployer invocation access (Dev)
         shell: bash
         run: |
@@ -308,8 +318,26 @@ jobs:
             --port 8080 &
           PROXY_PID=$!
           
-          # Wait for proxy to be ready
-          sleep 10
+          echo "Waiting for proxy to be ready..."
+          for attempt in $(seq 1 20); do
+            if curl -fsS "http://localhost:8080/health" >/dev/null 2>&1; then
+              echo "Proxy is ready."
+              break
+            fi
+
+            if ! kill -0 $PROXY_PID 2>/dev/null; then
+              echo "::error::Cloud Run proxy exited before becoming ready"
+              exit 1
+            fi
+
+            if [[ "$attempt" == "20" ]]; then
+              echo "::error::Timed out waiting for Cloud Run proxy"
+              kill $PROXY_PID || true
+              exit 1
+            fi
+
+            sleep 3
+          done
           
           # Run smoke tests through proxy
           for attempt in $(seq 1 8); do
