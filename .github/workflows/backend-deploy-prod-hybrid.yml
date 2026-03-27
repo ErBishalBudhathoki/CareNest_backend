@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -211,7 +211,7 @@ jobs:
           path: backend-sbom.spdx.json
 
       - name: Scan production image
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         env:
           TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2,public.ecr.aws/aquasecurity/trivy-db:2
           TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db:1,public.ecr.aws/aquasecurity/trivy-java-db:1
@@ -282,6 +282,8 @@ jobs:
         run: |
           IMAGE_URI="${{ needs.build.outputs.image-uri }}"
           
+          # This service remains publicly reachable for mobile clients.
+          # Firebase/AuthZ is enforced in application middleware, not Cloud Run IAM.
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "$IMAGE_URI" \
             --region ${{ env.REGION }} \
@@ -317,8 +319,26 @@ jobs:
             --port 8080 &
           PROXY_PID=$!
           
-          # Wait for proxy to be ready
-          sleep 15
+          echo "Waiting for proxy to be ready..."
+          for attempt in $(seq 1 20); do
+            if curl -fsS "http://localhost:8080/health" >/dev/null 2>&1; then
+              echo "Proxy is ready."
+              break
+            fi
+
+            if ! kill -0 $PROXY_PID 2>/dev/null; then
+              echo "::error::Cloud Run proxy exited before becoming ready"
+              exit 1
+            fi
+
+            if [[ "$attempt" == "20" ]]; then
+              echo "::error::Timed out waiting for Cloud Run proxy"
+              kill $PROXY_PID || true
+              exit 1
+            fi
+
+            sleep 3
+          done
           
           # Health check
           echo "Testing health endpoint..."
@@ -410,7 +430,26 @@ jobs:
             --port 8080 &
           PROXY_PID=$!
           
-          sleep 10
+          echo "Waiting for proxy to be ready..."
+          for attempt in $(seq 1 20); do
+            if curl -fsS "http://localhost:8080/health" >/dev/null 2>&1; then
+              echo "Proxy is ready."
+              break
+            fi
+
+            if ! kill -0 $PROXY_PID 2>/dev/null; then
+              echo "::error::Cloud Run proxy exited before becoming ready"
+              exit 1
+            fi
+
+            if [[ "$attempt" == "20" ]]; then
+              echo "::error::Timed out waiting for Cloud Run proxy"
+              kill $PROXY_PID || true
+              exit 1
+            fi
+
+            sleep 3
+          done
           
           # Final health checks
           echo "Running post-deployment validation..."
