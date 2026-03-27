@@ -171,6 +171,12 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGISTRY }}
 
+      - name: Clear stale Docker Hub credentials
+        run: |
+          docker logout docker.io || true
+          docker logout registry-1.docker.io || true
+          docker logout https://index.docker.io/v1/ || true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
