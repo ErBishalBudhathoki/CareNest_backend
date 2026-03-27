@@ -99,11 +99,13 @@ jobs:
         working-directory: .
     services:
       mongodb:
-        image: mongo:7
+        # Use AWS Public ECR mirrors to avoid Docker Hub auth/rate-limit issues
+        # on GitHub-hosted runners during service container startup.
+        image: public.ecr.aws/docker/library/mongo:7
         ports:
           - 27017:27017
       redis:
-        image: redis:7-alpine
+        image: public.ecr.aws/docker/library/redis:7-alpine
         ports:
           - 6379:6379
 
