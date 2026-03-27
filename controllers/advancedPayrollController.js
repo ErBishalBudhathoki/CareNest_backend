@@ -7,6 +7,14 @@ const mongoose = require('mongoose');
 const SUPPORTED_EXPORT_FORMATS = ['json', 'csv', 'xero', 'myob'];
 
 class AdvancedPayrollController {
+  constructor() {
+    this.calculatePayroll = this.calculatePayroll.bind(this);
+    this.getPayslip = this.getPayslip.bind(this);
+    this.generatePayslips = this.generatePayslips.bind(this);
+    this.getPayrollSummary = this.getPayrollSummary.bind(this);
+    this.exportPayrollData = this.exportPayrollData.bind(this);
+  }
+
   async calculatePayroll(req, res) {
     try {
       const payrollData = req.body;
