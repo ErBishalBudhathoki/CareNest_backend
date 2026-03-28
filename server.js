@@ -52,12 +52,12 @@ const initializeApplication = async () => {
 // Global Error Handlers
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
+  
 });
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  process.exit(1);
+  
 });
 
 // Start Schedulers
@@ -216,7 +216,7 @@ else if (require.main === module) {
 
     } catch (error) {
       logger.error('Server startup failed', { error: error.message, stack: error.stack });
-      process.exit(1);
+      
     }
   };
 
