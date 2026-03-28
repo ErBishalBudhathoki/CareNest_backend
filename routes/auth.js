@@ -121,9 +121,11 @@ router.post('/login',
  * @route POST /api/auth/register-fcm-token
  * @desc Register FCM token for push notifications
  * @access Public
+ * @security App Check required, rate-limited, intentionally available before login
  */
 router.post('/register-fcm-token',
   requireAppCheck,
+  rateLimitMiddleware('register-fcm-token'),
   async (req, res) => {
     try {
       const result = await SecureAuthController.registerFcmToken(req, res);
