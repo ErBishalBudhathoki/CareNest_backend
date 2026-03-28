@@ -8,6 +8,7 @@ const InputValidator = require('../utils/inputValidator');
 const { securityMonitor } = require('../utils/securityMonitor');
 const keyRotationService = require('../services/jwtKeyRotationService');
 const firebaseAdminConfig = require('../firebase-admin-config');
+const { isPublicAuthPath } = require('./apiAccessPolicy');
 // Support both export shapes:
 // - { admin, messaging } (production module)
 // - { auth: () => ... } (unit tests mocking firebase-admin-config)
@@ -77,26 +78,8 @@ class AuthMiddleware {
    */
   static async authenticateUser(req, res, next) {
     try {
-      // Public endpoints that don't require authentication
-      const publicEndpoints = [
-        '/api/auth/login',
-        '/api/auth/register',
-        '/api/auth/secure-login',
-        '/api/auth/forgot-password',
-        '/api/auth/reset-password',
-        '/api/auth/verify-email',
-        '/api/auth/health',
-        '/api/auth/v2/register',
-        '/api/auth/v2/login',
-        '/api/firebase-auth', // Firebase auth routes use their own token verification
-        '/api/health',
-        '/api-docs',
-        '/api-docs.json'
-      ];
-
-      // Check if this is a public endpoint (use originalUrl for full path)
       const path = req.originalUrl || req.path;
-      if (publicEndpoints.some(endpoint => path.startsWith(endpoint))) {
+      if (isPublicAuthPath(path)) {
         return next();
       }
 
@@ -694,6 +677,7 @@ if (process.env.NODE_ENV !== 'test') {
 const RATE_LIMIT_CONFIGS = {
   login: { windowMs: 15 * 60 * 1000, max: 5, message: 'Too many login attempts' },
   register: { windowMs: 60 * 60 * 1000, max: 3, message: 'Too many registration attempts' },
+  'register-fcm-token': { windowMs: 15 * 60 * 1000, max: 10, message: 'Too many FCM token registration attempts' },
   verify: { windowMs: 15 * 60 * 1000, max: 3, message: 'Too many verification attempts' },
   forgot: { windowMs: 15 * 60 * 1000, max: 3, message: 'Too many password reset requests' },
   reset: { windowMs: 15 * 60 * 1000, max: 3, message: 'Too many password reset attempts' },
@@ -718,7 +702,7 @@ function rateLimitMiddleware(type) {
 
     // For public auth endpoints, use email from body if available
     if (req.body && req.body.email && [
-      'login', 'register', 'verify', 'forgot', 'reset', 'resend'
+      'login', 'register', 'register-fcm-token', 'verify', 'forgot', 'reset', 'resend'
     ].includes(type)) {
       return req.body.email;
     }
