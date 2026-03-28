@@ -8,10 +8,6 @@ FROM node:22-alpine AS dependencies
 # Install security updates
 RUN apk upgrade --no-cache
 
-# The base image currently ships npm 10.x, which bundles vulnerable
-# glob/minimatch/tar versions that Trivy flags in the final image.
-RUN npm install -g npm@11.12.0
-
 # Create app directory
 WORKDIR /app
 
@@ -46,9 +42,6 @@ FROM node:22-alpine AS production
 RUN apk upgrade --no-cache && \
     apk add --no-cache dumb-init
 
-# Keep runtime npm aligned with the patched version used in build stages.
-RUN npm install -g npm@11.12.0
-
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
@@ -64,6 +57,11 @@ COPY --from=build --chown=nodejs:nodejs /app ./
 
 # Create writable logs directory for the application
 RUN mkdir -p /app/logs && chown -R nodejs:nodejs /app/logs
+
+# The runtime container only executes Node directly, so remove npm/npx
+# entirely instead of patching a broken bundled npm release.
+RUN rm -rf /usr/local/lib/node_modules/npm && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Remove unnecessary files for security
 RUN rm -rf \
