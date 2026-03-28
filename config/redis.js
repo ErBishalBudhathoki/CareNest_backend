@@ -16,6 +16,7 @@ if (useMockRedis) {
 }
 
 const isCloudRun = Boolean(process.env.K_SERVICE);
+const enableRedisInCloudRun = process.env.ENABLE_REDIS_IN_CLOUDRUN === 'true';
 const hasRedisUrl = Boolean(process.env.REDIS_URL);
 const hasRedisHostConfig = Boolean(
   process.env.REDIS_HOST || process.env.REDIS_PORT || process.env.REDIS_PASSWORD
@@ -26,7 +27,11 @@ const parsedRedisPort = Number.parseInt(process.env.REDIS_PORT || '6379', 10);
 const redisPort = Number.isNaN(parsedRedisPort) ? 6379 : parsedRedisPort;
 
 let redisConfig = null;
-if (hasRedisUrl) {
+if (isCloudRun && !enableRedisInCloudRun) {
+  logger.info(
+    'Redis disabled in Cloud Run by default; set ENABLE_REDIS_IN_CLOUDRUN=true to opt in.'
+  );
+} else if (hasRedisUrl) {
   redisConfig = process.env.REDIS_URL;
 } else if (hasRedisHostConfig || shouldUseLocalDefaults) {
   redisConfig = {
