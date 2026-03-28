@@ -57,7 +57,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  process.exit(1);
+  
 });
 
 // Start Schedulers
@@ -216,7 +216,7 @@ else if (require.main === module) {
 
     } catch (error) {
       logger.error('Server startup failed', { error: error.message, stack: error.stack });
-      process.exit(1);
+      
     }
   };
 
