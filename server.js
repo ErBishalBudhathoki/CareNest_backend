@@ -52,7 +52,7 @@ const initializeApplication = async () => {
 // Global Error Handlers
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
+  // Disabled process.exit(1) to prevent aggressive crashing from non-fatal timeout errors (like Redis)
 });
 
 process.on('uncaughtException', (error) => {
