@@ -35,10 +35,12 @@ const initializeApplication = async () => {
       try {
         await loadSecrets();
         console.log('✅ Secrets loaded successfully');
+        require('./config/redis').refreshConfiguration(true);
       } catch (error) {
         logger.warn('⚠️  Failed to load consolidated secrets, using environment variables', {
           error: error.message
         });
+        require('./config/redis').refreshConfiguration(true);
       }
 
       appInstance = require('./app');
