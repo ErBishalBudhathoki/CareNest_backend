@@ -54,21 +54,46 @@ class SecureAuthController {
     const existingMongoUser = await authService.checkEmailExists(email);
 
     if (existingMongoUser) {
-      // If MongoDB user exists WITH a firebaseUid — fully registered, reject
+      // If MongoDB user exists WITH a firebaseUid, verify the Firebase user still exists.
       if (existingMongoUser.firebaseUid) {
-        return res.status(409).json(
-          SecureErrorHandler.createErrorResponse(
-            'User with this email already exists',
-            409,
-            'USER_EXISTS'
-          )
-        );
-      }
+        try {
+          await admin.auth().getUser(existingMongoUser.firebaseUid);
+          return res.status(409).json(
+            SecureErrorHandler.createErrorResponse(
+              'User with this email already exists',
+              409,
+              'USER_EXISTS'
+            )
+          );
+        } catch (firebaseLookupError) {
+          if (firebaseLookupError.code !== 'auth/user-not-found') {
+            logger.error('Failed to verify Firebase user during registration', {
+              email,
+              firebaseUid: existingMongoUser.firebaseUid,
+              error: firebaseLookupError.message,
+              code: firebaseLookupError.code
+            });
+            return res.status(500).json(
+              SecureErrorHandler.createErrorResponse(
+                'Failed to verify existing account state. Please try again.',
+                500,
+                'FIREBASE_LOOKUP_ERROR'
+              )
+            );
+          }
 
-      // MongoDB user exists WITHOUT firebaseUid — orphaned record from a prior partial failure.
-      // Delete it so the registration can proceed cleanly.
-      logger.warn('Deleting orphaned MongoDB user (no firebaseUid)', { email });
-      await existingMongoUser.deleteOne();
+          logger.warn('Deleting stale MongoDB user with missing Firebase account', {
+            email,
+            firebaseUid: existingMongoUser.firebaseUid
+          });
+          await existingMongoUser.deleteOne();
+        }
+      } else {
+        // MongoDB user exists WITHOUT firebaseUid — orphaned record from a prior partial failure.
+        // Delete it so the registration can proceed cleanly.
+        logger.warn('Deleting orphaned MongoDB user (no firebaseUid)', { email });
+        await existingMongoUser.deleteOne();
+      }
     }
 
     // 4. CREATE FIREBASE USER via Admin SDK
