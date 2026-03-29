@@ -39,7 +39,7 @@ const OLD_SECRETS = {
     ]
   },
   production: {
-    projectId: 'carenest-prod',
+    projectId: 'carenest-prods',
     secrets: [
       'prod-mongodb-uri',
       'prod-redis-url',
@@ -296,8 +296,8 @@ function showChecklist(environment) {
   if (environment === 'production' || environment === 'all') {
     console.log('');
     log('Production:', 'yellow');
-    log('  gcloud secrets describe app-secrets-prod --project=carenest-prod', 'cyan');
-    log('  gcloud logs tail --filter="SecretLoader" --project=carenest-prod', 'cyan');
+    log('  gcloud secrets describe app-secrets-prod --project=carenest-prods', 'cyan');
+    log('  gcloud logs tail --filter="SecretLoader" --project=carenest-prods', 'cyan');
   }
 
   console.log('');
