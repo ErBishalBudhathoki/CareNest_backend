@@ -291,10 +291,10 @@ jobs:
               --platform managed \
               --allow-unauthenticated \
               --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
-              --min-instances 1 \
-              --max-instances 50 \
-              --cpu 2 \
-              --memory 1Gi \
+              --min-instances 0 \
+              --max-instances 10 \
+              --cpu 1 \
+              --memory 512Mi \
               --timeout 300 \
               --cpu-boost \
               --port 8080 \
@@ -311,10 +311,10 @@ jobs:
               --platform managed \
               --allow-unauthenticated \
               --service-account "${{ env.CLOUD_RUN_SERVICE_ACCOUNT }}" \
-              --min-instances 1 \
-              --max-instances 50 \
-              --cpu 2 \
-              --memory 1Gi \
+              --min-instances 0 \
+              --max-instances 10 \
+              --cpu 1 \
+              --memory 512Mi \
               --timeout 300 \
               --cpu-boost \
               --port 8080 \
