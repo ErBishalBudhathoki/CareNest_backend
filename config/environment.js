@@ -14,6 +14,12 @@ class EnvironmentConfig {
   }
 
   loadEnvironmentConfig() {
+    const isRenderRuntime = !!(
+      process.env.RENDER ||
+      process.env.RENDER_SERVICE_ID ||
+      process.env.RENDER_EXTERNAL_URL
+    );
+
     // Base configuration
     this.config = {
       app: {
@@ -42,10 +48,10 @@ class EnvironmentConfig {
         enableHealthEndpoint: true,
         enableMetrics: true,
         enableDebugEndpoints: this.isDevelopment,
-        enableKeepAlive: this.isProduction // Only enable keep-alive in production
+        enableKeepAlive: this.isProduction && isRenderRuntime
       },
       keepAlive: {
-        enabled: this.isProduction,
+        enabled: this.isProduction && isRenderRuntime,
         interval: 10 * 60 * 1000, // 10 minutes
         timeout: 30000, // 30 seconds
         retries: 3
