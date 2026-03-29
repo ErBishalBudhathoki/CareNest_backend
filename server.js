@@ -205,8 +205,8 @@ else if (require.main === module) {
         }
 
         try {
-          if (!environmentConfig.isDevelopmentEnvironment()) {
-            const serverUrl = process.env.RENDER_EXTERNAL_URL || 'https://more-than-invoice.onrender.com';
+          if (environmentConfig.getConfig().features.enableKeepAlive) {
+            const serverUrl = process.env.RENDER_EXTERNAL_URL || process.env.BACKEND_URL;
             keepAliveService.initialize(serverUrl);
           }
         } catch (e) {
