@@ -161,7 +161,7 @@ class SecretLoader {
     }
 
     return {
-      projectId: this.environment === 'production' ? 'carenest-prod' : 'invoice-660f3',
+      projectId: this.environment === 'production' ? 'carenest-prods' : 'invoice-660f3',
       secretName: this.environment === 'production' ? 'app-secrets-prod' : 'app-secrets-dev'
     };
   }

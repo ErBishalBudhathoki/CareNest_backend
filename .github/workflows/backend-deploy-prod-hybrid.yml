@@ -32,10 +32,10 @@ env:
   REGION: 'australia-southeast1'
   SERVICE_NAME: 'backend-prod'
   REGISTRY: 'australia-southeast1-docker.pkg.dev'
-  IMAGE_REPOSITORY: 'gcf-artifacts'
-  GCP_PROJECT_ID: 'carenest-prod'  # Prod project
+  IMAGE_REPOSITORY: 'backend-repo'
+  GCP_PROJECT_ID: 'carenest-prods'  # Prod project
   CONSOLIDATED_SECRET_NAME: 'app-secrets-prod'
-  CLOUD_RUN_SERVICE_ACCOUNT: 'carenest-prod@appspot.gserviceaccount.com'
+  CLOUD_RUN_SERVICE_ACCOUNT: 'backend-prod-runtime@carenest-prods.iam.gserviceaccount.com'
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -299,7 +299,7 @@ jobs:
               --cpu-boost \
               --port 8080 \
               --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
-              --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
+              --set-env-vars "GCP_PROJECT_ID=carenest-prods,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
               --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
               --no-traffic \
               --tag "$TRAFFIC_TAG" \
@@ -319,7 +319,7 @@ jobs:
               --cpu-boost \
               --port 8080 \
               --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
-              --set-env-vars "GCP_PROJECT_ID=carenest-prod,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
+              --set-env-vars "GCP_PROJECT_ID=carenest-prods,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
               --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
               --tag "$TRAFFIC_TAG" \
               --quiet
