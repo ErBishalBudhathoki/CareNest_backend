@@ -178,14 +178,14 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v3
         with:
-          project_id: carenest-prod
+          project_id: carenest-prods
 
       - name: Get currently deployed image
         id: current
         run: |
           CURRENT_IMAGE=$(gcloud run services describe backend-prod \
             --region ${{ env.REGION }} \
-            --project carenest-prod \
+            --project carenest-prods \
             --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
           
           if [ -n "$CURRENT_IMAGE" ]; then
@@ -203,7 +203,7 @@ jobs:
           REVISION_IMAGES=$(gcloud run revisions list \
             --service=backend-prod \
             --region=${{ env.REGION }} \
-            --project=carenest-prod \
+            --project=carenest-prods \
             --limit=5 \
             --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
           
@@ -218,8 +218,8 @@ jobs:
         run: |
           echo "Images before cleanup:"
           TOTAL=$(gcloud artifacts docker images list \
-            ${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod \
-            --project carenest-prod \
+            ${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod \
+            --project carenest-prods \
             --format="get(version)" 2>/dev/null | wc -l || echo "0")
           
           echo "Total images: $TOTAL"
@@ -236,10 +236,10 @@ jobs:
           
           # Get all image versions sorted by creation time (newest first)
           IMAGES=$(gcloud artifacts docker images list \
-            ${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod \
+            ${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod \
             --format="get(version)" \
             --sort-by="~CREATE_TIME" \
-            --project=carenest-prod 2>/dev/null || echo "")
+            --project=carenest-prods 2>/dev/null || echo "")
           
           if [ -z "$IMAGES" ]; then
             echo "::notice::No images found to cleanup"
@@ -273,10 +273,10 @@ jobs:
               continue
             fi
             
-            IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod@$version"
+            IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod@$version"
             
             if gcloud artifacts docker images delete "$IMAGE_URI" \
-              --project=carenest-prod \
+              --project=carenest-prods \
               --quiet 2>/dev/null; then
               echo "Deleted: ${version:0:12}"
               DELETED=$((DELETED + 1))
@@ -292,8 +292,8 @@ jobs:
         run: |
           echo "Images after cleanup:"
           TOTAL=$(gcloud artifacts docker images list \
-            ${{ env.REGION }}-docker.pkg.dev/carenest-prod/${{ env.REPO }}/backend-prod \
-            --project carenest-prod \
+            ${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod \
+            --project carenest-prods \
             --format="get(version)" 2>/dev/null | wc -l || echo "0")
           
           echo "Total images: $TOTAL"
@@ -306,7 +306,7 @@ jobs:
           ## 🧹 Production Cleanup Summary
           
           **Environment:** Production
-          **Project:** carenest-prod
+          **Project:** carenest-prods
           **Service:** backend-prod
           **Region:** ${{ env.REGION }}
           
