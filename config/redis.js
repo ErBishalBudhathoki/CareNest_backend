@@ -15,32 +15,61 @@ if (useMockRedis) {
   }
 }
 
-const isCloudRun = Boolean(process.env.K_SERVICE);
-const enableRedisInCloudRun = process.env.ENABLE_REDIS_IN_CLOUDRUN === 'true';
-const hasRedisUrl = Boolean(process.env.REDIS_URL);
-const hasRedisHostConfig = Boolean(
-  process.env.REDIS_HOST || process.env.REDIS_PORT || process.env.REDIS_PASSWORD
-);
-const shouldUseLocalDefaults = !hasRedisUrl && !hasRedisHostConfig && !isCloudRun;
+function getIsCloudRun() {
+  return Boolean(process.env.K_SERVICE);
+}
 
-const parsedRedisPort = Number.parseInt(process.env.REDIS_PORT || '6379', 10);
-const redisPort = Number.isNaN(parsedRedisPort) ? 6379 : parsedRedisPort;
+function getMaxConnections() {
+  return getIsCloudRun() ? 2 : 10;
+}
 
-let redisConfig = null;
-if (isCloudRun && !enableRedisInCloudRun) {
-  logger.info(
-    'Redis disabled in Cloud Run by default; set ENABLE_REDIS_IN_CLOUDRUN=true to opt in.'
+function resolveRedisRuntimeConfig() {
+  const isCloudRun = getIsCloudRun();
+  const enableRedisInCloudRun = process.env.ENABLE_REDIS_IN_CLOUDRUN === 'true';
+  const hasRedisUrl = Boolean(process.env.REDIS_URL);
+  const hasRedisHostConfig = Boolean(
+    process.env.REDIS_HOST || process.env.REDIS_PORT || process.env.REDIS_PASSWORD
   );
-} else if (hasRedisUrl) {
-  redisConfig = process.env.REDIS_URL;
-} else if (hasRedisHostConfig || shouldUseLocalDefaults) {
-  redisConfig = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: redisPort,
-    password: process.env.REDIS_PASSWORD || undefined,
-    maxRetriesPerRequest: null,
-    retryStrategy: (times) => Math.min(times * 50, 2000)
+  const shouldUseLocalDefaults = !hasRedisUrl && !hasRedisHostConfig && !isCloudRun;
+
+  const parsedRedisPort = Number.parseInt(process.env.REDIS_PORT || '6379', 10);
+  const redisPort = Number.isNaN(parsedRedisPort) ? 6379 : parsedRedisPort;
+
+  let redisConfig = null;
+  if (isCloudRun && !enableRedisInCloudRun) {
+    logger.info(
+      'Redis disabled in Cloud Run by default; set ENABLE_REDIS_IN_CLOUDRUN=true to opt in.'
+    );
+  } else if (hasRedisUrl) {
+    redisConfig = process.env.REDIS_URL;
+  } else if (hasRedisHostConfig || shouldUseLocalDefaults) {
+    redisConfig = {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: redisPort,
+      password: process.env.REDIS_PASSWORD || undefined,
+      maxRetriesPerRequest: null,
+      retryStrategy: (times) => Math.min(times * 50, 2000)
+    };
+  }
+
+  return {
+    isCloudRun,
+    enableRedisInCloudRun,
+    redisConfig,
   };
+}
+
+function getConfigKey(config) {
+  const redisConfig =
+    typeof config.redisConfig === 'string'
+      ? config.redisConfig
+      : JSON.stringify(config.redisConfig || null);
+
+  return JSON.stringify({
+    isCloudRun: config.isCloudRun,
+    enableRedisInCloudRun: config.enableRedisInCloudRun,
+    redisConfig,
+  });
 }
 
 // Circuit breaker state
@@ -53,7 +82,6 @@ const CIRCUIT_BREAK_RESET_MS = 60000;
 // Shared connection pool - minimize connections
 let sharedClient = null;
 let connectionCount = 0;
-const MAX_CONNECTIONS = isCloudRun ? 2 : 10; // Limit connections in Cloud Run
 
 class DisabledRedisClient extends EventEmitter {
   constructor() {
@@ -124,6 +152,9 @@ class DisabledRedisClient extends EventEmitter {
  * In Cloud Run, we limit connections to avoid hitting Redis Cloud limits
  */
 function createRedisClient(url, options) {
+  const isCloudRun = getIsCloudRun();
+  const maxConnections = getMaxConnections();
+
   // Check circuit breaker
   if (circuitOpen) {
     const elapsed = Date.now() - circuitOpenTime;
@@ -146,7 +177,7 @@ function createRedisClient(url, options) {
   }
 
   // Check connection limit
-  if (connectionCount >= MAX_CONNECTIONS) {
+  if (connectionCount >= maxConnections) {
     logger.warn('Redis connection limit reached, reusing shared connection');
     if (sharedClient) {
       return createSharedClientWrapper(sharedClient);
@@ -258,35 +289,100 @@ function parseConnectionOptions(redisUrl) {
 }
 
 let redis;
-if (!redisConfig) {
-  logger.warn(
-    'Redis is not configured. Redis-backed features will use in-memory or no-op behavior.',
-    { isCloudRun, nodeEnv: process.env.NODE_ENV || 'development' }
-  );
-  redis = new DisabledRedisClient();
-} else if (typeof redisConfig === 'string') {
-  const connectionOptions = parseConnectionOptions(redisConfig);
-  redis = createRedisClient(redisConfig, connectionOptions);
-  redis.connectionOptions = connectionOptions;
-  redis.redisUrl = redisConfig;
-} else {
-  const connectionOptions = {
-    ...redisConfig,
-    ...parseConnectionOptions(null),
-  };
-  redis = new RedisClass(connectionOptions);
-  redis.connectionOptions = connectionOptions;
+let redisConfigKey = null;
+
+function attachRedisMetadata(client, runtimeConfig) {
+  client.isConfigured = Boolean(runtimeConfig.redisConfig);
+  client.getConnectionStats = () => ({
+    isCloudRun: runtimeConfig.isCloudRun,
+    connectionCount,
+    maxConnections: getMaxConnections(),
+    circuitOpen,
+    sharedClientActive: !!sharedClient
+  });
+  client.refreshConfiguration = refreshConfiguration;
+  return client;
 }
 
-redis.isConfigured = Boolean(redisConfig);
+function closeRedisClient(client) {
+  if (!client || client instanceof DisabledRedisClient) {
+    return;
+  }
 
-// Export connection stats for monitoring
-redis.getConnectionStats = () => ({
-  isCloudRun,
-  connectionCount,
-  maxConnections: MAX_CONNECTIONS,
-  circuitOpen,
-  sharedClientActive: !!sharedClient
+  try {
+    if (typeof client.quit === 'function') {
+      client.quit().catch(() => {});
+    } else if (typeof client.disconnect === 'function') {
+      client.disconnect();
+    }
+  } catch {
+    // Ignore cleanup failures during config refresh.
+  }
+}
+
+function buildRedisClient(runtimeConfig) {
+  if (!runtimeConfig.redisConfig) {
+    logger.warn(
+      'Redis is not configured. Redis-backed features will use in-memory or no-op behavior.',
+      { isCloudRun: runtimeConfig.isCloudRun, nodeEnv: process.env.NODE_ENV || 'development' }
+    );
+    return attachRedisMetadata(new DisabledRedisClient(), runtimeConfig);
+  }
+
+  if (typeof runtimeConfig.redisConfig === 'string') {
+    const connectionOptions = parseConnectionOptions(runtimeConfig.redisConfig);
+    const client = createRedisClient(runtimeConfig.redisConfig, connectionOptions);
+    client.connectionOptions = connectionOptions;
+    client.redisUrl = runtimeConfig.redisConfig;
+    return attachRedisMetadata(client, runtimeConfig);
+  }
+
+  const connectionOptions = {
+    ...runtimeConfig.redisConfig,
+    ...parseConnectionOptions(null),
+  };
+  const client = createRedisClient(connectionOptions, connectionOptions);
+  client.connectionOptions = connectionOptions;
+  return attachRedisMetadata(client, runtimeConfig);
+}
+
+function refreshConfiguration(force = false) {
+  const runtimeConfig = resolveRedisRuntimeConfig();
+  const nextConfigKey = getConfigKey(runtimeConfig);
+
+  if (!force && redis && redisConfigKey === nextConfigKey) {
+    return redis;
+  }
+
+  if (force || redisConfigKey !== nextConfigKey) {
+    closeRedisClient(redis);
+    if (sharedClient && sharedClient !== redis) {
+      closeRedisClient(sharedClient);
+      sharedClient = null;
+    }
+    connectionCount = 0;
+  }
+
+  redis = buildRedisClient(runtimeConfig);
+  redisConfigKey = nextConfigKey;
+  return redis;
+}
+
+function getRedisClient() {
+  return refreshConfiguration();
+}
+
+const redisProxy = new Proxy(new EventEmitter(), {
+  get(_target, property) {
+    const client = getRedisClient();
+    const value = client[property];
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+  set(_target, property, value) {
+    const client = getRedisClient();
+    client[property] = value;
+    return true;
+  },
 });
 
-module.exports = redis;
+module.exports = redisProxy;
