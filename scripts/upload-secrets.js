@@ -9,7 +9,7 @@
  * Development (invoice-660f3):
  * - app-secrets-dev (all dev secrets as JSON)
  * 
- * Production (carenest-prod):
+ * Production (carenest-prods):
  * - app-secrets-prod (all prod secrets as JSON)
  * 
  * Usage:
@@ -31,12 +31,14 @@ const ENVIRONMENTS = {
   development: {
     projectId: 'invoice-660f3',
     secretName: 'app-secrets-dev',
-    account: 'deverbishal331@gmail.com'
+    account: 'deverbishal331@gmail.com',
+    runtimeServiceAccount: 'invoice-660f3@appspot.gserviceaccount.com'
   },
   production: {
-    projectId: 'carenest-prod',
+    projectId: 'carenest-prods',
     secretName: 'app-secrets-prod',
-    account: 'erbishalb331@gmail.com'
+    account: 'budhathokib085@gmail.com',
+    runtimeServiceAccount: 'backend-prod-runtime@carenest-prods.iam.gserviceaccount.com'
   }
 };
 
@@ -276,7 +278,7 @@ async function grantSecretAccess(environment) {
     log(`\nGranting access to Cloud Run service account...`, 'cyan');
     
     // Default compute service account for Cloud Run
-    const serviceAccount = `${config.projectId}@appspot.gserviceaccount.com`;
+    const serviceAccount = config.runtimeServiceAccount || `${config.projectId}@appspot.gserviceaccount.com`;
     
     await execAsync(
       `gcloud secrets add-iam-policy-binding ${config.secretName} \
