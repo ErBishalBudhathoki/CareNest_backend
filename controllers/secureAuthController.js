@@ -858,18 +858,21 @@ class SecureAuthController {
 
     const verificationContinueUrl =
       process.env.EMAIL_VERIFICATION_CONTINUE_URL ||
-      process.env.FRONTEND_URL ||
-      `https://${firebaseProjectId}.firebaseapp.com/verify-email`;
+      `https://${firebaseProjectId}.firebaseapp.com/email-verified`;
+
+    const iosBundleId = process.env.IOS_BUNDLE_ID || 'com.bishal.invoice';
+    const androidPackageName = process.env.ANDROID_PACKAGE_NAME || 'com.bishal.invoice';
 
     const emailVerificationActionSettings = {
       url: verificationContinueUrl,
-      handleCodeInApp: true
+      handleCodeInApp: true,
+      iOS: { bundleId: iosBundleId },
+      android: {
+        packageName: androidPackageName,
+        installApp: true,
+        minimumVersion: '1',
+      },
     };
-
-    if (process.env.FIREBASE_AUTH_LINK_DOMAIN) {
-      emailVerificationActionSettings.linkDomain =
-        process.env.FIREBASE_AUTH_LINK_DOMAIN;
-    }
 
     const verificationLink = await admin.auth().generateEmailVerificationLink(
       normalizedEmail,
