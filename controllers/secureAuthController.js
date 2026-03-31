@@ -865,7 +865,7 @@ class SecureAuthController {
 
     const emailVerificationActionSettings = {
       url: verificationContinueUrl,
-      handleCodeInApp: true,
+      handleCodeInApp: false,
       iOS: { bundleId: iosBundleId },
       android: {
         packageName: androidPackageName,
