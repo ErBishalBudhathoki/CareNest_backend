@@ -54,6 +54,9 @@ const organizationIdValidation = [
   param('organizationId').isMongoId().withMessage('Invalid organization ID')
 ];
 
+// Public verification landing page
+router.get('/contact-email/verify', orgLimiter, organizationController.verifyContactEmail);
+
 // Protected routes
 router.use(authenticateUser);
 
@@ -66,6 +69,7 @@ router.post('/switch/:organizationId', strictLimiter, organizationContextMiddlew
 // By ID
 router.get('/:organizationId', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationById);
 router.put('/:organizationId', strictLimiter, organizationContextMiddleware, organizationIdValidation, updateOrgValidation, handleValidationErrors, organizationController.updateOrganizationDetails);
+router.post('/:organizationId/contact-email/send-verification', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.sendContactEmailVerification);
 
 // Sub-resources
 router.get('/:organizationId/members', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationMembers);

@@ -25,7 +25,12 @@ const organizationSchema = new mongoose.Schema({
   contactDetails: {
     phone: String,
     email: String,
-    website: String
+    website: String,
+    emailVerified: { type: Boolean, default: false },
+    emailVerificationTokenHash: String,
+    emailVerificationExpiresAt: Date,
+    emailVerificationSentAt: Date,
+    emailVerifiedAt: Date
   },
   bankDetails: {
     bankName: String,
