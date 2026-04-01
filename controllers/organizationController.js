@@ -160,6 +160,108 @@ class OrganizationController {
     }
   });
 
+  sendContactEmailVerification = catchAsync(async (req, res) => {
+    const { organizationId } = req.params;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Organization ID is required',
+      });
+    }
+
+    const configuredBaseUrl =
+      process.env.BASE_URL ||
+      process.env.BACKEND_URL ||
+      `${req.protocol}://${req.get('host')}`;
+
+    const result = await organizationService.sendOrganizationContactVerification(
+      organizationId,
+      configuredBaseUrl,
+    );
+
+    if (!result.found) {
+      return res.status(404).json({
+        success: false,
+        message: 'Organization not found',
+      });
+    }
+
+    if (!result.hasEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Set an organization contact email before requesting verification.',
+      });
+    }
+
+    if (result.alreadyVerified) {
+      return res.status(200).json({
+        success: true,
+        message: 'Organization email is already verified.',
+        data: {
+          alreadyVerified: true,
+          organizationEmail: result.organizationEmail,
+        },
+      });
+    }
+
+    if (result.sendFailed) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send organization verification email.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Organization verification email sent successfully.',
+      data: {
+        sent: true,
+        organizationEmail: result.organizationEmail,
+        expiresAt: result.expiresAt,
+      },
+    });
+  });
+
+  verifyContactEmail = catchAsync(async (req, res) => {
+    const result = await organizationService.verifyOrganizationContactEmail(
+      req.query?.token,
+    );
+
+    const success = result.success === true;
+    const title = success
+      ? 'Organization Email Verified'
+      : 'Verification Link Invalid';
+    const body = success
+      ? `The organization email${result.organizationEmail ? ` ${result.organizationEmail}` : ''} is now verified for ${result.organizationName || 'your organization'}. You can return to the app and refresh the organization details screen.`
+      : 'This verification link is invalid or has expired. Request a new organization verification email from the app.';
+
+    return res
+      .status(success ? 200 : 400)
+      .send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f6f3ec; color: #111; margin: 0; padding: 24px; }
+      .card { max-width: 640px; margin: 48px auto; background: #fff; border: 3px solid #111; box-shadow: 8px 8px 0 #111; padding: 24px; }
+      .badge { display: inline-block; padding: 6px 10px; border: 2px solid #111; font-weight: 800; background: ${success ? '#6be675' : '#ffcc4d'}; }
+      h1 { margin: 16px 0 12px; font-size: 28px; }
+      p { line-height: 1.6; font-size: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="badge">${success ? 'VERIFIED' : 'ACTION NEEDED'}</div>
+      <h1>${title}</h1>
+      <p>${body}</p>
+    </div>
+  </body>
+</html>`);
+  });
+
   updateOrganizationDetails = catchAsync(async (req, res) => {
     const { organizationId } = req.params;
     const updates = req.body;

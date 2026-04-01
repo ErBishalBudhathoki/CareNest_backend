@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
@@ -8,8 +9,82 @@ const OrganizationBranding = require('../models/OrganizationBranding');
 const SharedEmployeeAssignment = require('../models/SharedEmployeeAssignment');
 const { generateOrganizationCode } = require('../utils/cryptoHelpers');
 const cacheService = require('./cacheService');
+const emailService = require('./emailService');
 
 class OrganizationService {
+  _normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  _buildOrganizationCacheKey(organizationId) {
+    return `org:v2:${organizationId}`;
+  }
+
+  _hashVerificationToken(token) {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  _buildSafeContactDetails(organization) {
+    const contactDetails = organization.contactDetails || {};
+    return {
+      phone: contactDetails.phone,
+      email: contactDetails.email,
+      website: contactDetails.website,
+      emailVerified: Boolean(contactDetails.emailVerified),
+      emailVerificationSentAt: contactDetails.emailVerificationSentAt || null,
+      emailVerifiedAt: contactDetails.emailVerifiedAt || null,
+    };
+  }
+
+  async _computeVerificationMeta(organization) {
+    const ownerEmail = this._normalizeEmail(organization.ownerEmail);
+    const ownerUser = ownerEmail
+      ? await User.findOne({ email: ownerEmail }).select('emailVerified')
+      : null;
+    const ownerEmailVerified = Boolean(ownerUser?.emailVerified);
+
+    const safeContactDetails = this._buildSafeContactDetails(organization);
+    const organizationEmail = this._normalizeEmail(safeContactDetails.email);
+    const sameAsOwner =
+      organizationEmail && ownerEmail && organizationEmail === ownerEmail;
+    const organizationEmailVerified = Boolean(safeContactDetails.emailVerified);
+
+    const isVerified = organizationEmail
+      ? (sameAsOwner
+          ? organizationEmailVerified || ownerEmailVerified
+          : organizationEmailVerified)
+      : ownerEmailVerified;
+
+    const verificationSource = organizationEmail
+      ? sameAsOwner
+        ? organizationEmailVerified
+          ? 'organization_email'
+          : ownerEmailVerified
+            ? 'owner_email'
+            : 'pending'
+        : organizationEmailVerified
+          ? 'organization_email'
+          : 'pending'
+      : 'owner_email';
+
+    const verificationEmail = organizationEmail || ownerEmail || null;
+
+    return {
+      ownerEmailVerified,
+      organizationEmail: organizationEmail || null,
+      organizationEmailVerified,
+      isVerified,
+      verificationSource,
+      verificationEmail,
+      safeContactDetails,
+    };
+  }
+
+  async _clearOrganizationCache(organizationId) {
+    await cacheService.del(`org:${organizationId}`);
+    await cacheService.del(this._buildOrganizationCacheKey(organizationId));
+  }
+
   _buildNonDeletedClientQuery(organizationId) {
     return {
       organizationId: organizationId,
@@ -148,7 +223,7 @@ class OrganizationService {
       console.log('🔍 [GET ORG BY ID] Database name:', Organization.db?.name);
       console.log('🔍 [GET ORG BY ID] Collection name:', Organization.collection?.name);
 
-      const cacheKey = `org:v2:${organizationId}`;
+      const cacheKey = this._buildOrganizationCacheKey(organizationId);
       const cached = await cacheService.get(cacheKey);
       if (cached) {
         console.log('🔍 [GET ORG BY ID] Returning cached result');
@@ -168,13 +243,7 @@ class OrganizationService {
         return null;
       }
 
-      const ownerEmail = (organization.ownerEmail || '').trim().toLowerCase();
-      const contactDetails = organization.contactDetails || {};
-      const organizationEmail = (contactDetails.email || '').trim();
-      const ownerUser = ownerEmail
-        ? await User.findOne({ email: ownerEmail }).select('emailVerified')
-        : null;
-      const ownerEmailVerified = Boolean(ownerUser?.emailVerified);
+      const verificationMeta = await this._computeVerificationMeta(organization);
 
       const result = {
         id: organization._id.toString(),
@@ -182,8 +251,8 @@ class OrganizationService {
         tradingName: organization.tradingName || organization.name,
         code: organization.code || organization.organizationCode,
         ownerEmail: organization.ownerEmail,
-        ownerEmailVerified,
-        organizationEmail: organizationEmail || null,
+        ownerEmailVerified: verificationMeta.ownerEmailVerified,
+        organizationEmail: verificationMeta.organizationEmail,
         ownerFirstName: organization.ownerFirstName,
         ownerLastName: organization.ownerLastName,
         createdAt: organization.createdAt,
@@ -191,16 +260,15 @@ class OrganizationService {
         settings: organization.settings,
         abn: organization.abn,
         address: organization.address,
-        contactDetails,
+        contactDetails: verificationMeta.safeContactDetails,
         bankDetails: organization.bankDetails,
         ndisRegistration: organization.ndisRegistration,
         logoUrl: organization.logoUrl,
         isActive: organization.isActive,
-        // Organization verification currently follows the owner/admin account.
-        // This keeps org status aligned with the verified login shown in Settings.
-        isVerified: ownerEmailVerified,
-        verificationSource: 'owner_email',
-        verificationEmail: organization.ownerEmail,
+        isVerified: verificationMeta.isVerified,
+        organizationEmailVerified: verificationMeta.organizationEmailVerified,
+        verificationSource: verificationMeta.verificationSource,
+        verificationEmail: verificationMeta.verificationEmail,
       };
 
       await cacheService.set(cacheKey, result, 900); // 15 minutes
@@ -214,6 +282,56 @@ class OrganizationService {
     try {
       // Add updatedAt timestamp
       updates.updatedAt = new Date();
+
+      const existingOrganization = await Organization.findById(organizationId);
+      if (!existingOrganization) {
+        return {
+          found: false,
+          modified: false,
+        };
+      }
+
+      if (updates.contactDetails && typeof updates.contactDetails === 'object') {
+        const existingContact = existingOrganization.contactDetails || {};
+        const incomingContact = updates.contactDetails || {};
+        const nextEmailRaw = Object.prototype.hasOwnProperty.call(
+          incomingContact,
+          'email',
+        )
+          ? incomingContact.email
+          : existingContact.email;
+        const nextEmail = this._normalizeEmail(nextEmailRaw);
+        const existingEmail = this._normalizeEmail(existingContact.email);
+        const ownerEmail = this._normalizeEmail(existingOrganization.ownerEmail);
+        const ownerUser = ownerEmail
+          ? await User.findOne({ email: ownerEmail }).select('emailVerified')
+          : null;
+        const ownerEmailVerified = Boolean(ownerUser?.emailVerified);
+
+        const mergedContact = {
+          ...existingContact,
+          ...incomingContact,
+        };
+
+        if (!nextEmail) {
+          mergedContact.email = incomingContact.email;
+          mergedContact.emailVerified = false;
+          mergedContact.emailVerificationTokenHash = null;
+          mergedContact.emailVerificationExpiresAt = null;
+          mergedContact.emailVerificationSentAt = null;
+          mergedContact.emailVerifiedAt = null;
+        } else if (nextEmail !== existingEmail) {
+          const autoVerified = nextEmail === ownerEmail && ownerEmailVerified;
+          mergedContact.email = nextEmail;
+          mergedContact.emailVerified = autoVerified;
+          mergedContact.emailVerificationTokenHash = null;
+          mergedContact.emailVerificationExpiresAt = null;
+          mergedContact.emailVerificationSentAt = null;
+          mergedContact.emailVerifiedAt = autoVerified ? new Date() : null;
+        }
+
+        updates.contactDetails = mergedContact;
+      }
 
       console.log('🔧 [SERVICE] updateOrganizationDetails called');
       console.log('🔧 [SERVICE] organizationId:', organizationId);
@@ -229,8 +347,7 @@ class OrganizationService {
 
       // Clear cache if organization was found (matched)
       if (result.matchedCount > 0) {
-        await cacheService.del(`org:${organizationId}`);
-        await cacheService.del(`org:v2:${organizationId}`);
+        await this._clearOrganizationCache(organizationId);
       }
 
       // Return object with both matchedCount and modifiedCount for better error handling
@@ -242,6 +359,156 @@ class OrganizationService {
       console.log('🔧 [SERVICE] Error:', error.message);
       throw error;
     }
+  }
+
+  async sendOrganizationContactVerification(organizationId, baseUrl) {
+    const organization = await Organization.findById(organizationId);
+
+    if (!organization) {
+      return { found: false };
+    }
+
+    const contactDetails = organization.contactDetails || {};
+    const organizationEmail = this._normalizeEmail(contactDetails.email);
+
+    if (!organizationEmail) {
+      return { found: true, hasEmail: false };
+    }
+
+    const verificationMeta = await this._computeVerificationMeta(organization);
+    const ownerEmail = this._normalizeEmail(organization.ownerEmail);
+    const sameAsOwner =
+      verificationMeta.organizationEmail &&
+      ownerEmail &&
+      verificationMeta.organizationEmail === ownerEmail;
+
+    if (verificationMeta.organizationEmailVerified) {
+      return {
+        found: true,
+        hasEmail: true,
+        alreadyVerified: true,
+        organizationEmail,
+      };
+    }
+
+    if (sameAsOwner && verificationMeta.ownerEmailVerified) {
+      organization.contactDetails = {
+        ...contactDetails,
+        email: organizationEmail,
+        emailVerified: true,
+        emailVerificationTokenHash: null,
+        emailVerificationExpiresAt: null,
+        emailVerificationSentAt: null,
+        emailVerifiedAt: new Date(),
+      };
+      await organization.save();
+      await this._clearOrganizationCache(organizationId);
+
+      return {
+        found: true,
+        hasEmail: true,
+        alreadyVerified: true,
+        organizationEmail,
+      };
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this._hashVerificationToken(token);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const verificationUrl =
+      `${String(baseUrl || '').replace(/\/$/, '')}/api/organization/contact-email/verify?token=${token}`;
+
+    organization.contactDetails = {
+      ...contactDetails,
+      email: organizationEmail,
+      emailVerified: false,
+      emailVerificationTokenHash: tokenHash,
+      emailVerificationExpiresAt: expiresAt,
+      emailVerificationSentAt: new Date(),
+    };
+
+    await organization.save();
+    await this._clearOrganizationCache(organizationId);
+
+    const subject = 'Verify your organization email - CareNest';
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 24px; color: #111;">
+        <h2 style="margin: 0 0 16px;">Verify your organization email</h2>
+        <p style="margin: 0 0 16px;">
+          Confirm <strong>${organizationEmail}</strong> as the public contact email for
+          <strong>${organization.name}</strong>.
+        </p>
+        <p style="margin: 24px 0;">
+          <a href="${verificationUrl}" style="display: inline-block; padding: 12px 18px; background: #111; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 700;">
+            Verify Organization Email
+          </a>
+        </p>
+        <p style="margin: 0 0 8px;">If the button does not work, paste this link into your browser:</p>
+        <p style="word-break: break-all; color: #555;">${verificationUrl}</p>
+        <p style="margin-top: 20px; color: #777; font-size: 12px;">
+          This link expires in 24 hours. If you did not request this, you can ignore this email.
+        </p>
+      </div>
+    `;
+
+    const sendResult = await emailService.sendEmail(
+      organizationEmail,
+      subject,
+      html,
+    );
+
+    if (!sendResult) {
+      return {
+        found: true,
+        hasEmail: true,
+        sendFailed: true,
+        organizationEmail,
+      };
+    }
+
+    return {
+      found: true,
+      hasEmail: true,
+      sent: true,
+      organizationEmail,
+      expiresAt,
+    };
+  }
+
+  async verifyOrganizationContactEmail(rawToken) {
+    const token = String(rawToken || '').trim();
+    if (!token) {
+      return { success: false, reason: 'missing_token' };
+    }
+
+    const tokenHash = this._hashVerificationToken(token);
+    const organization = await Organization.findOne({
+      'contactDetails.emailVerificationTokenHash': tokenHash,
+      'contactDetails.emailVerificationExpiresAt': { $gt: new Date() },
+    });
+
+    if (!organization) {
+      return { success: false, reason: 'invalid_or_expired' };
+    }
+
+    const contactDetails = organization.contactDetails || {};
+    organization.contactDetails = {
+      ...contactDetails,
+      emailVerified: true,
+      emailVerificationTokenHash: null,
+      emailVerificationExpiresAt: null,
+      emailVerificationSentAt: null,
+      emailVerifiedAt: new Date(),
+    };
+
+    await organization.save();
+    await this._clearOrganizationCache(organization._id.toString());
+
+    return {
+      success: true,
+      organizationName: organization.name,
+      organizationEmail: this._normalizeEmail(contactDetails.email),
+    };
   }
 
   async getOrganizationMembers(organizationId) {
