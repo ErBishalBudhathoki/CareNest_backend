@@ -70,6 +70,8 @@ router.post('/switch/:organizationId', strictLimiter, organizationContextMiddlew
 router.get('/:organizationId', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationById);
 router.put('/:organizationId', strictLimiter, organizationContextMiddleware, organizationIdValidation, updateOrgValidation, handleValidationErrors, organizationController.updateOrganizationDetails);
 router.post('/:organizationId/contact-email/send-verification', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.sendContactEmailVerification);
+// Legacy compatibility for older app builds that used a misspelled path segment.
+router.post('/:organizationId/contacct-email/send-verification', strictLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.sendContactEmailVerification);
 
 // Sub-resources
 router.get('/:organizationId/members', orgLimiter, organizationContextMiddleware, organizationIdValidation, handleValidationErrors, organizationController.getOrganizationMembers);
