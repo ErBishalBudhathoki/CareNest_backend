@@ -148,7 +148,7 @@ class OrganizationService {
       console.log('🔍 [GET ORG BY ID] Database name:', Organization.db?.name);
       console.log('🔍 [GET ORG BY ID] Collection name:', Organization.collection?.name);
 
-      const cacheKey = `org:${organizationId}`;
+      const cacheKey = `org:v2:${organizationId}`;
       const cached = await cacheService.get(cacheKey);
       if (cached) {
         console.log('🔍 [GET ORG BY ID] Returning cached result');
@@ -168,12 +168,22 @@ class OrganizationService {
         return null;
       }
 
+      const ownerEmail = (organization.ownerEmail || '').trim().toLowerCase();
+      const contactDetails = organization.contactDetails || {};
+      const organizationEmail = (contactDetails.email || '').trim();
+      const ownerUser = ownerEmail
+        ? await User.findOne({ email: ownerEmail }).select('emailVerified')
+        : null;
+      const ownerEmailVerified = Boolean(ownerUser?.emailVerified);
+
       const result = {
         id: organization._id.toString(),
         name: organization.name,
         tradingName: organization.tradingName || organization.name,
         code: organization.code || organization.organizationCode,
         ownerEmail: organization.ownerEmail,
+        ownerEmailVerified,
+        organizationEmail: organizationEmail || null,
         ownerFirstName: organization.ownerFirstName,
         ownerLastName: organization.ownerLastName,
         createdAt: organization.createdAt,
@@ -181,11 +191,16 @@ class OrganizationService {
         settings: organization.settings,
         abn: organization.abn,
         address: organization.address,
-        contactDetails: organization.contactDetails,
+        contactDetails,
         bankDetails: organization.bankDetails,
         ndisRegistration: organization.ndisRegistration,
         logoUrl: organization.logoUrl,
-        isActive: organization.isActive
+        isActive: organization.isActive,
+        // Organization verification currently follows the owner/admin account.
+        // This keeps org status aligned with the verified login shown in Settings.
+        isVerified: ownerEmailVerified,
+        verificationSource: 'owner_email',
+        verificationEmail: organization.ownerEmail,
       };
 
       await cacheService.set(cacheKey, result, 900); // 15 minutes
@@ -215,6 +230,7 @@ class OrganizationService {
       // Clear cache if organization was found (matched)
       if (result.matchedCount > 0) {
         await cacheService.del(`org:${organizationId}`);
+        await cacheService.del(`org:v2:${organizationId}`);
       }
 
       // Return object with both matchedCount and modifiedCount for better error handling
