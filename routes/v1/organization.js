@@ -114,6 +114,16 @@ const organizationIdValidation = [
     .matches(objectIdRegex).withMessage('Invalid organization ID format')
 ];
 
+/**
+ * Public organization contact-email verification landing page
+ * GET /organization/contact-email/verify
+ */
+router.get(
+  '/contact-email/verify',
+  organizationReadLimiter,
+  organizationController.verifyContactEmail
+);
+
 // Apply authentication to all routes except public verification endpoints
 router.use(authenticateUser);
 
@@ -239,6 +249,32 @@ router.put(
   organizationIdValidation,
   handleValidationErrors,
   organizationController.updateOrganizationDetails
+);
+
+/**
+ * Send organization contact email verification
+ * POST /organization/:organizationId/contact-email/send-verification
+ */
+router.post(
+  '/:organizationId/contact-email/send-verification',
+  organizationWriteLimiter,
+  organizationContextMiddleware,
+  organizationIdValidation,
+  handleValidationErrors,
+  organizationController.sendContactEmailVerification
+);
+
+/**
+ * Legacy typo compatibility for older app builds
+ * POST /organisation/:organizationId/contacct-email/send-verification
+ */
+router.post(
+  '/:organizationId/contacct-email/send-verification',
+  organizationWriteLimiter,
+  organizationContextMiddleware,
+  organizationIdValidation,
+  handleValidationErrors,
+  organizationController.sendContactEmailVerification
 );
 
 /**
