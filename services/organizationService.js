@@ -45,29 +45,12 @@ class OrganizationService {
 
     const safeContactDetails = this._buildSafeContactDetails(organization);
     const organizationEmail = this._normalizeEmail(safeContactDetails.email);
-    const sameAsOwner =
-      organizationEmail && ownerEmail && organizationEmail === ownerEmail;
     const organizationEmailVerified = Boolean(safeContactDetails.emailVerified);
-
-    const isVerified = organizationEmail
-      ? (sameAsOwner
-          ? organizationEmailVerified || ownerEmailVerified
-          : organizationEmailVerified)
-      : ownerEmailVerified;
-
-    const verificationSource = organizationEmail
-      ? sameAsOwner
-        ? organizationEmailVerified
-          ? 'organization_email'
-          : ownerEmailVerified
-            ? 'owner_email'
-            : 'pending'
-        : organizationEmailVerified
-          ? 'organization_email'
-          : 'pending'
-      : 'owner_email';
-
-    const verificationEmail = organizationEmail || ownerEmail || null;
+    const isVerified = organizationEmailVerified;
+    const verificationSource = organizationEmailVerified
+      ? 'organization_email'
+      : 'pending';
+    const verificationEmail = organizationEmail || null;
 
     return {
       ownerEmailVerified,
@@ -383,27 +366,6 @@ class OrganizationService {
       verificationMeta.organizationEmail === ownerEmail;
 
     if (verificationMeta.organizationEmailVerified) {
-      return {
-        found: true,
-        hasEmail: true,
-        alreadyVerified: true,
-        organizationEmail,
-      };
-    }
-
-    if (sameAsOwner && verificationMeta.ownerEmailVerified) {
-      organization.contactDetails = {
-        ...contactDetails,
-        email: organizationEmail,
-        emailVerified: true,
-        emailVerificationTokenHash: null,
-        emailVerificationExpiresAt: null,
-        emailVerificationSentAt: null,
-        emailVerifiedAt: new Date(),
-      };
-      await organization.save();
-      await this._clearOrganizationCache(organizationId);
-
       return {
         found: true,
         hasEmail: true,
