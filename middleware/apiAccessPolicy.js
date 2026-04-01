@@ -37,6 +37,10 @@ const API_SECURITY_BYPASS_PREFIXES = [
   ...PUBLIC_AUTH_ENDPOINT_PREFIXES,
   '/api/firebase-auth',
   '/api/health',
+  // Browser-based public verification landing pages must not require
+  // mobile App Check or bearer auth.
+  '/api/organization/contact-email/verify',
+  '/api/organisation/contact-email/verify',
   // Uses Cloud Scheduler OIDC auth and should not be forced through
   // the mobile app App Check + bearer token gate.
   '/api/scheduler',
