@@ -90,6 +90,7 @@ router.use('/invoice', pricePromptRoutesV1); // Note: mounted under /invoice
 router.use('/pricing', pricingRoutesV1);
 router.use('/invoice', invoiceRoutesV1); // Note: also mounted under /invoice, express merges them
 router.use('/organization', organizationRoutesV1);
+router.use('/organisation', organizationRoutesV1);
 
 // Core Feature Routes
 router.use('/webhooks', webhookRoutes);
