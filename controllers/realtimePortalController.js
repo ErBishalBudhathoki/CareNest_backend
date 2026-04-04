@@ -482,22 +482,16 @@ exports.getChecklistTemplate = async (req, res) => {
 exports.inviteFamilyMember = async (req, res) => {
   try {
     const { clientId, email, name, relationship, role, permissions } = req.body;
-
-    if (!clientId || !email || !name || !relationship) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, email, name, and relationship are required',
-      });
-    }
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
       actorRoles: req.user?.roles,
-      clientId,
+      clientId: normalizedClientId,
     });
 
     const invitation = await familyAccessService.inviteFamilyMember({
-      clientId,
+      clientId: normalizedClientId,
       email,
       name,
       relationship,
@@ -561,12 +555,6 @@ exports.updatePermissions = async (req, res) => {
 
     const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
     const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
-    if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, memberId, and permissions are required',
-      });
-    }
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
