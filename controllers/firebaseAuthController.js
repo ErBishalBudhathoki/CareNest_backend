@@ -6,6 +6,7 @@ const UserOrganization = require('../models/UserOrganization');
 
 const logger = createLogger('FirebaseAuthController');
 const Client = require('../models/Client');
+const familyAccessService = require('../services/familyAccessService');
 
 class FirebaseAuthController {
   static async _markClientActivationComplete(user, now = new Date()) {
@@ -43,6 +44,27 @@ class FirebaseAuthController {
       : Number(updateResult?.nModified || 0);
 
     return { matched, modified };
+  }
+
+  static async _markLinkedAccountActivationComplete(user, now = new Date()) {
+    if (!user) {
+      return { matched: 0, modified: 0, accountType: null };
+    }
+
+    if (user.role === 'client') {
+      const result = await this._markClientActivationComplete(user, now);
+      return { ...result, accountType: 'client' };
+    }
+
+    if (user.role === 'family') {
+      const result = await familyAccessService.markFamilyActivationComplete({
+        user,
+        now,
+      });
+      return { ...result, accountType: 'family' };
+    }
+
+    return { matched: 0, modified: 0, accountType: null };
   }
 
   /**
@@ -109,8 +131,8 @@ class FirebaseAuthController {
       await user.save();
 
       // Mark client activation complete after successful Firebase login sync.
-      if (user.role === 'client') {
-        await this._markClientActivationComplete(user, new Date());
+      if (user.role === 'client' || user.role === 'family') {
+        await this._markLinkedAccountActivationComplete(user, new Date());
       }
 
       // Fetch organization details if user has organizationId
@@ -194,10 +216,10 @@ class FirebaseAuthController {
         });
       }
 
-      if (user.role !== 'client') {
+      if (!['client', 'family'].includes(user.role)) {
         return res.status(403).json({
           success: false,
-          message: 'Only client accounts can complete this activation flow'
+          message: 'Only client or family accounts can complete this activation flow'
         });
       }
 
@@ -215,7 +237,7 @@ class FirebaseAuthController {
       );
 
       const userDoc = user.toObject ? user.toObject() : user;
-      const activation = await this._markClientActivationComplete(
+      const activation = await this._markLinkedAccountActivationComplete(
         {
           ...userDoc,
           _id: user._id,
@@ -229,24 +251,26 @@ class FirebaseAuthController {
       if (activation.matched === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Client profile not found for this account'
+          message: 'Linked profile not found for this account'
         });
       }
 
-      logger.info('Client activation completed from web reset flow', {
+      logger.info('Linked account activation completed from web reset flow', {
         firebaseUid: tokenUid,
         email: tokenEmail,
         userId: user._id?.toString?.() || null,
-        clientId: user.clientId?.toString?.() || null
+        clientId: user.clientId?.toString?.() || null,
+        accountType: activation.accountType,
       });
 
       return res.status(200).json({
         success: true,
-        message: 'Client activation completed',
+        message: `${activation.accountType === 'family' ? 'Family access' : 'Client activation'} completed`,
         data: {
           isActivated: true,
           activationPending: false,
-          activatedAt: now.toISOString()
+          activatedAt: now.toISOString(),
+          accountType: activation.accountType,
         }
       });
     } catch (error) {

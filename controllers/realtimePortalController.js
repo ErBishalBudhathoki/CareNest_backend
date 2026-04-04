@@ -481,23 +481,24 @@ exports.getChecklistTemplate = async (req, res) => {
  */
 exports.inviteFamilyMember = async (req, res) => {
   try {
-    const { clientId, invitedBy, email, name, relationship, role, permissions } = req.body;
+    const { clientId, email, name, relationship, role, permissions } = req.body;
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
 
-    if (!clientId || !invitedBy || !email || !name || !relationship) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, invitedBy, email, name, and relationship are required',
-      });
-    }
+    const context = await familyAccessService.authorizeManagementAccess({
+      actorUserId: req.user?.userId,
+      actorRoles: req.user?.roles,
+      clientId: normalizedClientId,
+    });
 
     const invitation = await familyAccessService.inviteFamilyMember({
-      clientId,
-      invitedBy,
+      clientId: normalizedClientId,
       email,
       name,
       relationship,
       role: role || 'family',
       permissions,
+      actor: context.actorSnapshot,
+      client: context.client,
     });
 
     res.json({
@@ -506,7 +507,7 @@ exports.inviteFamilyMember = async (req, res) => {
     });
   } catch (error) {
     console.error('Error inviting family member:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error inviting family member',
       error: error.message,
@@ -522,6 +523,12 @@ exports.getFamilyMembers = async (req, res) => {
   try {
     const { clientId } = req.params;
 
+    await familyAccessService.authorizeManagementAccess({
+      actorUserId: req.user?.userId,
+      actorRoles: req.user?.roles,
+      clientId,
+    });
+
     const members = await familyAccessService.getFamilyMembers(clientId);
 
     res.json({
@@ -530,7 +537,7 @@ exports.getFamilyMembers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting family members:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error getting family members',
       error: error.message,
@@ -544,20 +551,22 @@ exports.getFamilyMembers = async (req, res) => {
  */
 exports.updatePermissions = async (req, res) => {
   try {
-    const { clientId, memberId, permissions, updatedBy } = req.body;
+    const { clientId, memberId, permissions } = req.body;
 
-    if (!clientId || !memberId || !permissions || !updatedBy) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, memberId, permissions, and updatedBy are required',
-      });
-    }
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
+
+    const context = await familyAccessService.authorizeManagementAccess({
+      actorUserId: req.user?.userId,
+      actorRoles: req.user?.roles,
+      clientId: normalizedClientId,
+    });
 
     const member = await familyAccessService.updatePermissions({
-      clientId,
-      memberId,
+      clientId: normalizedClientId,
+      memberId: normalizedMemberId,
       permissions,
-      updatedBy,
+      actor: context.actorSnapshot,
     });
 
     res.json({
@@ -566,9 +575,48 @@ exports.updatePermissions = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating permissions:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error updating permissions',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Update family member status
+ * PUT /api/realtime-portal/family/status
+ */
+exports.updateFamilyMemberStatus = async (req, res) => {
+  try {
+    const { clientId, memberId, status } = req.body;
+
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
+    const normalizedStatus = familyAccessService.normalizeManageableStatus(status);
+
+    const context = await familyAccessService.authorizeManagementAccess({
+      actorUserId: req.user?.userId,
+      actorRoles: req.user?.roles,
+      clientId: normalizedClientId,
+    });
+
+    const member = await familyAccessService.updateMemberStatus({
+      clientId: normalizedClientId,
+      memberId: normalizedMemberId,
+      status: normalizedStatus,
+      actor: context.actorSnapshot,
+    });
+
+    res.json({
+      success: true,
+      data: member,
+    });
+  } catch (error) {
+    console.error('Error updating family member status:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: 'Error updating family member status',
       error: error.message,
     });
   }
@@ -583,6 +631,12 @@ exports.getAccessLog = async (req, res) => {
     const { clientId } = req.params;
     const { limit, startDate, endDate } = req.query;
 
+    await familyAccessService.authorizeManagementAccess({
+      actorUserId: req.user?.userId,
+      actorRoles: req.user?.roles,
+      clientId,
+    });
+
     const logs = await familyAccessService.getAccessLog(clientId, {
       limit: limit ? parseInt(limit) : 100,
       startDate,
@@ -595,7 +649,7 @@ exports.getAccessLog = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting access log:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Error getting access log',
       error: error.message,
