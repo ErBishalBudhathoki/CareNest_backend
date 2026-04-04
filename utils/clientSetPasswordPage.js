@@ -339,7 +339,7 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       </div>
 
       <p class="footer">
-        If this link has expired, ask your organization admin to resend your activation email.
+        If this link has expired, ask the client or care team member who invited you to resend your activation email.
       </p>
     </section>
   </main>

@@ -18,8 +18,8 @@ class UserService {
         query.organizationId = organizationId;
       }
 
-      // Filter out clients since this endpoint is usually for finding staff members
-      query.role = { $ne: 'client' };
+      // Filter out client-facing accounts since this endpoint is for staff members
+      query.role = { $nin: ['client', 'family'] };
 
       const users = await User.find(query);
 
@@ -52,7 +52,7 @@ class UserService {
       const employees = await User.find({
         organizationId: organizationId,
         isActive: true,
-        role: { $ne: 'client' }
+        role: { $nin: ['client', 'family'] }
       }, {
         password: 0, // Exclude sensitive fields
         salt: 0
