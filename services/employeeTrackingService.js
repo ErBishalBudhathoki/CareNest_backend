@@ -215,7 +215,9 @@ class EmployeeTrackingService {
             const roles = Array.isArray(user.roles)
               ? user.roles.map((r) => r.toString().toLowerCase())
               : [];
-            return role !== 'client' && !roles.includes('client');
+            return !['client', 'family'].includes(role) &&
+              !roles.includes('client') &&
+              !roles.includes('family');
           });
         }
         if (employeesFromLogin.length === 0) {

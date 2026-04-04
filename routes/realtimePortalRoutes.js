@@ -71,6 +71,9 @@ router.get('/family/members/:clientId', realtimePortalController.getFamilyMember
 // Update permissions
 router.put('/family/permissions', realtimePortalController.updatePermissions);
 
+// Update member status
+router.put('/family/status', realtimePortalController.updateFamilyMemberStatus);
+
 // Get access log
 router.get('/family/access-log/:clientId', realtimePortalController.getAccessLog);
 
