@@ -384,7 +384,9 @@ class AssignmentVoiceAgentService {
       const roles = Array.isArray(candidate.roles)
         ? candidate.roles.map((value) => String(value).toLowerCase())
         : [];
-      return role !== 'client' && !roles.includes('client');
+      return !['client', 'family'].includes(role) &&
+        !roles.includes('client') &&
+        !roles.includes('family');
     });
 
     const ranked = this._rankEntityMatches({
