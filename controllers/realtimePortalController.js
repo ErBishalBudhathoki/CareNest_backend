@@ -559,7 +559,9 @@ exports.updatePermissions = async (req, res) => {
   try {
     const { clientId, memberId, permissions } = req.body;
 
-    if (!clientId || !memberId || !permissions) {
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
+    if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
       return res.status(400).json({
         success: false,
         message: 'clientId, memberId, and permissions are required',
@@ -569,12 +571,12 @@ exports.updatePermissions = async (req, res) => {
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
       actorRoles: req.user?.roles,
-      clientId,
+      clientId: normalizedClientId,
     });
 
     const member = await familyAccessService.updatePermissions({
-      clientId,
-      memberId,
+      clientId: normalizedClientId,
+      memberId: normalizedMemberId,
       permissions,
       actor: context.actorSnapshot,
     });
@@ -601,23 +603,20 @@ exports.updateFamilyMemberStatus = async (req, res) => {
   try {
     const { clientId, memberId, status } = req.body;
 
-    if (!clientId || !memberId || !status) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, memberId, and status are required',
-      });
-    }
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
+    const normalizedStatus = familyAccessService.normalizeManageableStatus(status);
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
       actorRoles: req.user?.roles,
-      clientId,
+      clientId: normalizedClientId,
     });
 
     const member = await familyAccessService.updateMemberStatus({
-      clientId,
-      memberId,
-      status,
+      clientId: normalizedClientId,
+      memberId: normalizedMemberId,
+      status: normalizedStatus,
       actor: context.actorSnapshot,
     });
 
