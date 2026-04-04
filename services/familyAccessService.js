@@ -5,6 +5,7 @@
  */
 
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const FamilyMember = require('../models/FamilyMember');
 const User = require('../models/User');
 const Client = require('../models/Client');
@@ -15,6 +16,27 @@ const { admin } = require('../firebase-admin-config');
 
 const ADMIN_ROLE_TAGS = new Set(['admin', 'superadmin', 'owner']);
 const FAMILY_ROLE = 'family';
+const MANAGEABLE_MEMBER_STATUSES = new Set(['active', 'inactive']);
+
+function assertObjectId(value, fieldName) {
+  const normalized = String(value || '').trim();
+  if (!mongoose.isValidObjectId(normalized)) {
+    const error = new Error(`${fieldName} is invalid`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return new mongoose.Types.ObjectId(normalized);
+}
+
+function normalizeManageableStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!MANAGEABLE_MEMBER_STATUSES.has(normalized)) {
+    const error = new Error('Status must be active or inactive');
+    error.statusCode = 400;
+    throw error;
+  }
+  return normalized;
+}
 
 function normalizeRoleTags(...sources) {
   const tags = new Set();
@@ -252,9 +274,11 @@ async function pushAuditLog({
 }
 
 async function getClientAndActor({ actorUserId, actorRoles, clientId }) {
+  const safeActorUserId = assertObjectId(actorUserId, 'actorUserId');
+  const safeClientId = assertObjectId(clientId, 'clientId');
   const [actorUser, client] = await Promise.all([
-    User.findById(actorUserId),
-    Client.findById(clientId),
+    User.findOne({ _id: { $eq: safeActorUserId } }),
+    Client.findOne({ _id: { $eq: safeClientId } }),
   ]);
 
   if (!actorUser) {
@@ -325,6 +349,7 @@ exports.inviteFamilyMember = async ({
   client,
   options = {},
 }) => {
+  const safeClientId = assertObjectId(clientId, 'clientId');
   const normalizedEmail = clientAuthService._normalizeEmail(email);
   if (!normalizedEmail) {
     throw new Error('Family member email is required');
@@ -338,8 +363,8 @@ exports.inviteFamilyMember = async ({
   const invitationExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const existingMember = await FamilyMember.findOne({
-    clientId,
-    email: normalizedEmail,
+    clientId: { $eq: safeClientId },
+    email: { $eq: normalizedEmail },
   });
 
   if (existingMember) {
@@ -357,7 +382,7 @@ exports.inviteFamilyMember = async ({
 
   if (
     mongoUser?.clientId &&
-    mongoUser.clientId.toString() !== String(clientId)
+    mongoUser.clientId.toString() !== safeClientId.toString()
   ) {
     throw new Error('This family account is already linked to another client');
   }
@@ -495,7 +520,8 @@ exports.inviteFamilyMember = async ({
 };
 
 exports.getFamilyMembers = async (clientId) => {
-  const members = await FamilyMember.find({ clientId }).sort({
+  const safeClientId = assertObjectId(clientId, 'clientId');
+  const members = await FamilyMember.find({ clientId: { $eq: safeClientId } }).sort({
     status: 1,
     createdAt: 1,
   });
@@ -503,7 +529,12 @@ exports.getFamilyMembers = async (clientId) => {
 };
 
 exports.updatePermissions = async ({ clientId, memberId, permissions, actor }) => {
-  const member = await FamilyMember.findOne({ _id: memberId, clientId });
+  const safeClientId = assertObjectId(clientId, 'clientId');
+  const safeMemberId = assertObjectId(memberId, 'memberId');
+  const member = await FamilyMember.findOne({
+    _id: { $eq: safeMemberId },
+    clientId: { $eq: safeClientId },
+  });
   if (!member) {
     throw new Error('Family member not found');
   }
@@ -549,12 +580,14 @@ exports.updateMemberStatus = async ({
   status,
   actor,
 }) => {
-  const normalizedStatus = String(status || '').trim().toLowerCase();
-  if (!['active', 'inactive'].includes(normalizedStatus)) {
-    throw new Error('Status must be active or inactive');
-  }
+  const safeClientId = assertObjectId(clientId, 'clientId');
+  const safeMemberId = assertObjectId(memberId, 'memberId');
+  const normalizedStatus = normalizeManageableStatus(status);
 
-  const member = await FamilyMember.findOne({ _id: memberId, clientId });
+  const member = await FamilyMember.findOne({
+    _id: { $eq: safeMemberId },
+    clientId: { $eq: safeClientId },
+  });
   if (!member) {
     throw new Error('Family member not found');
   }
@@ -629,6 +662,9 @@ exports.updateMemberStatus = async ({
 
   return buildFamilyMemberDto(member);
 };
+
+exports.assertObjectId = assertObjectId;
+exports.normalizeManageableStatus = normalizeManageableStatus;
 
 exports.markFamilyActivationComplete = async ({ user, now = new Date() }) => {
   if (!user || String(user.role || '').trim().toLowerCase() !== FAMILY_ROLE) {
