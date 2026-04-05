@@ -377,7 +377,16 @@ exports.inviteFamilyMember = async ({
 
   let mongoUser = await User.findOne({ email: normalizedEmail });
   if (mongoUser && String(mongoUser.role || '').trim().toLowerCase() !== FAMILY_ROLE) {
-    throw new Error('Email is already in use by a non-family account');
+    const existingRole =
+      String(
+        mongoUser.role ||
+          (Array.isArray(mongoUser.roles) && mongoUser.roles.length > 0
+              ? mongoUser.roles[0]
+              : 'non-family')
+      )
+          .trim()
+          .toLowerCase() || 'non-family';
+    throw new Error(`Email is already in use by a ${existingRole} account`);
   }
 
   if (
