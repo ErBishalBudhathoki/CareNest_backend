@@ -362,18 +362,18 @@ exports.inviteFamilyMember = async ({
   const invitationToken = crypto.randomBytes(24).toString('hex');
   const invitationExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const existingMember = await FamilyMember.findOne({
+  let member = await FamilyMember.findOne({
     clientId: { $eq: safeClientId },
     email: { $eq: normalizedEmail },
   });
 
-  if (existingMember) {
+  if (member && member.status === 'inactive') {
     throw new Error(
-      existingMember.status === 'inactive'
-        ? 'Family member already exists for this client. Reactivate access instead.'
-        : 'Family member has already been invited for this client.'
+      'Family member already exists for this client. Reactivate access instead.'
     );
   }
+
+  const isResend = Boolean(member && member.status === 'pending');
 
   let mongoUser = await User.findOne({ email: normalizedEmail });
   if (mongoUser && String(mongoUser.role || '').trim().toLowerCase() !== FAMILY_ROLE) {
@@ -434,32 +434,58 @@ exports.inviteFamilyMember = async ({
     invitedEmail: normalizedEmail,
     relationship,
     role: normalizedRole,
-    status: 'pending',
+    status: isResend ? 'pending-resend' : 'pending',
     permissions: effectivePermissions,
   });
 
-  const member = await FamilyMember.create({
-    clientId,
-    organizationId: client.organizationId,
-    userId: mongoUser._id,
-    email: normalizedEmail,
-    firstName,
-    lastName,
-    relationship,
-    role: normalizedRole,
-    permissions: effectivePermissions,
-    status: 'pending',
-    activationPending: true,
-    invitedAt: now,
-    joinedAt: now,
-    invitationToken,
-    invitationExpiresAt,
-    activationEmailSentAt: now,
-    invitedBy: actor,
-    updatedBy: actor.email,
-    updatedByUserId: actor.userId,
-    auditTrail: [auditEntry],
-  });
+  if (member) {
+    member.organizationId = client.organizationId;
+    member.userId = mongoUser._id;
+    member.firstName = firstName;
+    member.lastName = lastName;
+    member.relationship = relationship;
+    member.role = normalizedRole;
+    member.permissions = effectivePermissions;
+    member.status = 'pending';
+    member.activationPending = true;
+    member.invitedAt = now;
+    member.invitationToken = invitationToken;
+    member.invitationExpiresAt = invitationExpiresAt;
+    member.invitedBy = actor;
+    member.updatedBy = actor.email;
+    member.updatedByUserId = actor.userId;
+    member.auditTrail.push(
+      buildAuditEntry('family_invite_resent', actor, {
+        invitedEmail: normalizedEmail,
+        relationship,
+        role: normalizedRole,
+        permissions: effectivePermissions,
+      })
+    );
+  } else {
+    member = await FamilyMember.create({
+      clientId,
+      organizationId: client.organizationId,
+      userId: mongoUser._id,
+      email: normalizedEmail,
+      firstName,
+      lastName,
+      relationship,
+      role: normalizedRole,
+      permissions: effectivePermissions,
+      status: 'pending',
+      activationPending: true,
+      invitedAt: now,
+      joinedAt: now,
+      invitationToken,
+      invitationExpiresAt,
+      activationEmailSentAt: null,
+      invitedBy: actor,
+      updatedBy: actor.email,
+      updatedByUserId: actor.userId,
+      auditTrail: [auditEntry],
+    });
+  }
 
   const resetLinks = await buildResetLinks(normalizedEmail, options);
   const emailSubject = 'Set up your CareNest family access';
@@ -479,6 +505,9 @@ exports.inviteFamilyMember = async ({
     emailHtml
   );
 
+  member.activationEmailSentAt = emailResult ? now : null;
+  await member.save();
+
   await pushAuditLog({
     action: auditService.AUDIT_ACTIONS.CREATE,
     entityId: mongoUser._id,
@@ -495,12 +524,21 @@ exports.inviteFamilyMember = async ({
     metadata: {
       invitedEmail: normalizedEmail,
       emailSent: Boolean(emailResult),
+      inviteType: isResend ? 'resend' : 'new',
       invitedByUserId: actor.userId?.toString?.() || null,
       activationLinkFormat: resetLinks.appResetLink
         ? 'com.bishal.invoice://reset-password?mode=resetPassword&oobCode=...'
         : 'firebase-web-link',
     },
   });
+
+  if (!emailResult) {
+    const error = new Error(
+      'Family member account was prepared, but the invite email could not be sent. Please try inviting again.'
+    );
+    error.statusCode = 502;
+    throw error;
+  }
 
   return {
     id: member._id.toString(),
@@ -515,7 +553,7 @@ exports.inviteFamilyMember = async ({
     invitedAt: now,
     expiresAt: invitationExpiresAt,
     token: invitationToken,
-    emailSent: Boolean(emailResult),
+    emailSent: true,
   };
 };
 
