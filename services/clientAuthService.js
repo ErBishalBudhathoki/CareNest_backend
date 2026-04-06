@@ -133,8 +133,24 @@ class ClientAuthService {
     const query = new URLSearchParams({
       code: String(oobCode).trim(),
       lang: String(lang || 'en').trim()
-    }).toString();
-    return `${base}/client/set-password?${query}`;
+    });
+
+    const accountType = String(options.accountType || '').trim().toLowerCase();
+    const displayName = String(options.displayName || options.name || '').trim();
+    const email = this._normalizeEmail(options.email);
+
+    if (accountType) {
+      query.set('accountType', accountType);
+    }
+
+    if (displayName) {
+      query.set('name', displayName);
+    }
+
+    if (email) {
+      query.set('email', email);
+    }
+    return `${base}/client/set-password?${query.toString()}`;
   }
 
   _buildActivationEmailHtml({ firstName, webResetLink, appResetLink }) {

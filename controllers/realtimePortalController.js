@@ -483,6 +483,15 @@ exports.inviteFamilyMember = async (req, res) => {
   try {
     const { clientId, email, name, relationship, role, permissions } = req.body;
     const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const forwardedProto = req.header('x-forwarded-proto');
+    const forwardedHost = req.header('x-forwarded-host');
+    const protocol = String(forwardedProto || req.protocol || 'https')
+      .split(',')[0]
+      .trim();
+    const host = String(forwardedHost || req.get('host') || '')
+      .split(',')[0]
+      .trim();
+    const webBaseUrl = host ? `${protocol}://${host}` : null;
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
@@ -499,6 +508,12 @@ exports.inviteFamilyMember = async (req, res) => {
       permissions,
       actor: context.actorSnapshot,
       client: context.client,
+      options: {
+        webBaseUrl,
+        accountType: 'family',
+        displayName: name,
+        email,
+      },
     });
 
     res.json({
