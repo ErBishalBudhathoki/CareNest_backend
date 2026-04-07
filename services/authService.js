@@ -6,6 +6,10 @@ const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
 const { admin } = require('../firebase-admin-config');
+const {
+  backfillLegacyOrganizationCodes,
+  normalizeOrganizationCode,
+} = require('../utils/organizationCodeUtils');
 
 /**
  * Get auth collection (login collection)
@@ -61,8 +65,15 @@ class AuthService {
    */
   async validateOrganizationCode(organizationCode) {
     try {
+      await backfillLegacyOrganizationCodes();
+      const normalizedCode = normalizeOrganizationCode(organizationCode);
+      if (!normalizedCode) {
+        return null;
+      }
+
       const organization = await Organization.findOne({
-        organizationCode: organizationCode
+        organizationCode: normalizedCode,
+        isActive: true,
       });
       return organization;
     } catch (error) {

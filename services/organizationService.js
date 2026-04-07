@@ -10,6 +10,11 @@ const SharedEmployeeAssignment = require('../models/SharedEmployeeAssignment');
 const { generateOrganizationCode } = require('../utils/cryptoHelpers');
 const cacheService = require('./cacheService');
 const emailService = require('./emailService');
+const {
+  backfillLegacyOrganizationCodes,
+  getCanonicalOrganizationCode,
+  normalizeOrganizationCode,
+} = require('../utils/organizationCodeUtils');
 
 class OrganizationService {
   _normalizeEmail(email) {
@@ -104,15 +109,19 @@ class OrganizationService {
 
       while (codeExists) {
         organizationCode = generateOrganizationCode();
-        const existingCode = await Organization.findOne({ code: organizationCode });
+        const existingCode = await Organization.findOne({
+          $or: [
+            { organizationCode },
+            { code: organizationCode },
+          ],
+        });
         codeExists = !!existingCode;
       }
 
       // Create organization document
       const organizationDoc = {
         name: organizationName,
-        code: organizationCode,
-        organizationCode: organizationCode, // Ensure compatibility with schema
+        organizationCode,
         ownerEmail: ownerEmail,
         isActive: true,
         settings: {
@@ -180,8 +189,14 @@ class OrganizationService {
 
   async verifyOrganizationCode(organizationCode) {
     try {
+      await backfillLegacyOrganizationCodes();
+      const normalizedCode = normalizeOrganizationCode(organizationCode);
+      if (!normalizedCode) {
+        return null;
+      }
+
       const organization = await Organization.findOne({
-        organizationCode: organizationCode,
+        organizationCode: normalizedCode,
         isActive: true
       });
 
@@ -192,7 +207,8 @@ class OrganizationService {
       return {
         organizationId: organization._id.toString(),
         organizationName: organization.name,
-        ownerEmail: organization.ownerEmail
+        ownerEmail: organization.ownerEmail,
+        organizationCode: getCanonicalOrganizationCode(organization),
       };
     } catch (error) {
       throw error;
@@ -232,7 +248,8 @@ class OrganizationService {
         id: organization._id.toString(),
         name: organization.name,
         tradingName: organization.tradingName || organization.name,
-        code: organization.code || organization.organizationCode,
+        code: getCanonicalOrganizationCode(organization),
+        organizationCode: getCanonicalOrganizationCode(organization),
         ownerEmail: organization.ownerEmail,
         ownerEmailVerified: verificationMeta.ownerEmailVerified,
         organizationEmail: verificationMeta.organizationEmail,
@@ -732,12 +749,13 @@ class OrganizationService {
   async getUserOrganizations(userId) {
     try {
       const userOrgs = await UserOrganization.find({ userId, isActive: true })
-        .populate('organizationId', 'name code logoUrl');
+        .populate('organizationId', 'name organizationCode code logoUrl');
 
       return userOrgs.map(uo => ({
         id: uo.organizationId._id,
         name: uo.organizationId.name,
-        code: uo.organizationId.code,
+        code: getCanonicalOrganizationCode(uo.organizationId),
+        organizationCode: getCanonicalOrganizationCode(uo.organizationId),
         logoUrl: uo.organizationId.logoUrl,
         role: uo.role,
         lastAccessedAt: uo.lastAccessedAt
