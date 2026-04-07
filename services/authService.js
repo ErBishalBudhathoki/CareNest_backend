@@ -29,6 +29,33 @@ function getUsersCollection() {
   return mongoose.connection.collection('users');
 }
 
+function mapUserRoleToOrganizationRole(role) {
+  const normalizedRole = String(role || 'user').trim().toLowerCase();
+
+  switch (normalizedRole) {
+    case 'owner':
+      return 'owner';
+    case 'admin':
+      return 'admin';
+    case 'shared_employee':
+      return 'shared_employee';
+    default:
+      return 'employee';
+  }
+}
+
+function getOrganizationPermissions(role) {
+  switch (role) {
+    case 'owner':
+    case 'admin':
+      return ['read', 'write', 'delete', 'manage_users', 'manage_billing'];
+    case 'shared_employee':
+      return ['read', 'write', 'cross_org_access'];
+    default:
+      return ['read', 'write'];
+  }
+}
+
 class AuthService {
   /**
    * Check if email exists in the system
@@ -133,11 +160,13 @@ class AuthService {
       // Create UserOrganization record (Zero-Trust requirement)
       if (userData.organizationId) {
         try {
+          const organizationRole = mapUserRoleToOrganizationRole(userData.role);
+
           await UserOrganization.create({
             userId: savedUser._id.toString(),
             organizationId: userData.organizationId,
-            role: userData.role || 'user',
-            permissions: (userData.role === 'admin' || userData.role === 'owner') ? ['*'] : ['read', 'write'],
+            role: organizationRole,
+            permissions: getOrganizationPermissions(organizationRole),
             isActive: true,
             joinedAt: new Date(),
             createdAt: new Date(),
