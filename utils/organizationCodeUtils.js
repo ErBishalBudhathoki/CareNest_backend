@@ -9,29 +9,44 @@ function normalizeOrganizationCode(value) {
 
 async function backfillLegacyOrganizationCodes() {
   if (!backfillPromise) {
-    backfillPromise = Organization.updateMany(
-      {
-        $or: [
-          { organizationCode: { $exists: false } },
-          { organizationCode: null },
-          { organizationCode: '' },
-        ],
-        code: { $exists: true, $type: 'string', $ne: '' },
-      },
-      [
+    backfillPromise = (async () => {
+      const organizations = await Organization.find(
         {
-          $set: {
-            organizationCode: {
-              $toUpper: {
-                $trim: {
-                  input: '$code',
-                },
+          $or: [
+            { organizationCode: { $exists: false } },
+            { organizationCode: null },
+            { organizationCode: '' },
+          ],
+          code: { $exists: true, $type: 'string', $ne: '' },
+        },
+        { _id: 1, code: 1 }
+      ).lean();
+
+      if (!organizations.length) {
+        return;
+      }
+
+      const operations = organizations
+        .map((organization) => ({
+          updateOne: {
+            filter: { _id: organization._id },
+            update: {
+              $set: {
+                organizationCode: normalizeOrganizationCode(organization.code),
               },
             },
           },
-        },
-      ]
-    ).catch((error) => {
+        }))
+        .filter(
+          (operation) => operation.updateOne.update.$set.organizationCode
+        );
+
+      if (!operations.length) {
+        return;
+      }
+
+      await Organization.bulkWrite(operations, { ordered: false });
+    })().catch((error) => {
       backfillPromise = null;
       throw error;
     });
