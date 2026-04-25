@@ -41,6 +41,12 @@ const certificationSchema = new mongoose.Schema({
   notes: {
     type: String,
     trim: true
+  },
+  // Tracks where the cert originated. 'onboarding' = promoted from employee onboarding flow.
+  source: {
+    type: String,
+    enum: ['manual', 'onboarding'],
+    default: 'manual'
   }
 }, {
   timestamps: true,
