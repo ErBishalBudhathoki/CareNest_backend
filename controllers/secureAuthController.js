@@ -177,7 +177,7 @@ class SecureAuthController {
         organizationCode,
         organizationId: organizationId || null,
         phone: phone || null,
-        role: isOwner ? 'admin' : 'user',
+        role: isOwner ? 'admin' : 'employee',
         firebaseUid: firebaseUser.uid,
         firebaseSyncedAt: new Date(),
         emailVerified: false
@@ -325,7 +325,7 @@ class SecureAuthController {
               email: email,
               firstName: firstName,
               lastName: lastName,
-              role: 'user',
+              role: 'employee',
               joinedExistingOrg: true
             },
             timestamp: new Date()
@@ -671,7 +671,7 @@ class SecureAuthController {
     // 8. Generate token
     const userRoles = user.roles && user.roles.length > 0
       ? user.roles
-      : (user.role ? [user.role] : ['user']);
+      : (user.role ? [user.role] : ['employee']);
 
     const tokenPayload = {
       userId: user._id?.toString() || user.email,
@@ -1189,7 +1189,7 @@ class SecureAuthController {
     // Handle both legacy 'role' and new 'roles' fields
     const userRoles = user.roles && user.roles.length > 0
       ? user.roles
-      : (user.role ? [user.role] : ['user']);
+      : (user.role ? [user.role] : ['employee']);
 
     const tokenPayload = {
       userId: user._id.toString(),

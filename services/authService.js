@@ -30,7 +30,7 @@ function getUsersCollection() {
 }
 
 function mapUserRoleToOrganizationRole(role) {
-  const normalizedRole = String(role || 'user').trim().toLowerCase();
+  const normalizedRole = String(role || 'employee').trim().toLowerCase();
 
   switch (normalizedRole) {
     case 'owner':
@@ -139,8 +139,8 @@ class AuthService {
         abn: userData.abn,
         organizationCode: userData.organizationCode,
         organizationId: userData.organizationId,
-        role: userData.role || 'user',
-        roles: ['user'],
+        role: userData.role || 'employee',
+        roles: [userData.role || 'employee'],
         createdAt: new Date(),
         lastLogin: null,
         isActive: true,
@@ -281,7 +281,7 @@ class AuthService {
           photo: user.photo,
           photoUrl: user.photoUrl,
           role: user.role,
-          roles: user.roles || (user.role ? [user.role] : ['user']),
+          roles: user.roles || (user.role ? [user.role] : ['employee']),
           organizationId: user.organizationId,
           organizationCode: user.organizationCode,
           organizationName: user.organizationName,
