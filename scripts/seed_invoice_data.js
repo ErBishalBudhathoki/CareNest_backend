@@ -24,7 +24,7 @@ const users = [
         abn: '11223344556',
         organizationId: 'org_123',
         password: 'hashed_password_placeholder', // In a real scenario this should be hashed
-        role: 'user'
+        role: 'employee'
     },
     {
         email: 'bishalkc331@gmail.com',
@@ -33,7 +33,7 @@ const users = [
         abn: '99887766554',
         organizationId: 'org_123',
         password: 'hashed_password_placeholder',
-        role: 'user'
+        role: 'employee'
     }
 ];
 
