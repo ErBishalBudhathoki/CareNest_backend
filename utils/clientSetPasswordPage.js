@@ -127,6 +127,38 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       text-transform: uppercase;
     }
 
+    .identity-panel {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding: 14px;
+      border: 2px solid var(--black);
+      background: #eef2ff;
+    }
+
+    .identity-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .identity-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .identity-value {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--black);
+      word-break: break-word;
+    }
+
     .alert {
       margin-bottom: 15px;
       padding: 11px 12px;
@@ -277,6 +309,11 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       .header h1 {
         font-size: 28px;
       }
+
+      .identity-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
     }
   </style>
 </head>
@@ -288,11 +325,21 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
         <div class="bar blue"></div>
         <div class="bar yellow"></div>
       </div>
-      <h1>Set Your Password</h1>
-      <p>Securely complete account setup for ${safeBrandName}</p>
+      <h1 id="page-title">Set Your Password</h1>
+      <p id="page-subtitle">Securely complete account setup for ${safeBrandName}</p>
     </section>
 
     <section class="content">
+      <div id="identity-panel" class="identity-panel hidden">
+        <div id="identity-name-row" class="identity-row hidden">
+          <div class="identity-label">Family Member</div>
+          <div id="identity-name" class="identity-value"></div>
+        </div>
+        <div id="identity-email-row" class="identity-row hidden">
+          <div class="identity-label">Email</div>
+          <div id="identity-email" class="identity-value"></div>
+        </div>
+      </div>
       <div id="email-pill" class="email-pill hidden"></div>
       <div id="alert" class="alert"></div>
 
@@ -349,6 +396,9 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       const firebaseApiKey = ${apiKeyLiteral};
       const params = new URLSearchParams(window.location.search);
       const oobCode = (params.get('code') || params.get('oobCode') || '').trim();
+      const requestedAccountType = String(params.get('accountType') || '').trim().toLowerCase();
+      const requestedName = String(params.get('name') || '').trim();
+      const requestedEmail = String(params.get('email') || '').trim().toLowerCase();
       const endpoint =
         'https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=' +
         encodeURIComponent(firebaseApiKey || '');
@@ -359,6 +409,13 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
         '/api/firebase-auth/complete-client-activation';
 
       const alertEl = document.getElementById('alert');
+      const pageTitle = document.getElementById('page-title');
+      const pageSubtitle = document.getElementById('page-subtitle');
+      const identityPanel = document.getElementById('identity-panel');
+      const identityNameRow = document.getElementById('identity-name-row');
+      const identityName = document.getElementById('identity-name');
+      const identityEmailRow = document.getElementById('identity-email-row');
+      const identityEmail = document.getElementById('identity-email');
       const emailPill = document.getElementById('email-pill');
       const formEl = document.getElementById('reset-form');
       const successPanel = document.getElementById('success-panel');
@@ -373,6 +430,41 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
         num: document.getElementById('rule-num'),
         special: document.getElementById('rule-special')
       };
+
+      function configureIdentityPanel(email) {
+        const normalizedEmail = String(email || requestedEmail || '').trim().toLowerCase();
+        const isFamily = requestedAccountType === 'family';
+
+        pageTitle.textContent = isFamily ? 'Set Family Password' : 'Set Your Password';
+        pageSubtitle.textContent = isFamily
+          ? 'Activate family access for ${safeBrandName}'
+          : 'Securely complete account setup for ${safeBrandName}';
+
+        if (!requestedName && !normalizedEmail) {
+          identityPanel.classList.add('hidden');
+          identityNameRow.classList.add('hidden');
+          identityEmailRow.classList.add('hidden');
+          return;
+        }
+
+        identityPanel.classList.remove('hidden');
+
+        if (requestedName) {
+          identityName.textContent = requestedName;
+          identityNameRow.classList.remove('hidden');
+        } else {
+          identityName.textContent = '';
+          identityNameRow.classList.add('hidden');
+        }
+
+        if (normalizedEmail) {
+          identityEmail.textContent = normalizedEmail;
+          identityEmailRow.classList.remove('hidden');
+        } else {
+          identityEmail.textContent = '';
+          identityEmailRow.classList.add('hidden');
+        }
+      }
 
       function showAlert(type, message) {
         alertEl.className = 'alert ' + type;
@@ -501,6 +593,7 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
       }
 
       async function initialize() {
+        configureIdentityPanel('');
         if (!firebaseApiKey) {
           showAlert('error', toFriendlyError('MISSING_API_KEY'));
           formEl.classList.add('hidden');
@@ -515,6 +608,7 @@ function renderClientSetPasswordPage({ apiKey, brandName = 'CareNest' } = {}) {
         try {
           const data = await callResetApi({ oobCode: oobCode });
           const email = data?.email ? String(data.email) : '';
+          configureIdentityPanel(email);
           if (email) {
             resolvedEmail = email.trim().toLowerCase();
             emailPill.textContent = 'Resetting password for ' + email;

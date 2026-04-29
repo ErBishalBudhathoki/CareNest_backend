@@ -165,8 +165,8 @@ class AuthMiddleware {
             req.user = {
               userId: user._id.toString(),
               email: user.email,
-              role: String(user.role || '').toLowerCase().trim() || 'user',
-              roles: normalizedRoles.length > 0 ? normalizedRoles : ['user'],
+              role: String(user.role || '').toLowerCase().trim() || 'employee',
+              roles: normalizedRoles.length > 0 ? normalizedRoles : ['employee'],
               organizationId: user.organizationId,
               lastActiveOrganizationId: user.lastActiveOrganizationId || user.organizationId,
               iat: decodedFirebaseToken.iat,
@@ -358,8 +358,8 @@ class AuthMiddleware {
       req.user = {
         userId: userIdValidation.sanitized,
         email: emailValidation.sanitized,
-        role: String(decoded.role || '').toLowerCase().trim() || 'user',
-        roles: normalizedRoles.length > 0 ? normalizedRoles : ['user'],
+        role: String(decoded.role || '').toLowerCase().trim() || 'employee',
+        roles: normalizedRoles.length > 0 ? normalizedRoles : ['employee'],
         organizationId: decoded.organizationId,
         iat: decoded.iat,
         exp: decoded.exp

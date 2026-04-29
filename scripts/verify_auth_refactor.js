@@ -32,7 +32,7 @@ async function verifyAuthRefactor() {
             firstName: 'Auth',
             lastName: 'Refactor',
             organizationId: 'ORG123',
-            role: 'user'
+            role: 'employee'
         });
         console.log('User created:', user._id);
 
