@@ -118,7 +118,7 @@ class AuthServiceV2 {
             email: userData.email.toLowerCase(),
             password: userData.password,
             refreshTokens: [],
-            roles: ['user'],
+            roles: [userData.role || 'employee'],
             isActive: true
         });
 
@@ -130,7 +130,7 @@ class AuthServiceV2 {
                 await UserOrganization.create({
                     userId: user._id.toString(),
                     organizationId: userData.organizationId,
-                    role: 'user',
+                    role: 'employee',
                     permissions: ['read', 'write'],
                     isActive: true,
                     joinedAt: new Date(),

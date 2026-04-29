@@ -8,8 +8,13 @@ const organizationSchema = new mongoose.Schema({
   },
   tradingName: String,
   organizationName: String,  // Alias for 'name'
-  code: { type: String, required: true, trim: true, uppercase: true },
-  organizationCode: String,  // Alias for 'code'
+  code: { type: String, trim: true, uppercase: true }, // Legacy alias
+  organizationCode: {
+    type: String,
+    required: true,
+    trim: true,
+    uppercase: true,
+  },
   abn: String,
   logoUrl: String,
   ownerEmail: { type: String, required: true, lowercase: true, trim: true },
@@ -305,8 +310,26 @@ const organizationSchema = new mongoose.Schema({
   }
 });
 
+organizationSchema.pre('validate', function syncOrganizationCode(next) {
+  const canonicalCode = String(this.organizationCode || this.code || '')
+    .trim()
+    .toUpperCase();
+
+  if (canonicalCode) {
+    this.organizationCode = canonicalCode;
+
+    // Keep the legacy alias in sync until all consumers move to organizationCode.
+    if (!this.code) {
+      this.code = canonicalCode;
+    }
+  }
+
+  next();
+});
+
 // Indexes
 organizationSchema.index({ code: 1 }, { unique: true });
+organizationSchema.index({ organizationCode: 1 }, { unique: true });
 organizationSchema.index({ ownerEmail: 1 });
 
 module.exports = mongoose.model('Organization', organizationSchema);

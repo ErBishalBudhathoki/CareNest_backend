@@ -10,6 +10,7 @@ const Client = require('../models/Client');
 const AuditTrail = require('../models/AuditTrail');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
 const { invoiceArtifactService } = require('./invoiceArtifactService');
+const { getCanonicalOrganizationCode } = require('../utils/organizationCodeUtils');
 const logger = require('../config/logger');
 const crypto = require('crypto');
 const fs = require('fs').promises;
@@ -704,11 +705,11 @@ class InvoiceManagementService {
 
       // Prefer organization code for human-readable compact numbers.
       const org = await Organization.findById(organizationId)
-        .select('code organizationCode name')
+        .select('organizationCode code name')
         .lean();
 
       const orgCode = this._generateCompactCode(
-        org?.code || org?.organizationCode || organizationId,
+        getCanonicalOrganizationCode(org) || organizationId,
         3,
         'X'
       );

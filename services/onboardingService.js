@@ -1,6 +1,8 @@
 const OnboardingRecord = require('../models/OnboardingRecord');
 const EmployeeDocument = require('../models/EmployeeDocument');
+const Certification = require('../models/Certification');
 const User = require('../models/User'); // Maps to 'login' collection
+const bankDetailsService = require('./bankDetailsService');
 const logger = require('../config/logger');
 const emailService = require('./emailService');
 
@@ -213,6 +215,32 @@ class OnboardingService {
             { new: true }
         );
 
+        // ----- Sync onboarding data to authoritative collections -----
+        // Each sync is wrapped independently so a partial failure doesn't
+        // block the finalize response or email delivery.
+
+        // 1. Sync bank details → bankDetails collection
+        await OnboardingService._syncBankDetails(userId, result).catch(err =>
+            logger.error('[OnboardingService] _syncBankDetails failed', { userId, err: err.message })
+        );
+
+        // 2. Promote EmployeeDocuments → certifications collection
+        await OnboardingService._syncDocumentsToCertifications(userId).catch(err =>
+            logger.error('[OnboardingService] _syncDocumentsToCertifications failed', { userId, err: err.message })
+        );
+
+        // 3. Patch User model with personal details
+        await OnboardingService._syncPersonalDetails(userId, result).catch(err =>
+            logger.error('[OnboardingService] _syncPersonalDetails failed', { userId, err: err.message })
+        );
+
+        logger.business('Onboarding data synced to authoritative collections', {
+            event: 'onboarding_data_synced',
+            userId,
+            timestamp: new Date().toISOString()
+        });
+        // ----------------------------------------------------------
+
         // Send welcome email
         try {
             const user = await User.findById(userId);
@@ -225,6 +253,119 @@ class OnboardingService {
         }
 
         return result;
+    }
+
+    /**
+     * @private
+     * Sync bank details entered during onboarding into the authoritative bankDetails collection.
+     * Uses bankDetailsService.saveBankDetails() which upserts by (userEmail, organizationId).
+     */
+    static async _syncBankDetails(userId, onboardingRecord) {
+        const bankStep = onboardingRecord?.steps?.bankDetails;
+        if (!bankStep || !bankStep.accountName || !bankStep.bsb || !bankStep.accountNumber) {
+            logger.info('[OnboardingService] Skipping bank sync — bankDetails step incomplete', { userId });
+            return;
+        }
+
+        const user = await User.findById(userId).lean();
+        if (!user || !user.email) {
+            throw new Error('User email not found — cannot sync bank details');
+        }
+
+        const orgId = String(onboardingRecord.organizationId || '');
+        await bankDetailsService.saveBankDetails(
+            user.email,  // actorEmail (system acting on behalf of the employee)
+            user.email,  // targetEmail (same person)
+            orgId,
+            {
+                bankName:      bankStep.bankName      || '',
+                accountName:   bankStep.accountName,
+                bsb:           String(bankStep.bsb).replace(/\D/g, ''),
+                accountNumber: String(bankStep.accountNumber)
+            }
+        );
+
+        logger.info('[OnboardingService] Bank details synced', { userId, email: user.email });
+    }
+
+    /**
+     * @private
+     * Promote EmployeeDocument records into the Certifications collection.
+     * Idempotent: uses upsert keyed on (userId, source:'onboarding', name).
+     *
+     * Document type → human-readable cert name mapping:
+     *   passport        → "Passport / ID"
+     *   police_check    → "Police Check"
+     *   visa            → "Visa Grant"
+     *   drivers_license → "Driver's Licence"
+     *   first_aid       → "First Aid Certificate"
+     *   ndis_screening  → "NDIS Worker Screening"
+     *   other           → "Other Document"
+     */
+    static async _syncDocumentsToCertifications(userId) {
+        const TYPE_LABELS = {
+            passport:        'Passport / ID',
+            police_check:    'Police Check',
+            visa:            'Visa Grant',
+            drivers_license: "Driver's Licence",
+            first_aid:       'First Aid Certificate',
+            ndis_screening:  'NDIS Worker Screening',
+            other:           'Other Document'
+        };
+
+        const docs = await EmployeeDocument.find({ userId }).lean();
+        if (!docs.length) {
+            logger.info('[OnboardingService] No documents to promote for user', { userId });
+            return;
+        }
+
+        for (const doc of docs) {
+            const certName = TYPE_LABELS[doc.type] || 'Other Document';
+            // Upsert keyed on userId + source + name to be idempotent across re-finalizes.
+            await Certification.updateOne(
+                { userId, source: 'onboarding', name: certName },
+                {
+                    $setOnInsert: {
+                        userId,
+                        name:       certName,
+                        fileUrl:    doc.fileUrl,
+                        expiryDate: doc.expiryDate || null,
+                        status:     'pending_approval',
+                        source:     'onboarding',
+                        notes:      'Imported from onboarding',
+                        issueDate:  doc.uploadedAt || new Date()
+                    }
+                },
+                { upsert: true }
+            );
+        }
+
+        logger.info('[OnboardingService] Documents promoted to certifications', {
+            userId,
+            count: docs.length
+        });
+    }
+
+    /**
+     * @private
+     * Patch the User document with personal details collected during onboarding.
+     * Only overwrites fields that are present in the onboarding step.
+     */
+    static async _syncPersonalDetails(userId, onboardingRecord) {
+        const step = onboardingRecord?.steps?.personalDetails;
+        if (!step) return;
+
+        const patch = {};
+        if (step.firstName)   patch.firstName   = step.firstName;
+        if (step.lastName)    patch.lastName    = step.lastName;
+        if (step.phone)       patch.phone       = step.phone;
+        if (step.dateOfBirth) patch.dateOfBirth = step.dateOfBirth;
+        if (step.address)     patch.address     = step.address;
+
+        if (!Object.keys(patch).length) return;
+
+        await User.updateOne({ _id: userId }, { $set: patch });
+        logger.info('[OnboardingService] Personal details synced to User document', { userId });
     }
 
     /**

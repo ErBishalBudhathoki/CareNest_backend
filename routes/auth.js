@@ -79,7 +79,7 @@ router.get('/verify-organization/:code',
         success: true,
         organizationId: organization._id?.toString() || organization.organizationId,
         organizationName: organization.name || organization.organizationName,
-        organizationCode: organization.code || code.toUpperCase()
+        organizationCode: organization.organizationCode || code.toUpperCase()
       });
     } catch (error) {
       logger.error('Verify organization code error', {
