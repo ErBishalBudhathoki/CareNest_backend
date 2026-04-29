@@ -177,7 +177,7 @@ class SecureAuthController {
         organizationCode,
         organizationId: organizationId || null,
         phone: phone || null,
-        role: isOwner ? 'admin' : 'user',
+        role: isOwner ? 'admin' : 'employee',
         firebaseUid: firebaseUser.uid,
         firebaseSyncedAt: new Date(),
         emailVerified: false
@@ -325,7 +325,7 @@ class SecureAuthController {
               email: email,
               firstName: firstName,
               lastName: lastName,
-              role: 'user',
+              role: 'employee',
               joinedExistingOrg: true
             },
             timestamp: new Date()
@@ -671,7 +671,7 @@ class SecureAuthController {
     // 8. Generate token
     const userRoles = user.roles && user.roles.length > 0
       ? user.roles
-      : (user.role ? [user.role] : ['user']);
+      : (user.role ? [user.role] : ['employee']);
 
     const tokenPayload = {
       userId: user._id?.toString() || user.email,
@@ -812,20 +812,51 @@ class SecureAuthController {
     }
 
     let firebaseUser;
+    let firebaseLookupSource = user.firebaseUid ? 'uid' : 'email';
+
     try {
       if (user.firebaseUid) {
-        firebaseUser = await admin.auth().getUser(user.firebaseUid);
+        try {
+          firebaseUser = await admin.auth().getUser(user.firebaseUid);
+        } catch (firebaseUidLookupError) {
+          const isMissingUid = firebaseUidLookupError?.code === 'auth/user-not-found';
+          logger.warn('Firebase UID lookup failed for verification resend', {
+            email: normalizedEmail,
+            firebaseUid: user.firebaseUid,
+            code: firebaseUidLookupError?.code,
+            error: firebaseUidLookupError?.message,
+            fallingBackToEmail: isMissingUid,
+          });
+
+          if (!isMissingUid) {
+            throw firebaseUidLookupError;
+          }
+
+          firebaseLookupSource = 'email-fallback';
+          firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        }
       } else {
         firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+      }
+
+      if (firebaseUser?.uid && firebaseUser.uid !== user.firebaseUid) {
         await User.updateOne(
           { _id: user._id },
-          { $set: { firebaseUid: firebaseUser.uid, firebaseSyncedAt: new Date() } }
+          {
+            $set: {
+              firebaseUid: firebaseUser.uid,
+              firebaseSyncedAt: new Date(),
+            },
+          }
         );
       }
     } catch (firebaseLookupError) {
       logger.warn('Firebase user lookup failed for verification resend', {
         email: normalizedEmail,
-        error: firebaseLookupError.message
+        firebaseUid: user.firebaseUid,
+        lookupSource: firebaseLookupSource,
+        code: firebaseLookupError?.code,
+        error: firebaseLookupError?.message,
       });
 
       return res.status(200).json(
@@ -1158,7 +1189,7 @@ class SecureAuthController {
     // Handle both legacy 'role' and new 'roles' fields
     const userRoles = user.roles && user.roles.length > 0
       ? user.roles
-      : (user.role ? [user.role] : ['user']);
+      : (user.role ? [user.role] : ['employee']);
 
     const tokenPayload = {
       userId: user._id.toString(),

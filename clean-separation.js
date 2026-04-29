@@ -82,8 +82,8 @@ async function cleanSeparation() {
         organizationName: user.organizationName || null,
         
         // Roles & Permissions
-        role: user.role || 'user',
-        roles: user.roles || (user.role ? [user.role] : ['user']),
+        role: user.role || 'employee',
+        roles: user.roles || (user.role ? [user.role] : ['employee']),
         
         // Employment Details
         clientId: user.clientId || null,
