@@ -823,7 +823,7 @@ class PricingService {
       let providerTypeUsed = 'standard';
 
       const currentDate = new Date();
-      const results = {};
+      const results = Object.create(null);
 
       // Build aggregation pipeline for efficient bulk lookup
       const customPricingPipeline = [
@@ -890,7 +890,7 @@ class PricingService {
           : null;
 
       // Map custom pricing results
-      const customPricingMap = {};
+      const customPricingMap = Object.create(null);
       customPricingResults.forEach(result => {
         const pricing = result.pricing;
         customPricingMap[result._id] = {
@@ -906,8 +906,8 @@ class PricingService {
       );
 
       // Get NDIS default pricing for items without custom pricing
-      let ndisDefaultPricing = {};
-      let priceCapsData = {};
+      let ndisDefaultPricing = Object.create(null);
+      let priceCapsData = Object.create(null);
 
       allNdisItems.forEach(item => {
         priceCapsData[item.supportItemNumber] = {

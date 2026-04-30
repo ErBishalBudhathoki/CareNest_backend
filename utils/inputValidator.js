@@ -14,6 +14,17 @@ class InputValidator {
   static NAME_REGEX = /^[a-zA-Z\s'-]{2,50}$/;
   static ORG_CODE_REGEX = /^[A-Z0-9]{6,12}$/;
   static OTP_REGEX = /^\d{6}$/;
+  static REGEX_SPECIAL_CHARS = /[.*+?^${}()|[\]\\]/g;
+
+  /**
+   * Escapes a string for use in a regular expression to prevent ReDoS
+   * @param {string} string - String to escape
+   * @returns {string} Escaped string
+   */
+  static escapeRegExp(string) {
+    if (typeof string !== 'string') return '';
+    return string.replace(this.REGEX_SPECIAL_CHARS, '\\$&');
+  }
 
   // Dangerous patterns to detect
   static SUSPICIOUS_PATTERNS = [

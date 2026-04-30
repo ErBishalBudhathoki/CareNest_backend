@@ -42,7 +42,7 @@ function summarizeBodyPayload(body, { sensitive = false } = {}) {
     return { type: 'array', length: body.length };
   }
 
-  if (typeof body === 'object' && body !== null) {
+  if (Object.prototype.toString.call(body) === '[object Object]') {
     const keys = Object.keys(body);
     return {
       type: 'object',

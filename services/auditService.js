@@ -458,7 +458,11 @@ function sanitizeData(data) {
 
   // Recursively sanitize nested objects
   Object.keys(sanitized).forEach(key => {
-    if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      delete sanitized[key];
+      return;
+    }
+    if (Object.prototype.toString.call(sanitized[key]) === '[object Object]' && sanitized[key] !== null) {
       sanitized[key] = sanitizeData(sanitized[key]);
     }
   });
@@ -477,6 +481,7 @@ function getObjectDifferences(oldObj, newObj) {
 
   // Check for changed or new fields
   Object.keys(newObj).forEach(key => {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return;
     if (JSON.stringify(oldObj[key]) !== JSON.stringify(newObj[key])) {
       differences[key] = {
         old: oldObj[key],
@@ -487,6 +492,7 @@ function getObjectDifferences(oldObj, newObj) {
 
   // Check for deleted fields
   Object.keys(oldObj).forEach(key => {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return;
     if (!(key in newObj)) {
       differences[key] = {
         old: oldObj[key],
