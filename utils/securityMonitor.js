@@ -1,6 +1,7 @@
 const { createLogger } = require('./logger');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 /**
  * Advanced Security Monitoring System
@@ -154,7 +155,7 @@ class SecurityMonitor {
     this.metrics.totalEvents++;
     // Ensure timestamp is unique by adding a small increment
     const now = new Date();
-    this.metrics.lastUpdated = new Date(now.getTime() + Math.floor(Math.random() * 10) + 1).toISOString();
+    this.metrics.lastUpdated = new Date(now.getTime() + crypto.randomInt(1, 11)).toISOString();
     
     this.logger.security('Failed login attempt recorded', event);
     
@@ -341,7 +342,7 @@ class SecurityMonitor {
     this.metrics.securityEvents++;
     // Ensure timestamp is unique by adding a small increment
     const now = new Date();
-    this.metrics.lastUpdated = new Date(now.getTime() + Math.floor(Math.random() * 10) + 1).toISOString();
+    this.metrics.lastUpdated = new Date(now.getTime() + crypto.randomInt(1, 11)).toISOString();
     
     this.logger.security('Security event recorded', { type: eventType, details });
     

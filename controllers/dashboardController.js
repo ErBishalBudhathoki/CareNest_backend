@@ -117,8 +117,8 @@ const getWorkerLocations = catchAsync(async (req, res) => {
     workerId: shift.userEmail,
     workerName: shift.userName || 'Unknown',
     workerEmail: shift.userEmail,
-    latitude: -37.8136 + (Math.random() - 0.5) * 0.1, // Mock location
-    longitude: 144.9631 + (Math.random() - 0.5) * 0.1, // Mock location
+    latitude: -37.8136 + (require('crypto').randomInt(0, 1000) / 1000 - 0.5) * 0.1, // Mock location
+    longitude: 144.9631 + (require('crypto').randomInt(0, 1000) / 1000 - 0.5) * 0.1, // Mock location
     status: _determineWorkerStatus(shift),
     lastUpdated: new Date(),
     currentAppointmentId: shift.assignedClientId,

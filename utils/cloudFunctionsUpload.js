@@ -8,6 +8,7 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const path = require('path');
 const fs = require('fs');
 const { Readable } = require('stream');
+const crypto = require('crypto');
 
 // Ensure uploads directory exists for local fallback
 const uploadDir = path.join(__dirname, '../uploads');
@@ -151,7 +152,7 @@ async function uploadToR2(fileBuffer, originalFilename, fieldname) {
         throw new Error('R2 is not configured');
     }
 
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const uniqueSuffix = Date.now() + '-' + crypto.randomInt(0, 1000000000);
     let folder = 'others';
     if (fieldname === 'logo') folder = 'logos';
     if (fieldname === 'receipt') folder = 'receipts';
@@ -192,7 +193,7 @@ async function uploadToR2(fileBuffer, originalFilename, fieldname) {
  * Save file to local disk (fallback)
  */
 async function saveToLocalDisk(fileBuffer, originalFilename, fieldname) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const uniqueSuffix = Date.now() + '-' + crypto.randomInt(0, 1000000000);
     const extension = path.extname(originalFilename);
     const filename = `${fieldname}-${uniqueSuffix}${extension}`;
     const filepath = path.join(uploadDir, filename);

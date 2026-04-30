@@ -11,7 +11,7 @@ let serverEncryptionKey;
  * @returns {string} 6-digit OTP
  */
 function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 /**
@@ -21,8 +21,9 @@ function generateOTP() {
 function generateOrganizationCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
+  const randomValues = crypto.randomBytes(8);
   for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(randomValues[i] % chars.length);
   }
   return result;
 }

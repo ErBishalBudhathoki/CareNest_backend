@@ -112,3 +112,10 @@ build/
 # uploads folder where user uploaded img, files stays
 uploads/
 bfg-1.15.0.jar
+.agents/
+dismiss.sh
+dismiss_alerts.js
+scripts/check_user_role.js
+security_issues.json
+to_dismiss.txt
+trivy_fail.txt

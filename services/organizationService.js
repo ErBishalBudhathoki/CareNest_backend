@@ -15,6 +15,7 @@ const {
   getCanonicalOrganizationCode,
   normalizeOrganizationCode,
 } = require('../utils/organizationCodeUtils');
+const InputValidator = require('../utils/inputValidator');
 
 class OrganizationService {
   _normalizeEmail(email) {
@@ -95,8 +96,9 @@ class OrganizationService {
       const { organizationName, ownerEmail, ownerFirstName, ownerLastName } = organizationData;
 
       // Check if organization name already exists
+      const escapedName = InputValidator.escapeRegExp(organizationName);
       const existingOrg = await Organization.findOne({
-        name: { $regex: new RegExp(`^${organizationName}$`, 'i') }
+        name: { $regex: new RegExp(`^${escapedName}$`, 'i') }
       });
 
       if (existingOrg) {
