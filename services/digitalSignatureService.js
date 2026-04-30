@@ -10,8 +10,19 @@ const path = require('path');
 let PDFDocument = null;
 
 // In-memory storage for demo (use database in production)
+const MAX_MAP_SIZE = 500;
 const signatures = new Map();
 const serviceConfirmations = new Map();
+
+/**
+ * Helper to enforce map size limit (FIFO)
+ */
+function enforceMapLimit(map) {
+  if (map.size > MAX_MAP_SIZE) {
+    const firstKey = map.keys().next().value;
+    map.delete(firstKey);
+  }
+}
 
 /**
  * Save digital signature
@@ -44,6 +55,7 @@ exports.saveSignature = async (params) => {
   };
 
   signatures.set(signature._id, signature);
+  enforceMapLimit(signatures);
 
   return signature;
 };
@@ -83,6 +95,7 @@ exports.submitServiceConfirmation = async (params) => {
   };
 
   serviceConfirmations.set(appointmentId, confirmation);
+  enforceMapLimit(serviceConfirmations);
 
   // Generate PDF report
   const pdfPath = await generateServiceReport(confirmation);

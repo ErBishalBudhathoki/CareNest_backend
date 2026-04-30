@@ -38,9 +38,11 @@ exports.getIntegrations = async (req, res) => {
 exports.connectIntegration = async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const { integrationType, apiKey, accessToken, refreshToken, metadata } = req.body;
+    const { toSafeString, isValidKey } = require('../utils/security');
+    const integrationType = toSafeString(req.body.integrationType);
+    const { apiKey, accessToken, refreshToken, metadata } = req.body;
 
-    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
+    if (!integrationType || !isValidKey(integrationType)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid integration type',

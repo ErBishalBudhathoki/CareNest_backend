@@ -64,7 +64,8 @@ class AuthService {
    */
   async checkEmailExists(email) {
     try {
-      const user = await User.findOne({ email: email });
+      const { toSafeString } = require('../utils/security');
+      const user = await User.findOne({ email: toSafeString(email) });
       return user;
     } catch (error) {
       throw new Error(`Error checking email: ${error.message}`);
@@ -78,7 +79,8 @@ class AuthService {
    */
   async getClientDetails(email) {
     try {
-      const client = await Client.findOne({ email: email });
+      const { toSafeString } = require('../utils/security');
+      const client = await Client.findOne({ email: toSafeString(email) });
       return client;
     } catch (error) {
       throw new Error(`Error getting client details: ${error.message}`);
@@ -92,6 +94,7 @@ class AuthService {
    */
   async validateOrganizationCode(organizationCode) {
     try {
+      const { toSafeString } = require('../utils/security');
       await backfillLegacyOrganizationCodes();
       const normalizedCode = normalizeOrganizationCode(organizationCode);
       if (!normalizedCode) {
@@ -99,7 +102,7 @@ class AuthService {
       }
 
       const organization = await Organization.findOne({
-        organizationCode: normalizedCode,
+        organizationCode: toSafeString(normalizedCode),
         isActive: true,
       });
       return organization;

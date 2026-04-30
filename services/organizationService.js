@@ -75,8 +75,9 @@ class OrganizationService {
   }
 
   _buildNonDeletedClientQuery(organizationId) {
+    const { toSafeString } = require('../utils/security');
     return {
-      organizationId: organizationId,
+      organizationId: toSafeString(organizationId),
       $or: [
         { deletedAt: null },
         { deletedAt: { $exists: false } }
@@ -85,8 +86,9 @@ class OrganizationService {
   }
 
   _buildDeletedClientQuery(organizationId) {
+    const { toSafeString } = require('../utils/security');
     return {
-      organizationId: organizationId,
+      organizationId: toSafeString(organizationId),
       deletedAt: { $ne: null }
     };
   }
@@ -494,9 +496,12 @@ class OrganizationService {
 
   async getOrganizationMembers(organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+
       // Query UserOrganization for zero-trust compliance
       const userOrgs = await UserOrganization.find({
-        organizationId: organizationId,
+        organizationId: safeOrgId,
         isActive: true
       }).lean();
 
@@ -566,8 +571,9 @@ class OrganizationService {
 
   async getOrganizationBusinesses(organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
       return await Business.find({
-        organizationId: organizationId,
+        organizationId: toSafeString(organizationId),
         isActive: true
       }).lean();
     } catch (error) {
@@ -630,9 +636,12 @@ class OrganizationService {
 
   async getOrganizationEmployees(organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+
       // Query UserOrganization for zero-trust compliance
       const userOrgs = await UserOrganization.find({
-        organizationId: organizationId,
+        organizationId: safeOrgId,
         isActive: true
       }).lean();
 
@@ -700,14 +709,18 @@ class OrganizationService {
 
   async switchOrganization(userId, organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeUserId = toSafeString(userId);
+      const safeOrgId = toSafeString(organizationId);
+
       // Validate access
-      const userOrg = await UserOrganization.findOne({ userId, organizationId, isActive: true });
+      const userOrg = await UserOrganization.findOne({ userId: safeUserId, organizationId: safeOrgId, isActive: true });
       if (!userOrg) {
         throw new Error('Access denied to organization');
       }
 
       // Update user's last active organization
-      await User.findByIdAndUpdate(userId, { lastActiveOrganizationId: organizationId });
+      await User.findByIdAndUpdate(safeUserId, { lastActiveOrganizationId: safeOrgId });
 
       // Return organization details with branding
       const org = await this.getOrganizationById(organizationId);
@@ -750,7 +763,9 @@ class OrganizationService {
 
   async getUserOrganizations(userId) {
     try {
-      const userOrgs = await UserOrganization.find({ userId, isActive: true })
+      const { toSafeString } = require('../utils/security');
+      const safeUserId = toSafeString(userId);
+      const userOrgs = await UserOrganization.find({ userId: safeUserId, isActive: true })
         .populate('organizationId', 'name organizationCode code logoUrl');
 
       return userOrgs.map(uo => ({
@@ -769,10 +784,14 @@ class OrganizationService {
 
   async addSharedEmployee(employeeId, targetOrgId, assignmentData) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeEmployeeId = toSafeString(employeeId);
+      const safeTargetOrgId = toSafeString(targetOrgId);
+
       // Check if assignment exists
       const existing = await SharedEmployeeAssignment.findOne({
-        employeeId,
-        organizationId: targetOrgId,
+        employeeId: safeEmployeeId,
+        organizationId: safeTargetOrgId,
         status: 'active'
       });
 

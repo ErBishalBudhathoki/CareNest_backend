@@ -133,6 +133,9 @@ async function processRecurringExpenses(organizationId = null) {
     const db = client.db('Invoice');
     const expensesCollection = db.collection('expenses');
     
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = organizationId ? toSafeString(organizationId) : null;
+    
     // Build query for recurring expenses
     const query = {
       isRecurring: true,
@@ -141,8 +144,8 @@ async function processRecurringExpenses(organizationId = null) {
       'recurringConfig.nextOccurrence': { $lte: new Date() }
     };
     
-    if (organizationId) {
-      query.organizationId = organizationId;
+    if (safeOrgId) {
+      query.organizationId = safeOrgId;
     }
     
     const recurringExpenses = await expensesCollection.find(query).toArray();
@@ -303,9 +306,13 @@ async function createRecurringExpense(expenseData) {
       expenseData.recurringConfig.interval || 1
     );
     
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = toSafeString(expenseData.organizationId);
+
     // Prepare recurring expense document
     const recurringExpense = {
       ...expenseData,
+      organizationId: safeOrgId,
       _id: new ObjectId(),
       isRecurring: true,
       isRecurringInstance: false,
@@ -390,9 +397,12 @@ async function updateRecurringExpense(expenseId, updateData) {
     const db = client.db('Invoice');
     const expensesCollection = db.collection('expenses');
     
+    const { toSafeString } = require('../utils/security');
+    const safeExpenseId = toSafeString(expenseId);
+
     // Get current recurring expense
     const currentExpense = await expensesCollection.findOne({
-      _id: new ObjectId(expenseId),
+      _id: new ObjectId(safeExpenseId),
       isRecurring: true
     });
     
@@ -426,7 +436,7 @@ async function updateRecurringExpense(expenseId, updateData) {
     
     // Update the recurring expense
     const result = await expensesCollection.updateOne(
-      { _id: new ObjectId(expenseId) },
+      { _id: new ObjectId(safeExpenseId) },
       { $set: update }
     );
     
@@ -488,9 +498,12 @@ async function deactivateRecurringExpense(expenseId, userEmail) {
     const db = client.db('Invoice');
     const expensesCollection = db.collection('expenses');
     
+    const { toSafeString } = require('../utils/security');
+    const safeExpenseId = toSafeString(expenseId);
+
     // Get current recurring expense
     const currentExpense = await expensesCollection.findOne({
-      _id: new ObjectId(expenseId),
+      _id: new ObjectId(safeExpenseId),
       isRecurring: true
     });
     
@@ -500,7 +513,7 @@ async function deactivateRecurringExpense(expenseId, userEmail) {
     
     // Deactivate the recurring expense
     const result = await expensesCollection.updateOne(
-      { _id: new ObjectId(expenseId) },
+      { _id: new ObjectId(safeExpenseId) },
       {
         $set: {
           isActive: false,
@@ -560,8 +573,11 @@ async function getRecurringExpenses(organizationId, options = {}) {
     const db = client.db('Invoice');
     const expensesCollection = db.collection('expenses');
     
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = toSafeString(organizationId);
+
     const query = {
-      organizationId: organizationId,
+      organizationId: safeOrgId,
       isRecurring: true,
       isDeleted: false
     };
@@ -614,10 +630,13 @@ async function getRecurringExpenseStats(organizationId) {
     const db = client.db('Invoice');
     const expensesCollection = db.collection('expenses');
     
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = toSafeString(organizationId);
+
     const pipeline = [
       {
         $match: {
-          organizationId: organizationId,
+          organizationId: safeOrgId,
           isRecurring: true,
           isDeleted: false
         }

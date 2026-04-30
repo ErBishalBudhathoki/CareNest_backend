@@ -16,11 +16,9 @@ class PricingService {
    * mismatches between screens that pass different identifier types.
    */
   async resolveClientContext(clientIdentifier) {
-    const rawInput =
-      typeof clientIdentifier === 'string'
-        ? clientIdentifier.trim()
-        : clientIdentifier?.toString?.().trim?.() || '';
-
+    const { toSafeString } = require('../utils/security');
+    const rawInput = toSafeString(clientIdentifier).trim();
+    
     if (!rawInput) {
       return {
         normalizedInput: null,
@@ -310,14 +308,18 @@ class PricingService {
         sortOrder = 'desc'
       } = options;
 
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+
       const skip = (page - 1) * limit;
-      const query = { organizationId, isActive: true };
+      const query = { organizationId: safeOrgId, isActive: true };
 
       // Add filters
       if (search) {
+        const escapedSearch = toSafeString(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         query.$or = [
-          { supportItemNumber: { $regex: search, $options: 'i' } },
-          { supportItemName: { $regex: search, $options: 'i' } }
+          { supportItemNumber: { $regex: escapedSearch, $options: 'i' } },
+          { supportItemName: { $regex: escapedSearch, $options: 'i' } }
         ];
       }
 
@@ -358,8 +360,9 @@ class PricingService {
    */
   async getPricingById(pricingId) {
     try {
+      const { toSafeString } = require('../utils/security');
       const pricing = await CustomPricing.findOne({
-        _id: pricingId,
+        _id: toSafeString(pricingId),
         isActive: true
       });
 
@@ -626,13 +629,17 @@ class PricingService {
         reason: 'pricing_lookup_single',
       });
 
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+      const safeSupportItemNumber = toSafeString(supportItemNumber);
+
       const clientContext = await this.resolveClientContext(clientId);
       const cacheClientKey =
         clientContext.canonicalClientId ||
         clientContext.normalizedEmail ||
         clientContext.normalizedInput ||
         'global';
-      const cacheKey = `pricing:${organizationId}:${supportItemNumber}:${cacheClientKey}`;
+      const cacheKey = `pricing:${safeOrgId}:${safeSupportItemNumber}:${cacheClientKey}`;
       const cachedResult = await cacheService.get(cacheKey);
       
       if (cachedResult) {
@@ -648,7 +655,7 @@ class PricingService {
 
       // Pre-fetch support item for caps and metadata
       const supportItemDoc = await SupportItem.findOne({
-        supportItemNumber
+        supportItemNumber: safeSupportItemNumber
       });
 
       // Priority 1: Client-specific pricing
@@ -812,6 +819,12 @@ class PricingService {
    */
   async getBulkPricingLookup(organizationId, supportItemNumbers, clientId = null) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+      const safeSupportItemNumbers = Array.isArray(supportItemNumbers)
+        ? supportItemNumbers.map(n => toSafeString(n))
+        : [toSafeString(supportItemNumbers)];
+
       await ndisCatalogSyncService.ensureFreshOnAccess({
         reason: 'pricing_lookup_bulk',
       });
@@ -829,8 +842,8 @@ class PricingService {
       const customPricingPipeline = [
         {
           $match: {
-            organizationId,
-            supportItemNumber: { $in: supportItemNumbers },
+            organizationId: safeOrgId,
+            supportItemNumber: { $in: safeSupportItemNumbers },
             isActive: true,
             approvalStatus: 'approved',
             effectiveDate: { $lte: currentDate },

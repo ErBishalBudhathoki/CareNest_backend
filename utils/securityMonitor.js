@@ -36,6 +36,7 @@ class SecurityMonitor {
       errors: [],
       securityEvents: []
     };
+    this.MAX_BUFFER_SIZE = 1000; // Cap each event type to 1000 entries
     
     this.alertCallbacks = [];
     this.metricsFile = path.join(process.cwd(), 'logs', 'security-metrics.json');
@@ -151,6 +152,9 @@ class SecurityMonitor {
     };
     
     this.eventBuffer.failedLogins.push(event);
+    if (this.eventBuffer.failedLogins.length > this.MAX_BUFFER_SIZE) {
+      this.eventBuffer.failedLogins.shift();
+    }
     this.metrics.failedLogins++;
     this.metrics.totalEvents++;
     // Ensure timestamp is unique by adding a small increment
@@ -234,6 +238,9 @@ class SecurityMonitor {
     };
     
     this.eventBuffer.suspiciousActivity.push(event);
+    if (this.eventBuffer.suspiciousActivity.length > this.MAX_BUFFER_SIZE) {
+      this.eventBuffer.suspiciousActivity.shift();
+    }
     this.metrics.suspiciousPatterns++;
     this.metrics.totalEvents++;
     
@@ -272,6 +279,9 @@ class SecurityMonitor {
     };
     
     this.eventBuffer.rateLimitViolations.push(event);
+    if (this.eventBuffer.rateLimitViolations.length > this.MAX_BUFFER_SIZE) {
+      this.eventBuffer.rateLimitViolations.shift();
+    }
     this.metrics.rateLimitViolations++;
     this.metrics.totalEvents++;
     
@@ -308,6 +318,9 @@ class SecurityMonitor {
     };
     
     this.eventBuffer.errors.push(event);
+    if (this.eventBuffer.errors.length > this.MAX_BUFFER_SIZE) {
+      this.eventBuffer.errors.shift();
+    }
     this.metrics.totalEvents++;
     
     this.logger.security('Security error recorded', event);
@@ -339,6 +352,9 @@ class SecurityMonitor {
     };
     
     this.eventBuffer.securityEvents.push(event);
+    if (this.eventBuffer.securityEvents.length > this.MAX_BUFFER_SIZE) {
+      this.eventBuffer.securityEvents.shift();
+    }
     this.metrics.securityEvents++;
     // Ensure timestamp is unique by adding a small increment
     const now = new Date();
@@ -449,6 +465,28 @@ class SecurityMonitor {
   }
 
   /**
+   * Save metrics to persistent storage with throttling
+   */
+  saveMetricsToFile() {
+    // Only schedule save if not already pending
+    if (this.saveTimeout) return;
+    
+    this.saveTimeout = setTimeout(() => {
+      this.saveTimeout = null;
+      try {
+        const metricsToSave = {
+          ...this.metrics,
+          blockedIPs: Array.from(this.metrics.blockedIPs),
+          blockedIPDetails: Array.from(this.metrics.blockedIPDetails.entries())
+        };
+        fs.writeFileSync(this.metricsFile, JSON.stringify(metricsToSave, null, 2));
+      } catch (error) {
+        this.logger.error('Failed to save security metrics', { error: error.message });
+      }
+    }, 5000); // Save at most once every 5 seconds
+  }
+
+  /**
    * Block IP address
    * @param {string} ip - IP address to block
    * @param {string} reason - Reason for blocking
@@ -464,6 +502,16 @@ class SecurityMonitor {
     if (!this.metrics.blockedIPs) {
       this.metrics.blockedIPs = new Set();
     }
+    
+    // Check if we've already blocked this IP
+    if (this.metrics.blockedIPs.has(ip)) return;
+    
+    // Cap the number of simultaneously blocked IPs to prevent memory exhaustion
+    if (this.metrics.blockedIPs.size >= 5000) {
+      this.logger.warn('Maximum blocked IPs reached, not blocking:', ip);
+      return;
+    }
+    
     this.metrics.blockedIPs.add(ip);
     
     const blockEvent = {
