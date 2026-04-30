@@ -17,32 +17,36 @@ class WorkerService {
       const endOfDay = new Date(now.setHours(23, 59, 59, 999));
 
       // 1. Get Active Timer (Clock In Status)
+      const { toSafeString } = require('../utils/security');
+      const safeEmail = toSafeString(userEmail);
+      const safeOrgId = toSafeString(organizationId);
+
       const activeTimer = await ActiveTimer.findOne({
-        userEmail: userEmail,
-        organizationId: organizationId,
+        userEmail: safeEmail,
+        organizationId: safeOrgId,
         endTime: null // Assuming null endTime means running, or check logic
       }).lean();
 
       // 2. Get Today's Shifts
       const todayShifts = await Shift.find({
-        employeeEmail: userEmail,
-        organizationId: organizationId,
+        employeeEmail: safeEmail,
+        organizationId: safeOrgId,
         startTime: { $gte: startOfDay, $lte: endOfDay },
         status: { $ne: 'cancelled' }
       }).sort({ startTime: 1 }).lean();
 
       // 3. Get Next Upcoming Shift (if not in today's list, or next one today)
       const nextShift = await Shift.findOne({
-        employeeEmail: userEmail,
-        organizationId: organizationId,
+        employeeEmail: safeEmail,
+        organizationId: safeOrgId,
         startTime: { $gt: new Date() },
         status: { $ne: 'cancelled' }
       }).sort({ startTime: 1 }).lean();
 
       // 4. Get Recent Expenses (Last 3)
       const recentExpenses = await Expense.find({
-        submittedBy: userEmail,
-        organizationId: organizationId
+        submittedBy: safeEmail,
+        organizationId: safeOrgId
       })
       .sort({ expenseDate: -1 })
       .limit(3)
@@ -50,13 +54,13 @@ class WorkerService {
 
       // 5. Get Leave Balances
       const leaveBalances = await LeaveBalance.find({
-        userEmail: userEmail
+        userEmail: safeEmail
       }).lean();
 
       // 6. Get Past Assigned Shifts (from assignment schedules)
       const assignments = await ClientAssignment.find({
-        userEmail: userEmail,
-        organizationId: organizationId,
+        userEmail: safeEmail,
+        organizationId: safeOrgId,
         isActive: true
       }).populate('clientId', 'clientFirstName clientLastName clientEmail').lean();
 
@@ -77,9 +81,13 @@ class WorkerService {
 
   async getPastAssignedShiftHistory(userEmail, organizationId, options = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeEmail = toSafeString(userEmail);
+      const safeOrgId = toSafeString(organizationId);
+
       const assignments = await ClientAssignment.find({
-        userEmail: userEmail,
-        organizationId: organizationId,
+        userEmail: safeEmail,
+        organizationId: safeOrgId,
         isActive: true
       }).populate('clientId', 'clientFirstName clientLastName clientEmail').lean();
 

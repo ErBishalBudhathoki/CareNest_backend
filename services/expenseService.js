@@ -46,9 +46,10 @@ async function createExpense(expenseData) {
     }
 
     // Verify user belongs to organization
+    const { toSafeString } = require('../utils/security');
     const user = await User.findOne({
-      email: userEmail,
-      organizationId: organizationId
+      email: toSafeString(userEmail),
+      organizationId: toSafeString(organizationId)
     });
 
     if (!user) {
@@ -215,26 +216,30 @@ async function getOrganizationExpenses(organizationId, options = {}) {
     } = options;
 
     // Build query
-    const query = { organizationId: organizationId, isActive: true };
+    const { toSafeString } = require('../utils/security');
+    const query = { 
+      organizationId: toSafeString(organizationId), 
+      isActive: true 
+    };
     
     if (clientId) {
-      query.clientId = clientId;
+      query.clientId = toSafeString(clientId);
     }
     
     if (category) {
-      query.category = category;
+      query.category = toSafeString(category);
     }
     
     if (subcategory) {
-      query.subcategory = subcategory;
+      query.subcategory = toSafeString(subcategory);
     }
     
     if (status) {
-      query.status = status;
+      query.status = toSafeString(status);
     }
     
     if (approvalStatus) {
-      query.approvalStatus = approvalStatus;
+      query.approvalStatus = toSafeString(approvalStatus);
     }
     
     if (isReimbursable !== undefined) {
@@ -242,7 +247,7 @@ async function getOrganizationExpenses(organizationId, options = {}) {
     }
     
     if (submittedBy) {
-      query.submittedBy = submittedBy;
+      query.submittedBy = toSafeString(submittedBy);
     }
     
     // Date range filter
@@ -268,11 +273,12 @@ async function getOrganizationExpenses(organizationId, options = {}) {
     }
     
     if (search) {
+      const escapedSearch = toSafeString(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
-        { description: { $regex: search, $options: 'i' } },
-        { supportItemName: { $regex: search, $options: 'i' } },
-        { supportItemNumber: { $regex: search, $options: 'i' } },
-        { notes: { $regex: search, $options: 'i' } }
+        { description: { $regex: escapedSearch, $options: 'i' } },
+        { supportItemName: { $regex: escapedSearch, $options: 'i' } },
+        { supportItemNumber: { $regex: escapedSearch, $options: 'i' } },
+        { notes: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 
@@ -410,8 +416,12 @@ async function updateExpense(expenseId, updateData) {
       throw new Error('userEmail is required');
     }
 
+    const { toSafeString } = require('../utils/security');
+    const safeExpenseId = toSafeString(expenseId);
+    const safeUserEmail = toSafeString(userEmail);
+
     // Get existing record
-    const existingRecord = await Expense.findById(expenseId);
+    const existingRecord = await Expense.findById(safeExpenseId);
 
     if (!existingRecord) {
       throw new Error('Expense record not found');
@@ -419,7 +429,7 @@ async function updateExpense(expenseId, updateData) {
 
     // Verify user belongs to organization
     const user = await User.findOne({
-      email: userEmail,
+      email: safeUserEmail,
       organizationId: existingRecord.organizationId
     });
 
@@ -605,8 +615,12 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
       throw new Error('userEmail is required');
     }
 
+    const { toSafeString } = require('../utils/security');
+    const safeExpenseId = toSafeString(expenseId);
+    const safeUserEmail = toSafeString(userEmail);
+
     // Get existing record
-    const existingRecord = await Expense.findById(expenseId);
+    const existingRecord = await Expense.findById(safeExpenseId);
 
     if (!existingRecord) {
       throw new Error('Expense record not found');
@@ -614,7 +628,7 @@ async function deleteExpense(expenseId, userEmail, deleteReason) {
 
     // Verify user belongs to organization
     const user = await User.findOne({
-      email: userEmail,
+      email: safeUserEmail,
       organizationId: existingRecord.organizationId
     });
 
@@ -685,12 +699,17 @@ async function updateExpenseApproval(expenseId, approvalData) {
       throw new Error('approvalStatus and userEmail are required');
     }
 
-    if (!['pending', 'approved', 'rejected'].includes(approvalStatus)) {
+    const { toSafeString } = require('../utils/security');
+    const safeExpenseId = toSafeString(expenseId);
+    const safeUserEmail = toSafeString(userEmail);
+    const safeApprovalStatus = toSafeString(approvalStatus);
+
+    if (!['pending', 'approved', 'rejected'].includes(safeApprovalStatus)) {
       throw new Error('approvalStatus must be pending, approved, or rejected');
     }
 
     // Get existing record
-    const existingRecord = await Expense.findById(expenseId);
+    const existingRecord = await Expense.findById(safeExpenseId);
 
     if (!existingRecord) {
       throw new Error('Expense record not found');
@@ -698,7 +717,7 @@ async function updateExpenseApproval(expenseId, approvalData) {
 
     // Verify user belongs to organization
     const user = await User.findOne({
-      email: userEmail,
+      email: safeUserEmail,
       organizationId: existingRecord.organizationId
     });
 

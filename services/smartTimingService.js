@@ -93,9 +93,11 @@ class SmartTimingService {
     }
 
     // Track category-specific engagement
-    if (category !== '__proto__' && category !== 'constructor' && category !== 'prototype') {
-      pattern.categoryEngagement[category] =
-        (pattern.categoryEngagement[category] || 0) + 1;
+    const { toSafeString, isValidKey } = require('../utils/security');
+    const safeCategory = toSafeString(category);
+    if (safeCategory && isValidKey(safeCategory)) {
+      pattern.categoryEngagement[safeCategory] =
+        (pattern.categoryEngagement[safeCategory] || 0) + 1;
     }
 
     // Calculate engagement score
