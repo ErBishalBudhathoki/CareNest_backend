@@ -12,7 +12,8 @@ class OnboardingService {
      * Get or create onboarding status for a user
      */
     static async getOnboardingStatus(userId, organizationId) {
-        let record = await OnboardingRecord.findOne({ userId });
+        const { toSafeString } = require('../utils/security');
+        let record = await OnboardingRecord.findOne({ userId: toSafeString(userId) });
 
         if (!record) {
             // Create initial record if it doesn't exist
@@ -44,8 +45,9 @@ class OnboardingService {
             updateData.currentStep = currentStep;
         }
 
+        const { toSafeString } = require('../utils/security');
         const result = await OnboardingRecord.findOneAndUpdate(
-            { userId },
+            { userId: toSafeString(userId) },
             { $set: updateData },
             { new: true } // returnDocument: 'after' equivalent
         );
@@ -66,10 +68,11 @@ class OnboardingService {
         await document.save();
 
         // Update document count in onboarding record
-        const count = await EmployeeDocument.countDocuments({ userId: docData.userId });
+        const { toSafeString } = require('../utils/security');
+        const count = await EmployeeDocument.countDocuments({ userId: toSafeString(docData.userId) });
 
         await OnboardingRecord.updateOne(
-            { userId: docData.userId },
+            { userId: toSafeString(docData.userId) },
             {
                 $set: {
                     'steps.documents.count': count,
@@ -85,7 +88,8 @@ class OnboardingService {
      * Get all documents for a user
      */
     static async getUserDocuments(userId) {
-        return await EmployeeDocument.find({ userId });
+        const { toSafeString } = require('../utils/security');
+        return await EmployeeDocument.find({ userId: toSafeString(userId) });
     }
 
     /**
@@ -93,9 +97,10 @@ class OnboardingService {
      */
     static async deleteDocument(docId, userId) {
         // Ensure the document belongs to the user
+        const { toSafeString } = require('../utils/security');
         const result = await EmployeeDocument.deleteOne({
-            _id: docId,
-            userId: userId
+            _id: toSafeString(docId),
+            userId: toSafeString(userId)
         });
 
         if (result.deletedCount === 0) {
@@ -103,10 +108,10 @@ class OnboardingService {
         }
 
         // Update document count
-        const count = await EmployeeDocument.countDocuments({ userId });
+        const count = await EmployeeDocument.countDocuments({ userId: toSafeString(userId) });
 
         await OnboardingRecord.updateOne(
-            { userId },
+            { userId: toSafeString(userId) },
             {
                 $set: {
                     'steps.documents.count': count,
@@ -122,8 +127,9 @@ class OnboardingService {
      * Submit onboarding for review
      */
     static async submitOnboarding(userId) {
+        const { toSafeString } = require('../utils/security');
         const result = await OnboardingRecord.findOneAndUpdate(
-            { userId },
+            { userId: toSafeString(userId) },
             {
                 $set: {
                     status: 'submitted',
@@ -145,8 +151,9 @@ class OnboardingService {
     static async getPendingOnboardings(organizationId) {
         // Join with login collection (User model) to get names
         // Using aggregation to mimic original behavior
+        const { toSafeString } = require('../utils/security');
         return await OnboardingRecord.aggregate([
-            { $match: { organizationId: organizationId } }, // Ensure organizationId is string as per model
+            { $match: { organizationId: toSafeString(organizationId) } }, // Ensure organizationId is string as per model
             {
                 $lookup: {
                     from: 'login', // User collection name
@@ -177,16 +184,17 @@ class OnboardingService {
      * Verify a document
      */
     static async verifyDocument(docId, status, reason, adminId) {
+        const { toSafeString } = require('../utils/security');
         const updateData = {
             status,
             verifiedAt: new Date(),
-            verifiedBy: adminId
+            verifiedBy: toSafeString(adminId)
         };
 
         if (reason) updateData.rejectionReason = reason;
 
         return await EmployeeDocument.findOneAndUpdate(
-            { _id: docId },
+            { _id: toSafeString(docId) },
             { $set: updateData },
             { new: true }
         );
@@ -197,12 +205,13 @@ class OnboardingService {
      */
     static async finalizeOnboarding(userId, _adminId) {
         // Calculate probation end date (e.g., 3 months from now)
+        const { toSafeString } = require('../utils/security');
         const startDate = new Date();
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + 3);
 
         const result = await OnboardingRecord.findOneAndUpdate(
-            { userId },
+            { userId: toSafeString(userId) },
             {
                 $set: {
                     status: 'completed',
@@ -243,7 +252,7 @@ class OnboardingService {
 
         // Send welcome email
         try {
-            const user = await User.findById(userId);
+            const user = await User.findById(toSafeString(userId));
             if (user && user.email) {
                 const name = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Employee';
                 await emailService.sendOnboardingWelcomeEmail(user.email, name);
@@ -267,7 +276,8 @@ class OnboardingService {
             return;
         }
 
-        const user = await User.findById(userId).lean();
+        const { toSafeString } = require('../utils/security');
+        const user = await User.findById(toSafeString(userId)).lean();
         if (!user || !user.email) {
             throw new Error('User email not found — cannot sync bank details');
         }
@@ -313,7 +323,8 @@ class OnboardingService {
             other:           'Other Document'
         };
 
-        const docs = await EmployeeDocument.find({ userId }).lean();
+        const { toSafeString } = require('../utils/security');
+        const docs = await EmployeeDocument.find({ userId: toSafeString(userId) }).lean();
         if (!docs.length) {
             logger.info('[OnboardingService] No documents to promote for user', { userId });
             return;
@@ -323,10 +334,10 @@ class OnboardingService {
             const certName = TYPE_LABELS[doc.type] || 'Other Document';
             // Upsert keyed on userId + source + name to be idempotent across re-finalizes.
             await Certification.updateOne(
-                { userId, source: 'onboarding', name: certName },
+                { userId: toSafeString(userId), source: 'onboarding', name: certName },
                 {
                     $setOnInsert: {
-                        userId,
+                        userId: toSafeString(userId),
                         name:       certName,
                         fileUrl:    doc.fileUrl,
                         expiryDate: doc.expiryDate || null,
@@ -364,7 +375,8 @@ class OnboardingService {
 
         if (!Object.keys(patch).length) return;
 
-        await User.updateOne({ _id: userId }, { $set: patch });
+        const { toSafeString } = require('../utils/security');
+        await User.updateOne({ _id: toSafeString(userId) }, { $set: patch });
         logger.info('[OnboardingService] Personal details synced to User document', { userId });
     }
 

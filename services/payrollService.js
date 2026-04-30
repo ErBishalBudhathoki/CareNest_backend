@@ -27,14 +27,16 @@ class PayrollService {
      */
     async getPayrollSummary(organizationId, startDate, endDate) {
         try {
+            const { toSafeString } = require('../utils/security');
+            const safeOrgId = toSafeString(organizationId);
             const db = await this.connect();
 
             // 1. Fetch Employees
-            const employees = await userService.getOrganizationEmployees(organizationId);
+            const employees = await userService.getOrganizationEmployees(safeOrgId);
 
             // 2. Fetch Worked Records (Shifts)
             const query = {
-                organizationId: organizationId,
+                organizationId: safeOrgId,
                 shiftDate: {
                     $gte: startDate,
                     $lte: endDate
@@ -69,7 +71,7 @@ class PayrollService {
                 anomalies: []
             };
 
-            const shiftsByUser = {};
+            const shiftsByUser = Object.create(null);
             for (const shift of shifts) {
                 if (!shiftsByUser[shift.userEmail]) shiftsByUser[shift.userEmail] = [];
                 shiftsByUser[shift.userEmail].push(shift);

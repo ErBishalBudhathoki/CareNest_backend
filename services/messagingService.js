@@ -204,10 +204,11 @@ const resolveShiftWindowFromConversation = async (conversation) => {
   let scheduleItem = null;
 
   if (scheduleId && mongoose.Types.ObjectId.isValid(scheduleId)) {
+    const { toSafeString } = require('../utils/security');
     assignment = await ClientAssignment.findOne({
       isActive: true,
-      'schedule._id': scheduleId,
-      ...(conversation?.organizationId ? { organizationId: conversation.organizationId } : {}),
+      'schedule._id': toSafeString(scheduleId),
+      ...(conversation?.organizationId ? { organizationId: toSafeString(conversation.organizationId) } : {}),
     }).lean();
 
     if (assignment) {
@@ -269,9 +270,10 @@ const provisionConversationsForUser = async ({ authUser }) => {
   const authEmail = normalizeEmail(authUser?.email);
   if (!authEmail) return;
 
+  const { toSafeString } = require('../utils/security');
   const assignments = await ClientAssignment.find({
     isActive: true,
-    $or: [{ userEmail: authEmail }, { clientEmail: authEmail }],
+    $or: [{ userEmail: toSafeString(authEmail) }, { clientEmail: toSafeString(authEmail) }],
   }).lean();
 
   if (!assignments.length) return;
@@ -280,10 +282,10 @@ const provisionConversationsForUser = async ({ authUser }) => {
   const clientEmails = uniqueTokens(assignments.map((item) => item.clientEmail));
 
   const [workers, clients] = await Promise.all([
-    User.find({ email: { $in: workerEmails } })
+    User.find({ email: { $in: workerEmails.map(toSafeString) } })
       .select({ _id: 1, email: 1 })
       .lean(),
-    Client.find({ clientEmail: { $in: clientEmails }, isActive: true })
+    Client.find({ clientEmail: { $in: clientEmails.map(toSafeString) }, isActive: true })
       .select({ _id: 1, clientEmail: 1 })
       .lean(),
   ]);
@@ -366,7 +368,8 @@ exports.sendMessage = async (params) => {
     throw createBadRequestError('conversationId and message are required');
   }
 
-  const conversationDoc = await MessageConversation.findById(conversationId);
+  const { toSafeString } = require('../utils/security');
+  const conversationDoc = await MessageConversation.findById(toSafeString(conversationId));
   if (!conversationDoc) {
     throw createNotFoundError('Conversation not found');
   }

@@ -234,7 +234,7 @@ exports.forecastDemand = (historicalData, daysAhead) => {
   });
 
   // Find most common hours
-  const hourCounts = {};
+  const hourCounts = Object.create(null);
   allHours.forEach(hour => {
     if (hour >= 0 && hour <= 23) {
       hourCounts[hour] = (hourCounts[hour] || 0) + 1;
@@ -251,7 +251,7 @@ exports.forecastDemand = (historicalData, daysAhead) => {
   const defaultPeakHours = peakHours.length > 0 ? peakHours : [9, 10, 14, 15];
 
   // Get service type distribution
-  const serviceTypeCounts = {};
+  const serviceTypeCounts = Object.create(null);
   historicalData.forEach(day => {
     if (day.serviceTypes) {
       day.serviceTypes.forEach(st => {
@@ -692,7 +692,7 @@ exports.predictClientRisk = (clientData, metrics) => {
  */
 exports.predictServiceDemand = (historicalData, daysAhead) => {
   const predictions = [];
-  const serviceTypes = {};
+  const serviceTypes = Object.create(null);
 
   // Aggregate data by service type
   historicalData.forEach(day => {
