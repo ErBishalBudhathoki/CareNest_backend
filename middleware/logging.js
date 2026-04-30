@@ -6,6 +6,23 @@ function isInvoiceEndpoint(url = '') {
   return normalized.includes('/invoices');
 }
 
+function redactSensitiveData(data) {
+  if (!data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) return data.map(item => redactSensitiveData(item));
+  
+  const sensitiveKeys = ['password', 'token', 'secret', 'authorization', 'otp'];
+  const result = { ...data };
+  
+  for (const key of Object.keys(result)) {
+    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      result[key] = '[REDACTED]';
+    } else if (typeof result[key] === 'object' && result[key] !== null) {
+      result[key] = redactSensitiveData(result[key]);
+    }
+  }
+  return result;
+}
+
 function summarizeBodyPayload(body, { sensitive = false } = {}) {
   if (body === null || body === undefined) return undefined;
 
@@ -25,7 +42,7 @@ function summarizeBodyPayload(body, { sensitive = false } = {}) {
     return { type: 'array', length: body.length };
   }
 
-  if (typeof body === 'object') {
+  if (typeof body === 'object' && body !== null) {
     const keys = Object.keys(body);
     return {
       type: 'object',
@@ -66,7 +83,7 @@ function loggingMiddleware(req, res, next) {
     userId,
     organizationId,
     headers: getSafeHeaders(req),
-    query: Object.keys(req.query || {}).length ? req.query : undefined,
+    query: Object.keys(req.query || {}).length ? redactSensitiveData(req.query) : undefined,
     bodySummary: summarizeBodyPayload(req.body, { sensitive: isSensitivePath }),
     sensitivePath: isSensitivePath
   });
@@ -105,8 +122,8 @@ function silentLoggingMiddleware(req, res, next) {
     requestId,
     method: req.method,
     url: req.originalUrl,
-    query: req.query,
-    bodyKeys: Object.keys(req.body)
+    query: redactSensitiveData(req.query),
+    bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : []
   });
   
   // Capture the original methods
