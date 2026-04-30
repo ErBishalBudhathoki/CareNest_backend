@@ -28,7 +28,7 @@ permissions:
   pull-requests: write
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: "24"
   REGION: 'australia-southeast1'
   SERVICE_NAME: 'backend-prod'
   REGISTRY: 'australia-southeast1-docker.pkg.dev'
