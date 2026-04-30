@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { promisify } = require('util');
+const crypto = require('crypto');
 
 // Promisify fs functions for async/await usage
 const readFile = promisify(fs.readFile);
@@ -73,7 +74,7 @@ function getFileExtension(filename) {
 function generateUniqueFilename(originalName, prefix = 'file') {
   const extension = getFileExtension(originalName);
   const timestamp = Date.now();
-  const random = Math.round(Math.random() * 1E9);
+  const random = crypto.randomInt(0, 1000000000);
   return `${prefix}-${timestamp}-${random}${extension}`;
 }
 
