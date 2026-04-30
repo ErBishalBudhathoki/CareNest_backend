@@ -2,6 +2,7 @@ const { MongoClient } = require('mongodb');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const path = require('path');
+const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '../.env.development') });
 
 // Configuration
@@ -57,7 +58,7 @@ async function migratePhotos() {
                 const buffer = Buffer.from(user.photoData, 'base64');
                 
                 // Generate filename
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                const uniqueSuffix = Date.now() + '-' + crypto.randomInt(0, 1000000000);
                 const ext = user.filename ? path.extname(user.filename) : '.jpg';
                 const key = `profileImage/migrated-${user._id}-${uniqueSuffix}${ext}`;
                 

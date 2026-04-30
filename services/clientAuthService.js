@@ -203,8 +203,8 @@ class ClientAuthService {
       }
 
       const now = new Date();
-      const wasAlreadyActivated = client.isActivated === true;
-      const temporaryPassword = `Temp#${Math.random().toString(36).slice(-12)}A1`;
+      const crypto = require('crypto');
+      const temporaryPassword = `Temp#${crypto.randomBytes(6).toString('hex')}A1`;
 
       // 2. Ensure Firebase user exists
       let firebaseUser;
