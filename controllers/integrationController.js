@@ -40,10 +40,10 @@ exports.connectIntegration = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType, apiKey, accessToken, refreshToken, metadata } = req.body;
 
-    if (!integrationType) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type is required',
+        message: 'Invalid integration type',
       });
     }
 
@@ -128,10 +128,10 @@ exports.disconnectIntegration = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType } = req.body;
 
-    if (!integrationType) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type is required',
+        message: 'Invalid integration type',
       });
     }
 
@@ -191,10 +191,10 @@ exports.getAuthUrl = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType, redirectUri } = req.body;
 
-    if (!integrationType) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type is required',
+        message: 'Invalid integration type',
       });
     }
 
@@ -227,10 +227,10 @@ exports.handleCallback = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType, code, state } = req.body;
 
-    if (!integrationType || !code) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType) || !code) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type and authorization code are required',
+        message: 'Invalid integration type or missing authorization code',
       });
     }
 
@@ -295,10 +295,10 @@ exports.syncIntegration = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType, options } = req.body;
 
-    if (!integrationType) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type is required',
+        message: 'Invalid integration type',
       });
     }
 
@@ -379,10 +379,10 @@ exports.testIntegration = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType } = req.body;
 
-    if (!integrationType) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type is required',
+        message: 'Invalid integration type',
       });
     }
 
@@ -460,10 +460,10 @@ exports.updateSettings = async (req, res) => {
     const { organizationId } = req.params;
     const { integrationType, settings } = req.body;
 
-    if (!integrationType || !settings) {
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType) || !settings) {
       return res.status(400).json({
         success: false,
-        message: 'Integration type and settings are required',
+        message: 'Invalid integration type or missing settings',
       });
     }
 
@@ -510,6 +510,12 @@ exports.updateSettings = async (req, res) => {
 exports.handleWebhook = async (req, res) => {
   try {
     const { integrationType } = req.params;
+    if (!integrationType || ['__proto__', 'constructor', 'prototype'].includes(integrationType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid integration type',
+      });
+    }
     const payload = req.body;
 
     logger.info(`Received webhook from ${integrationType}:`, payload);
