@@ -7,6 +7,7 @@ const SupportItem = require('../models/SupportItem');
 const User = require('../models/User');
 const VoiceCommand = require('../models/VoiceCommand');
 const logger = require('../utils/logger');
+const InputValidator = require('../utils/inputValidator');
 const assignmentVoiceAgentService = require('./assignmentVoiceAgentService');
 const clientService = require('./clientService');
 
@@ -746,7 +747,7 @@ class VoiceService {
       return { primary: null, matches: [], confident: false };
     }
 
-    const regex = new RegExp(this._escapeRegExp(query), 'i');
+    const regex = new RegExp(InputValidator.escapeRegExp(query), 'i');
     const candidates = (
       await User.find({
       organizationId,
@@ -789,7 +790,7 @@ class VoiceService {
       return { primary: null, matches: [], confident: false };
     }
 
-    const regex = new RegExp(this._escapeRegExp(query), 'i');
+    const regex = new RegExp(InputValidator.escapeRegExp(query), 'i');
     const candidates = await Client.find({
       organizationId,
       isActive: true,
@@ -900,7 +901,7 @@ class VoiceService {
         .limit(5)
         .lean();
     } else {
-      const regex = new RegExp(this._escapeRegExp(query), 'i');
+      const regex = new RegExp(InputValidator.escapeRegExp(query), 'i');
       items = await SupportItem.find({
         isActive: true,
         $or: [
@@ -1269,7 +1270,7 @@ class VoiceService {
     };
 
     if (searchTerm) {
-      const regex = new RegExp(this._escapeRegExp(searchTerm), 'i');
+      const regex = new RegExp(InputValidator.escapeRegExp(searchTerm), 'i');
       filters.$or = [
         { clientFirstName: regex },
         { clientLastName: regex },
@@ -1702,7 +1703,7 @@ class VoiceService {
   _extractLabeledName(commandText, labels) {
     for (const label of labels) {
       const regex = new RegExp(
-        `\\b${this._escapeRegExp(label)}\\s+(.+?)(?=\\s+(?:to|on|today|tomorrow|next|from|with|using)\\b|$)`,
+        `\\b${InputValidator.escapeRegExp(label)}\\s+(.+?)(?=\\s+(?:to|on|today|tomorrow|next|from|with|using)\\b|$)`,
         'i'
       );
       const match = commandText.match(regex);
@@ -1977,10 +1978,6 @@ class VoiceService {
       organization?.name ||
       null
     );
-  }
-
-  _escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   _normalizeSearchText(value) {

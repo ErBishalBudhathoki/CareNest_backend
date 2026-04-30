@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+const safeRandom = () => crypto.randomBytes(4).readUInt32LE(0) / 0xffffffff;
 const logger = require('../config/logger');
 const catchAsync = require('../utils/catchAsync');
 const crossOrgService = require('../services/crossOrgService');
@@ -1145,16 +1147,16 @@ const getClientRisk = catchAsync(async (req, res) => {
 
       // Get client metrics (mock data for now - replace with actual queries)
       const metrics = {
-        totalInvoices: Math.floor(Math.random() * 50) + 10,
-        latePayments: Math.floor(Math.random() * 10),
-        totalAppointments: Math.floor(Math.random() * 100) + 20,
-        cancellations: Math.floor(Math.random() * 15),
-        complaints: Math.floor(Math.random() * 3),
-        escalations: Math.floor(Math.random() * 2),
-        avgResponseTime: Math.floor(Math.random() * 72) + 12,
-        recentAppointments: Math.floor(Math.random() * 30) + 10,
+        totalInvoices: Math.floor(safeRandom() * 50) + 10,
+        latePayments: Math.floor(safeRandom() * 10),
+        totalAppointments: Math.floor(safeRandom() * 100) + 20,
+        cancellations: Math.floor(safeRandom() * 15),
+        complaints: Math.floor(safeRandom() * 3),
+        escalations: Math.floor(safeRandom() * 2),
+        avgResponseTime: Math.floor(safeRandom() * 72) + 12,
+        recentAppointments: Math.floor(safeRandom() * 30) + 10,
         historicalAverage: 25,
-        monthsAsClient: Math.floor(Math.random() * 24) + 3
+        monthsAsClient: Math.floor(safeRandom() * 24) + 3
       };
 
       const clientData = {

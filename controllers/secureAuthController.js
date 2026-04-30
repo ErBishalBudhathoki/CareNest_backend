@@ -12,6 +12,7 @@ const SecureErrorHandler = require('../utils/errorHandler');
 const { admin, messaging } = require('../firebase-admin-config');
 const keyRotationService = require('../services/jwtKeyRotationService');
 const { verifyFirebaseCredentials } = require('../utils/firebasePasswordVerifier');
+const crypto = require('crypto');
 
 /**
  * Secure Authentication Controller
@@ -217,8 +218,9 @@ class SecureAuthController {
         const generateOrgCode = () => {
           const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
           let code = '';
+          const randomValues = crypto.randomBytes(6);
           for (let i = 0; i < 6; i++) {
-            code += chars.charAt(Math.floor(Math.random() * chars.length));
+            code += chars.charAt(randomValues[i] % chars.length);
           }
           return code;
         };

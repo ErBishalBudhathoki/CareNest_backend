@@ -437,7 +437,8 @@ class AuthService {
       }
 
       // Generate 6-digit OTP
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const crypto = require('crypto');
+      const otp = crypto.randomInt(100000, 1000000).toString();
       const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await User.updateOne(

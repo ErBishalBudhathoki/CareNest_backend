@@ -11,6 +11,7 @@ const AuditTrail = require('../models/AuditTrail');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
 const { invoiceArtifactService } = require('./invoiceArtifactService');
 const { getCanonicalOrganizationCode } = require('../utils/organizationCodeUtils');
+const InputValidator = require('../utils/inputValidator');
 const logger = require('../config/logger');
 const crypto = require('crypto');
 const fs = require('fs').promises;
@@ -70,7 +71,7 @@ class InvoiceManagementService {
       }
       
       if (clientEmail) {
-        query.clientEmail = new RegExp(clientEmail, 'i');
+        query.clientEmail = new RegExp(InputValidator.escapeRegExp(clientEmail), 'i');
       }
       
       if (paymentStatus) {
@@ -84,11 +85,12 @@ class InvoiceManagementService {
       }
       
       if (searchTerm) {
+        const escapedSearch = InputValidator.escapeRegExp(searchTerm);
         query.$or = [
-          { invoiceNumber: new RegExp(searchTerm, 'i') },
-          { clientName: new RegExp(searchTerm, 'i') },
-          { clientEmail: new RegExp(searchTerm, 'i') },
-          { 'metadata.internalNotes': new RegExp(searchTerm, 'i') }
+          { invoiceNumber: new RegExp(escapedSearch, 'i') },
+          { clientName: new RegExp(escapedSearch, 'i') },
+          { clientEmail: new RegExp(escapedSearch, 'i') },
+          { 'metadata.internalNotes': new RegExp(escapedSearch, 'i') }
         ];
       }
       
@@ -724,7 +726,7 @@ class InvoiceManagementService {
       // INV + ORG(3) + Y(1) + M(1) + SEQ(2+) + CLIENT(2)
       const prefix = `INV${orgCode}${shortYear}${shortMonth}`;
 
-      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedPrefix = InputValidator.escapeRegExp(prefix);
       const sequenceMatcher = new RegExp(
         `^${escapedPrefix}(\\d+)[A-Z0-9]{2}$`
       );
