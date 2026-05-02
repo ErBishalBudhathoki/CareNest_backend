@@ -1,4 +1,3 @@
-# Multi-Tenant Invoice Backend Server
 
 # Multi-Tenant Invoice Backend
 
