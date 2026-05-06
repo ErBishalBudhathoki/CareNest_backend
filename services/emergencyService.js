@@ -4,24 +4,30 @@ const QueueManager = require('../core/QueueManager');
 const logger = require('../config/logger');
 
 class EmergencyService {
-  async sendBroadcast(senderId, teamId, message, type) {
+  async sendBroadcast(senderId, teamIds, message, type, organizationId) {
+    if (!Array.isArray(teamIds)) {
+      teamIds = [teamIds];
+    }
+
     // Create record with fields matching the EmergencyBroadcast model
     const broadcast = await EmergencyBroadcast.create({
-      teamId,
+      teamId: teamIds[0], // Primary teamId for backward compatibility
+      teamIds,
       initiatorId: senderId,
+      organizationId,
       message,
       type,
       status: 'active',
       acknowledgments: []
     });
     
-    // Send high-priority FCM notifications to all team members
+    // Send high-priority FCM notifications to all team members across all selected teams
     try {
-      const members = await TeamMember.find({ teamId });
-      logger.info(`Sending emergency notifications to ${members.length} members for team ${teamId}`);
+      const members = await TeamMember.find({ teamId: { $in: teamIds } });
+      logger.info(`Sending emergency notifications to ${members.length} members across ${teamIds.length} teams`);
       
       const notificationPromises = members.map(member => {
-        // Skip the sender (optional, but usually good)
+        // Skip the sender
         if (member.userId.toString() === senderId.toString()) return Promise.resolve();
         
         return QueueManager.addJob('notifications', 'emergency_alert', {
@@ -32,7 +38,7 @@ class EmergencyService {
             data: {
               type: 'emergency_broadcast',
               broadcastId: broadcast._id.toString(),
-              teamId: teamId.toString(),
+              teamIds: teamIds.join(','),
               priority: 'high'
             }
           }
@@ -42,7 +48,6 @@ class EmergencyService {
       await Promise.all(notificationPromises);
     } catch (err) {
       logger.error('Failed to queue emergency notifications', { error: err.message });
-      // We don't throw here to avoid failing the broadcast creation if notification queue fails
     }
     
     return broadcast;
