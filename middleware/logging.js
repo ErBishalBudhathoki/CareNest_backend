@@ -7,7 +7,7 @@ function isInvoiceEndpoint(url = '') {
 }
 
 function redactSensitiveData(data) {
-  if (!data || typeof data !== 'object') return data;
+  if (!data || typeof data !== 'object' || Buffer.isBuffer(data)) return data;
   if (Array.isArray(data)) return data.map(item => redactSensitiveData(item));
   
   const sensitiveKeys = ['password', 'token', 'secret', 'authorization', 'otp'];
@@ -23,9 +23,16 @@ function redactSensitiveData(data) {
   return result;
 }
 
+function getSafeString(val) {
+  if (typeof val === 'string') return val;
+  if (Array.isArray(val) && val.length > 0) return typeof val[0] === 'string' ? val[0] : '';
+  return '';
+}
+
 function summarizeBodyPayload(body, { sensitive = false } = {}) {
   if (body === null || body === undefined) return undefined;
 
+  // Use strict type checks to prevent confusion with user-supplied objects
   if (Buffer.isBuffer(body)) {
     return { type: 'buffer', sizeBytes: body.length };
   }
@@ -42,6 +49,7 @@ function summarizeBodyPayload(body, { sensitive = false } = {}) {
     return { type: 'array', length: body.length };
   }
 
+  // Check if it's a plain object specifically
   if (Object.prototype.toString.call(body) === '[object Object]') {
     const keys = Object.keys(body);
     return {
@@ -73,9 +81,16 @@ function loggingMiddleware(req, res, next) {
   const requestUrl = req.originalUrl || req.url;
   const isSensitivePath = isInvoiceEndpoint(requestUrl);
   
-  // Extract user information from request
-  const userId = req.user?.userId || req.body?.userId || req.query?.userId || req.headers['x-user-id'];
-  const organizationId = req.user?.organizationId || req.body?.organizationId || req.query?.organizationId || req.headers['x-organization-id'];
+  // Extract user information from request safely to prevent type confusion
+  const userId = req.user?.userId || 
+                 getSafeString(req.body?.userId) || 
+                 getSafeString(req.query?.userId) || 
+                 getSafeString(req.headers['x-user-id']);
+                 
+  const organizationId = req.user?.organizationId || 
+                         getSafeString(req.body?.organizationId) || 
+                         getSafeString(req.query?.organizationId) || 
+                         getSafeString(req.headers['x-organization-id']);
   
   // Log request
   logger.request(req, {

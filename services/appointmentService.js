@@ -13,11 +13,13 @@ class AppointmentService {
    */
   static async loadAppointments(email) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeEmail = toSafeString(email);
       // Get appointments (client assignments) with client details
       const appointments = await ClientAssignment.aggregate([
         {
           $match: {
-            userEmail: email,
+            userEmail: safeEmail,
             isActive: true
           }
         },
@@ -122,12 +124,16 @@ class AppointmentService {
    */
   static async loadAppointmentDetails(userEmail, clientEmail) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeUserEmail = toSafeString(userEmail);
+      const safeClientEmail = toSafeString(clientEmail);
+
       // Get the specific appointment assignment with client details
       const appointmentDetails = await ClientAssignment.aggregate([
         {
           $match: {
-            userEmail: userEmail,
-            clientEmail: clientEmail,
+            userEmail: safeUserEmail,
+            clientEmail: safeClientEmail,
             isActive: true
           }
         },
@@ -236,11 +242,14 @@ class AppointmentService {
    */
   static async getOrganizationAssignments(organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+
       // Get assignments with client details for the organization
       const assignments = await ClientAssignment.aggregate([
         {
           $match: {
-            organizationId: organizationId,
+            organizationId: safeOrgId,
             isActive: true
           }
         },
@@ -341,11 +350,15 @@ class AppointmentService {
    */
   static async removeClientAssignment(userEmail, clientEmail) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeUserEmail = toSafeString(userEmail);
+      const safeClientEmail = toSafeString(clientEmail);
+
       // Soft delete assignment
       const result = await ClientAssignment.updateOne(
         {
-          userEmail: userEmail,
-          clientEmail: clientEmail,
+          userEmail: safeUserEmail,
+          clientEmail: safeClientEmail,
           isActive: true
         },
         {
@@ -379,6 +392,7 @@ class AppointmentService {
    */
   static async setWorkedTime(workedTimeData) {
     try {
+      const { toSafeString } = require('../utils/security');
       const {
         userEmail,
         clientEmail,
@@ -390,15 +404,18 @@ class AppointmentService {
         shiftBreak: _shiftBreakFromRequest
       } = workedTimeData;
 
+      const safeUserEmail = toSafeString(userEmail);
+      const safeClientEmail = toSafeString(clientEmail);
+
       // Validate required fields
-      if (!userEmail || !clientEmail || !timeList) {
+      if (!safeUserEmail || !safeClientEmail || !timeList) {
         throw new Error('Missing required fields: userEmail, clientEmail, timeList');
       }
 
       // Find the assigned client record
       const assignedClient = await ClientAssignment.findOne({
-        userEmail: userEmail,
-        clientEmail: clientEmail,
+        userEmail: safeUserEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
 
@@ -546,6 +563,12 @@ class AppointmentService {
    */
   static async reassignShift(organizationId, oldUserEmail, newUserEmail, clientEmail, shiftDetails) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+      const safeOldUserEmail = toSafeString(oldUserEmail);
+      const safeNewUserEmail = toSafeString(newUserEmail);
+      const safeClientEmail = toSafeString(clientEmail);
+
       // INTERNAL HELPER: Normalize schedule from legacy fields
       const getNormalizedSchedule = (doc) => {
         if (doc.schedule && doc.schedule.length > 0) return doc.schedule;
@@ -563,9 +586,9 @@ class AppointmentService {
 
       // 1. Process Old User (Remove Shift)
       const oldAssignment = await ClientAssignment.findOne({
-        organizationId,
-        userEmail: oldUserEmail,
-        clientEmail: clientEmail,
+        organizationId: safeOrgId,
+        userEmail: safeOldUserEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
 
@@ -622,9 +645,9 @@ class AppointmentService {
 
       // 2. Process New User (Add Shift)
       const newAssignment = await ClientAssignment.findOne({
-        organizationId,
-        userEmail: newUserEmail,
-        clientEmail: clientEmail,
+        organizationId: safeOrgId,
+        userEmail: safeNewUserEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
 
@@ -650,9 +673,9 @@ class AppointmentService {
       } else {
         // Create new assignment
         await ClientAssignment.create({
-          organizationId,
-          userEmail: newUserEmail,
-          clientEmail: clientEmail,
+          organizationId: safeOrgId,
+          userEmail: safeNewUserEmail,
+          clientEmail: safeClientEmail,
           clientId: oldAssignment.clientId, // Need clientId
           schedule: [shiftDetails],
           isActive: true,

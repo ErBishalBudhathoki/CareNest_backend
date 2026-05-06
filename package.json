@@ -49,8 +49,10 @@
     "minimatch": "^10.2.1",
     "glob": "^11.0.0",
     "ajv": "^8.18.0",
-    "fast-xml-parser": "5.5.8",
-    "@aws-sdk/xml-builder": "3.972.14"
+    "fast-xml-parser": "5.7.2",
+    "@aws-sdk/xml-builder": "3.972.14",
+    "@tootallnate/once": "3.0.1",
+    "uuid": "^11.0.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1014.0",
@@ -85,7 +87,7 @@
     "rate-limit-redis": "^4.3.1",
     "serverless-http": "^3.2.0",
     "stripe": "^20.4.1",
-    "uuid": "^11.1.0",
+    "uuid": "^11.0.0",
     "winston": "^3.17.0",
     "zod": "^3.22.4"
   },
