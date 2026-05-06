@@ -17,8 +17,12 @@ class EmergencyController {
       });
     }
     
-    const broadcast = await EmergencyService.sendBroadcast(senderId, teamId, message, type);
+    let broadcast = await EmergencyService.sendBroadcast(senderId, teamId, message, type);
     
+    // Populate initiator for immediate display in history
+    broadcast = await EmergencyBroadcast.findById(broadcast._id)
+      .populate('initiatorId', 'firstName lastName email');
+
     logger.business('Emergency broadcast sent', {
       action: 'emergency_broadcast',
       senderId,
