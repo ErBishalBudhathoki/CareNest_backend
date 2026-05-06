@@ -50,6 +50,9 @@ router.get('/active', viewLimiter, EmergencyController.getActive);
 // POST /api/emergency/broadcast — send an emergency broadcast (admin/manager only)
 router.post('/broadcast', requireRoles(['admin', 'manager']), emergencyLimiter, broadcastValidation, handleValidationErrors, EmergencyController.broadcast);
 
+// GET /api/emergency/history — broadcast history (admin/manager only)
+router.get('/history', requireRoles(['admin', 'manager']), viewLimiter, EmergencyController.getHistory);
+
 // PUT /api/emergency/broadcast/:broadcastId/acknowledge — acknowledge (existing route, used by EmergencyService)
 router.put('/broadcast/:broadcastId/acknowledge', acknowledgeLimiter, acknowledgeValidation, handleValidationErrors, EmergencyController.acknowledge);
 
