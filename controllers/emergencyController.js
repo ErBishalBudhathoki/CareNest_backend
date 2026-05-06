@@ -102,6 +102,28 @@ class EmergencyController {
 
     res.json({ success: true, data: broadcast });
   });
+
+  /**
+   * GET /api/emergency/history
+   * Returns all broadcasts (active and inactive) for teams the current user belongs to.
+   * Restricted to admin/manager via routes.
+   */
+  getHistory = catchAsync(async (req, res) => {
+    const userId = req.user.userId;
+
+    // Find all teams the user is a member of
+    const memberships = await TeamMember.find({ userId });
+    const teamIds = memberships.map(m => m.teamId);
+
+    const broadcasts = await EmergencyBroadcast.find({
+      teamId: { $in: teamIds }
+    })
+    .populate('initiatorId', 'firstName lastName email')
+    .sort({ createdAt: -1 })
+    .limit(50);
+
+    res.json({ success: true, data: broadcasts });
+  });
 }
 
 module.exports = new EmergencyController();
