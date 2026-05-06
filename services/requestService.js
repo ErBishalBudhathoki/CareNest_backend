@@ -47,8 +47,9 @@ class RequestService {
 
     let storedUserId = userId;
     // Resolve email to User ID if needed
+    const { toSafeString } = require('../utils/security');
     if (typeof storedUserId === 'string' && storedUserId.includes('@')) {
-      const userDoc = await User.findOne({ email: storedUserId }).select('_id');
+      const userDoc = await User.findOne({ email: toSafeString(storedUserId) }).select('_id');
       if (userDoc) {
         storedUserId = userDoc._id.toString();
       }
@@ -76,7 +77,7 @@ class RequestService {
       // Find admins
       // Query User model
       const adminQuery = {
-        organizationId: organizationId,
+        organizationId: toSafeString(organizationId),
         isActive: true,
         $or: [
           { role: { $regex: /^admin$/i } },
@@ -150,10 +151,11 @@ class RequestService {
   }
 
   async getRequests(organizationId, filters = {}) {
-    const query = { organizationId };
+    const { toSafeString } = require('../utils/security');
+    const query = { organizationId: toSafeString(organizationId) };
 
     if (filters.userId) {
-      const filterUserId = filters.userId.toString();
+      const filterUserId = toSafeString(filters.userId);
       if (filterUserId.includes('@')) {
         query.$or = [
           { userId: filterUserId },
@@ -163,7 +165,7 @@ class RequestService {
       } else {
         // Resolve ObjectId if possible
         if (mongoose.Types.ObjectId.isValid(filterUserId)) {
-          const userDoc = await User.findById(filterUserId).select('email');
+          const userDoc = await User.findById(toSafeString(filterUserId)).select('email');
           const email = userDoc?.email;
           if (email) {
             query.$or = [
@@ -181,8 +183,8 @@ class RequestService {
         }
       }
     }
-    if (filters.status) query.status = filters.status;
-    if (filters.type) query.type = filters.type;
+    if (filters.status) query.status = toSafeString(filters.status);
+    if (filters.type) query.type = toSafeString(filters.type);
 
     const requests = await Request.find(query).sort({ createdAt: -1 }).lean();
 

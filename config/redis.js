@@ -281,7 +281,10 @@ function parseConnectionOptions(redisUrl) {
 
   if (typeof redisUrl === 'string') {
     if (redisUrl.startsWith('rediss://')) {
-      options.tls = { rejectUnauthorized: false };
+      // Secure by default: only allow self-signed certs if explicitly requested via ENV
+      options.tls = { 
+        rejectUnauthorized: process.env.REDIS_REJECT_UNAUTHORIZED === 'false' ? false : true 
+      };
     }
   }
 

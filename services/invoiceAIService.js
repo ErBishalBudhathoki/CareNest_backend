@@ -325,7 +325,7 @@ exports.autoGenerateInvoices = async (appointments, options = {}) => {
   // Group by client if requested
   let invoiceGroups = [];
   if (options.groupByClient) {
-    const clientGroups = {};
+    const clientGroups = Object.create(null);
     appointments.forEach(apt => {
       const clientId = apt.clientId || apt.clientEmail;
       if (!clientGroups[clientId]) {

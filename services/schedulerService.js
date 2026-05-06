@@ -55,8 +55,10 @@ class SchedulerService {
             } = shiftDetails;
 
             // 1. Get all active employees in the organization
+            const { toSafeString } = require('../utils/security');
+            const safeOrgId = toSafeString(organizationId);
             const employees = await User.find({
-                organizationId: organizationId,
+                organizationId: safeOrgId,
                 isActive: true,
                 role: { $in: ['employee', 'user', 'Employee', 'User'] }
             });
@@ -68,7 +70,7 @@ class SchedulerService {
             // 2. Get client location if not provided
             let clientLocation = location;
             if (!clientLocation && clientEmail) {
-                const client = await Client.findOne({ clientEmail });
+                const client = await Client.findOne({ clientEmail: toSafeString(clientEmail) });
                 if (client && client.location) {
                     clientLocation = client.location;
                 }
@@ -177,13 +179,17 @@ class SchedulerService {
         try {
             const conflicts = [];
 
+            const { toSafeString } = require('../utils/security');
+            const safeEmpId = toSafeString(employeeId);
+            const safeEmpEmail = toSafeString(employeeEmail);
+
             // Check for overlapping shifts in the shifts collection
             const overlappingShifts = await Shift.find({
                 $and: [
                     {
                         $or: [
-                            { employeeId: employeeId },
-                            { employeeEmail: employeeEmail }
+                            { employeeId: safeEmpId },
+                            { employeeEmail: safeEmpEmail }
                         ]
                     },
                     {
@@ -212,7 +218,7 @@ class SchedulerService {
 
             // Check for active timers
             const activeTimer = await ActiveTimer.findOne({
-                userEmail: employeeEmail,
+                userEmail: safeEmpEmail,
                 startTime: { $lte: endTime }
             });
 
@@ -264,9 +270,12 @@ class SchedulerService {
         try {
             const conflicts = [];
 
+            const { toSafeString } = require('../utils/security');
+            const safeEmail = toSafeString(employeeEmail);
+
             // Get all active assignments for this employee
             const assignments = await ClientAssignment.find({
-                userEmail: employeeEmail,
+                userEmail: safeEmail,
                 isActive: true
             });
 
@@ -680,8 +689,11 @@ class SchedulerService {
      */
     static async getShifts(organizationId, filters = {}) {
         try {
+            const { toSafeString } = require('../utils/security');
+            const safeOrgId = toSafeString(organizationId);
+
             const query = {
-                organizationId: organizationId,
+                organizationId: safeOrgId,
                 isActive: { $ne: false }
             };
 
@@ -693,13 +705,13 @@ class SchedulerService {
                 query.startTime = { ...query.startTime, $lte: new Date(filters.endDate) };
             }
             if (filters.status) {
-                query.status = filters.status;
+                query.status = toSafeString(filters.status);
             }
             if (filters.employeeEmail) {
-                query.employeeEmail = filters.employeeEmail;
+                query.employeeEmail = toSafeString(filters.employeeEmail);
             }
             if (filters.clientEmail) {
-                query.clientEmail = filters.clientEmail;
+                query.clientEmail = toSafeString(filters.clientEmail);
             }
 
             const shifts = await Shift.find(query).sort({ startTime: 1 });
@@ -727,16 +739,19 @@ class SchedulerService {
     }
 
     static async getAssignmentBackedShifts(organizationId, filters = {}) {
+        const { toSafeString } = require('../utils/security');
+        const safeOrgId = toSafeString(organizationId);
+
         const assignmentQuery = {
-            organizationId,
+            organizationId: safeOrgId,
             isActive: true
         };
 
         if (filters.employeeEmail) {
-            assignmentQuery.userEmail = filters.employeeEmail;
+            assignmentQuery.userEmail = toSafeString(filters.employeeEmail);
         }
         if (filters.clientEmail) {
-            assignmentQuery.clientEmail = filters.clientEmail;
+            assignmentQuery.clientEmail = toSafeString(filters.clientEmail);
         }
 
         const assignments = await ClientAssignment.find(assignmentQuery).lean();
