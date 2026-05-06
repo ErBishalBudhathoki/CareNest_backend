@@ -27,6 +27,9 @@ const viewLimiter = rateLimit({
 
 // Validation rules
 const broadcastValidation = [
+  body('teamId').optional().isMongoId().withMessage('Invalid team ID'),
+  body('teamIds').optional().isArray().withMessage('teamIds must be an array'),
+  body('teamIds.*').optional().isMongoId().withMessage('Invalid team ID in array'),
   body('organizationId').optional().isMongoId().withMessage('Valid organization ID is required'),
   body('message').trim().notEmpty().withMessage('Emergency message is required'),
   body('message').isLength({ max: 1000 }).withMessage('Message too long (max 1000 characters)'),

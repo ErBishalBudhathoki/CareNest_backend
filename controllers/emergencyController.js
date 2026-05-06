@@ -7,17 +7,22 @@ const logger = require('../config/logger');
 class EmergencyController {
   broadcast = catchAsync(async (req, res) => {
     const senderId = req.user.userId;
-    const { teamId, message, type } = req.body;
+    const organizationId = req.user.organizationId;
+    const { teamId, teamIds, message, type } = req.body;
     
-    if (!teamId || !message || !type) {
+    // Resolve targeted teams (support both legacy teamId and new teamIds array)
+    let targets = teamIds;
+    if (!targets && teamId) targets = [teamId];
+
+    if (!targets || !Array.isArray(targets) || targets.length === 0 || !message || !type) {
       return res.status(400).json({
         success: false,
         code: 'VALIDATION_ERROR',
-        message: 'teamId, message, and type are required'
+        message: 'teamIds (array), message, and type are required'
       });
     }
     
-    let broadcast = await EmergencyService.sendBroadcast(senderId, teamId, message, type);
+    let broadcast = await EmergencyService.sendBroadcast(senderId, targets, message, type, organizationId);
     
     // Populate initiator for immediate display in history
     broadcast = await EmergencyBroadcast.findById(broadcast._id)
@@ -26,7 +31,8 @@ class EmergencyController {
     logger.business('Emergency broadcast sent', {
       action: 'emergency_broadcast',
       senderId,
-      teamId,
+      organizationId,
+      teamIds: targets,
       type,
       messageLength: message.length
     });
@@ -72,16 +78,24 @@ class EmergencyController {
    * Flutter TeamRepository calls this endpoint directly.
    */
   getActive = catchAsync(async (req, res) => {
-    const userId = req.user.userId;
+    const { userId, organizationId, roles } = req.user;
+    const isAdmin = roles.includes('admin') || roles.includes('manager');
 
-    // Find all teams the user is a member of
-    const memberships = await TeamMember.find({ userId });
-    const teamIds = memberships.map(m => m.teamId);
+    let query;
+    if (isAdmin && organizationId) {
+      // Admins see all active broadcasts for the entire organization
+      query = { organizationId, status: 'active' };
+    } else {
+      // Others only see active broadcasts for teams they belong to
+      const memberships = await TeamMember.find({ userId });
+      const teamIds = memberships.map(m => m.teamId);
+      query = { 
+        teamId: { $in: teamIds },
+        status: 'active'
+      };
+    }
 
-    const broadcasts = await EmergencyBroadcast.find({
-      teamId: { $in: teamIds },
-      status: 'active'
-    }).sort({ createdAt: -1 });
+    const broadcasts = await EmergencyBroadcast.find(query).sort({ createdAt: -1 });
 
     res.json({ success: true, data: broadcasts });
   });
@@ -113,18 +127,24 @@ class EmergencyController {
    * Restricted to admin/manager via routes.
    */
   getHistory = catchAsync(async (req, res) => {
-    const userId = req.user.userId;
+    const { userId, organizationId, roles } = req.user;
+    const isAdmin = roles.includes('admin') || roles.includes('manager');
 
-    // Find all teams the user is a member of
-    const memberships = await TeamMember.find({ userId });
-    const teamIds = memberships.map(m => m.teamId);
+    let query;
+    if (isAdmin && organizationId) {
+      // Admins see all broadcasts for the entire organization
+      query = { organizationId };
+    } else {
+      // Others only see broadcasts for teams they belong to
+      const memberships = await TeamMember.find({ userId });
+      const teamIds = memberships.map(m => m.teamId);
+      query = { teamId: { $in: teamIds } };
+    }
 
-    const broadcasts = await EmergencyBroadcast.find({
-      teamId: { $in: teamIds }
-    })
-    .populate('initiatorId', 'firstName lastName email')
-    .sort({ createdAt: -1 })
-    .limit(50);
+    const broadcasts = await EmergencyBroadcast.find(query)
+      .populate('initiatorId', 'firstName lastName email')
+      .sort({ createdAt: -1 })
+      .limit(50);
 
     res.json({ success: true, data: broadcasts });
   });
