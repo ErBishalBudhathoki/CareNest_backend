@@ -168,11 +168,16 @@ async function getEntityAuditHistory(entityType, entityId, organizationId, optio
       endDate = null
     } = options;
 
+    const { toSafeString } = require('../utils/security');
+    const safeEntityType = toSafeString(entityType);
+    const safeEntityId = toSafeString(entityId);
+    const safeOrgId = toSafeString(organizationId);
+
     // Build query
     const query = {
-      entityType,
-      entityId,
-      organizationId
+      entityType: safeEntityType,
+      entityId: safeEntityId,
+      organizationId: safeOrgId
     };
 
     // Add action filter if specified
@@ -239,20 +244,23 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
       endDate = null
     } = options;
 
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = toSafeString(organizationId);
+
     // Build query
-    const query = { organizationId };
+    const query = { organizationId: safeOrgId };
 
     // Add filters
-    if (entityTypes && entityTypes.length > 0) {
-      query.entityType = { $in: entityTypes };
+    if (entityTypes && Array.isArray(entityTypes)) {
+      query.entityType = { $in: entityTypes.map(t => toSafeString(t)) };
     }
 
-    if (actions && actions.length > 0) {
-      query.action = { $in: actions };
+    if (actions && Array.isArray(actions)) {
+      query.action = { $in: actions.map(a => toSafeString(a)) };
     }
 
     if (userEmail) {
-      query.userEmail = userEmail;
+      query.userEmail = toSafeString(userEmail);
     }
 
     if (startDate || endDate) {
@@ -297,15 +305,17 @@ async function getOrganizationAuditLogs(organizationId, options = {}) {
  * @param {Object} options - Query options
  * @returns {Promise<Object>} Audit statistics
  */
-async function getAuditStatistics(organizationId, options = {}) {
+  async function getAuditStatistics(organizationId, options = {}) {
   try {
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = toSafeString(organizationId);
     const {
       startDate = null,
       endDate = null
     } = options;
 
     // Build base query
-    const baseQuery = { organizationId };
+    const baseQuery = { organizationId: safeOrgId };
 
     if (startDate || endDate) {
       baseQuery.timestamp = {};
@@ -447,7 +457,8 @@ function sanitizeData(data) {
   }
 
   const sensitiveFields = ['password', 'token', 'secret', 'key', 'fcmToken'];
-  const sanitized = { ...data };
+  const sanitized = Object.create(null);
+  Object.assign(sanitized, data);
 
   // Remove sensitive fields
   sensitiveFields.forEach(field => {

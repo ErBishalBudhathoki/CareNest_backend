@@ -8,7 +8,8 @@ class NotificationService {
    * @returns {Promise<Object>} Notification settings
    */
   async getSettings(userId) {
-    let settings = await NotificationSetting.findOne({ userId });
+    const { toSafeString } = require('../utils/security');
+    let settings = await NotificationSetting.findOne({ userId: toSafeString(userId) });
 
     if (!settings) {
       // Create default settings if not found
@@ -25,8 +26,9 @@ class NotificationService {
    * @returns {Promise<Object>} Updated settings
    */
   async updateSettings(userId, updates) {
+    const { toSafeString } = require('../utils/security');
     const settings = await NotificationSetting.findOneAndUpdate(
-      { userId },
+      { userId: toSafeString(userId) },
       { $set: updates },
       { new: true, upsert: true, runValidators: true }
     );
@@ -40,9 +42,10 @@ class NotificationService {
    * @returns {Promise<Object>} Notification history and pagination info
    */
   async getHistory(userId, { page = 1, limit = 20, type } = {}) {
-    const query = { userId };
+    const { toSafeString } = require('../utils/security');
+    const query = { userId: toSafeString(userId) };
     if (type) {
-      query.type = type;
+      query.type = toSafeString(type);
     }
 
     const skip = (page - 1) * limit;
@@ -74,8 +77,9 @@ class NotificationService {
    * @returns {Promise<Object>} Updated notification
    */
   async markAsRead(userId, notificationId) {
+    const { toSafeString } = require('../utils/security');
     const notification = await NotificationHistory.findOneAndUpdate(
-      { _id: notificationId, userId },
+      { _id: toSafeString(notificationId), userId: toSafeString(userId) },
       { 
         $set: { 
           status: 'read',

@@ -57,17 +57,18 @@ class InvoiceManagementService {
       } = pagination;
       
       // Build query filter
+      const { toSafeString } = require('../utils/security');
       const query = {
-        organizationId,
+        organizationId: toSafeString(organizationId),
         'deletion.isDeleted': { $ne: true }
       };
       
       if (status) {
-        query['workflow.status'] = status;
+        query['workflow.status'] = toSafeString(status);
       }
 
       if (invoiceType) {
-        query['metadata.invoiceType'] = invoiceType;
+        query['metadata.invoiceType'] = toSafeString(invoiceType);
       }
       
       if (clientEmail) {
@@ -75,7 +76,7 @@ class InvoiceManagementService {
       }
       
       if (paymentStatus) {
-        query['payment.status'] = paymentStatus;
+        query['payment.status'] = toSafeString(paymentStatus);
       }
       
       if (dateFrom || dateTo) {
@@ -152,9 +153,13 @@ class InvoiceManagementService {
    */
   async getInvoiceDetails(invoiceId, organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       const invoice = await Invoice.findOne({
-        _id: invoiceId,
-        organizationId,
+        _id: safeInvoiceId,
+        organizationId: safeOrgId,
         'deletion.isDeleted': { $ne: true }
       });
       
@@ -774,10 +779,14 @@ class InvoiceManagementService {
    */
   async logInvoiceAccess(invoiceId, organizationId, action, metadata = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       await AuditTrail.create({
         timestamp: new Date(),
-        invoiceId,
-        organizationId,
+        invoiceId: safeInvoiceId,
+        organizationId: safeOrgId,
         action,
         metadata,
         userAgent: metadata.userAgent || 'system',
@@ -794,9 +803,13 @@ class InvoiceManagementService {
    */
   async updatePaymentStatus(invoiceId, organizationId, status, paymentDetails = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       const invoice = await Invoice.findOne({
-        _id: invoiceId,
-        organizationId,
+        _id: safeInvoiceId,
+        organizationId: safeOrgId,
         'deletion.isDeleted': { $ne: true }
       });
       

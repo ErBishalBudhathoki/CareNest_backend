@@ -28,10 +28,14 @@ class PaymentService {
     }
 
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       // 1. Check for Connected Account
       let stripeAccountHeader = {};
-      if (organizationId) {
-        const org = await Organization.findById(organizationId);
+      if (safeOrgId) {
+        const org = await Organization.findById(safeOrgId);
         if (org && org.stripeAccountId) {
            // For Standard Connect, we authenticate as the connected account
            stripeAccountHeader = { stripeAccount: org.stripeAccountId };
@@ -44,7 +48,7 @@ class PaymentService {
       const paymentIntentPayload = {
         amount: amountInCents,
         currency: currency.toLowerCase(),
-        metadata: { invoiceId, clientEmail, organizationId },
+        metadata: { invoiceId: safeInvoiceId, clientEmail, organizationId: safeOrgId },
         receipt_email: clientEmail,
         automatic_payment_methods: { enabled: true },
       };
@@ -74,7 +78,8 @@ class PaymentService {
   async createOnboardingLink(organizationId, userEmail) {
     if (!this.stripeEnabled) throw new Error('Stripe not configured');
 
-    const org = await Organization.findById(organizationId);
+    const { toSafeString } = require('../utils/security');
+    const org = await Organization.findById(toSafeString(organizationId));
     if (!org) throw new Error('Organization not found');
 
     // 1. Create a Standard Connect Account if not exists

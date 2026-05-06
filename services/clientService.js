@@ -53,6 +53,7 @@ class ClientService {
   }
 
   async _deactivateClientAccess(clientEmail, organizationId) {
+    const { toSafeString } = require('../utils/security');
     const normalizedEmail = this._normalizeEmail(clientEmail);
     if (!normalizedEmail) return;
 
@@ -64,9 +65,9 @@ class ClientService {
     );
 
     if (mongoUser) {
-      const userOrgQuery = { userId: mongoUser._id.toString() };
+      const userOrgQuery = { userId: toSafeString(mongoUser._id) };
       if (organizationId) {
-        userOrgQuery.organizationId = String(organizationId);
+        userOrgQuery.organizationId = toSafeString(organizationId);
       }
       await UserOrganization.updateMany(userOrgQuery, {
         $set: { isActive: false, updatedAt: now }
@@ -127,9 +128,10 @@ class ClientService {
       }
 
       // Verify user belongs to organization
+      const { toSafeString } = require('../utils/security');
       if (userEmail) {
         const userOrg = await UserOrganization.findOne({
-          organizationId: organizationId,
+          organizationId: toSafeString(organizationId),
           isActive: true
         }).populate('userId');
         
@@ -142,7 +144,7 @@ class ClientService {
       const existingClient = await Client.findOne(
         this.buildNonDeletedClientQuery({
           clientEmail: normalizedClientEmail,
-          organizationId: organizationId
+          organizationId: toSafeString(organizationId)
         })
       );
       
@@ -284,11 +286,15 @@ class ClientService {
 
   async getClients(organizationId, userEmail) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeEmail = toSafeString(userEmail);
+      const safeOrgId = toSafeString(organizationId);
+
       // Verify user belongs to organization
       if (organizationId && userEmail) {
         const user = await User.findOne({ 
-          email: userEmail,
-          organizationId: organizationId 
+          email: safeEmail,
+          organizationId: safeOrgId 
         });
         
         if (!user) {
@@ -298,7 +304,7 @@ class ClientService {
       
       const query = this.buildNonDeletedClientQuery();
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = safeOrgId;
       }
       
       const clients = await Client.find(query).lean();
@@ -329,10 +335,11 @@ class ClientService {
   async getClientById(clientId, organizationId, userEmail) {
     try {
       // Verify user belongs to organization
+      const { toSafeString } = require('../utils/security');
       if (organizationId && userEmail) {
         const user = await User.findOne({ 
-          email: userEmail,
-          organizationId: organizationId 
+          email: toSafeString(userEmail),
+          organizationId: toSafeString(organizationId) 
         });
         
         if (!user) {
@@ -341,11 +348,11 @@ class ClientService {
       }
       
       const query = this.buildNonDeletedClientQuery({
-        _id: clientId
+        _id: toSafeString(clientId)
       });
       
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = toSafeString(organizationId);
       }
       
       const clientDoc = await Client.findOne(query);
@@ -366,11 +373,15 @@ class ClientService {
 
   async updateClient(clientId, updateData, organizationId, userEmail) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeOrgId = toSafeString(organizationId);
+      const safeUserEmail = toSafeString(userEmail);
+
       // Verify user belongs to organization
       if (organizationId && userEmail) {
         const user = await User.findOne({ 
-          email: userEmail,
-          organizationId: organizationId 
+          email: safeUserEmail,
+          organizationId: safeOrgId 
         });
         
         if (!user) {
@@ -379,11 +390,11 @@ class ClientService {
       }
       
       const query = this.buildNonDeletedClientQuery({
-        _id: clientId
+        _id: toSafeString(clientId)
       });
       
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = toSafeString(organizationId);
       }
       
       const updateDoc = {
@@ -455,15 +466,20 @@ class ClientService {
         acc[field] = updateData[field];
       }
       return acc;
-    }, {});
+    }, Object.create(null));
   }
 
   async restoreClient(clientId, organizationId, userEmail, restoreData = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeClientId = toSafeString(clientId);
+      const safeOrgId = toSafeString(organizationId);
+      const safeUserEmail = toSafeString(userEmail);
+
       if (organizationId && userEmail) {
         const user = await User.findOne({
-          email: userEmail,
-          organizationId: organizationId
+          email: safeUserEmail,
+          organizationId: safeOrgId
         });
 
         if (!user) {
@@ -471,9 +487,9 @@ class ClientService {
         }
       }
 
-      const query = this.buildDeletedClientQuery({ _id: clientId });
+      const query = this.buildDeletedClientQuery({ _id: safeClientId });
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = safeOrgId;
       }
 
       const now = new Date();
@@ -637,11 +653,16 @@ class ClientService {
     }
 
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeClientId = toSafeString(clientId);
+      const safeOrgId = toSafeString(organizationId);
+      const safeUserEmail = toSafeString(userEmail);
+
       // Verify user belongs to organization
       if (organizationId && userEmail) {
         const user = await User.findOne({ 
-          email: userEmail,
-          organizationId: organizationId 
+          email: safeUserEmail,
+          organizationId: safeOrgId 
         });
         
         if (!user) {
@@ -650,11 +671,11 @@ class ClientService {
       }
       
       const query = this.buildNonDeletedClientQuery({
-        _id: clientId
+        _id: safeClientId
       });
       
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = safeOrgId;
       }
 
       const now = new Date();
@@ -725,10 +746,15 @@ class ClientService {
 
   async forceDeleteClient(clientId, organizationId, userEmail) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeClientId = toSafeString(clientId);
+      const safeOrgId = toSafeString(organizationId);
+      const safeUserEmail = toSafeString(userEmail);
+
       if (organizationId && userEmail) {
         const user = await User.findOne({
-          email: userEmail,
-          organizationId: organizationId
+          email: safeUserEmail,
+          organizationId: safeOrgId
         });
 
         if (!user) {
@@ -736,9 +762,9 @@ class ClientService {
         }
       }
 
-      const query = { _id: clientId };
+      const query = { _id: safeClientId };
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = safeOrgId;
       }
 
       const client = await Client.findOne(query);

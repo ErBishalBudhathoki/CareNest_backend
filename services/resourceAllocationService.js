@@ -16,15 +16,16 @@ exports.optimizeAllocation = async (params) => {
 
   try {
     // Get available workers
+    const { toSafeString } = require('../utils/security');
     const workers = await Employee.find({
-      organizationId,
+      organizationId: toSafeString(organizationId),
       status: 'active',
       [`availability.${new Date(date).getDay()}`]: true
     }).select('name skills location hourlyRate performanceScore');
 
     // Get appointments for the date
     const appointmentsData = appointments || await Appointment.find({
-      organizationId,
+      organizationId: toSafeString(organizationId),
       date: new Date(date),
       status: { $in: ['pending', 'scheduled'] }
     }).populate('client');
@@ -64,8 +65,9 @@ exports.reallocateResources = async (params) => {
 
   try {
     // Get current allocations
+    const { toSafeString } = require('../utils/security');
     const currentAllocations = await Appointment.find({
-      organizationId,
+      organizationId: toSafeString(organizationId),
       date: { $gte: new Date() },
       status: 'scheduled'
     }).populate('assignedTo client');
@@ -103,11 +105,12 @@ exports.getAllocationRecommendations = async (params) => {
   const { organizationId, appointmentId } = params;
 
   try {
-    const appointment = await Appointment.findById(appointmentId).populate('client');
+    const { toSafeString } = require('../utils/security');
+    const appointment = await Appointment.findById(toSafeString(appointmentId)).populate('client');
     
     // Get all available workers
     const workers = await Employee.find({
-      organizationId,
+      organizationId: toSafeString(organizationId),
       status: 'active'
     }).select('name skills location hourlyRate performanceScore availability');
 
@@ -421,10 +424,12 @@ function identifyAffectedAppointments(allocations, triggerId, reason) {
  */
 async function findAlternativeWorkers(affected, organizationId) {
   const alternatives = {};
+  const { toSafeString } = require('../utils/security');
+  const safeOrgId = toSafeString(organizationId);
   
   for (const appointment of affected) {
     const workers = await Employee.find({
-      organizationId,
+      organizationId: safeOrgId,
       status: 'active',
       _id: { $ne: appointment.assignedTo._id }
     }).limit(5);
