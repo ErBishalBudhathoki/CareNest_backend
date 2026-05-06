@@ -3,6 +3,9 @@ const ActiveTimer = require('../models/ActiveTimer');
 const Expense = require('../models/Expense');
 const LeaveBalance = require('../models/LeaveBalance');
 const ClientAssignment = require('../models/ClientAssignment');
+const User = require('../models/User');
+const TeamMember = require('../models/TeamMember');
+const EmergencyBroadcast = require('../models/EmergencyBroadcast');
 
 class WorkerService {
   /**
@@ -65,6 +68,19 @@ class WorkerService {
       }).populate('clientId', 'clientFirstName clientLastName clientEmail').lean();
 
       const pastAssignedShifts = this._extractPastAssignedShifts(assignments, { limit: 20 });
+      
+      // 7. Get Active Emergency Broadcasts
+      const user = await User.findOne({ email: safeEmail }).lean();
+      let activeBroadcasts = [];
+      if (user) {
+        const memberships = await TeamMember.find({ userId: user._id });
+        const teamIds = memberships.map(m => m.teamId);
+        
+        activeBroadcasts = await EmergencyBroadcast.find({
+          teamId: { $in: teamIds },
+          status: 'active'
+        }).sort({ createdAt: -1 }).lean();
+      }
 
       return {
         activeTimer,
@@ -72,7 +88,8 @@ class WorkerService {
         nextShift,
         recentExpenses,
         leaveBalances,
-        pastAssignedShifts
+        pastAssignedShifts,
+        activeBroadcasts
       };
     } catch (error) {
       throw new Error(`Error fetching worker dashboard data: ${error.message}`);
