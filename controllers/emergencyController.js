@@ -7,23 +7,23 @@ const logger = require('../config/logger');
 class EmergencyController {
   broadcast = catchAsync(async (req, res) => {
     const senderId = req.user.userId;
-    const { teamId, message, priority } = req.body;
+    const { teamId, message, type } = req.body;
     
-    if (!teamId || !message) {
+    if (!teamId || !message || !type) {
       return res.status(400).json({
         success: false,
         code: 'VALIDATION_ERROR',
-        message: 'teamId and message are required'
+        message: 'teamId, message, and type are required'
       });
     }
     
-    const broadcast = await EmergencyService.sendBroadcast(senderId, teamId, message, priority);
+    const broadcast = await EmergencyService.sendBroadcast(senderId, teamId, message, type);
     
     logger.business('Emergency broadcast sent', {
       action: 'emergency_broadcast',
       senderId,
       teamId,
-      priority: priority || 'normal',
+      type,
       messageLength: message.length
     });
     
