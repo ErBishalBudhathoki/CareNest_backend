@@ -19,6 +19,12 @@ const acknowledgeLimiter = rateLimit({
   message: { success: false, message: 'Too many acknowledge requests.' }
 });
 
+const viewLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+  message: { success: false, message: 'Too many requests. Please wait a moment.' }
+});
+
 // Validation rules
 const broadcastValidation = [
   body('organizationId').optional().isMongoId().withMessage('Valid organization ID is required'),
@@ -39,7 +45,7 @@ const acknowledgeValidation = [
 router.use(authenticateUser);
 
 // GET /api/emergency/active — active broadcasts for the current user's teams
-router.get('/active', emergencyLimiter, EmergencyController.getActive);
+router.get('/active', viewLimiter, EmergencyController.getActive);
 
 // POST /api/emergency/broadcast — send an emergency broadcast (admin/manager only)
 router.post('/broadcast', requireRoles(['admin', 'manager']), emergencyLimiter, broadcastValidation, handleValidationErrors, EmergencyController.broadcast);
