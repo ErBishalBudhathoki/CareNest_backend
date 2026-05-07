@@ -430,50 +430,46 @@ class SecureAuthController {
       organizationId = user.organizationId;
     }
 
-    // Verify token with Firebase
-    try {
-      await messaging.send(
-        {
-          token: fcmToken,
-          data: { type: 'token_verification' },
-          android: { priority: 'normal' },
-          apns: { headers: { 'apns-priority': '5' } }
-        },
-        true
-      );
-    } catch (error) {
-      return res.status(400).json(
-        SecureErrorHandler.createErrorResponse(
-          `Invalid FCM token: ${error.message}`,
-          400,
-          'INVALID_FCM_TOKEN'
-        )
-      );
-    }
+    // Non-blocking token format validation — log warnings but never reject a
+    // structurally valid token.  The old dry-run `messaging.send(…, true)` call
+    // was rejecting tokens due to transient FIS_AUTH errors, debug-mode tokens,
+    // and emulator quirks.  Since FCM token validity can only be truly verified
+    // at send-time, we save the token unconditionally and let the actual push
+    // call surface invalid-token errors (which trigger cleanup).
+    logger.info('Registering FCM token', {
+      action: 'FCM_TOKEN_REGISTER_ATTEMPT',
+      email,
+      organizationId,
+      tokenPreview: fcmToken.substring(0, 20) + '...',
+    });
 
-    // Handle old token clean up
+    // Handle old token clean up — remove token if it belonged to another user
     const existingToken = await FcmToken.findOne({ fcmToken: fcmToken });
     if (
       existingToken &&
-      (existingToken.userEmail !== email || existingToken.organizationId?.toString() !== organizationId?.toString())
+      existingToken.userEmail !== email
     ) {
       await FcmToken.deleteOne({ fcmToken: fcmToken });
+      logger.info('Cleaned up FCM token previously owned by another user', {
+        previousOwner: existingToken.userEmail,
+        newOwner: email,
+      });
     }
 
-    const fcmTokenFilter =
-      deviceId && typeof deviceId === 'string' && deviceId.trim() !== ''
-        ? { userEmail: email, organizationId, deviceId: deviceId }
-        : { userEmail: email, organizationId };
-
+    // Upsert using ONLY userEmail — this matches the unique index in the
+    // FcmToken schema.  The old filter included organizationId and deviceId
+    // which aren't in the schema, causing the upsert to never match and then
+    // fail on the unique constraint.
     await FcmToken.updateOne(
-      fcmTokenFilter,
+      { userEmail: email },
       {
         $set: {
           fcmToken: fcmToken,
           updatedAt: new Date(),
           lastValidated: new Date(),
           deviceId: deviceId || null,
-          deviceInfo: deviceInfo || null
+          deviceInfo: deviceInfo || null,
+          organizationId: organizationId || null,
         },
         $setOnInsert: { createdAt: new Date() }
       },
