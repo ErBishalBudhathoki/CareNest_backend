@@ -3,10 +3,12 @@ const TeamMember = require('../models/TeamMember');
 const EmergencyService = require('../services/emergencyService');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
+const mongoose = require('mongoose');
 
 class EmergencyController {
   broadcast = catchAsync(async (req, res) => {
-    const senderId = req.user.userId;
+    // Ensure senderId is a clean string (guards against jwt middleware returning object)
+    const senderId = String(req.user.userId || req.user.id || '');
     const organizationId = req.user.organizationId;
     const { teamId, teamIds, message, type } = req.body;
     
@@ -24,9 +26,21 @@ class EmergencyController {
     
     let broadcast = await EmergencyService.sendBroadcast(senderId, targets, message, type, organizationId);
     
-    // Populate initiator for immediate display in history
-    broadcast = await EmergencyBroadcast.findById(broadcast._id)
+    // Populate initiator for display; extract safe fields to avoid [object Object] serialisation
+    const populated = await EmergencyBroadcast.findById(broadcast._id)
       .populate('initiatorId', 'firstName lastName email');
+
+    // Build a clean response object
+    const broadcastData = populated.toJSON();
+    if (populated.initiatorId && typeof populated.initiatorId === 'object' && populated.initiatorId._id) {
+      broadcastData.initiator = {
+        id: populated.initiatorId._id.toString(),
+        firstName: populated.initiatorId.firstName,
+        lastName: populated.initiatorId.lastName,
+        email: populated.initiatorId.email,
+      };
+      broadcastData.initiatorId = populated.initiatorId._id.toString();
+    }
 
     logger.business('Emergency broadcast sent', {
       action: 'emergency_broadcast',
@@ -40,7 +54,7 @@ class EmergencyController {
     res.status(201).json({
       success: true,
       code: 'EMERGENCY_BROADCAST_SENT',
-      data: broadcast,
+      data: broadcastData,
       message: 'Emergency broadcast sent'
     });
   });
@@ -79,19 +93,39 @@ class EmergencyController {
    */
   getActive = catchAsync(async (req, res) => {
     const { userId, organizationId, roles } = req.user;
-    const isAdmin = roles.includes('admin') || roles.includes('manager');
+    const isAdmin = Array.isArray(roles)
+      ? roles.some(r => ['admin', 'manager'].includes(String(r).toLowerCase()))
+      : false;
 
     let query;
     if (isAdmin && organizationId) {
       // Admins see all active broadcasts for the entire organization
       query = { organizationId, status: 'active' };
     } else {
-      // Others only see active broadcasts for teams they belong to
-      const memberships = await TeamMember.find({ userId });
-      const teamIds = memberships.map(m => m.teamId);
-      query = { 
-        teamId: { $in: teamIds },
-        status: 'active'
+      // Safely cast string userId from JWT to ObjectId for TeamMember lookup
+      let userObjectId;
+      try {
+        userObjectId = new mongoose.Types.ObjectId(String(userId));
+      } catch (_) {
+        return res.json({ success: true, data: [] });
+      }
+
+      // Find all teams this employee belongs to
+      const memberships = await TeamMember.find({ userId: userObjectId });
+      const memberTeamIds = memberships.map(m => m.teamId);
+
+      if (memberTeamIds.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+
+      // Match broadcasts where ANY of the targeted teamIds overlaps with the user's teams.
+      // Checks both `teamIds` (array field) and legacy `teamId` (singular) for full coverage.
+      query = {
+        status: 'active',
+        $or: [
+          { teamIds: { $in: memberTeamIds } },
+          { teamId:  { $in: memberTeamIds } },
+        ],
       };
     }
 
