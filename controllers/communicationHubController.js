@@ -13,7 +13,7 @@ class CommunicationHubController {
   async getConversations(req, res) {
     try {
       const { userId } = req.params;
-      const result = await communicationHubService.getConversations(userId);
+      const result = await communicationHubService.getConversations(userId, req.user);
       return res.status(result.success ? 200 : 500).json(result);
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
@@ -23,7 +23,7 @@ class CommunicationHubController {
   async getMessages(req, res) {
     try {
       const { conversationId } = req.params;
-      const result = await communicationHubService.getMessages(conversationId);
+      const result = await communicationHubService.getMessages(conversationId, req.user);
       return res.status(result.success ? 200 : 500).json(result);
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });

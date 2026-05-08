@@ -1,4 +1,5 @@
 const CommunicationBroadcast = require('../models/CommunicationBroadcast');
+const messagingService = require('./messagingService');
 const mongoose = require('mongoose');
 
 class CommunicationHubService {
@@ -26,38 +27,57 @@ class CommunicationHubService {
     }
   }
   
-  async getConversations(userId) {
+  async getConversations(userId, authUser) {
     try {
+      // Use messagingService to fetch real conversations from MongoDB
+      const rawConversations = await messagingService.getUserConversations(userId, { authUser, provisionFromAssignments: false });
+      
+      const mapped = rawConversations.map(conv => {
+        // Determine participant name relative to the requesting user
+        let participantName = 'Unknown Participant';
+        const clientEmail = conv.clientEmail || '';
+        const workerEmail = conv.workerEmail || '';
+        if (clientEmail && clientEmail !== userId) participantName = clientEmail;
+        else if (workerEmail && workerEmail !== userId) participantName = workerEmail;
+
+        let unreadCount = 0;
+        if (conv.unreadCount && typeof conv.unreadCount === 'object') {
+           unreadCount = conv.unreadCount[userId] || 0;
+        }
+
+        return {
+          conversationId: conv._id,
+          participantName: participantName,
+          lastMessage: conv.lastMessage || 'No messages yet',
+          lastMessageTime: conv.lastMessageAt || conv.createdAt || new Date().toISOString(),
+          unreadCount: unreadCount
+        };
+      });
+
       return {
         success: true,
-        data: [
-          {
-            conversationId: 'CONV-1',
-            participantName: 'Jane Smith',
-            lastMessage: 'See you tomorrow!',
-            lastMessageTime: new Date().toISOString(),
-            unreadCount: 2
-          }
-        ]
+        data: mapped
       };
     } catch (error) {
       return { success: false, message: error.message };
     }
   }
   
-  async getMessages(conversationId) {
+  async getMessages(conversationId, authUser) {
     try {
+      const rawMessages = await messagingService.getMessages(conversationId, { limit: 50 }, authUser);
+      
+      const mapped = rawMessages.map(msg => ({
+        messageId: msg._id,
+        senderId: msg.senderId,
+        message: msg.message,
+        timestamp: msg.timestamp || new Date().toISOString(),
+        read: msg.read || false
+      }));
+
       return {
         success: true,
-        data: [
-          {
-            messageId: 'MSG-1',
-            senderId: 'user1',
-            message: 'Hello!',
-            timestamp: new Date().toISOString(),
-            read: true
-          }
-        ]
+        data: mapped.reverse() // Return chronological order for UI
       };
     } catch (error) {
       return { success: false, message: error.message };
