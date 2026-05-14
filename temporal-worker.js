@@ -57,6 +57,16 @@ async function run() {
   });
 
   logger.info('Temporal Worker started successfully.');
+
+  // Start a simple HTTP health check server for Dokploy/Swarm
+  const http = require('http');
+  const healthPort = process.env.PORT || 8080;
+  http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Worker is healthy');
+  }).listen(healthPort, () => {
+    logger.info(`Health check server listening on port ${healthPort}`);
+  });
   
   await worker.run();
 }
