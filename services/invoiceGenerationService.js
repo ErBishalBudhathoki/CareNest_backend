@@ -148,6 +148,10 @@ class InvoiceGenerationService {
    */
   async generateSingleInvoiceForBulk(userEmail, clientEmail, startDate, endDate, options = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeUserEmail = toSafeString(userEmail);
+      const safeClientEmail = toSafeString(clientEmail);
+
       const {
         usePreConfiguredPricing = true,
         skipPricePrompts = true,
@@ -155,10 +159,12 @@ class InvoiceGenerationService {
         organizationId
       } = options;
       
+      const safeOrgId = toSafeString(organizationId);
+      
       // Get client assignment data
       const assignment = await ClientAssignment.findOne({
-        userEmail: userEmail,
-        clientEmail: clientEmail,
+        userEmail: safeUserEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
       
@@ -172,7 +178,7 @@ class InvoiceGenerationService {
       
       // Get client data
       const client = await Client.findOne({
-        clientEmail: clientEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
       
@@ -368,10 +374,14 @@ class InvoiceGenerationService {
    */
   async generateInvoiceLineItems(userEmail, clientEmail, startDate, endDate) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeUserEmail = toSafeString(userEmail);
+      const safeClientEmail = toSafeString(clientEmail);
+
       // Get client assignment data
       const assignment = await ClientAssignment.findOne({
-        userEmail: userEmail,
-        clientEmail: clientEmail,
+        userEmail: safeUserEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
 
@@ -381,7 +391,7 @@ class InvoiceGenerationService {
 
       // Get client details for additional context
       const client = await Client.findOne({
-        clientEmail: clientEmail,
+        clientEmail: safeClientEmail,
         isActive: true
       });
 

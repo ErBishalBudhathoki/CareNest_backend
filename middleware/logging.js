@@ -6,9 +6,33 @@ function isInvoiceEndpoint(url = '') {
   return normalized.includes('/invoices');
 }
 
+function redactSensitiveData(data) {
+  if (!data || typeof data !== 'object' || Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return data.map(item => redactSensitiveData(item));
+  
+  const sensitiveKeys = ['password', 'token', 'secret', 'authorization', 'otp'];
+  const result = { ...data };
+  
+  for (const key of Object.keys(result)) {
+    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      result[key] = '[REDACTED]';
+    } else if (typeof result[key] === 'object' && result[key] !== null) {
+      result[key] = redactSensitiveData(result[key]);
+    }
+  }
+  return result;
+}
+
+function getSafeString(val) {
+  if (typeof val === 'string') return val;
+  if (Array.isArray(val) && val.length > 0) return typeof val[0] === 'string' ? val[0] : '';
+  return '';
+}
+
 function summarizeBodyPayload(body, { sensitive = false } = {}) {
   if (body === null || body === undefined) return undefined;
 
+  // Use strict type checks to prevent confusion with user-supplied objects
   if (Buffer.isBuffer(body)) {
     return { type: 'buffer', sizeBytes: body.length };
   }
@@ -25,7 +49,8 @@ function summarizeBodyPayload(body, { sensitive = false } = {}) {
     return { type: 'array', length: body.length };
   }
 
-  if (typeof body === 'object') {
+  // Check if it's a plain object specifically
+  if (Object.prototype.toString.call(body) === '[object Object]') {
     const keys = Object.keys(body);
     return {
       type: 'object',
@@ -56,9 +81,16 @@ function loggingMiddleware(req, res, next) {
   const requestUrl = req.originalUrl || req.url;
   const isSensitivePath = isInvoiceEndpoint(requestUrl);
   
-  // Extract user information from request
-  const userId = req.user?.userId || req.body?.userId || req.query?.userId || req.headers['x-user-id'];
-  const organizationId = req.user?.organizationId || req.body?.organizationId || req.query?.organizationId || req.headers['x-organization-id'];
+  // Extract user information from request safely to prevent type confusion
+  const userId = req.user?.userId || 
+                 getSafeString(req.body?.userId) || 
+                 getSafeString(req.query?.userId) || 
+                 getSafeString(req.headers['x-user-id']);
+                 
+  const organizationId = req.user?.organizationId || 
+                         getSafeString(req.body?.organizationId) || 
+                         getSafeString(req.query?.organizationId) || 
+                         getSafeString(req.headers['x-organization-id']);
   
   // Log request
   logger.request(req, {
@@ -66,7 +98,7 @@ function loggingMiddleware(req, res, next) {
     userId,
     organizationId,
     headers: getSafeHeaders(req),
-    query: Object.keys(req.query || {}).length ? req.query : undefined,
+    query: Object.keys(req.query || {}).length ? redactSensitiveData(req.query) : undefined,
     bodySummary: summarizeBodyPayload(req.body, { sensitive: isSensitivePath }),
     sensitivePath: isSensitivePath
   });
@@ -105,8 +137,8 @@ function silentLoggingMiddleware(req, res, next) {
     requestId,
     method: req.method,
     url: req.originalUrl,
-    query: req.query,
-    bodyKeys: Object.keys(req.body)
+    query: redactSensitiveData(req.query),
+    bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : []
   });
   
   // Capture the original methods

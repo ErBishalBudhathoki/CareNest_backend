@@ -311,14 +311,19 @@ class NotificationScheduler {
       sentAt: null // Will be updated by worker
     });
 
-    // Add to queue
-    await QueueManager.addJob(QUEUE_NAME, 'send-notification', {
-      userId,
-      notification,
-      historyId: history._id
+    // Trigger Temporal Workflow
+    const temporalClient = await require('../core/TemporalManager').getClient();
+    await temporalClient.workflow.start('NotificationWorkflow', {
+      taskQueue: 'default',
+      workflowId: `notification-${history._id}`,
+      args: [{
+        userId,
+        notification,
+        historyId: history._id.toString()
+      }]
     });
 
-    logger.info(`Notification scheduled for user ${userId}: ${notification.title}`);
+    logger.info(`Notification workflow started for user ${userId}: ${notification.title}`);
   }
 }
 

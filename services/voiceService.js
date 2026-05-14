@@ -7,6 +7,7 @@ const SupportItem = require('../models/SupportItem');
 const User = require('../models/User');
 const VoiceCommand = require('../models/VoiceCommand');
 const logger = require('../utils/logger');
+const InputValidator = require('../utils/inputValidator');
 const assignmentVoiceAgentService = require('./assignmentVoiceAgentService');
 const clientService = require('./clientService');
 
@@ -141,15 +142,17 @@ class VoiceService {
       throw new Error('Authenticated user context is required for voice commands.');
     }
 
+    const { toSafeString } = require('../utils/security');
     return {
       userId: userId.toString(),
-      email: userContext?.email || '',
-      organizationId: userContext?.organizationId || null,
-      role:
+      email: toSafeString(userContext?.email || ''),
+      organizationId: toSafeString(userContext?.organizationId || null),
+      role: toSafeString(
         userContext?.role ||
         (Array.isArray(userContext?.roles) && userContext.roles.length > 0
           ? userContext.roles[0]
-          : 'user'),
+          : 'user')
+      ),
     };
   }
 
@@ -746,7 +749,7 @@ class VoiceService {
       return { primary: null, matches: [], confident: false };
     }
 
-    const regex = new RegExp(this._escapeRegExp(query), 'i');
+    const regex = new RegExp(InputValidator.escapeRegExp(query), 'i');
     const candidates = (
       await User.find({
       organizationId,
@@ -789,7 +792,7 @@ class VoiceService {
       return { primary: null, matches: [], confident: false };
     }
 
-    const regex = new RegExp(this._escapeRegExp(query), 'i');
+    const regex = new RegExp(InputValidator.escapeRegExp(query), 'i');
     const candidates = await Client.find({
       organizationId,
       isActive: true,
@@ -900,7 +903,7 @@ class VoiceService {
         .limit(5)
         .lean();
     } else {
-      const regex = new RegExp(this._escapeRegExp(query), 'i');
+      const regex = new RegExp(InputValidator.escapeRegExp(query), 'i');
       items = await SupportItem.find({
         isActive: true,
         $or: [
@@ -1186,7 +1189,8 @@ class VoiceService {
   }
 
   async _getDashboardSummary(userContext) {
-    const organizationId = userContext.organizationId;
+    const { toSafeString } = require('../utils/security');
+    const organizationId = toSafeString(userContext.organizationId);
     if (!organizationId) {
       return this._missingOrganizationResponse('dashboard_summary');
     }
@@ -1222,7 +1226,7 @@ class VoiceService {
           },
         ]),
         NotificationHistory.countDocuments({
-          userId: userContext.userId,
+          userId: toSafeString(userContext.userId),
           status: { $ne: 'read' },
         }),
       ]);
@@ -1257,7 +1261,8 @@ class VoiceService {
   }
 
   async _getClientLookup(userContext, searchTerm) {
-    const organizationId = userContext.organizationId;
+    const { toSafeString } = require('../utils/security');
+    const organizationId = toSafeString(userContext.organizationId);
     if (!organizationId) {
       return this._missingOrganizationResponse('client_lookup');
     }
@@ -1269,7 +1274,7 @@ class VoiceService {
     };
 
     if (searchTerm) {
-      const regex = new RegExp(this._escapeRegExp(searchTerm), 'i');
+      const regex = new RegExp(InputValidator.escapeRegExp(searchTerm), 'i');
       filters.$or = [
         { clientFirstName: regex },
         { clientLastName: regex },
@@ -1316,7 +1321,8 @@ class VoiceService {
   }
 
   async _getScheduleOverview(userContext, range = 'upcoming') {
-    const organizationId = userContext.organizationId;
+    const { toSafeString } = require('../utils/security');
+    const organizationId = toSafeString(userContext.organizationId);
     if (!organizationId) {
       return this._missingOrganizationResponse('schedule_overview');
     }
@@ -1380,7 +1386,8 @@ class VoiceService {
   }
 
   async _getInvoiceSummary(userContext, filter = 'all') {
-    const organizationId = userContext.organizationId;
+    const { toSafeString } = require('../utils/security');
+    const organizationId = toSafeString(userContext.organizationId);
     if (!organizationId) {
       return this._missingOrganizationResponse('invoice_summary');
     }
@@ -1482,15 +1489,18 @@ class VoiceService {
   }
 
   async _getNotificationSummary(userContext) {
+    const { toSafeString } = require('../utils/security');
+    const safeUserId = toSafeString(userContext.userId);
+
     const notifications = await NotificationHistory.find({
-      userId: userContext.userId,
+      userId: safeUserId,
     })
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
 
     const unreadCount = await NotificationHistory.countDocuments({
-      userId: userContext.userId,
+      userId: safeUserId,
       status: { $ne: 'read' },
     });
 
@@ -1526,10 +1536,12 @@ class VoiceService {
   }
 
   async _markNotificationsRead(userContext) {
+    const { toSafeString } = require('../utils/security');
+    const safeUserId = toSafeString(userContext.userId);
     const now = new Date();
     const result = await NotificationHistory.updateMany(
       {
-        userId: userContext.userId,
+        userId: safeUserId,
         status: { $ne: 'read' },
       },
       {
@@ -1589,6 +1601,19 @@ class VoiceService {
   }
 
   _buildNavigationResponse(intent, targetRoute) {
+    const { toSafeString, isValidKey } = require('../utils/security');
+    const safeRoute = toSafeString(targetRoute);
+
+    if (!isValidKey(safeRoute)) {
+      return {
+        detectedIntent: intent,
+        executed: false,
+        actionType: 'error',
+        displayText: 'I could not find the screen you requested.',
+        parameters: { error: 'Invalid navigation target' },
+      };
+    }
+
     const responseByRoute = {
       [SUPPORTED_ROUTE_TARGETS.admin_dashboard]: 'Opening the admin dashboard.',
       [SUPPORTED_ROUTE_TARGETS.client_list]: 'Opening the client list.',
@@ -1605,7 +1630,7 @@ class VoiceService {
       detectedIntent: intent,
       executed: true,
       actionType: 'navigate',
-      parameters: { targetRoute },
+      parameters: { targetRoute: safeRoute },
       responseText:
         responseByRoute[targetRoute] || 'Opening the requested screen.',
       suggestedRoute: targetRoute,
@@ -1702,7 +1727,7 @@ class VoiceService {
   _extractLabeledName(commandText, labels) {
     for (const label of labels) {
       const regex = new RegExp(
-        `\\b${this._escapeRegExp(label)}\\s+(.+?)(?=\\s+(?:to|on|today|tomorrow|next|from|with|using)\\b|$)`,
+        `\\b${InputValidator.escapeRegExp(label)}\\s+([\\s\\S]{1,100}?)(?=\\s+(?:to|on|today|tomorrow|next|from|with|using)\\b|$)`,
         'i'
       );
       const match = commandText.match(regex);
@@ -1716,7 +1741,7 @@ class VoiceService {
 
   _extractAssignmentPair(commandText) {
     const match = commandText.match(
-      /\bassign\b\s+(.+?)\s+\bto\b\s+(.+?)(?=\s+(?:on|today|tomorrow|day after tomorrow|next|from|with|using)\b|$)/i
+      /\bassign\b\s+([\s\S]{1,100}?)\s+\bto\b\s+([\s\S]{1,100}?)(?=\s+(?:on|today|tomorrow|day after tomorrow|next|from|with|using)\b|$)/i
     );
 
     if (!match?.[1] || !match?.[2]) {
@@ -1860,7 +1885,7 @@ class VoiceService {
     }
 
     const labelMatch = commandText.match(
-      /\b(?:with|using)?\s*(?:ndis|support)\s+item\s+(.+?)(?=\s+(?:on|today|tomorrow|next|from)\b|$)/i
+      /\b(?:with|using)?\s*(?:ndis|support)\s+item\s+([\s\S]{1,100}?)(?=\s+(?:on|today|tomorrow|next|from)\b|$)/i
     );
     if (labelMatch?.[1]) {
       const query = labelMatch[1].trim();
@@ -1920,7 +1945,7 @@ class VoiceService {
 
   _extractClientSearchTerm(commandText) {
     const raw = String(commandText || '').trim();
-    const match = raw.match(/client(?:s)?(?: named| called)?\s+(.+)$/i);
+    const match = raw.match(/client(?:s)?(?: named| called)?\s+([\s\S]{1,150})$/i);
     if (match && match[1]) {
       return match[1].trim();
     }
@@ -1977,10 +2002,6 @@ class VoiceService {
       organization?.name ||
       null
     );
-  }
-
-  _escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   _normalizeSearchText(value) {

@@ -12,6 +12,7 @@ const SecureErrorHandler = require('../utils/errorHandler');
 const { admin, messaging } = require('../firebase-admin-config');
 const keyRotationService = require('../services/jwtKeyRotationService');
 const { verifyFirebaseCredentials } = require('../utils/firebasePasswordVerifier');
+const crypto = require('crypto');
 
 /**
  * Secure Authentication Controller
@@ -177,7 +178,7 @@ class SecureAuthController {
         organizationCode,
         organizationId: organizationId || null,
         phone: phone || null,
-        role: isOwner ? 'admin' : 'user',
+        role: isOwner ? 'admin' : 'employee',
         firebaseUid: firebaseUser.uid,
         firebaseSyncedAt: new Date(),
         emailVerified: false
@@ -217,8 +218,9 @@ class SecureAuthController {
         const generateOrgCode = () => {
           const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
           let code = '';
+          const randomValues = crypto.randomBytes(6);
           for (let i = 0; i < 6; i++) {
-            code += chars.charAt(Math.floor(Math.random() * chars.length));
+            code += chars.charAt(randomValues[i] % chars.length);
           }
           return code;
         };
@@ -325,7 +327,7 @@ class SecureAuthController {
               email: email,
               firstName: firstName,
               lastName: lastName,
-              role: 'user',
+              role: 'employee',
               joinedExistingOrg: true
             },
             timestamp: new Date()
@@ -428,50 +430,46 @@ class SecureAuthController {
       organizationId = user.organizationId;
     }
 
-    // Verify token with Firebase
-    try {
-      await messaging.send(
-        {
-          token: fcmToken,
-          data: { type: 'token_verification' },
-          android: { priority: 'normal' },
-          apns: { headers: { 'apns-priority': '5' } }
-        },
-        true
-      );
-    } catch (error) {
-      return res.status(400).json(
-        SecureErrorHandler.createErrorResponse(
-          `Invalid FCM token: ${error.message}`,
-          400,
-          'INVALID_FCM_TOKEN'
-        )
-      );
-    }
+    // Non-blocking token format validation — log warnings but never reject a
+    // structurally valid token.  The old dry-run `messaging.send(…, true)` call
+    // was rejecting tokens due to transient FIS_AUTH errors, debug-mode tokens,
+    // and emulator quirks.  Since FCM token validity can only be truly verified
+    // at send-time, we save the token unconditionally and let the actual push
+    // call surface invalid-token errors (which trigger cleanup).
+    logger.info('Registering FCM token', {
+      action: 'FCM_TOKEN_REGISTER_ATTEMPT',
+      email,
+      organizationId,
+      tokenPreview: fcmToken.substring(0, 20) + '...',
+    });
 
-    // Handle old token clean up
+    // Handle old token clean up — remove token if it belonged to another user
     const existingToken = await FcmToken.findOne({ fcmToken: fcmToken });
     if (
       existingToken &&
-      (existingToken.userEmail !== email || existingToken.organizationId?.toString() !== organizationId?.toString())
+      existingToken.userEmail !== email
     ) {
       await FcmToken.deleteOne({ fcmToken: fcmToken });
+      logger.info('Cleaned up FCM token previously owned by another user', {
+        previousOwner: existingToken.userEmail,
+        newOwner: email,
+      });
     }
 
-    const fcmTokenFilter =
-      deviceId && typeof deviceId === 'string' && deviceId.trim() !== ''
-        ? { userEmail: email, organizationId, deviceId: deviceId }
-        : { userEmail: email, organizationId };
-
+    // Upsert using ONLY userEmail — this matches the unique index in the
+    // FcmToken schema.  The old filter included organizationId and deviceId
+    // which aren't in the schema, causing the upsert to never match and then
+    // fail on the unique constraint.
     await FcmToken.updateOne(
-      fcmTokenFilter,
+      { userEmail: email },
       {
         $set: {
           fcmToken: fcmToken,
           updatedAt: new Date(),
           lastValidated: new Date(),
           deviceId: deviceId || null,
-          deviceInfo: deviceInfo || null
+          deviceInfo: deviceInfo || null,
+          organizationId: organizationId || null,
         },
         $setOnInsert: { createdAt: new Date() }
       },
@@ -671,7 +669,7 @@ class SecureAuthController {
     // 8. Generate token
     const userRoles = user.roles && user.roles.length > 0
       ? user.roles
-      : (user.role ? [user.role] : ['user']);
+      : (user.role ? [user.role] : ['employee']);
 
     const tokenPayload = {
       userId: user._id?.toString() || user.email,
@@ -812,20 +810,51 @@ class SecureAuthController {
     }
 
     let firebaseUser;
+    let firebaseLookupSource = user.firebaseUid ? 'uid' : 'email';
+
     try {
       if (user.firebaseUid) {
-        firebaseUser = await admin.auth().getUser(user.firebaseUid);
+        try {
+          firebaseUser = await admin.auth().getUser(user.firebaseUid);
+        } catch (firebaseUidLookupError) {
+          const isMissingUid = firebaseUidLookupError?.code === 'auth/user-not-found';
+          logger.warn('Firebase UID lookup failed for verification resend', {
+            email: normalizedEmail,
+            firebaseUid: user.firebaseUid,
+            code: firebaseUidLookupError?.code,
+            error: firebaseUidLookupError?.message,
+            fallingBackToEmail: isMissingUid,
+          });
+
+          if (!isMissingUid) {
+            throw firebaseUidLookupError;
+          }
+
+          firebaseLookupSource = 'email-fallback';
+          firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+        }
       } else {
         firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
+      }
+
+      if (firebaseUser?.uid && firebaseUser.uid !== user.firebaseUid) {
         await User.updateOne(
           { _id: user._id },
-          { $set: { firebaseUid: firebaseUser.uid, firebaseSyncedAt: new Date() } }
+          {
+            $set: {
+              firebaseUid: firebaseUser.uid,
+              firebaseSyncedAt: new Date(),
+            },
+          }
         );
       }
     } catch (firebaseLookupError) {
       logger.warn('Firebase user lookup failed for verification resend', {
         email: normalizedEmail,
-        error: firebaseLookupError.message
+        firebaseUid: user.firebaseUid,
+        lookupSource: firebaseLookupSource,
+        code: firebaseLookupError?.code,
+        error: firebaseLookupError?.message,
       });
 
       return res.status(200).json(
@@ -1158,7 +1187,7 @@ class SecureAuthController {
     // Handle both legacy 'role' and new 'roles' fields
     const userRoles = user.roles && user.roles.length > 0
       ? user.roles
-      : (user.role ? [user.role] : ['user']);
+      : (user.role ? [user.role] : ['employee']);
 
     const tokenPayload = {
       userId: user._id.toString(),

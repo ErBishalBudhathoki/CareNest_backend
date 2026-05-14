@@ -34,7 +34,8 @@ const inviteValidation = [
 ];
 
 const broadcastValidation = [
-  body('teamId').isMongoId().withMessage('Invalid team ID'),
+  body('teamIds').isArray().withMessage('teamIds must be an array'),
+  body('teamIds.*').isMongoId().withMessage('Invalid team ID in array'),
   body('message').trim().notEmpty().withMessage('Message is required'),
   body('message').isLength({ max: 1000 }).withMessage('Message too long'),
   body('type').optional().isIn(['medical', 'fire', 'security', 'alert']).withMessage('Invalid broadcast type')
@@ -60,15 +61,12 @@ router.use(authenticateUser);
 // Teams
 router.get('/my-teams', teamLimiter, TeamController.getMyTeams);
 router.post('/', teamLimiter, createTeamValidation, handleValidationErrors, TeamController.create);
+router.put('/:teamId', teamLimiter, teamIdValidation, handleValidationErrors, TeamController.update);
+router.delete('/:teamId', teamLimiter, teamIdValidation, handleValidationErrors, TeamController.delete);
+router.put('/:teamId/squash', teamLimiter, teamIdValidation, handleValidationErrors, TeamController.squash);
 router.post('/:teamId/invite', teamLimiter, inviteValidation, handleValidationErrors, TeamController.inviteMember);
 
-// Availability
 router.get('/:teamId/availability', teamLimiter, teamIdValidation, handleValidationErrors, TeamController.getAvailability);
 router.put('/status', teamLimiter, statusValidation, handleValidationErrors, TeamController.updateStatus);
-
-// Emergency
-router.post('/emergency/broadcast', broadcastLimiter, broadcastValidation, handleValidationErrors, TeamController.sendBroadcast);
-router.get('/emergency/active', teamLimiter, TeamController.getActiveBroadcasts);
-router.post('/emergency/acknowledge/:id', teamLimiter, broadcastIdValidation, handleValidationErrors, TeamController.acknowledgeBroadcast);
 
 module.exports = router;

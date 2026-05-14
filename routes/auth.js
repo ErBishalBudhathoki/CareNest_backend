@@ -79,7 +79,7 @@ router.get('/verify-organization/:code',
         success: true,
         organizationId: organization._id?.toString() || organization.organizationId,
         organizationName: organization.name || organization.organizationName,
-        organizationCode: organization.code || code.toUpperCase()
+        organizationCode: organization.organizationCode || code.toUpperCase()
       });
     } catch (error) {
       logger.error('Verify organization code error', {
@@ -476,8 +476,8 @@ router.post('/security-log',
       // Normalize event type for internal metrics while preserving original
       const normalizedEvent = String(event).replace(/[-\s]+/g, '_').toUpperCase();
 
-      // Extract request context
-      const ip = (req.headers['x-forwarded-for']?.toString().split(',')[0] || req.ip || '').trim();
+      // Extract request context securely using Express req.ip (which respects trust proxy settings)
+      const ip = (req.ip || '').trim();
       const userAgent = req.headers['user-agent'];
 
       const details = {
