@@ -5,10 +5,57 @@
 
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const { body, param } = require('express-validator');
 const realtimePortalController = require('../controllers/realtimePortalController');
 const { authenticateUser } = require('../middleware/auth');
+const { handleValidationErrors } = require('../middleware/validation');
 
 router.use(authenticateUser);
+
+const familyReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many family access requests.' },
+});
+
+const familyWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { success: false, message: 'Too many family access changes.' },
+});
+
+const familyInviteValidation = [
+  body('clientId').isMongoId().withMessage('Invalid client ID'),
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('name').isString().trim().isLength({ min: 1, max: 120 }).withMessage('Name is required'),
+  body('relationship')
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 80 })
+    .withMessage('Relationship is required'),
+  body('role')
+    .optional()
+    .isIn(['family', 'guardian', 'viewer'])
+    .withMessage('Invalid family role'),
+  body('permissions').optional().isObject().withMessage('Permissions must be an object'),
+];
+
+const familyMembersValidation = [
+  param('clientId').isMongoId().withMessage('Invalid client ID'),
+];
+
+const familyPermissionsValidation = [
+  body('clientId').isMongoId().withMessage('Invalid client ID'),
+  body('memberId').isMongoId().withMessage('Invalid family member ID'),
+  body('permissions').isObject().withMessage('Permissions must be an object'),
+];
+
+const familyStatusValidation = [
+  body('clientId').isMongoId().withMessage('Invalid client ID'),
+  body('memberId').isMongoId().withMessage('Invalid family member ID'),
+  body('status').isIn(['active', 'inactive']).withMessage('Invalid family status'),
+];
 
 // ============================================================================
 // Real-Time Tracking Routes
@@ -63,18 +110,48 @@ router.get('/checklist/:serviceType', realtimePortalController.getChecklistTempl
 // ============================================================================
 
 // Invite family member
-router.post('/family/invite', realtimePortalController.inviteFamilyMember);
+router.post(
+  '/family/invite',
+  familyWriteLimiter,
+  familyInviteValidation,
+  handleValidationErrors,
+  realtimePortalController.inviteFamilyMember
+);
 
 // Get family members
-router.get('/family/members/:clientId', realtimePortalController.getFamilyMembers);
+router.get(
+  '/family/members/:clientId',
+  familyReadLimiter,
+  familyMembersValidation,
+  handleValidationErrors,
+  realtimePortalController.getFamilyMembers
+);
 
 // Update permissions
-router.put('/family/permissions', realtimePortalController.updatePermissions);
+router.put(
+  '/family/permissions',
+  familyWriteLimiter,
+  familyPermissionsValidation,
+  handleValidationErrors,
+  realtimePortalController.updatePermissions
+);
 
 // Update member status
-router.put('/family/status', realtimePortalController.updateFamilyMemberStatus);
+router.put(
+  '/family/status',
+  familyWriteLimiter,
+  familyStatusValidation,
+  handleValidationErrors,
+  realtimePortalController.updateFamilyMemberStatus
+);
 
 // Get access log
-router.get('/family/access-log/:clientId', realtimePortalController.getAccessLog);
+router.get(
+  '/family/access-log/:clientId',
+  familyReadLimiter,
+  familyMembersValidation,
+  handleValidationErrors,
+  realtimePortalController.getAccessLog
+);
 
 module.exports = router;

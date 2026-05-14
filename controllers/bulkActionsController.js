@@ -6,6 +6,7 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../utils/logger');
+const crypto = require('crypto');
 
 /**
  * Bulk approve timesheets
@@ -290,7 +291,7 @@ exports.generateInvoices = catchAsync(async (req, res) => {
       const invoice = new Invoice({
         organizationId,
         clientId,
-        invoiceNumber: `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
         issueDate: new Date(),
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         status: 'pending',
@@ -326,7 +327,7 @@ exports.generateInvoices = catchAsync(async (req, res) => {
       const invoice = new Invoice({
         organizationId,
         clientId: apt.clientId._id,
-        invoiceNumber: `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
         issueDate: new Date(),
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         status: 'pending',

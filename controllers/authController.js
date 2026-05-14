@@ -122,7 +122,7 @@ class AuthController {
       password,
       organizationCode: organization.organizationCode,
       organizationId: organization._id.toString(),
-      role: role || 'user'
+      role: role || 'employee'
     };
     
     const newUser = await authService.createUser(userData);

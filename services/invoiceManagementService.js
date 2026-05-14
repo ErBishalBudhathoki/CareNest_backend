@@ -10,6 +10,8 @@ const Client = require('../models/Client');
 const AuditTrail = require('../models/AuditTrail');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
 const { invoiceArtifactService } = require('./invoiceArtifactService');
+const { getCanonicalOrganizationCode } = require('../utils/organizationCodeUtils');
+const InputValidator = require('../utils/inputValidator');
 const logger = require('../config/logger');
 const crypto = require('crypto');
 const fs = require('fs').promises;
@@ -55,25 +57,26 @@ class InvoiceManagementService {
       } = pagination;
       
       // Build query filter
+      const { toSafeString } = require('../utils/security');
       const query = {
-        organizationId,
+        organizationId: toSafeString(organizationId),
         'deletion.isDeleted': { $ne: true }
       };
       
       if (status) {
-        query['workflow.status'] = status;
+        query['workflow.status'] = toSafeString(status);
       }
 
       if (invoiceType) {
-        query['metadata.invoiceType'] = invoiceType;
+        query['metadata.invoiceType'] = toSafeString(invoiceType);
       }
       
       if (clientEmail) {
-        query.clientEmail = new RegExp(clientEmail, 'i');
+        query.clientEmail = new RegExp(InputValidator.escapeRegExp(clientEmail), 'i');
       }
       
       if (paymentStatus) {
-        query['payment.status'] = paymentStatus;
+        query['payment.status'] = toSafeString(paymentStatus);
       }
       
       if (dateFrom || dateTo) {
@@ -83,11 +86,12 @@ class InvoiceManagementService {
       }
       
       if (searchTerm) {
+        const escapedSearch = InputValidator.escapeRegExp(searchTerm);
         query.$or = [
-          { invoiceNumber: new RegExp(searchTerm, 'i') },
-          { clientName: new RegExp(searchTerm, 'i') },
-          { clientEmail: new RegExp(searchTerm, 'i') },
-          { 'metadata.internalNotes': new RegExp(searchTerm, 'i') }
+          { invoiceNumber: new RegExp(escapedSearch, 'i') },
+          { clientName: new RegExp(escapedSearch, 'i') },
+          { clientEmail: new RegExp(escapedSearch, 'i') },
+          { 'metadata.internalNotes': new RegExp(escapedSearch, 'i') }
         ];
       }
       
@@ -149,9 +153,13 @@ class InvoiceManagementService {
    */
   async getInvoiceDetails(invoiceId, organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       const invoice = await Invoice.findOne({
-        _id: invoiceId,
-        organizationId,
+        _id: safeInvoiceId,
+        organizationId: safeOrgId,
         'deletion.isDeleted': { $ne: true }
       });
       
@@ -704,11 +712,11 @@ class InvoiceManagementService {
 
       // Prefer organization code for human-readable compact numbers.
       const org = await Organization.findById(organizationId)
-        .select('code organizationCode name')
+        .select('organizationCode code name')
         .lean();
 
       const orgCode = this._generateCompactCode(
-        org?.code || org?.organizationCode || organizationId,
+        getCanonicalOrganizationCode(org) || organizationId,
         3,
         'X'
       );
@@ -723,7 +731,7 @@ class InvoiceManagementService {
       // INV + ORG(3) + Y(1) + M(1) + SEQ(2+) + CLIENT(2)
       const prefix = `INV${orgCode}${shortYear}${shortMonth}`;
 
-      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedPrefix = InputValidator.escapeRegExp(prefix);
       const sequenceMatcher = new RegExp(
         `^${escapedPrefix}(\\d+)[A-Z0-9]{2}$`
       );
@@ -771,10 +779,14 @@ class InvoiceManagementService {
    */
   async logInvoiceAccess(invoiceId, organizationId, action, metadata = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       await AuditTrail.create({
         timestamp: new Date(),
-        invoiceId,
-        organizationId,
+        invoiceId: safeInvoiceId,
+        organizationId: safeOrgId,
         action,
         metadata,
         userAgent: metadata.userAgent || 'system',
@@ -791,9 +803,13 @@ class InvoiceManagementService {
    */
   async updatePaymentStatus(invoiceId, organizationId, status, paymentDetails = {}) {
     try {
+      const { toSafeString } = require('../utils/security');
+      const safeInvoiceId = toSafeString(invoiceId);
+      const safeOrgId = toSafeString(organizationId);
+
       const invoice = await Invoice.findOne({
-        _id: invoiceId,
-        organizationId,
+        _id: safeInvoiceId,
+        organizationId: safeOrgId,
         'deletion.isDeleted': { $ne: true }
       });
       

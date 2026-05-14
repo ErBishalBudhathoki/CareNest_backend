@@ -133,8 +133,24 @@ class ClientAuthService {
     const query = new URLSearchParams({
       code: String(oobCode).trim(),
       lang: String(lang || 'en').trim()
-    }).toString();
-    return `${base}/client/set-password?${query}`;
+    });
+
+    const accountType = String(options.accountType || '').trim().toLowerCase();
+    const displayName = String(options.displayName || options.name || '').trim();
+    const email = this._normalizeEmail(options.email);
+
+    if (accountType) {
+      query.set('accountType', accountType);
+    }
+
+    if (displayName) {
+      query.set('name', displayName);
+    }
+
+    if (email) {
+      query.set('email', email);
+    }
+    return `${base}/client/set-password?${query.toString()}`;
   }
 
   _buildActivationEmailHtml({ firstName, webResetLink, appResetLink }) {
@@ -187,8 +203,8 @@ class ClientAuthService {
       }
 
       const now = new Date();
-      const wasAlreadyActivated = client.isActivated === true;
-      const temporaryPassword = `Temp#${Math.random().toString(36).slice(-12)}A1`;
+      const crypto = require('crypto');
+      const temporaryPassword = `Temp#${crypto.randomBytes(6).toString('hex')}A1`;
 
       // 2. Ensure Firebase user exists
       let firebaseUser;

@@ -30,6 +30,58 @@ class TeamController {
     res.status(201).json({ success: true, data: team });
   });
 
+  update = catchAsync(async (req, res) => {
+    const { teamId } = req.params;
+    const { name, settings } = req.body;
+
+    const team = await Team.findByIdAndUpdate(
+      teamId,
+      { name, settings },
+      { new: true }
+    );
+
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    res.json({ success: true, data: team });
+  });
+
+  delete = catchAsync(async (req, res) => {
+    const { teamId } = req.params;
+
+    const team = await Team.findByIdAndUpdate(
+      teamId,
+      { status: 'deleted' },
+      { new: true }
+    );
+
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // Also deactivate memberships
+    await TeamMember.updateMany({ teamId }, { status: 'deactivated' });
+
+    res.json({ success: true, message: 'Team deleted' });
+  });
+
+  squash = catchAsync(async (req, res) => {
+    const { teamId } = req.params;
+
+    const team = await Team.findByIdAndUpdate(
+      teamId,
+      { status: 'archived' },
+      { new: true }
+    );
+
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    res.json({ success: true, message: 'Team archived', data: team });
+  });
+
   getMyTeams = catchAsync(async (req, res) => {
     const userId = req.user.userId;
     
@@ -116,47 +168,6 @@ class TeamController {
 
   // --- Emergency ---
 
-  sendBroadcast = catchAsync(async (req, res) => {
-    const { teamId, message, type } = req.body;
-    const initiatorId = req.user.userId;
-
-    const broadcast = await EmergencyBroadcast.create({
-        teamId,
-        initiatorId,
-        message,
-        type: type || 'alert',
-        status: 'active'
-    });
-
-    res.status(201).json({ success: true, data: broadcast });
-  });
-
-  getActiveBroadcasts = catchAsync(async (req, res) => {
-    const userId = req.user.userId;
-    // Find teams user belongs to
-    const memberships = await TeamMember.find({ userId });
-    const teamIds = memberships.map(m => m.teamId);
-
-    const broadcasts = await EmergencyBroadcast.find({
-        teamId: { $in: teamIds },
-        status: 'active'
-    }).sort({ createdAt: -1 });
-
-    res.json({ success: true, data: broadcasts });
-  });
-
-  acknowledgeBroadcast = catchAsync(async (req, res) => {
-    const { id } = req.params;
-    const userId = req.user.userId;
-
-    const broadcast = await EmergencyBroadcast.findByIdAndUpdate(
-        id,
-        { $addToSet: { acknowledgments: userId } },
-        { new: true }
-    );
-
-    res.json({ success: true, data: broadcast });
-  });
 }
 
 module.exports = new TeamController();

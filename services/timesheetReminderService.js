@@ -67,7 +67,7 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
         const employees = await User.find({
             organizationId: organizationId,
             isActive: { $ne: false },
-            // Optional: filter by role if needed, e.g., role: 'user' or 'employee'
+            // Optional: filter by role if needed, e.g., role: 'employee'
             // For now, assuming all active users in org are employees/users
         });
 

@@ -5,6 +5,7 @@
  */
 
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const FamilyMember = require('../models/FamilyMember');
 const User = require('../models/User');
 const Client = require('../models/Client');
@@ -15,6 +16,27 @@ const { admin } = require('../firebase-admin-config');
 
 const ADMIN_ROLE_TAGS = new Set(['admin', 'superadmin', 'owner']);
 const FAMILY_ROLE = 'family';
+const MANAGEABLE_MEMBER_STATUSES = new Set(['active', 'inactive']);
+
+function assertObjectId(value, fieldName) {
+  const normalized = String(value || '').trim();
+  if (!mongoose.isValidObjectId(normalized)) {
+    const error = new Error(`${fieldName} is invalid`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return new mongoose.Types.ObjectId(normalized);
+}
+
+function normalizeManageableStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!MANAGEABLE_MEMBER_STATUSES.has(normalized)) {
+    const error = new Error('Status must be active or inactive');
+    error.statusCode = 400;
+    throw error;
+  }
+  return normalized;
+}
 
 function normalizeRoleTags(...sources) {
   const tags = new Set();
@@ -252,9 +274,11 @@ async function pushAuditLog({
 }
 
 async function getClientAndActor({ actorUserId, actorRoles, clientId }) {
+  const safeActorUserId = assertObjectId(actorUserId, 'actorUserId');
+  const safeClientId = assertObjectId(clientId, 'clientId');
   const [actorUser, client] = await Promise.all([
-    User.findById(actorUserId),
-    Client.findById(clientId),
+    User.findOne({ _id: { $eq: safeActorUserId } }),
+    Client.findOne({ _id: { $eq: safeClientId } }),
   ]);
 
   if (!actorUser) {
@@ -325,6 +349,7 @@ exports.inviteFamilyMember = async ({
   client,
   options = {},
 }) => {
+  const safeClientId = assertObjectId(clientId, 'clientId');
   const normalizedEmail = clientAuthService._normalizeEmail(email);
   if (!normalizedEmail) {
     throw new Error('Family member email is required');
@@ -337,27 +362,36 @@ exports.inviteFamilyMember = async ({
   const invitationToken = crypto.randomBytes(24).toString('hex');
   const invitationExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const existingMember = await FamilyMember.findOne({
-    clientId,
-    email: normalizedEmail,
+  let member = await FamilyMember.findOne({
+    clientId: { $eq: safeClientId },
+    email: { $eq: normalizedEmail },
   });
 
-  if (existingMember) {
+  if (member && member.status === 'inactive') {
     throw new Error(
-      existingMember.status === 'inactive'
-        ? 'Family member already exists for this client. Reactivate access instead.'
-        : 'Family member has already been invited for this client.'
+      'Family member already exists for this client. Reactivate access instead.'
     );
   }
 
+  const isResend = Boolean(member && member.status === 'pending');
+
   let mongoUser = await User.findOne({ email: normalizedEmail });
   if (mongoUser && String(mongoUser.role || '').trim().toLowerCase() !== FAMILY_ROLE) {
-    throw new Error('Email is already in use by a non-family account');
+    const existingRole =
+      String(
+        mongoUser.role ||
+          (Array.isArray(mongoUser.roles) && mongoUser.roles.length > 0
+              ? mongoUser.roles[0]
+              : 'non-family')
+      )
+          .trim()
+          .toLowerCase() || 'non-family';
+    throw new Error(`Email is already in use by a ${existingRole} account`);
   }
 
   if (
     mongoUser?.clientId &&
-    mongoUser.clientId.toString() !== String(clientId)
+    mongoUser.clientId.toString() !== safeClientId.toString()
   ) {
     throw new Error('This family account is already linked to another client');
   }
@@ -409,32 +443,58 @@ exports.inviteFamilyMember = async ({
     invitedEmail: normalizedEmail,
     relationship,
     role: normalizedRole,
-    status: 'pending',
+    status: isResend ? 'pending-resend' : 'pending',
     permissions: effectivePermissions,
   });
 
-  const member = await FamilyMember.create({
-    clientId,
-    organizationId: client.organizationId,
-    userId: mongoUser._id,
-    email: normalizedEmail,
-    firstName,
-    lastName,
-    relationship,
-    role: normalizedRole,
-    permissions: effectivePermissions,
-    status: 'pending',
-    activationPending: true,
-    invitedAt: now,
-    joinedAt: now,
-    invitationToken,
-    invitationExpiresAt,
-    activationEmailSentAt: now,
-    invitedBy: actor,
-    updatedBy: actor.email,
-    updatedByUserId: actor.userId,
-    auditTrail: [auditEntry],
-  });
+  if (member) {
+    member.organizationId = client.organizationId;
+    member.userId = mongoUser._id;
+    member.firstName = firstName;
+    member.lastName = lastName;
+    member.relationship = relationship;
+    member.role = normalizedRole;
+    member.permissions = effectivePermissions;
+    member.status = 'pending';
+    member.activationPending = true;
+    member.invitedAt = now;
+    member.invitationToken = invitationToken;
+    member.invitationExpiresAt = invitationExpiresAt;
+    member.invitedBy = actor;
+    member.updatedBy = actor.email;
+    member.updatedByUserId = actor.userId;
+    member.auditTrail.push(
+      buildAuditEntry('family_invite_resent', actor, {
+        invitedEmail: normalizedEmail,
+        relationship,
+        role: normalizedRole,
+        permissions: effectivePermissions,
+      })
+    );
+  } else {
+    member = await FamilyMember.create({
+      clientId,
+      organizationId: client.organizationId,
+      userId: mongoUser._id,
+      email: normalizedEmail,
+      firstName,
+      lastName,
+      relationship,
+      role: normalizedRole,
+      permissions: effectivePermissions,
+      status: 'pending',
+      activationPending: true,
+      invitedAt: now,
+      joinedAt: now,
+      invitationToken,
+      invitationExpiresAt,
+      activationEmailSentAt: null,
+      invitedBy: actor,
+      updatedBy: actor.email,
+      updatedByUserId: actor.userId,
+      auditTrail: [auditEntry],
+    });
+  }
 
   const resetLinks = await buildResetLinks(normalizedEmail, options);
   const emailSubject = 'Set up your CareNest family access';
@@ -454,6 +514,9 @@ exports.inviteFamilyMember = async ({
     emailHtml
   );
 
+  member.activationEmailSentAt = emailResult ? now : null;
+  await member.save();
+
   await pushAuditLog({
     action: auditService.AUDIT_ACTIONS.CREATE,
     entityId: mongoUser._id,
@@ -470,12 +533,21 @@ exports.inviteFamilyMember = async ({
     metadata: {
       invitedEmail: normalizedEmail,
       emailSent: Boolean(emailResult),
+      inviteType: isResend ? 'resend' : 'new',
       invitedByUserId: actor.userId?.toString?.() || null,
       activationLinkFormat: resetLinks.appResetLink
         ? 'com.bishal.invoice://reset-password?mode=resetPassword&oobCode=...'
         : 'firebase-web-link',
     },
   });
+
+  if (!emailResult) {
+    const error = new Error(
+      'Family member account was prepared, but the invite email could not be sent. Please try inviting again.'
+    );
+    error.statusCode = 502;
+    throw error;
+  }
 
   return {
     id: member._id.toString(),
@@ -490,12 +562,13 @@ exports.inviteFamilyMember = async ({
     invitedAt: now,
     expiresAt: invitationExpiresAt,
     token: invitationToken,
-    emailSent: Boolean(emailResult),
+    emailSent: true,
   };
 };
 
 exports.getFamilyMembers = async (clientId) => {
-  const members = await FamilyMember.find({ clientId }).sort({
+  const safeClientId = assertObjectId(clientId, 'clientId');
+  const members = await FamilyMember.find({ clientId: { $eq: safeClientId } }).sort({
     status: 1,
     createdAt: 1,
   });
@@ -503,7 +576,12 @@ exports.getFamilyMembers = async (clientId) => {
 };
 
 exports.updatePermissions = async ({ clientId, memberId, permissions, actor }) => {
-  const member = await FamilyMember.findOne({ _id: memberId, clientId });
+  const safeClientId = assertObjectId(clientId, 'clientId');
+  const safeMemberId = assertObjectId(memberId, 'memberId');
+  const member = await FamilyMember.findOne({
+    _id: { $eq: safeMemberId },
+    clientId: { $eq: safeClientId },
+  });
   if (!member) {
     throw new Error('Family member not found');
   }
@@ -549,12 +627,14 @@ exports.updateMemberStatus = async ({
   status,
   actor,
 }) => {
-  const normalizedStatus = String(status || '').trim().toLowerCase();
-  if (!['active', 'inactive'].includes(normalizedStatus)) {
-    throw new Error('Status must be active or inactive');
-  }
+  const safeClientId = assertObjectId(clientId, 'clientId');
+  const safeMemberId = assertObjectId(memberId, 'memberId');
+  const normalizedStatus = normalizeManageableStatus(status);
 
-  const member = await FamilyMember.findOne({ _id: memberId, clientId });
+  const member = await FamilyMember.findOne({
+    _id: { $eq: safeMemberId },
+    clientId: { $eq: safeClientId },
+  });
   if (!member) {
     throw new Error('Family member not found');
   }
@@ -629,6 +709,9 @@ exports.updateMemberStatus = async ({
 
   return buildFamilyMemberDto(member);
 };
+
+exports.assertObjectId = assertObjectId;
+exports.normalizeManageableStatus = normalizeManageableStatus;
 
 exports.markFamilyActivationComplete = async ({ user, now = new Date() }) => {
   if (!user || String(user.role || '').trim().toLowerCase() !== FAMILY_ROLE) {

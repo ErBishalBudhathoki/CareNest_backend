@@ -93,8 +93,12 @@ class SmartTimingService {
     }
 
     // Track category-specific engagement
-    pattern.categoryEngagement[category] =
-      (pattern.categoryEngagement[category] || 0) + 1;
+    const { toSafeString, isValidKey } = require('../utils/security');
+    const safeCategory = toSafeString(category);
+    if (safeCategory && isValidKey(safeCategory)) {
+      pattern.categoryEngagement[safeCategory] =
+        (pattern.categoryEngagement[safeCategory] || 0) + 1;
+    }
 
     // Calculate engagement score
     pattern.engagementScore = this.calculateEngagementScore(pattern);
@@ -323,12 +327,12 @@ class SmartTimingService {
       readNotifications: 0,
       actionedNotifications: 0,
       averageResponseTimeMinutes: 0,
-      hourlyEngagement: {
+      hourlyEngagement: Object.assign(Object.create(null), {
         9: 10,  // 9 AM
         12: 15, // 12 PM
         18: 12  // 6 PM
-      },
-      categoryEngagement: {},
+      }),
+      categoryEngagement: Object.create(null),
       engagementScore: 50,
       lastUpdated: new Date()
     };

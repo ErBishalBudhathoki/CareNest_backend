@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { createLogger } = require('./logger');
+const crypto = require('crypto');
 
 /**
  * Advanced Alerting System
@@ -275,7 +276,6 @@ class AlertingSystem {
     
     // Add signature if secret is configured
     if (this.channels.webhook.secret) {
-      const crypto = require('crypto');
       const signature = crypto
         .createHmac('sha256', this.channels.webhook.secret)
         .update(JSON.stringify(payload))
@@ -554,7 +554,7 @@ class AlertingSystem {
       timestamp: new Date(),
       details: {
         message: 'This is a test alert to verify the alerting system is working correctly.',
-        testId: Math.random().toString(36).substr(2, 9)
+        testId: crypto.randomBytes(5).toString('hex')
       }
     };
     

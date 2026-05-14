@@ -3,6 +3,7 @@ const { createLogger } = require('../utils/logger');
 const User = require('../models/User');
 const Organization = require('../models/Organization');
 const UserOrganization = require('../models/UserOrganization');
+const { getCanonicalOrganizationCode } = require('../utils/organizationCodeUtils');
 
 const logger = createLogger('FirebaseAuthController');
 const Client = require('../models/Client');
@@ -144,7 +145,7 @@ class FirebaseAuthController {
           const organization = await Organization.findById(user.organizationId);
           if (organization) {
             organizationName = organization.name;
-            organizationCode = organization.code;
+            organizationCode = getCanonicalOrganizationCode(organization);
           }
         } catch (orgError) {
           logger.warn('Could not fetch organization details', {

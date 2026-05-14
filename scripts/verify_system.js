@@ -3,9 +3,10 @@ const https = require('https');
 
 const BASE_URL = process.env.BACKEND_URL || 'http://localhost:8080';
 
-// Ignore self-signed certs if testing HTTPS locally
+// Use secure TLS validation by default. 
+// Can be overridden via VERIFY_INSECURE=true for local self-signed certificate testing.
 const agent = new https.Agent({  
-  rejectUnauthorized: false
+  rejectUnauthorized: process.env.VERIFY_INSECURE === 'true' ? false : true
 });
 
 const client = axios.create({

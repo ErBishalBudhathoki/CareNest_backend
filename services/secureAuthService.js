@@ -123,7 +123,7 @@ class SecureAuthService {
         phone: userData.phone || null,
         organizationCode: userData.organizationCode || null,
         organizationId: userData.organizationId || null,
-        roles: userData.roles || ['user'],
+        roles: userData.roles || ['employee'],
         isActive: true,
         isEmailVerified: false,
         createdAt: new Date(),
@@ -306,7 +306,7 @@ class SecureAuthService {
       const tokenPayload = {
         userId: user.userId,
         email: user.email,
-        roles: user.roles || ['user'],
+        roles: user.roles || ['employee'],
         organizationId: user.organizationId
       };
       

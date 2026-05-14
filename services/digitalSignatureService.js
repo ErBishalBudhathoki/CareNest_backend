@@ -10,8 +10,19 @@ const path = require('path');
 let PDFDocument = null;
 
 // In-memory storage for demo (use database in production)
+const MAX_MAP_SIZE = 500;
 const signatures = new Map();
 const serviceConfirmations = new Map();
+
+/**
+ * Helper to enforce map size limit (FIFO)
+ */
+function enforceMapLimit(map) {
+  if (map.size > MAX_MAP_SIZE) {
+    const firstKey = map.keys().next().value;
+    map.delete(firstKey);
+  }
+}
 
 /**
  * Save digital signature
@@ -20,6 +31,10 @@ const serviceConfirmations = new Map();
  */
 exports.saveSignature = async (params) => {
   const { appointmentId, clientId, signatureData, timestamp } = params;
+  
+  if (signatureData && signatureData.length > 500000) {
+    throw new Error('Signature data too large');
+  }
 
   // Create hash of signature for verification
   const hash = crypto
@@ -40,6 +55,7 @@ exports.saveSignature = async (params) => {
   };
 
   signatures.set(signature._id, signature);
+  enforceMapLimit(signatures);
 
   return signature;
 };
@@ -79,6 +95,7 @@ exports.submitServiceConfirmation = async (params) => {
   };
 
   serviceConfirmations.set(appointmentId, confirmation);
+  enforceMapLimit(serviceConfirmations);
 
   // Generate PDF report
   const pdfPath = await generateServiceReport(confirmation);
@@ -256,7 +273,8 @@ async function generateServiceReport(confirmation) {
 
       const PdfDocumentClass = loadPdfDocument();
       if (!PdfDocumentClass) {
-        const fallbackFileName = `service-report-${confirmation.appointmentId}.json`;
+        const safeAppointmentId = path.basename(String(confirmation.appointmentId)).replace(/[^a-zA-Z0-9_-]/g, '');
+        const fallbackFileName = `service-report-${safeAppointmentId}.json`;
         const fallbackFilePath = path.join(reportsDir, fallbackFileName);
         const fallbackReport = {
           generatedAt: new Date().toISOString(),
@@ -269,7 +287,8 @@ async function generateServiceReport(confirmation) {
         return;
       }
 
-      const fileName = `service-report-${confirmation.appointmentId}.pdf`;
+      const safeAppointmentId = path.basename(String(confirmation.appointmentId)).replace(/[^a-zA-Z0-9_-]/g, '');
+      const fileName = `service-report-${safeAppointmentId}.pdf`;
       const filePath = path.join(reportsDir, fileName);
       const doc = new PdfDocumentClass();
       const stream = fs.createWriteStream(filePath);

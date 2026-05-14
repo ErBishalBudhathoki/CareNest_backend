@@ -1,6 +1,8 @@
 const OnboardingRecord = require('../models/OnboardingRecord');
 const EmployeeDocument = require('../models/EmployeeDocument');
+const Certification = require('../models/Certification');
 const User = require('../models/User'); // Maps to 'login' collection
+const bankDetailsService = require('./bankDetailsService');
 const logger = require('../config/logger');
 const emailService = require('./emailService');
 
@@ -10,7 +12,8 @@ class OnboardingService {
      * Get or create onboarding status for a user
      */
     static async getOnboardingStatus(userId, organizationId) {
-        let record = await OnboardingRecord.findOne({ userId });
+        const { toSafeString } = require('../utils/security');
+        let record = await OnboardingRecord.findOne({ userId: toSafeString(userId) });
 
         if (!record) {
             // Create initial record if it doesn't exist
@@ -42,8 +45,9 @@ class OnboardingService {
             updateData.currentStep = currentStep;
         }
 
+        const { toSafeString } = require('../utils/security');
         const result = await OnboardingRecord.findOneAndUpdate(
-            { userId },
+            { userId: toSafeString(userId) },
             { $set: updateData },
             { new: true } // returnDocument: 'after' equivalent
         );
@@ -64,10 +68,11 @@ class OnboardingService {
         await document.save();
 
         // Update document count in onboarding record
-        const count = await EmployeeDocument.countDocuments({ userId: docData.userId });
+        const { toSafeString } = require('../utils/security');
+        const count = await EmployeeDocument.countDocuments({ userId: toSafeString(docData.userId) });
 
         await OnboardingRecord.updateOne(
-            { userId: docData.userId },
+            { userId: toSafeString(docData.userId) },
             {
                 $set: {
                     'steps.documents.count': count,
@@ -83,7 +88,8 @@ class OnboardingService {
      * Get all documents for a user
      */
     static async getUserDocuments(userId) {
-        return await EmployeeDocument.find({ userId });
+        const { toSafeString } = require('../utils/security');
+        return await EmployeeDocument.find({ userId: toSafeString(userId) });
     }
 
     /**
@@ -91,9 +97,10 @@ class OnboardingService {
      */
     static async deleteDocument(docId, userId) {
         // Ensure the document belongs to the user
+        const { toSafeString } = require('../utils/security');
         const result = await EmployeeDocument.deleteOne({
-            _id: docId,
-            userId: userId
+            _id: toSafeString(docId),
+            userId: toSafeString(userId)
         });
 
         if (result.deletedCount === 0) {
@@ -101,10 +108,10 @@ class OnboardingService {
         }
 
         // Update document count
-        const count = await EmployeeDocument.countDocuments({ userId });
+        const count = await EmployeeDocument.countDocuments({ userId: toSafeString(userId) });
 
         await OnboardingRecord.updateOne(
-            { userId },
+            { userId: toSafeString(userId) },
             {
                 $set: {
                     'steps.documents.count': count,
@@ -120,8 +127,9 @@ class OnboardingService {
      * Submit onboarding for review
      */
     static async submitOnboarding(userId) {
+        const { toSafeString } = require('../utils/security');
         const result = await OnboardingRecord.findOneAndUpdate(
-            { userId },
+            { userId: toSafeString(userId) },
             {
                 $set: {
                     status: 'submitted',
@@ -143,8 +151,9 @@ class OnboardingService {
     static async getPendingOnboardings(organizationId) {
         // Join with login collection (User model) to get names
         // Using aggregation to mimic original behavior
+        const { toSafeString } = require('../utils/security');
         return await OnboardingRecord.aggregate([
-            { $match: { organizationId: organizationId } }, // Ensure organizationId is string as per model
+            { $match: { organizationId: toSafeString(organizationId) } }, // Ensure organizationId is string as per model
             {
                 $lookup: {
                     from: 'login', // User collection name
@@ -175,16 +184,17 @@ class OnboardingService {
      * Verify a document
      */
     static async verifyDocument(docId, status, reason, adminId) {
+        const { toSafeString } = require('../utils/security');
         const updateData = {
             status,
             verifiedAt: new Date(),
-            verifiedBy: adminId
+            verifiedBy: toSafeString(adminId)
         };
 
         if (reason) updateData.rejectionReason = reason;
 
         return await EmployeeDocument.findOneAndUpdate(
-            { _id: docId },
+            { _id: toSafeString(docId) },
             { $set: updateData },
             { new: true }
         );
@@ -195,12 +205,13 @@ class OnboardingService {
      */
     static async finalizeOnboarding(userId, _adminId) {
         // Calculate probation end date (e.g., 3 months from now)
+        const { toSafeString } = require('../utils/security');
         const startDate = new Date();
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + 3);
 
         const result = await OnboardingRecord.findOneAndUpdate(
-            { userId },
+            { userId: toSafeString(userId) },
             {
                 $set: {
                     status: 'completed',
@@ -213,9 +224,35 @@ class OnboardingService {
             { new: true }
         );
 
+        // ----- Sync onboarding data to authoritative collections -----
+        // Each sync is wrapped independently so a partial failure doesn't
+        // block the finalize response or email delivery.
+
+        // 1. Sync bank details → bankDetails collection
+        await OnboardingService._syncBankDetails(userId, result).catch(err =>
+            logger.error('[OnboardingService] _syncBankDetails failed', { userId, err: err.message })
+        );
+
+        // 2. Promote EmployeeDocuments → certifications collection
+        await OnboardingService._syncDocumentsToCertifications(userId).catch(err =>
+            logger.error('[OnboardingService] _syncDocumentsToCertifications failed', { userId, err: err.message })
+        );
+
+        // 3. Patch User model with personal details
+        await OnboardingService._syncPersonalDetails(userId, result).catch(err =>
+            logger.error('[OnboardingService] _syncPersonalDetails failed', { userId, err: err.message })
+        );
+
+        logger.business('Onboarding data synced to authoritative collections', {
+            event: 'onboarding_data_synced',
+            userId,
+            timestamp: new Date().toISOString()
+        });
+        // ----------------------------------------------------------
+
         // Send welcome email
         try {
-            const user = await User.findById(userId);
+            const user = await User.findById(toSafeString(userId));
             if (user && user.email) {
                 const name = user.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Employee';
                 await emailService.sendOnboardingWelcomeEmail(user.email, name);
@@ -225,6 +262,122 @@ class OnboardingService {
         }
 
         return result;
+    }
+
+    /**
+     * @private
+     * Sync bank details entered during onboarding into the authoritative bankDetails collection.
+     * Uses bankDetailsService.saveBankDetails() which upserts by (userEmail, organizationId).
+     */
+    static async _syncBankDetails(userId, onboardingRecord) {
+        const bankStep = onboardingRecord?.steps?.bankDetails;
+        if (!bankStep || !bankStep.accountName || !bankStep.bsb || !bankStep.accountNumber) {
+            logger.info('[OnboardingService] Skipping bank sync — bankDetails step incomplete', { userId });
+            return;
+        }
+
+        const { toSafeString } = require('../utils/security');
+        const user = await User.findById(toSafeString(userId)).lean();
+        if (!user || !user.email) {
+            throw new Error('User email not found — cannot sync bank details');
+        }
+
+        const orgId = String(onboardingRecord.organizationId || '');
+        await bankDetailsService.saveBankDetails(
+            user.email,  // actorEmail (system acting on behalf of the employee)
+            user.email,  // targetEmail (same person)
+            orgId,
+            {
+                bankName:      bankStep.bankName      || '',
+                accountName:   bankStep.accountName,
+                bsb:           String(bankStep.bsb).replace(/\D/g, ''),
+                accountNumber: String(bankStep.accountNumber)
+            }
+        );
+
+        logger.info('[OnboardingService] Bank details synced', { userId, email: user.email });
+    }
+
+    /**
+     * @private
+     * Promote EmployeeDocument records into the Certifications collection.
+     * Idempotent: uses upsert keyed on (userId, source:'onboarding', name).
+     *
+     * Document type → human-readable cert name mapping:
+     *   passport        → "Passport / ID"
+     *   police_check    → "Police Check"
+     *   visa            → "Visa Grant"
+     *   drivers_license → "Driver's Licence"
+     *   first_aid       → "First Aid Certificate"
+     *   ndis_screening  → "NDIS Worker Screening"
+     *   other           → "Other Document"
+     */
+    static async _syncDocumentsToCertifications(userId) {
+        const TYPE_LABELS = {
+            passport:        'Passport / ID',
+            police_check:    'Police Check',
+            visa:            'Visa Grant',
+            drivers_license: "Driver's Licence",
+            first_aid:       'First Aid Certificate',
+            ndis_screening:  'NDIS Worker Screening',
+            other:           'Other Document'
+        };
+
+        const { toSafeString } = require('../utils/security');
+        const docs = await EmployeeDocument.find({ userId: toSafeString(userId) }).lean();
+        if (!docs.length) {
+            logger.info('[OnboardingService] No documents to promote for user', { userId });
+            return;
+        }
+
+        for (const doc of docs) {
+            const certName = TYPE_LABELS[doc.type] || 'Other Document';
+            // Upsert keyed on userId + source + name to be idempotent across re-finalizes.
+            await Certification.updateOne(
+                { userId: toSafeString(userId), source: 'onboarding', name: certName },
+                {
+                    $setOnInsert: {
+                        userId: toSafeString(userId),
+                        name:       certName,
+                        fileUrl:    doc.fileUrl,
+                        expiryDate: doc.expiryDate || null,
+                        status:     'pending_approval',
+                        source:     'onboarding',
+                        notes:      'Imported from onboarding',
+                        issueDate:  doc.uploadedAt || new Date()
+                    }
+                },
+                { upsert: true }
+            );
+        }
+
+        logger.info('[OnboardingService] Documents promoted to certifications', {
+            userId,
+            count: docs.length
+        });
+    }
+
+    /**
+     * @private
+     * Patch the User document with personal details collected during onboarding.
+     * Only overwrites fields that are present in the onboarding step.
+     */
+    static async _syncPersonalDetails(userId, onboardingRecord) {
+        const step = onboardingRecord?.steps?.personalDetails;
+        if (!step) return;
+
+        const patch = {};
+        if (step.firstName)   patch.firstName   = step.firstName;
+        if (step.lastName)    patch.lastName    = step.lastName;
+        if (step.phone)       patch.phone       = step.phone;
+        if (step.dateOfBirth) patch.dateOfBirth = step.dateOfBirth;
+        if (step.address)     patch.address     = step.address;
+
+        if (!Object.keys(patch).length) return;
+
+        const { toSafeString } = require('../utils/security');
+        await User.updateOne({ _id: toSafeString(userId) }, { $set: patch });
+        logger.info('[OnboardingService] Personal details synced to User document', { userId });
     }
 
     /**
