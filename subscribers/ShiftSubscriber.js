@@ -48,14 +48,19 @@ class ShiftSubscriber {
 
       logger.info(`WorkedTime record created/updated for shift ${shift.id || shift._id}`);
 
-      // 2. Queue Invoice Generation
-      await QueueManager.addJob('invoice-generation', 'generate-preview', {
-        shiftId: shift.id || shift._id,
-        clientEmail: shift.clientEmail,
-        organizationId: shift.organizationId
+      // 2. Queue Invoice Generation via Temporal
+      const temporalClient = await require('../core/TemporalManager').getClient();
+      await temporalClient.workflow.start('InvoiceProcessingWorkflow', {
+        taskQueue: 'default',
+        workflowId: `invoice-generation-${shift.id || shift._id}-${Date.now()}`,
+        args: [{
+          shiftId: shift.id || shift._id,
+          clientEmail: shift.clientEmail,
+          organizationId: shift.organizationId
+        }]
       });
 
-      logger.info(`Invoice generation job queued for shift ${shift.id || shift._id}`);
+      logger.info(`Invoice generation workflow started for shift ${shift.id || shift._id}`);
 
     } catch (error) {
       logger.error('Error handling shift.completed event', { error: error.message, shift });
