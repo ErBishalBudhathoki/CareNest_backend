@@ -4,6 +4,7 @@ const User = require('../models/User');
 const FcmToken = require('../models/FcmToken');
 const { messaging } = require('../firebase-admin-config');
 const logger = require('../config/logger');
+const TemporalManager = require('../core/TemporalManager');
 
 class EmergencyService {
   async sendBroadcast(senderId, teamIds, message, type, organizationId) {
@@ -25,9 +26,9 @@ class EmergencyService {
 
     logger.info(`Emergency broadcast created: ${broadcast._id}`);
 
-    // Send FCM push notifications — fire and forget (never block the HTTP response)
+    // Send FCM push notifications via Temporal — fire and forget
     this._dispatchPushNotifications(broadcast._id.toString(), teamIds, senderId, message, type)
-      .catch(err => logger.error('Emergency push dispatch failed', { error: err.message }));
+      .catch(err => logger.error('Emergency Temporal dispatch failed', { error: err.message }));
 
     return broadcast;
   }
@@ -109,72 +110,26 @@ class EmergencyService {
         channelId: 'emergency_alerts',
       };
 
-      // Send in batches of 500 (FCM multicast limit)
-      const BATCH_SIZE = 500;
-      const staleTokens = [];
+      // Dispatch via Temporal for each recipient
+      logger.info(`Starting Temporal workflows for ${tokenEntries.length} emergency devices`);
 
-      for (let i = 0; i < tokenEntries.length; i += BATCH_SIZE) {
-        const batch = tokenEntries.slice(i, i + BATCH_SIZE);
-        const tokens = batch.map(e => e.token);
-
-        const multicastMessage = {
-          tokens,
-          notification: {
-            title: '🚨 EMERGENCY BROADCAST',
-            body: message,
-          },
-          data: dataPayload,
-          android: {
-            priority: 'high',
+      for (const entry of tokenEntries) {
+        TemporalManager.startWorkflow('EmergencyNotificationWorkflow', {
+          workflowId: `emergency-alert-${broadcastId}-${entry.userId}`,
+          args: [{
+            userId: entry.userId,
+            email: entry.email,
             notification: {
-              channelId: 'emergency_alerts',
-              sound: 'default',
-              priority: 'high',
-              defaultSound: true,
-              notificationCount: 1,
-            },
-          },
-          apns: {
-            headers: {
-              'apns-priority': '10',
-              'apns-push-type': 'alert',
-            },
-            payload: {
-              aps: {
-                sound: 'default',
-                badge: 1,
-                contentAvailable: true,
-                mutableContent: true,
-              },
-            },
-          },
-        };
-
-        try {
-          const response = await messaging.sendEachForMulticast(multicastMessage);
-          logger.info(`FCM batch sent: ${response.successCount} success, ${response.failureCount} failed`);
-
-          // Collect stale tokens for cleanup
-          response.responses.forEach((resp, idx) => {
-            if (!resp.success) {
-              const code = resp.error?.code;
-              if (
-                code === 'messaging/registration-token-not-registered' ||
-                code === 'messaging/invalid-argument' ||
-                code === 'messaging/invalid-registration-token'
-              ) {
-                staleTokens.push(batch[idx]);
-              } else {
-                logger.warn(`FCM send failed for ${batch[idx].email}`, {
-                  code,
-                  error: resp.error?.message,
-                });
-              }
+              title: '🚨 EMERGENCY BROADCAST',
+              body: message,
+              data: dataPayload
             }
-          });
-        } catch (batchErr) {
-          logger.error('FCM multicast batch error', { error: batchErr.message });
-        }
+          }],
+          taskQueue: 'default'
+        }).catch(err => logger.error('Failed to start Emergency Temporal workflow', { 
+          userId: entry.userId, 
+          error: err.message 
+        }));
       }
 
       // Clean up stale tokens (non-blocking)
