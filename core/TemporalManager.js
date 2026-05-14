@@ -15,17 +15,19 @@ class TemporalManager {
     }
 
     try {
-      // Connect to the Temporal server through Cloudflare Tunnel
-      // Force IPv4 resolution because Docker on Oracle Cloud often fails to route IPv6
-      const dns = require('dns').promises;
-      const lookup = await dns.lookup('temporal.bishalbudhathoki.com', { family: 4 });
-      
-      connectionInstance = await Connection.connect({
-        address: `${lookup.address}:443`,
-        tls: {
-          serverNameOverride: 'temporal.bishalbudhathoki.com'
-        },
-      });
+      // Use environment variables for connection (allows different settings for GCP vs Dokploy)
+      const address = process.env.TEMPORAL_ADDRESS || 'temporal.bishalbudhathoki.com:443';
+      const useTls = process.env.TEMPORAL_TLS !== 'false';
+
+      const connectionOptions = { address };
+
+      if (useTls) {
+        connectionOptions.tls = {
+          serverNameOverride: 'temporal.bishalbudhathoki.com' // Explicitly required for SNI routing
+        };
+      }
+
+      connectionInstance = await Connection.connect(connectionOptions);
 
       clientInstance = new Client({
         connection: connectionInstance,
