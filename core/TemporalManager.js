@@ -16,10 +16,15 @@ class TemporalManager {
 
     try {
       // Connect to the Temporal server through Cloudflare Tunnel
-      // Must use port 443 and enable TLS.
+      // Force IPv4 resolution because Docker on Oracle Cloud often fails to route IPv6
+      const dns = require('dns').promises;
+      const lookup = await dns.lookup('temporal.bishalbudhathoki.com', { family: 4 });
+      
       connectionInstance = await Connection.connect({
-        address: 'temporal.bishalbudhathoki.com:443',
-        tls: true,
+        address: `${lookup.address}:443`,
+        tls: {
+          serverNameOverride: 'temporal.bishalbudhathoki.com'
+        },
       });
 
       clientInstance = new Client({
