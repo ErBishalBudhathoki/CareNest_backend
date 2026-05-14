@@ -15,15 +15,27 @@ class TemporalManager {
     }
 
     try {
-      // Use environment variables for connection (allows different settings for GCP vs Dokploy)
+      // Use environment variables for connection
       const address = process.env.TEMPORAL_ADDRESS || 'temporal.bishalbudhathoki.com:443';
       const useTls = process.env.TEMPORAL_TLS !== 'false';
 
-      const connectionOptions = { address };
+      const [host, port] = address.split(':');
+      
+      // Force IPv4 resolution for the hostname to bypass Oracle Docker IPv6 issues
+      const dns = require('dns').promises;
+      let finalAddress = address;
+      try {
+        const lookup = await dns.lookup(host, { family: 4 });
+        finalAddress = `${lookup.address}:${port || '443'}`;
+      } catch (e) {
+        logger.warn(`Failed to resolve IPv4 for ${host}, falling back to original address`, e);
+      }
+
+      const connectionOptions = { address: finalAddress };
 
       if (useTls) {
         connectionOptions.tls = {
-          serverNameOverride: 'temporal.bishalbudhathoki.com' // Explicitly required for SNI routing
+          serverNameOverride: host // Explicitly required for SNI routing
         };
       }
 
