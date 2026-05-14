@@ -3,10 +3,10 @@
 # ============================================
 # Stage 1: Dependencies (Build environment)
 # ============================================
-FROM node:22-alpine AS dependencies
+FROM node:22-bookworm-slim AS dependencies
 
 # Install security updates
-RUN apk upgrade --no-cache
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
@@ -36,15 +36,16 @@ RUN npm prune --production
 # ============================================
 # Stage 3: Production (Final image)
 # ============================================
-FROM node:22-alpine AS production
+FROM node:22-bookworm-slim AS production
 
 # Install security updates and dumb-init
-RUN apk upgrade --no-cache && \
-    apk add --no-cache dumb-init
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y dumb-init --no-install-recommends && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+RUN groupadd -r nodejs -g 1001 && \
+    useradd -r -g nodejs -u 1001 nodejs
 
 # Set working directory
 WORKDIR /app
