@@ -62,8 +62,13 @@ async function run() {
   const http = require('http');
   const healthPort = process.env.PORT || 8080;
   http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('Worker is healthy');
+    if (req.url === '/health' || req.url === '/') {
+      res.writeHead(200);
+      res.end('Worker is healthy');
+    } else {
+      res.writeHead(404);
+      res.end('Not Found');
+    }
   }).listen(healthPort, () => {
     logger.info(`Health check server listening on port ${healthPort}`);
   });
