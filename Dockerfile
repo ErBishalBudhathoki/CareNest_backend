@@ -40,7 +40,7 @@ FROM node:22-bookworm-slim AS production
 
 # Install security updates and dumb-init
 RUN apt-get update && apt-get upgrade -y && \
-    apt-get install -y dumb-init --no-install-recommends && \
+    apt-get install -y dumb-init ca-certificates --no-install-recommends && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
