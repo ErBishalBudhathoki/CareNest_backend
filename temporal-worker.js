@@ -16,9 +16,15 @@ async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
 
   // Native connection to Temporal server
+  // Force IPv4 resolution because Docker on Oracle Cloud often fails to route IPv6
+  const dns = require('dns').promises;
+  const lookup = await dns.lookup('temporal.bishalbudhathoki.com', { family: 4 });
+  
   const connection = await NativeConnection.connect({
-    address: 'temporal.bishalbudhathoki.com:443',
-    tls: true,
+    address: `${lookup.address}:443`,
+    tls: {
+      serverNameOverride: 'temporal.bishalbudhathoki.com'
+    },
   });
 
   const worker = await Worker.create({
