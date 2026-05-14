@@ -43,5 +43,8 @@ async function run() {
 
 run().catch((err) => {
   logger.error('Failed to start Temporal Worker', err);
+  console.error('TEMPORAL WORKER CRASH DETAILS:');
+  console.error(err);
+  if (err.cause) console.error('Cause:', err.cause);
   process.exit(1);
 });
