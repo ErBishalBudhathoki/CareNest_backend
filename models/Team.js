@@ -25,7 +25,13 @@ const teamSchema = new mongoose.Schema({
     }
   },
   organizationId: {
-    type: mongoose.Schema.Types.ObjectId, // Optional if teams are cross-org or handled differently
+    type: mongoose.Schema.Types.ObjectId,
+    index: true
+  },
+  status: {
+    type: String,
+    enum: ['active', 'archived', 'deleted'],
+    default: 'active',
     index: true
   }
 }, {

@@ -86,8 +86,12 @@ class TrainingComplianceController {
     const isR2Upload = Boolean(r2Key || r2Location);
 
     if (!isR2Upload) {
-      if (req.file.path) {
-        fs.unlink(req.file.path, () => {});
+      if (req.file && req.file.path) {
+        const safePath = require('path').resolve(req.file.path);
+        // Ensure the path is within safe boundaries before deletion
+        if (safePath.startsWith(require('path').resolve('uploads')) || safePath.startsWith('/tmp') || safePath.includes('temp')) {
+          fs.unlink(safePath, () => {});
+        }
       }
       return res.status(500).json({
         success: false,

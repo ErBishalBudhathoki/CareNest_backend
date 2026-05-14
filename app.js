@@ -9,6 +9,8 @@ const express = require("express");
 const path = require('path');
 const cors = require("cors");
 const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
+const rateLimit = require("express-rate-limit");
 const { environmentConfig } = require('./config/environment');
 
 // Import Middleware
@@ -100,6 +102,9 @@ app.use(express.urlencoded({
     }
   }
 }));
+
+// Sanitize data against NoSQL query injection
+app.use(mongoSanitize());
 
 // Global Middleware
 app.use(systemHealthMiddleware);
@@ -200,6 +205,20 @@ app.get('/client/set-password', (req, res) => {
 // - /api/scheduler bypasses this gate because it already uses Cloud Scheduler OIDC auth.
 // - Future server-to-server callers should use an explicit bypass or gateway path,
 //   not weaken the default mobile-oriented gate.
+
+// Global Rate Limiter for API Routes (prevents DDoS and brute force)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Limit each IP to 1000 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again after 15 minutes'
+  }
+});
+
+app.use('/api', apiLimiter);
 app.use('/api', apiSecurityGate, require('./routes'));
 
 // Serve static files from uploads directory

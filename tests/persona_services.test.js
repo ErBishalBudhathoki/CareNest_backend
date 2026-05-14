@@ -10,6 +10,9 @@ const EmployeeDocument = require('../models/EmployeeDocument');
 const UserOrganization = require('../models/UserOrganization');
 const Invoice = require('../models/Invoice');
 const Client = require('../models/Client');
+const User = require('../models/User');
+const TeamMember = require('../models/TeamMember');
+const EmergencyBroadcast = require('../models/EmergencyBroadcast');
 
 // Mock Mongoose Models
 jest.mock('../models/Shift');
@@ -21,7 +24,9 @@ jest.mock('../models/EmployeeDocument');
 jest.mock('../models/UserOrganization');
 jest.mock('../models/Invoice');
 jest.mock('../models/Client');
-jest.mock('../models/User'); // Added User mock
+jest.mock('../models/User');
+jest.mock('../models/TeamMember');
+jest.mock('../models/EmergencyBroadcast');
 
 describe('Persona Services Tests', () => {
   const mockOrgId = 'org-123';
@@ -33,11 +38,27 @@ describe('Persona Services Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     
-    // Setup User mock
-    User.findOne.mockResolvedValue({
+    // Setup User mock with chainable .lean() and thenable behavior
+    const mockUser = {
       _id: 'user-123',
       email: mockUserEmail,
       toString: () => 'user-123'
+    };
+    
+    User.findOne.mockReturnValue({
+      lean: jest.fn().mockResolvedValue(mockUser),
+      then: (resolve) => Promise.resolve(mockUser).then(resolve),
+      catch: (reject) => Promise.resolve(mockUser).catch(reject)
+    });
+
+    // Setup TeamMember mock
+    TeamMember.find.mockResolvedValue([]);
+
+    // Setup EmergencyBroadcast mock with chainable .sort().lean()
+    EmergencyBroadcast.find.mockReturnValue({
+      sort: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([])
+      })
     });
   });
 

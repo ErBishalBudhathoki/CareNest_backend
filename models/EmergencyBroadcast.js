@@ -1,16 +1,26 @@
 const mongoose = require('mongoose');
 
 const emergencyBroadcastSchema = new mongoose.Schema({
-  teamId: {
+  teamId: { // Primary teamId for backward compatibility
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Team',
     required: true,
     index: true
   },
+  teamIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Team'
+  }],
   initiatorId: { // Frontend expects initiatorId
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true
   },
   type: { // Frontend expects type
     type: String, 

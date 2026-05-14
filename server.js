@@ -89,13 +89,12 @@ const startSchedulers = async () => {
 // Start Workers
 const startWorkers = () => {
   try {
+    // Event subscribers (now using Temporal internally)
     require('./subscribers/ShiftSubscriber');
-    const QueueManager = require('./core/QueueManager');
-    const processInvoiceJob = require('./workers/InvoiceWorker');
-    QueueManager.registerWorker('invoice-generation', processInvoiceJob);
-    logger.info('👷 Job Workers & Subscribers initialized');
+    
+    logger.info('👷 Subscribers initialized');
   } catch (err) {
-    logger.error('Failed to initialize workers', { error: err.message });
+    logger.error('Failed to initialize subscribers', { error: err.message });
   }
 };
 

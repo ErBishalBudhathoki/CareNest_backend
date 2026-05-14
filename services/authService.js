@@ -6,6 +6,10 @@ const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
 const { admin } = require('../firebase-admin-config');
+const {
+  backfillLegacyOrganizationCodes,
+  normalizeOrganizationCode,
+} = require('../utils/organizationCodeUtils');
 
 /**
  * Get auth collection (login collection)
@@ -25,6 +29,33 @@ function getUsersCollection() {
   return mongoose.connection.collection('users');
 }
 
+function mapUserRoleToOrganizationRole(role) {
+  const normalizedRole = String(role || 'employee').trim().toLowerCase();
+
+  switch (normalizedRole) {
+    case 'owner':
+      return 'owner';
+    case 'admin':
+      return 'admin';
+    case 'shared_employee':
+      return 'shared_employee';
+    default:
+      return 'employee';
+  }
+}
+
+function getOrganizationPermissions(role) {
+  switch (role) {
+    case 'owner':
+    case 'admin':
+      return ['read', 'write', 'delete', 'manage_users', 'manage_billing'];
+    case 'shared_employee':
+      return ['read', 'write', 'cross_org_access'];
+    default:
+      return ['read', 'write'];
+  }
+}
+
 class AuthService {
   /**
    * Check if email exists in the system
@@ -33,7 +64,8 @@ class AuthService {
    */
   async checkEmailExists(email) {
     try {
-      const user = await User.findOne({ email: email });
+      const { toSafeString } = require('../utils/security');
+      const user = await User.findOne({ email: toSafeString(email) });
       return user;
     } catch (error) {
       throw new Error(`Error checking email: ${error.message}`);
@@ -47,7 +79,8 @@ class AuthService {
    */
   async getClientDetails(email) {
     try {
-      const client = await Client.findOne({ email: email });
+      const { toSafeString } = require('../utils/security');
+      const client = await Client.findOne({ email: toSafeString(email) });
       return client;
     } catch (error) {
       throw new Error(`Error getting client details: ${error.message}`);
@@ -61,8 +94,16 @@ class AuthService {
    */
   async validateOrganizationCode(organizationCode) {
     try {
+      const { toSafeString } = require('../utils/security');
+      await backfillLegacyOrganizationCodes();
+      const normalizedCode = normalizeOrganizationCode(organizationCode);
+      if (!normalizedCode) {
+        return null;
+      }
+
       const organization = await Organization.findOne({
-        organizationCode: organizationCode
+        organizationCode: toSafeString(normalizedCode),
+        isActive: true,
       });
       return organization;
     } catch (error) {
@@ -101,8 +142,8 @@ class AuthService {
         abn: userData.abn,
         organizationCode: userData.organizationCode,
         organizationId: userData.organizationId,
-        role: userData.role || 'user',
-        roles: ['user'],
+        role: userData.role || 'employee',
+        roles: [userData.role || 'employee'],
         createdAt: new Date(),
         lastLogin: null,
         isActive: true,
@@ -122,11 +163,13 @@ class AuthService {
       // Create UserOrganization record (Zero-Trust requirement)
       if (userData.organizationId) {
         try {
+          const organizationRole = mapUserRoleToOrganizationRole(userData.role);
+
           await UserOrganization.create({
             userId: savedUser._id.toString(),
             organizationId: userData.organizationId,
-            role: userData.role || 'user',
-            permissions: (userData.role === 'admin' || userData.role === 'owner') ? ['*'] : ['read', 'write'],
+            role: organizationRole,
+            permissions: getOrganizationPermissions(organizationRole),
             isActive: true,
             joinedAt: new Date(),
             createdAt: new Date(),
@@ -241,7 +284,7 @@ class AuthService {
           photo: user.photo,
           photoUrl: user.photoUrl,
           role: user.role,
-          roles: user.roles || (user.role ? [user.role] : ['user']),
+          roles: user.roles || (user.role ? [user.role] : ['employee']),
           organizationId: user.organizationId,
           organizationCode: user.organizationCode,
           organizationName: user.organizationName,
@@ -397,7 +440,8 @@ class AuthService {
       }
 
       // Generate 6-digit OTP
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const crypto = require('crypto');
+      const otp = crypto.randomInt(100000, 1000000).toString();
       const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await User.updateOne(

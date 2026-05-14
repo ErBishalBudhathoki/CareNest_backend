@@ -15,7 +15,8 @@ exports.scoreServiceQuality = async (params) => {
   const { appointmentId, organizationId } = params;
 
   try {
-    const appointment = await Appointment.findById(appointmentId)
+    const { toSafeString } = require('../utils/security');
+    const appointment = await Appointment.findById(toSafeString(appointmentId))
       .populate('assignedTo client');
 
     if (!appointment) {
@@ -73,8 +74,9 @@ exports.performComplianceCheck = async (params) => {
   const { organizationId, employeeId, startDate, endDate } = params;
 
   try {
-    const query = { organizationId };
-    if (employeeId) query.assignedTo = employeeId;
+    const { toSafeString } = require('../utils/security');
+    const query = { organizationId: toSafeString(organizationId) };
+    if (employeeId) query.assignedTo = toSafeString(employeeId);
     if (startDate && endDate) {
       query.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
     }
@@ -550,7 +552,7 @@ function classifyTopics(keywords) {
 }
 
 function getCommonTopics(sentiments) {
-  const topicCounts = {};
+  const topicCounts = Object.create(null);
   sentiments.forEach(s => {
     s.topics.forEach(topic => {
       topicCounts[topic] = (topicCounts[topic] || 0) + 1;
@@ -656,7 +658,7 @@ function generateMitigations(factors, overallRisk) {
 }
 
 function analyzeByWorker(incidents) {
-  const byWorker = {};
+  const byWorker = Object.create(null);
   incidents.forEach(inc => {
     const workerId = inc.assignedTo?._id?.toString();
     if (workerId) {
@@ -670,7 +672,7 @@ function analyzeByWorker(incidents) {
 }
 
 function analyzeByClient(incidents) {
-  const byClient = {};
+  const byClient = Object.create(null);
   incidents.forEach(inc => {
     const clientId = inc.client?._id?.toString();
     if (clientId) {
@@ -684,7 +686,7 @@ function analyzeByClient(incidents) {
 }
 
 function analyzeByServiceType(incidents) {
-  const byType = {};
+  const byType = Object.create(null);
   incidents.forEach(inc => {
     const type = inc.serviceType || 'unknown';
     byType[type] = (byType[type] || 0) + 1;
@@ -695,7 +697,7 @@ function analyzeByServiceType(incidents) {
 }
 
 function analyzeByTimeOfDay(incidents) {
-  const byHour = {};
+  const byHour = Object.create(null);
   incidents.forEach(inc => {
     const hour = new Date(inc.date).getHours();
     byHour[hour] = (byHour[hour] || 0) + 1;
@@ -707,7 +709,7 @@ function analyzeByTimeOfDay(incidents) {
 }
 
 function analyzeByDayOfWeek(incidents) {
-  const byDay = {};
+  const byDay = Object.create(null);
   incidents.forEach(inc => {
     const day = new Date(inc.date).getDay();
     byDay[day] = (byDay[day] || 0) + 1;

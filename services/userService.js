@@ -12,10 +12,9 @@ class UserService {
       const query = {};
 
       // If organizationId is provided, filter by it.
-      // If explicit null/undefined is passed (e.g. by superadmin in future), it might return all, 
-      // but we will enforce organizationId presence in the controller.
+      const { toSafeString } = require('../utils/security');
       if (organizationId) {
-        query.organizationId = organizationId;
+        query.organizationId = toSafeString(organizationId);
       }
 
       // Filter out client-facing accounts since this endpoint is for staff members
@@ -49,8 +48,9 @@ class UserService {
    */
   async getOrganizationEmployees(organizationId) {
     try {
+      const { toSafeString } = require('../utils/security');
       const employees = await User.find({
-        organizationId: organizationId,
+        organizationId: toSafeString(organizationId),
         isActive: true,
         role: { $nin: ['client', 'family'] }
       }, {
@@ -81,9 +81,13 @@ class UserService {
   async fixClientOrganizationId(userEmail, organizationId) {
     try {
       // Verify user belongs to organization
+      const { toSafeString } = require('../utils/security');
+      const safeEmail = toSafeString(userEmail);
+      const safeOrgId = toSafeString(organizationId);
+      
       const user = await User.findOne({
-        email: userEmail,
-        organizationId: organizationId,
+        email: safeEmail,
+        organizationId: safeOrgId,
         isActive: true
       });
 
@@ -102,13 +106,13 @@ class UserService {
 
       const clientUpdateResult = await Client.updateMany(
         {
-          createdBy: userEmail,
+          createdBy: safeEmail,
           organizationId: null,
           isActive: true
         },
         {
           $set: {
-            organizationId: organizationId,
+            organizationId: safeOrgId,
             updatedAt: new Date()
           }
         }
@@ -117,13 +121,13 @@ class UserService {
       // Update client assignments that have null organizationId for this user
       const assignmentUpdateResult = await ClientAssignment.updateMany(
         {
-          userEmail: userEmail,
+          userEmail: safeEmail,
           organizationId: null,
           isActive: true
         },
         {
           $set: {
-            organizationId: organizationId,
+            organizationId: safeOrgId,
             updatedAt: new Date()
           }
         }

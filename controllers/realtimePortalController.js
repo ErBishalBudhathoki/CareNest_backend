@@ -482,22 +482,25 @@ exports.getChecklistTemplate = async (req, res) => {
 exports.inviteFamilyMember = async (req, res) => {
   try {
     const { clientId, email, name, relationship, role, permissions } = req.body;
-
-    if (!clientId || !email || !name || !relationship) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, email, name, and relationship are required',
-      });
-    }
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const forwardedProto = req.header('x-forwarded-proto');
+    const forwardedHost = req.header('x-forwarded-host');
+    const protocol = String(forwardedProto || req.protocol || 'https')
+      .split(',')[0]
+      .trim();
+    const host = String(forwardedHost || req.get('host') || '')
+      .split(',')[0]
+      .trim();
+    const webBaseUrl = host ? `${protocol}://${host}` : null;
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
       actorRoles: req.user?.roles,
-      clientId,
+      clientId: normalizedClientId,
     });
 
     const invitation = await familyAccessService.inviteFamilyMember({
-      clientId,
+      clientId: normalizedClientId,
       email,
       name,
       relationship,
@@ -505,6 +508,12 @@ exports.inviteFamilyMember = async (req, res) => {
       permissions,
       actor: context.actorSnapshot,
       client: context.client,
+      options: {
+        webBaseUrl,
+        accountType: 'family',
+        displayName: name,
+        email,
+      },
     });
 
     res.json({
@@ -559,22 +568,18 @@ exports.updatePermissions = async (req, res) => {
   try {
     const { clientId, memberId, permissions } = req.body;
 
-    if (!clientId || !memberId || !permissions) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, memberId, and permissions are required',
-      });
-    }
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
       actorRoles: req.user?.roles,
-      clientId,
+      clientId: normalizedClientId,
     });
 
     const member = await familyAccessService.updatePermissions({
-      clientId,
-      memberId,
+      clientId: normalizedClientId,
+      memberId: normalizedMemberId,
       permissions,
       actor: context.actorSnapshot,
     });
@@ -601,23 +606,20 @@ exports.updateFamilyMemberStatus = async (req, res) => {
   try {
     const { clientId, memberId, status } = req.body;
 
-    if (!clientId || !memberId || !status) {
-      return res.status(400).json({
-        success: false,
-        message: 'clientId, memberId, and status are required',
-      });
-    }
+    const normalizedClientId = familyAccessService.assertObjectId(clientId, 'clientId');
+    const normalizedMemberId = familyAccessService.assertObjectId(memberId, 'memberId');
+    const normalizedStatus = familyAccessService.normalizeManageableStatus(status);
 
     const context = await familyAccessService.authorizeManagementAccess({
       actorUserId: req.user?.userId,
       actorRoles: req.user?.roles,
-      clientId,
+      clientId: normalizedClientId,
     });
 
     const member = await familyAccessService.updateMemberStatus({
-      clientId,
-      memberId,
-      status,
+      clientId: normalizedClientId,
+      memberId: normalizedMemberId,
+      status: normalizedStatus,
       actor: context.actorSnapshot,
     });
 
