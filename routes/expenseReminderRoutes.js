@@ -17,10 +17,7 @@ const {
     getExpenseReminderStatus
 } = require('../services/expenseReminderService');
 
-const {
-    getExpenseSchedulerStatus,
-    manualTriggerExpenseReminders
-} = require('../expense_reminder_scheduler');
+const TemporalManager = require('../core/TemporalManager');
 
 // Rate limiting
 const reminderLimiter = rateLimit({
@@ -72,10 +69,9 @@ router.use(authenticateUser);
  */
 router.get('/expense/status', reminderLimiter, async (req, res) => {
     try {
-        const status = getExpenseSchedulerStatus();
         res.status(200).json({
             success: true,
-            data: status
+            data: { message: "Expense scheduling is managed dynamically by Temporal Workflows." }
         });
     } catch (error) {
         console.error('Error getting expense scheduler status:', error);
@@ -95,11 +91,13 @@ router.post('/expense/trigger', requireRoles(['admin']), triggerLimiter, trigger
     try {
         const { organizationId } = req.body;
 
-        const result = await manualTriggerExpenseReminders(organizationId);
+        await TemporalManager.startWorkflow('ExpenseRemindersCronWorkflow', {
+            workflowId: `manual-expense-reminders-${organizationId || 'all'}-${Date.now()}`,
+        });
 
         res.status(200).json({
             success: true,
-            data: result
+            data: { message: "Expense reminder workflow manually triggered via Temporal" }
         });
     } catch (error) {
         console.error('Error triggering expense reminders:', error);
