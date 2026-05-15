@@ -16,11 +16,7 @@ const {
     updateOrganizationReminderSettings
 } = require('../services/timesheetReminderService');
 
-const {
-    getSchedulerStatus,
-    manualTrigger,
-    refreshSchedulers
-} = require('../timesheet_reminder_scheduler');
+const TemporalManager = require('../core/TemporalManager');
 
 // Rate limiting configurations
 const reminderLimiter = rateLimit({
@@ -64,14 +60,13 @@ router.use(authenticateUser);
 
 /**
  * GET /api/reminders/timesheet/status
- * Get scheduler status
+ * Get scheduler status (Legacy, now handled by Temporal)
  */
 router.get('/timesheet/status', reminderLimiter, async (req, res) => {
     try {
-        const status = getSchedulerStatus();
         res.status(200).json({
             success: true,
-            data: status
+            data: { message: "Timesheet scheduling is managed dynamically by Temporal Workflows." }
         });
     } catch (error) {
         console.error('Error getting scheduler status:', error);
@@ -91,11 +86,13 @@ router.post('/timesheet/trigger', requireRoles(['admin']), triggerLimiter, trigg
     try {
         const { organizationId } = req.body;
 
-        const result = await manualTrigger(organizationId);
+        await TemporalManager.startWorkflow('TimesheetRemindersCronWorkflow', {
+            workflowId: `manual-timesheet-reminders-${organizationId || 'all'}-${Date.now()}`,
+        });
 
         res.status(200).json({
             success: true,
-            data: result
+            data: { message: "Timesheet reminder workflow manually triggered via Temporal" }
         });
     } catch (error) {
         console.error('Error triggering timesheet reminders:', error);
@@ -188,8 +185,8 @@ router.put('/timesheet/settings/:organizationId', strictLimiter, requireRoles(['
         const result = await updateOrganizationReminderSettings(organizationId, settings);
 
         if (result.success) {
-            // Refresh schedulers to pick up new settings
-            await refreshSchedulers();
+            // Temporal workflows read settings dynamically on their next execution.
+            // No need to restart in-memory schedulers.
         }
 
         res.status(200).json({
@@ -208,17 +205,14 @@ router.put('/timesheet/settings/:organizationId', strictLimiter, requireRoles(['
 
 /**
  * POST /api/reminders/timesheet/refresh
- * Refresh all schedulers (e.g., after settings change)
+ * Refresh all schedulers (Legacy, now handled by Temporal)
  */
 router.post('/timesheet/refresh', strictLimiter, requireRoles(['admin']), async (req, res) => {
     try {
-        await refreshSchedulers();
-        const status = getSchedulerStatus();
-
         res.status(200).json({
             success: true,
-            message: 'Schedulers refreshed',
-            data: status
+            message: 'Schedulers refreshed (managed automatically by Temporal)',
+            data: { message: "Temporal handles schedules dynamically." }
         });
     } catch (error) {
         console.error('Error refreshing schedulers:', error);
