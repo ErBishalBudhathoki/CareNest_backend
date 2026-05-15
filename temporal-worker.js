@@ -12,6 +12,13 @@ const {
   processRecurringInvoicesActivity, 
   processOverdueRemindersActivity 
 } = require('./temporal/activities/cron');
+const {
+  processDunningActivity,
+  processExpenseRemindersActivity,
+  processTimesheetRemindersActivity,
+  processShiftRemindersActivity,
+  processEmailVerificationRemindersActivity
+} = require('./temporal/activities/system_cron');
 
 async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
@@ -63,7 +70,12 @@ async function run() {
       sendEmergencyPush,
       processInvoiceActivity,
       processRecurringInvoicesActivity,
-      processOverdueRemindersActivity
+      processOverdueRemindersActivity,
+      processDunningActivity,
+      processExpenseRemindersActivity,
+      processTimesheetRemindersActivity,
+      processShiftRemindersActivity,
+      processEmailVerificationRemindersActivity
     },
   });
 

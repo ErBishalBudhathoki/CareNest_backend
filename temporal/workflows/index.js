@@ -5,11 +5,23 @@ const {
   RecurringInvoiceCronWorkflow,
   OverdueRemindersCronWorkflow
 } = require('./cron');
+const {
+  DunningCronWorkflow,
+  ExpenseRemindersCronWorkflow,
+  TimesheetRemindersCronWorkflow,
+  ShiftRemindersCronWorkflow,
+  EmailVerificationCronWorkflow
+} = require('./system_cron');
 
 module.exports = {
   NotificationWorkflow,
   EmergencyNotificationWorkflow,
   InvoiceProcessingWorkflow,
   RecurringInvoiceCronWorkflow,
-  OverdueRemindersCronWorkflow
+  OverdueRemindersCronWorkflow,
+  DunningCronWorkflow,
+  ExpenseRemindersCronWorkflow,
+  TimesheetRemindersCronWorkflow,
+  ShiftRemindersCronWorkflow,
+  EmailVerificationCronWorkflow
 };
