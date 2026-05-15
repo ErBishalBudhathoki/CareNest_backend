@@ -60,13 +60,31 @@ router.use(authenticateUser);
 
 /**
  * GET /api/reminders/timesheet/status
- * Get scheduler status (Legacy, now handled by Temporal)
+ * Get scheduler status from Temporal
  */
 router.get('/timesheet/status', reminderLimiter, async (req, res) => {
     try {
+        const client = await TemporalManager.getClient();
+        let scheduleStatus = 'Unknown';
+        let nextActionTimes = [];
+        
+        try {
+            const handle = client.schedule.getHandle('timesheet-reminders-schedule');
+            const description = await handle.describe();
+            scheduleStatus = description.info.runningActions.length > 0 ? 'Running' : 'Scheduled';
+            nextActionTimes = description.info.nextActionTimes || [];
+        } catch (scheduleError) {
+            console.log('Could not fetch Temporal schedule status:', scheduleError.message);
+            scheduleStatus = 'Not Found/Not Registered';
+        }
+
         res.status(200).json({
             success: true,
-            data: { message: "Timesheet scheduling is managed dynamically by Temporal Workflows." }
+            data: { 
+                message: "Timesheet scheduling is managed dynamically by Temporal Workflows.",
+                temporalStatus: scheduleStatus,
+                nextExpectedRuns: nextActionTimes
+            }
         });
     } catch (error) {
         console.error('Error getting scheduler status:', error);
