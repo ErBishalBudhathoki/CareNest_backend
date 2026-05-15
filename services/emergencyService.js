@@ -133,10 +133,7 @@ class EmergencyService {
         }));
       }
 
-      // Clean up stale tokens (non-blocking)
-      if (staleTokens.length > 0) {
-        this._cleanupStaleTokens(staleTokens).catch(() => {});
-      }
+      // Note: stale token cleanup is handled by the Temporal activity after delivery attempt
     } catch (err) {
       logger.error('_dispatchPushNotifications error', { error: err.message, stack: err.stack });
     }
