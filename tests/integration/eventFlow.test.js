@@ -25,13 +25,9 @@ jest.mock('../../config/database', () => ({
 jest.mock('../../core/QueueManager', () => ({
   addJob: jest.fn().mockResolvedValue({ id: 'job-123' })
 }));
-const mockWorkflowStart = jest.fn().mockResolvedValue({});
+const mockStartWorkflow = jest.fn().mockResolvedValue({ workflowId: 'test-wf-id' });
 jest.mock('../../core/TemporalManager', () => ({
-  getClient: jest.fn().mockResolvedValue({
-    workflow: {
-      start: mockWorkflowStart
-    }
-  })
+  startWorkflow: mockStartWorkflow
 }));
 
 describe('Integration: Shift Completion Flow', () => {
@@ -70,8 +66,7 @@ describe('Integration: Shift Completion Flow', () => {
 
     // Verify Temporal Workflow (Invoice)
     const TemporalManager = require('../../core/TemporalManager');
-    const client = await TemporalManager.getClient();
-    expect(client.workflow.start).toHaveBeenCalledWith(
+    expect(TemporalManager.startWorkflow).toHaveBeenCalledWith(
       'InvoiceProcessingWorkflow',
       expect.objectContaining({
         taskQueue: 'default',
