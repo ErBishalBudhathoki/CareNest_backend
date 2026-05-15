@@ -1,4 +1,5 @@
 const { Connection, Client } = require('@temporalio/client');
+const fs = require('fs');
 const logger = require('../config/logger');
 
 let clientInstance = null;
@@ -7,7 +8,18 @@ let connectionInstance = null;
 class TemporalManager {
   /**
    * Initializes and returns the Temporal Client connection.
-   * If already initialized, returns the existing client instance.
+   *
+   * Supports three connection modes based on environment:
+   *
+   *  1. mTLS (Cloud Run)
+   *     Set TEMPORAL_TLS_CA, TEMPORAL_TLS_CERT, TEMPORAL_TLS_KEY to file paths.
+   *     Certs are mounted from GCP Secret Manager as volume files.
+   *
+   *  2. Simple TLS (default)
+   *     Just server-side TLS with SNI override.
+   *
+   *  3. Plaintext (Oracle Worker internal)
+   *     Set TEMPORAL_TLS=false for internal Docker network traffic.
    */
   static async getClient() {
     if (clientInstance) {
@@ -15,18 +27,19 @@ class TemporalManager {
     }
 
     try {
-      // Use environment variables for connection
-      const address = process.env.TEMPORAL_ADDRESS || 'temporal.bishalbudhathoki.com:443';
+      const address = process.env.TEMPORAL_ADDRESS || 'temporal-direct.bishalbudhathoki.com:7236';
+      const namespace = process.env.TEMPORAL_NAMESPACE || 'default';
       const useTls = process.env.TEMPORAL_TLS !== 'false';
 
       const [host, port] = address.split(':');
-      
-      // Force IPv4 resolution for the hostname to bypass Oracle Docker IPv6 issues
+
+      // Force IPv4 resolution to bypass Oracle Docker IPv6 issues
       const dns = require('dns').promises;
       let finalAddress = address;
       try {
         const lookup = await dns.lookup(host, { family: 4 });
-        finalAddress = `${lookup.address}:${port || '443'}`;
+        finalAddress = `${lookup.address}:${port || '7236'}`;
+        logger.info(`Resolved ${host} to ${lookup.address}`);
       } catch (e) {
         logger.warn(`Failed to resolve IPv4 for ${host}, falling back to original address`, e);
       }
@@ -34,20 +47,43 @@ class TemporalManager {
       const connectionOptions = { address: finalAddress };
 
       if (useTls) {
-        connectionOptions.tls = {
-          serverNameOverride: host // Explicitly required for SNI routing
+        const tlsConfig = {
+          serverNameOverride: process.env.TEMPORAL_TLS_SERVER_NAME || host,
         };
+
+        // mTLS: Read certs from GCP Secret Manager volume mounts
+        const caPath = process.env.TEMPORAL_TLS_CA;
+        const certPath = process.env.TEMPORAL_TLS_CERT;
+        const keyPath = process.env.TEMPORAL_TLS_KEY;
+
+        if (caPath && fs.existsSync(caPath)) {
+          tlsConfig.serverRootCACertificate = fs.readFileSync(caPath);
+          logger.info('Loaded Temporal CA certificate from volume mount');
+        }
+
+        if (certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+          tlsConfig.clientCertPair = {
+            crt: fs.readFileSync(certPath),
+            key: fs.readFileSync(keyPath),
+          };
+          logger.info('Loaded Temporal client cert/key pair for mTLS');
+        }
+
+        connectionOptions.tls = tlsConfig;
+      } else {
+        logger.info('Temporal TLS disabled — using plaintext gRPC');
       }
+
+      logger.info(`Connecting to Temporal at ${finalAddress} (tls=${useTls}, namespace=${namespace})`);
 
       connectionInstance = await Connection.connect(connectionOptions);
 
       clientInstance = new Client({
         connection: connectionInstance,
-        // Using the 'default' namespace. If your server uses a different one, update here.
-        namespace: 'default',
+        namespace,
       });
 
-      logger.info('Connected to Temporal server at temporal.bishalbudhathoki.com:443');
+      logger.info(`Connected to Temporal server at ${address} (namespace=${namespace})`);
       return clientInstance;
     } catch (error) {
       logger.error('Failed to connect to Temporal server:', error);
