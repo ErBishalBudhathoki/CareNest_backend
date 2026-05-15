@@ -1,5 +1,6 @@
 require('dotenv').config({ path: `.env.${process.env.NODE_ENV || 'development'}` });
 const { Worker, NativeConnection } = require('@temporalio/worker');
+const mongoose = require('mongoose');
 const logger = require('./config/logger');
 const path = require('path');
 
@@ -14,6 +15,16 @@ const {
 
 async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
+
+  // Connect to MongoDB — required by activities that query FcmToken, User, etc.
+  const mongoUri = process.env.MONGODB_URI;
+  const dbName = process.env.DB_NAME || 'Invoice';
+  if (mongoUri) {
+    await mongoose.connect(mongoUri, { dbName });
+    logger.info(`Connected to MongoDB (db=${dbName})`);
+  } else {
+    logger.warn('MONGODB_URI not set — database-dependent activities will fail');
+  }
 
   // Native connection to Temporal server
   const address = process.env.TEMPORAL_ADDRESS || 'temporal.bishalbudhathoki.com:443';
