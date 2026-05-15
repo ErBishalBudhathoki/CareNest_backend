@@ -76,7 +76,11 @@ class TemporalManager {
 
       logger.info(`Connecting to Temporal at ${finalAddress} (tls=${useTls}, namespace=${namespace})`);
 
-      connectionInstance = await Connection.connect(connectionOptions);
+      connectionInstance = await Connection.connect({
+        ...connectionOptions,
+        // 15s deadline for cross-cloud (GCP → Oracle) gRPC connection
+        connectTimeout: 15000,
+      });
 
       clientInstance = new Client({
         connection: connectionInstance,
