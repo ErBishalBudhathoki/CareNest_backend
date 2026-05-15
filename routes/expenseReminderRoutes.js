@@ -65,13 +65,31 @@ router.use(authenticateUser);
 
 /**
  * GET /api/reminders/expense/status
- * Get expense reminder scheduler status
+ * Get expense reminder scheduler status from Temporal
  */
 router.get('/expense/status', reminderLimiter, async (req, res) => {
     try {
+        const client = await TemporalManager.getClient();
+        let scheduleStatus = 'Unknown';
+        let nextActionTimes = [];
+        
+        try {
+            const handle = client.schedule.getHandle('expense-reminders-schedule');
+            const description = await handle.describe();
+            scheduleStatus = description.info.runningActions.length > 0 ? 'Running' : 'Scheduled';
+            nextActionTimes = description.info.nextActionTimes || [];
+        } catch (scheduleError) {
+            console.log('Could not fetch Temporal schedule status (it may not be created yet):', scheduleError.message);
+            scheduleStatus = 'Not Found/Not Registered';
+        }
+
         res.status(200).json({
             success: true,
-            data: { message: "Expense scheduling is managed dynamically by Temporal Workflows." }
+            data: { 
+                message: "Expense scheduling is managed dynamically by Temporal Workflows.",
+                temporalStatus: scheduleStatus,
+                nextExpectedRuns: nextActionTimes
+            }
         });
     } catch (error) {
         console.error('Error getting expense scheduler status:', error);
