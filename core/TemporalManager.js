@@ -48,7 +48,7 @@ class TemporalManager {
 
       if (useTls) {
         const tlsConfig = {
-          serverNameOverride: process.env.TEMPORAL_TLS_SERVER_NAME || host,
+          serverNameOverride: process.env.TEMPORAL_TLS_SERVER_NAME || 'temporal.bishalbudhathoki.com',
         };
 
         // mTLS: Read certs from GCP Secret Manager volume mounts
