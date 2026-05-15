@@ -12,6 +12,7 @@ const {
   ShiftRemindersCronWorkflow,
   EmailVerificationCronWorkflow
 } = require('./system_cron');
+const { EmployeeOnboardingWorkflow } = require('./employeeOnboarding');
 
 module.exports = {
   NotificationWorkflow,
@@ -23,5 +24,6 @@ module.exports = {
   ExpenseRemindersCronWorkflow,
   TimesheetRemindersCronWorkflow,
   ShiftRemindersCronWorkflow,
-  EmailVerificationCronWorkflow
+  EmailVerificationCronWorkflow,
+  EmployeeOnboardingWorkflow
 };
