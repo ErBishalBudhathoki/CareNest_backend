@@ -62,29 +62,7 @@ process.on('uncaughtException', (error) => {
   
 });
 
-// Start Schedulers
-const startSchedulers = async () => {
-  try {
-    require('./cron/notificationScheduler').start();
-    require('./cron/dunningScheduler').scheduleDunning();
-    require('./cron/scheduler').start();
-    
-    // Legacy schedulers
-    try {
-      const { startTimesheetReminderScheduler } = require('./timesheet_reminder_scheduler');
-      await startTimesheetReminderScheduler();
-    } catch (e) { logger.warn('⚠️ Timesheet scheduler issue:', e.message); }
-
-    try {
-      const { startExpenseReminderScheduler } = require('./expense_reminder_scheduler');
-      require('./expense_reminder_scheduler').startExpenseReminderScheduler();
-    } catch (e) { logger.warn('⚠️ Expense scheduler issue:', e.message); }
-    
-    logger.info('⏰ All schedulers initialized');
-  } catch (error) {
-    logger.error('Failed to start schedulers', { error: error.message });
-  }
-};
+// Schedulers have been migrated to Temporal. See temporal-worker.js and temporal/activities/system_cron.js
 
 // Start Workers
 const startWorkers = () => {
@@ -199,8 +177,7 @@ else if (require.main === module) {
           logger.warn('⚠️  Falling back to JWT_SECRET from environment');
         }
 
-        console.log('⏳ Starting schedulers...');
-        startSchedulers();
+        console.log('✅ Cron schedulers migrated to Temporal');
         console.log('⏳ Starting workers...');
         startWorkers();
         console.log('✅ Background tasks initialized');
