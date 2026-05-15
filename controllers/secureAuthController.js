@@ -382,6 +382,26 @@ class SecureAuthController {
         'User registered successfully. Please verify your email using the Firebase verification link.'
       )
     );
+
+    // Start the Employee Onboarding Temporal Workflow (non-blocking — don't await).
+    // Only for employee role; admin owners have a different onboarding path.
+    if (newUser.role === 'employee') {
+      const TemporalManager = require('../core/TemporalManager');
+      TemporalManager.startWorkflow('EmployeeOnboardingWorkflow', {
+        workflowId: `employee-onboarding-${newUser._id.toString()}`,
+        args: [{
+          userId: newUser._id.toString(),
+          email: newUser.email,
+          firstName: newUser.firstName,
+          organizationId: newUser.organizationId || null,
+        }],
+      }).catch((err) => {
+        logger.error('Failed to start EmployeeOnboardingWorkflow (non-fatal)', {
+          userId: newUser._id.toString(),
+          error: err.message,
+        });
+      });
+    }
   });
 
   /**
