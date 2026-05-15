@@ -401,6 +401,12 @@ class SecureAuthController {
           error: err.message,
         });
       });
+
+      // Add new employee to Listmonk sign-in(onboarding) list (non-blocking).
+      emailService.addSubscriber(
+        newUser.email,
+        `${newUser.firstName || ''} ${newUser.lastName || ''}`.trim() || newUser.email
+      ).catch(() => {});
     }
   });
 
