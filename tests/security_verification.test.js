@@ -99,22 +99,10 @@ jest.mock('../middleware/systemHealth', () => ({
   systemHealthMiddleware: (req, res, next) => next()
 }));
 
-// Mock Notification Scheduler
-jest.mock('../cron/notificationScheduler', () => ({
-  start: jest.fn()
-}));
-
-// Mock ShiftSubscriber (just require it)
-jest.mock('../subscribers/ShiftSubscriber', () => ({}));
-
-// Mock Timesheet Reminder Scheduler
-jest.mock('../timesheet_reminder_scheduler', () => ({
-  startTimesheetReminderScheduler: jest.fn()
-}));
-
-// Mock Expense Reminder Scheduler
-jest.mock('../expense_reminder_scheduler', () => ({
-  startExpenseReminderScheduler: jest.fn()
+// Mock TemporalManager to prevent actual workflow triggering during tests
+jest.mock('../core/TemporalManager', () => ({
+  startWorkflow: jest.fn().mockResolvedValue({ workflowId: 'mock-id' }),
+  getClient: jest.fn().mockResolvedValue({})
 }));
 
 // Mock Job Workers
