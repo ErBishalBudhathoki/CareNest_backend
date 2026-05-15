@@ -504,6 +504,23 @@ class FirebaseAuthController {
         email: user.email
       });
 
+      // Signal the Onboarding Workflow that this user's email is now verified.
+      // Non-blocking — a Temporal outage must never break the verification response.
+      if (user.role === 'employee') {
+        const TemporalManager = require('../core/TemporalManager');
+        TemporalManager.getClient().then(async (client) => {
+          try {
+            const handle = client.workflow.getHandle(`employee-onboarding-${user._id.toString()}`);
+            await handle.signal('accountVerifiedSignal');
+            logger.info('[Onboarding] Sent accountVerifiedSignal', { userId: user._id.toString() });
+          } catch (err) {
+            logger.warn('[Onboarding] Could not signal accountVerifiedSignal (non-fatal)', {
+              userId: user._id.toString(), error: err.message,
+            });
+          }
+        }).catch(() => {});
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Email verified successfully',

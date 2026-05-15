@@ -19,6 +19,12 @@ const {
   processShiftRemindersActivity,
   processEmailVerificationRemindersActivity
 } = require('./temporal/activities/system_cron');
+const {
+  generateAndSendVerificationEmail,
+  sendVerificationReminderEmail,
+  sendOnboardingReminderEmail,
+  activateUserAccount,
+} = require('./temporal/activities/employeeOnboardingActivities');
 
 async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
@@ -75,7 +81,12 @@ async function run() {
       processExpenseRemindersActivity,
       processTimesheetRemindersActivity,
       processShiftRemindersActivity,
-      processEmailVerificationRemindersActivity
+      processEmailVerificationRemindersActivity,
+      // Employee Onboarding
+      generateAndSendVerificationEmail,
+      sendVerificationReminderEmail,
+      sendOnboardingReminderEmail,
+      activateUserAccount,
     },
   });
 

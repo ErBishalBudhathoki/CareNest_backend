@@ -126,6 +126,20 @@ class OnboardingController {
             organizationId: orgId,
             timestamp: new Date().toISOString()
         });
+
+        // Signal the Temporal workflow that onboarding is complete (non-blocking).
+        const TemporalManager = require('../core/TemporalManager');
+        TemporalManager.getClient().then(async (client) => {
+            try {
+                const handle = client.workflow.getHandle(`employee-onboarding-${uid}`);
+                await handle.signal('onboardingCompletedSignal');
+                logger.info('[Onboarding] Sent onboardingCompletedSignal', { userId: uid });
+            } catch (err) {
+                logger.warn('[Onboarding] Could not signal onboardingCompletedSignal (non-fatal)', {
+                    userId: uid, error: err.message,
+                });
+            }
+        }).catch(() => {});
         
         res.json({ success: true, code: 'ONBOARDING_SUBMITTED', data: result });
     });
@@ -185,6 +199,20 @@ class OnboardingController {
             adminId,
             timestamp: new Date().toISOString()
         });
+
+        // Signal the Temporal workflow that admin has finalized onboarding (non-blocking).
+        const TemporalManager = require('../core/TemporalManager');
+        TemporalManager.getClient().then(async (client) => {
+            try {
+                const handle = client.workflow.getHandle(`employee-onboarding-${userId}`);
+                await handle.signal('onboardingFinalizedSignal');
+                logger.info('[Onboarding] Sent onboardingFinalizedSignal', { userId });
+            } catch (err) {
+                logger.warn('[Onboarding] Could not signal onboardingFinalizedSignal (non-fatal)', {
+                    userId, error: err.message,
+                });
+            }
+        }).catch(() => {});
         
         res.json({ success: true, code: 'ONBOARDING_FINALIZED', data: result });
     });
