@@ -78,10 +78,15 @@ async function run() {
 
   const connection = await NativeConnection.connect(connectionOptions);
 
+  // Dynamically determine task queue based on environment
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
+  const isProd = projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
+  const taskQueue = `default-${isProd ? 'prod' : 'dev'}`;
+
   const worker = await Worker.create({
     connection,
     namespace: 'default',
-    taskQueue: 'default',
+    taskQueue: taskQueue,
     // Path to the workflows bundle/file
     workflowsPath: path.join(__dirname, 'temporal', 'workflows', 'index.js'),
     activities: {
