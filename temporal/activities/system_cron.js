@@ -293,10 +293,10 @@ async function cleanupArtifactRegistryActivity() {
       }
 
       // Sort by createTime descending (newest first)
-      // Note: createTime is a Protobuf Timestamp object
       const sortedVersions = versions.sort((a, b) => {
-        const timeA = a.createTime.seconds * 1000 + (a.createTime.nanos / 1000000);
-        const timeB = b.createTime.seconds * 1000 + (b.createTime.nanos / 1000000);
+        if (!a.createTime || !b.createTime) return 0;
+        const timeA = (Number(a.createTime.seconds) || 0) * 1000 + ((Number(a.createTime.nanos) || 0) / 1000000);
+        const timeB = (Number(b.createTime.seconds) || 0) * 1000 + ((Number(b.createTime.nanos) || 0) / 1000000);
         return timeB - timeA;
       });
 
@@ -309,9 +309,18 @@ async function cleanupArtifactRegistryActivity() {
       let failedCount = 0;
 
       for (const version of toDelete) {
+        // Send heartbeat to Temporal to prevent timeout during long cleanups
+        try {
+          const { Context } = require('@temporalio/activity');
+          Context.current().heartbeat(`Cleaning up ${env.name}: ${deletedCount}/${toDelete.length}`);
+        } catch (e) {
+          // Ignore if not running in a worker context (e.g. tests)
+        }
+
         // Safety check: Never delete a version that has tags (e.g., 'latest' or a version tag)
         if (version.relatedTags && version.relatedTags.length > 0) {
-          logger.info(`[Temporal Activity] Skipping version ${version.name} as it has tags: ${version.relatedTags.map(t => t.name).join(', ')}`);
+          const tagNames = version.relatedTags.map(t => typeof t === 'string' ? t : (t.name || 'unknown')).join(', ');
+          logger.info(`[Temporal Activity] Skipping version ${version.name} as it has tags: ${tagNames}`);
           continue;
         }
 
