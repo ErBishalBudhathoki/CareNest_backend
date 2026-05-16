@@ -360,24 +360,55 @@ async function cleanupArtifactRegistryActivity() {
       }
     }
 
-    // ── PHASE 2: delete ALL tags from every version we intend to remove ───────
-    // Tag-deletion failures are HARD BLOCKERS – version is pulled from the list.
+    // ── PHASE 2: explicitly list & delete ALL tags, then mark safe to delete ──────
+    // listVersions does NOT populate relatedTags reliably. We must call listTags
+    // directly, filtered to each version we intend to remove.
+
+    const packagePath = parent; // same parent used for listVersions
+    const [allTags] = await client.listTags({ parent: packagePath });
+
+    // Build a map: versionName → [tag resource names]
+    const tagsByVersion = new Map();
+    for (const tag of allTags) {
+      // tag.version is the full version resource name e.g. .../versions/sha256:abc
+      const ver = tag.version || '';
+      if (!tagsByVersion.has(ver)) tagsByVersion.set(ver, []);
+      tagsByVersion.get(ver).push(tag.name); // tag.name is already the full resource path
+    }
+
+    logger.info(
+      `[Temporal Activity] Found ${allTags.length} total tags across all versions.`
+    );
+
     const safeToDelete = [];
 
     for (const version of toDelete) {
-      const tags = version.relatedTags || [];
-      let tagError = false;
+      const tags = tagsByVersion.get(version.name) || [];
 
-      for (const tag of tags) {
-        const name = fullTagName(tag, version.name);
-        const short = tagShortName(tag);
+      if (tags.length === 0) {
+        // No tags at all — safe to attempt deletion directly
+        safeToDelete.push(version);
+        continue;
+      }
+
+      let tagError = false;
+      for (const tagResourceName of tags) {
+        const short = tagResourceName.split('/').pop();
+        
+        // Critical check: If it has a protected tag, we MUST skip the entire version
+        if (PROTECTED_TAGS.has(short)) {
+          logger.info(`[Temporal Activity] Skipping version ${version.name.split('/').pop()} as it has protected tag: ${short}`);
+          tagError = true;
+          break;
+        }
+
         try {
-          await client.deleteTag({ name });
+          await client.deleteTag({ name: tagResourceName });
           logger.info(`[Temporal Activity] Deleted tag "${short}" from ${version.name.split('/').pop()}`);
         } catch (err) {
           logger.error(
             `[Temporal Activity] Could not delete tag "${short}" from ` +
-            `${version.name.split('/').pop()} – skipping this version. Reason: ${err.message}`
+            `${version.name.split('/').pop()} — skipping this version. Reason: ${err.message}`
           );
           tagError = true;
           break;
