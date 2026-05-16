@@ -1,6 +1,6 @@
 // Firebase Admin SDK configuration
 const { admin, messaging } = require('../firebase-admin-config');
-const logger = require('../utils/structuredLogger');
+const logger = require('./logger');
 
 class FirebaseConfig {
   constructor() {
