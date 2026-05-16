@@ -60,8 +60,13 @@ async function EmailVerificationCronWorkflow() {
  * Workflow that cleans up old Artifact Registry images.
  */
 async function CleanupArtifactRegistryWorkflow() {
-  const result = await cleanupArtifactRegistryActivity();
-  return result;
+  try {
+    const result = await cleanupArtifactRegistryActivity();
+    return { success: true, result };
+  } catch (error) {
+    // We log the error but don't fail the whole workflow to allow the schedule to continue
+    return { success: false, error: error.message };
+  }
 }
 
 module.exports = {
