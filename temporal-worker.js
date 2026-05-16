@@ -5,6 +5,7 @@ const logger = require('./config/logger');
 const path = require('path');
 
 // Activities
+const { registerSchedules } = require('./scripts/register-temporal-schedules');
 const { sendPushNotification } = require('./temporal/activities/notifications');
 const { sendEmergencyPush } = require('./temporal/activities/emergency');
 const { processInvoiceActivity } = require('./temporal/activities/invoice');
@@ -17,7 +18,8 @@ const {
   processExpenseRemindersActivity,
   processTimesheetRemindersActivity,
   processShiftRemindersActivity,
-  processEmailVerificationRemindersActivity
+  processEmailVerificationRemindersActivity,
+  cleanupArtifactRegistryActivity
 } = require('./temporal/activities/system_cron');
 const {
   generateAndSendVerificationEmail,
@@ -28,6 +30,17 @@ const {
 
 async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
+
+  // Auto-register schedules if requested
+  if (process.env.REGISTER_TEMPORAL_SCHEDULES === 'true') {
+    try {
+      await registerSchedules();
+      logger.info('Temporal schedules registered/synced successfully on worker startup');
+    } catch (err) {
+      logger.error('Failed to auto-register Temporal schedules on worker startup', err);
+      // We don't exit here because the worker can still process activities/workflows
+    }
+  }
 
   // Connect to MongoDB — required by activities that query FcmToken, User, etc.
   const mongoUri = process.env.MONGODB_URI;
@@ -82,6 +95,7 @@ async function run() {
       processTimesheetRemindersActivity,
       processShiftRemindersActivity,
       processEmailVerificationRemindersActivity,
+      cleanupArtifactRegistryActivity,
       // Employee Onboarding
       generateAndSendVerificationEmail,
       sendVerificationReminderEmail,
