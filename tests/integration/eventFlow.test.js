@@ -24,11 +24,11 @@ jest.mock('../../config/database', () => ({
 jest.mock('../../core/QueueManager', () => ({
   addJob: jest.fn().mockResolvedValue({ id: 'job-123' })
 }));
-
 const mockStartWorkflow = jest.fn().mockResolvedValue({ workflowId: 'test-wf-id' });
 jest.mock('../../core/TemporalManager', () => ({
   startWorkflow: mockStartWorkflow
 }));
+
 
 // Now require the modules
 const EventBus = require('../../core/EventBus');
