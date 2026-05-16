@@ -341,15 +341,42 @@ async function cleanupArtifactRegistryActivity() {
       }
 
       try {
+        // Step 1: Delete all tags first (except protected ones)
+        if (version.relatedTags && version.relatedTags.length > 0) {
+          for (const tag of version.relatedTags) {
+            const tagName = typeof tag === 'string' ? tag : (tag.name || '').split('/').pop();
+            
+            // Critical check: If it has a protected tag, we MUST skip the entire version
+            if (protectedTags.includes(tagName)) {
+              throw new Error(`PROTECTED_TAG_FOUND:${tagName}`);
+            }
+            
+            // Delete the tag
+            try {
+              const fullTagName = typeof tag === 'string' 
+                ? `${version.name.split('/versions/')[0]}/tags/${tag}`
+                : tag.name;
+              await client.deleteTag({ name: fullTagName });
+              logger.info(`[Temporal Activity] Deleted tag ${tagName} from ${version.name.split('/').pop()}`);
+            } catch (tagErr) {
+              logger.warn(`[Temporal Activity] Failed to delete tag ${tagName}: ${tagErr.message}`);
+            }
+          }
+        }
+
+        // Step 2: Delete the version now that tags are gone
         const [operation] = await client.deleteVersion({ name: version.name });
-        // Wait for the long-running operation to complete
         await operation.promise();
         
         deletedCount++;
         logger.info(`[Temporal Activity] Successfully deleted version: ${version.name.split('/').pop()}`);
       } catch (err) {
-        failedCount++;
-        logger.error(`[Temporal Activity] Failed to delete version ${version.name.split('/').pop()}: ${err.message}`);
+        if (err.message.startsWith('PROTECTED_TAG_FOUND:')) {
+          logger.info(`[Temporal Activity] Skipping version ${version.name.split('/').pop()} as it has protected tag: ${err.message.split(':')[1]}`);
+        } else {
+          failedCount++;
+          logger.error(`[Temporal Activity] Failed to delete version ${version.name.split('/').pop()}: ${err.message}`);
+        }
       }
     }
 
