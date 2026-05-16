@@ -67,20 +67,12 @@ process.on('uncaughtException', (error) => {
 // Start Workers
 const startWorkers = () => {
   try {
+    // Event subscribers (now using Temporal internally)
     require('./subscribers/ShiftSubscriber');
-    const QueueManager = require('./core/QueueManager');
-    const processInvoiceJob = require('./workers/InvoiceWorker');
-    QueueManager.registerWorker('invoice-generation', processInvoiceJob);
-
-    // Emergency alert worker — handles 'emergency_alert' jobs on the 'notifications' queue
-    require('./workers/emergencyNotificationWorker');
-
-    // General notification worker — handles other notification job types
-    require('./workers/notificationWorker');
-
-    logger.info('👷 Job Workers & Subscribers initialized');
+    
+    logger.info('👷 Subscribers initialized');
   } catch (err) {
-    logger.error('Failed to initialize workers', { error: err.message });
+    logger.error('Failed to initialize subscribers', { error: err.message });
   }
 };
 

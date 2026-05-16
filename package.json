@@ -52,7 +52,12 @@
     "fast-xml-parser": "5.7.2",
     "@aws-sdk/xml-builder": "3.972.14",
     "@tootallnate/once": "3.0.1",
-    "uuid": "^11.0.0"
+    "uuid": "^11.0.0",
+    "protobufjs": "^8.3.0",
+    "fast-uri": "^3.1.2",
+    "fast-xml-builder": "^1.2.0",
+    "hono": "^4.12.18",
+    "ip-address": "^10.1.1"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1014.0",

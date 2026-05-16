@@ -96,6 +96,27 @@ class TemporalManager {
   }
 
   /**
+   * Starts a Temporal workflow.
+   * @param {string} workflowName Name of the workflow to start.
+   * @param {Object} options Options including workflowId, taskQueue, and args.
+   */
+  static async startWorkflow(workflowName, { workflowId, taskQueue, args }) {
+    const client = await this.getClient();
+    try {
+      const handle = await client.workflow.start(workflowName, {
+        taskQueue: taskQueue || 'default',
+        workflowId,
+        args: args || [],
+      });
+      logger.info(`Started Temporal workflow: ${workflowName}`, { workflowId: handle.workflowId });
+      return handle;
+    } catch (error) {
+      logger.error(`Failed to start Temporal workflow: ${workflowName}`, { error: error.message, workflowId });
+      throw error;
+    }
+  }
+
+  /**
    * Closes the connection gracefully.
    */
   static async close() {
