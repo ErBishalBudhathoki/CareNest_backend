@@ -327,10 +327,16 @@ async function cleanupArtifactRegistryActivity() {
         // Ignore if not running in a worker context (e.g. tests)
       }
 
-      // Safety check: Never delete a version that has tags (e.g., 'latest' or a version tag)
-      if (version.relatedTags && version.relatedTags.length > 0) {
-        const tagNames = version.relatedTags.map(t => typeof t === 'string' ? t : (t.name || 'unknown')).join(', ');
-        logger.info(`[Temporal Activity] Skipping version ${version.name} as it has tags: ${tagNames}`);
+      // Safety check: Only protect critical tags. Delete others if they are old.
+      const protectedTags = ['latest', 'prod', 'production', 'dev', 'development', 'main', 'master'];
+      const hasProtectedTag = version.relatedTags && version.relatedTags.some(t => {
+        const tagName = typeof t === 'string' ? t : (t.name || '').split('/').pop();
+        return protectedTags.includes(tagName);
+      });
+
+      if (hasProtectedTag) {
+        const tagNames = version.relatedTags.map(t => typeof t === 'string' ? t : (t.name || '').split('/').pop()).join(', ');
+        logger.info(`[Temporal Activity] Skipping version ${version.name.split('/').pop()} as it has protected tags: ${tagNames}`);
         continue;
       }
 
