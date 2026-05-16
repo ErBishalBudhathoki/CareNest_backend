@@ -49,8 +49,7 @@ class ShiftSubscriber {
       logger.info(`WorkedTime record created/updated for shift ${shift.id || shift._id}`);
 
       // 2. Queue Invoice Generation via Temporal
-      const temporalClient = await require('../core/TemporalManager').getClient();
-      await temporalClient.workflow.start('InvoiceProcessingWorkflow', {
+      await require('../core/TemporalManager').startWorkflow('InvoiceProcessingWorkflow', {
         taskQueue: 'default',
         workflowId: `invoice-generation-${shift.id || shift._id}-${Date.now()}`,
         args: [{

@@ -1,8 +1,4 @@
-const EventBus = require('../../core/EventBus');
-const ShiftSubscriber = require('../../subscribers/ShiftSubscriber');
-const QueueManager = require('../../core/QueueManager');
-
-// Mock dependencies
+// Mock dependencies must be at the very top before any requires
 jest.mock('../../config/redis', () => {
   const Redis = require('ioredis-mock');
   const client = new Redis();
@@ -10,11 +6,13 @@ jest.mock('../../config/redis', () => {
   client.status = 'ready';
   return client;
 });
+
 jest.mock('../../config/logger', () => ({
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn()
 }));
+
 jest.mock('../../config/database', () => ({
   getDatabase: jest.fn().mockResolvedValue({
     collection: jest.fn().mockReturnValue({
@@ -22,6 +20,7 @@ jest.mock('../../config/database', () => ({
     })
   })
 }));
+
 jest.mock('../../core/QueueManager', () => ({
   addJob: jest.fn().mockResolvedValue({ id: 'job-123' })
 }));
@@ -29,6 +28,12 @@ const mockStartWorkflow = jest.fn().mockResolvedValue({ workflowId: 'test-wf-id'
 jest.mock('../../core/TemporalManager', () => ({
   startWorkflow: mockStartWorkflow
 }));
+
+
+// Now require the modules
+const EventBus = require('../../core/EventBus');
+const ShiftSubscriber = require('../../subscribers/ShiftSubscriber');
+const QueueManager = require('../../core/QueueManager');
 
 describe('Integration: Shift Completion Flow', () => {
   beforeAll(() => {

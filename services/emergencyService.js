@@ -111,9 +111,10 @@ class EmergencyService {
       };
 
       // Dispatch via Temporal for each recipient
-      logger.info(`Starting Temporal workflows for ${tokenEntries.length} emergency devices`);
+      logger.info(`Starting Temporal workflows for ${tokenEntries.length} emergency devices`, { broadcastId });
 
       for (const entry of tokenEntries) {
+        logger.debug(`Initiating EmergencyNotificationWorkflow for user ${entry.userId}`);
         TemporalManager.startWorkflow('EmergencyNotificationWorkflow', {
           workflowId: `emergency-alert-${broadcastId}-${entry.userId}`,
           args: [{
