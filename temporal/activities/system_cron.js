@@ -14,6 +14,7 @@ const User = require('../../models/User');
 const FcmToken = require('../../models/FcmToken');
 const { admin, messaging } = require('../../firebase-admin-config');
 const { ArtifactRegistryClient } = require('@google-cloud/artifact-registry');
+const { ArtifactRegistryClient } = require('@google-cloud/artifact-registry');
 
 /**
  * Trigger Temporal Workflow (replaces the one in notificationScheduler)
@@ -261,6 +262,97 @@ async function processEmailVerificationRemindersActivity() {
 
 /**
  * Activity: Cleanup Artifact Registry
+ */
+async function cleanupArtifactRegistryActivity() {
+  const client = new ArtifactRegistryClient();
+  const region = 'australia-southeast1';
+  const repo = 'backend-repo';
+
+  const environments = [
+    { name: 'Development', project: 'invoice-660f3', package: 'backend-dev', service: 'backend-dev', keepCount: 10 },
+    { name: 'Production', project: 'carenest-prods', package: 'backend-prod', service: 'backend-prod', keepCount: 20 }
+  ];
+
+  const results = [];
+
+  for (const env of environments) {
+    logger.info(`[Temporal Activity] Starting Artifact Registry cleanup for ${env.name}...`);
+    try {
+      // 1. Get currently deployed image to protect it
+      // Using Cloud Run API via gcloud would be hard, but we can just use the Artifact Registry metadata
+      // if we don't have a reliable way to get the 'current' tag.
+      // However, the best practice is to protect images that have ANY tag, or specific tags.
+
+      const parent = `projects/${env.project}/locations/${region}/repositories/${repo}/packages/${env.package}`;
+
+      // List all versions
+      const [versions] = await client.listVersions({ parent });
+
+      if (!versions || versions.length === 0) {
+        results.push({ env: env.name, status: 'no_images' });
+        continue;
+      }
+
+      // Sort by createTime descending (newest first)
+      const sortedVersions = versions.sort((a, b) => {
+        if (!a.createTime || !b.createTime) return 0;
+        const timeA = (Number(a.createTime.seconds) || 0) * 1000 + ((Number(a.createTime.nanos) || 0) / 1000000);
+        const timeB = (Number(b.createTime.seconds) || 0) * 1000 + ((Number(b.createTime.nanos) || 0) / 1000000);
+        return timeB - timeA;
+      });
+
+      const total = sortedVersions.length;
+      const toDelete = sortedVersions.slice(env.keepCount);
+
+      logger.info(`[Temporal Activity] Found ${total} versions for ${env.name}. Keeping ${env.keepCount}, deleting ${toDelete.length}...`);
+
+      let deletedCount = 0;
+      let failedCount = 0;
+
+      for (const version of toDelete) {
+        // Send heartbeat to Temporal to prevent timeout during long cleanups
+        try {
+          const { Context } = require('@temporalio/activity');
+          Context.current().heartbeat(`Cleaning up ${env.name}: ${deletedCount}/${toDelete.length}`);
+        } catch (e) {
+          // Ignore if not running in a worker context (e.g. tests)
+        }
+
+        // Safety check: Never delete a version that has tags (e.g., 'latest' or a version tag)
+        if (version.relatedTags && version.relatedTags.length > 0) {
+          const tagNames = version.relatedTags.map(t => typeof t === 'string' ? t : (t.name || 'unknown')).join(', ');
+          logger.info(`[Temporal Activity] Skipping version ${version.name} as it has tags: ${tagNames}`);
+          continue;
+        }
+
+        try {
+          await client.deleteVersion({ name: version.name });
+          deletedCount++;
+        } catch (err) {
+          logger.error(`[Temporal Activity] Failed to delete version ${version.name}`, err);
+          failedCount++;
+        }
+      }
+
+      results.push({
+        env: env.name,
+        total,
+        deleted: deletedCount,
+        failed: failedCount,
+        kept: total - deletedCount
+      });
+
+    } catch (error) {
+      logger.error(`[Temporal Activity] Artifact Registry cleanup failed for ${env.name}`, error);
+      results.push({ env: env.name, status: 'failed', error: error.message });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Activity: Cleanup Artifact Registry
  *
  * Fixes applied vs original:
  * 1. Tags are now deleted BEFORE we attempt to delete any version, and failures
@@ -276,9 +368,9 @@ async function cleanupArtifactRegistryActivity() {
   const credentials =
     process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL
       ? {
-          client_email: process.env.FIREBASE_CLIENT_EMAIL,
-          private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-        }
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      }
       : undefined;
 
   const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
@@ -394,7 +486,7 @@ async function cleanupArtifactRegistryActivity() {
       let tagError = false;
       for (const tagResourceName of tags) {
         const short = tagResourceName.split('/').pop();
-        
+
         // Critical check: If it has a protected tag, we MUST skip the entire version
         if (PROTECTED_TAGS.has(short)) {
           logger.info(`[Temporal Activity] Skipping version ${version.name.split('/').pop()} as it has protected tag: ${short}`);
@@ -500,4 +592,5 @@ module.exports = {
   processEmailVerificationRemindersActivity,
   cleanupArtifactRegistryActivity
 };
+
 
