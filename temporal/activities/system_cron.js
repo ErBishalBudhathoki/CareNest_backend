@@ -261,93 +261,235 @@ async function processEmailVerificationRemindersActivity() {
 
 /**
  * Activity: Cleanup Artifact Registry
+ *
+ * Fixes applied vs original:
+ * 1. Tags are now deleted BEFORE we attempt to delete any version, and failures
+ *    are treated as hard blockers (the version is skipped, not attempted).
+ * 2. Versions that still carry protected tags are excluded up-front.
+ * 3. Multi-pass deletion handles parent/child manifest ordering automatically:
+ *    Pass 1 – delete everything we can (parent manifest-lists, which just had
+ *              their tags stripped, go first).
+ *    Pass 2+ – retry the ones that failed because a parent hadn't been removed
+ *              yet.  Repeats until no more progress is made (max 5 passes).
  */
 async function cleanupArtifactRegistryActivity() {
-  const client = new ArtifactRegistryClient();
-  const region = 'australia-southeast1';
-  const repo = 'backend-repo';
-  
-  const environments = [
-    { name: 'Development', project: 'invoice-660f3', package: 'backend-dev', service: 'backend-dev', keepCount: 10 },
-    { name: 'Production', project: 'carenest-prods', package: 'backend-prod', service: 'backend-prod', keepCount: 20 }
-  ];
+  const credentials =
+    process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL
+      ? {
+          client_email: process.env.FIREBASE_CLIENT_EMAIL,
+          private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }
+      : undefined;
 
-  const results = [];
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
+  const isProd =
+    projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
 
-  for (const env of environments) {
-    logger.info(`[Temporal Activity] Starting Artifact Registry cleanup for ${env.name}...`);
-    try {
-      // 1. Get currently deployed image to protect it
-      // Using Cloud Run API via gcloud would be hard, but we can just use the Artifact Registry metadata
-      // if we don't have a reliable way to get the 'current' tag.
-      // However, the best practice is to protect images that have ANY tag, or specific tags.
-      
-      const parent = `projects/${env.project}/locations/${region}/repositories/${repo}/packages/${env.package}`;
-      
-      // List all versions
-      const [versions] = await client.listVersions({ parent });
-      
-      if (!versions || versions.length === 0) {
-        results.push({ env: env.name, status: 'no_images' });
+  const env = {
+    name: isProd ? 'Production' : 'Development',
+    project: projectId,
+    package: isProd ? 'backend-prod' : 'backend-dev',
+    keepCount: isProd ? 20 : 10,
+  };
+
+  const PROTECTED_TAGS = new Set([
+    'latest', 'prod', 'production', 'dev', 'development', 'main', 'master',
+  ]);
+
+  logger.info(
+    `[Temporal Activity] Starting Artifact Registry cleanup for ${env.name} (${env.project})…`
+  );
+
+  try {
+    const client = new ArtifactRegistryClient({
+      projectId: env.project,
+      ...(credentials && { credentials }),
+    });
+
+    const region = 'australia-southeast1';
+    const repo = 'backend-repo';
+    const parent = `projects/${env.project}/locations/${region}/repositories/${repo}/packages/${env.package}`;
+
+    const [versions] = await client.listVersions({ parent });
+
+    if (!versions?.length) {
+      logger.info('[Temporal Activity] No versions found – nothing to clean.');
+      return { success: true, message: 'No versions found.' };
+    }
+
+    // ── Sort newest → oldest ──────────────────────────────────────────────────
+    const sorted = [...versions].sort((a, b) => {
+      const tA = (Number(a.createTime?.seconds) || 0) * 1e3 + (Number(a.createTime?.nanos) || 0) / 1e6;
+      const tB = (Number(b.createTime?.seconds) || 0) * 1e3 + (Number(b.createTime?.nanos) || 0) / 1e6;
+      return tB - tA; // newest first
+    });
+
+    const candidates = sorted.slice(env.keepCount);
+
+    logger.info(
+      `[Temporal Activity] ${sorted.length} total versions. Keeping ${env.keepCount}, ` +
+      `evaluating ${candidates.length} for deletion.`
+    );
+
+    // ── Helper: resolve a tag object → its full resource name ─────────────────
+    const fullTagName = (tag, versionName) => {
+      if (typeof tag === 'string') {
+        const packagePath = versionName.split('/versions/')[0];
+        return `${packagePath}/tags/${tag}`;
+      }
+      return tag.name;
+    };
+
+    const tagShortName = (tag) =>
+      typeof tag === 'string' ? tag : (tag.name || '').split('/').pop();
+
+    // ── PHASE 1: filter out anything with a protected tag ────────────────────
+    const toDelete = [];
+    const skippedProtected = [];
+
+    for (const version of candidates) {
+      const tags = version.relatedTags || [];
+      const hasProtected = tags.some((t) => PROTECTED_TAGS.has(tagShortName(t)));
+      if (hasProtected) {
+        skippedProtected.push(version.name.split('/').pop());
+        logger.info(
+          `[Temporal Activity] Skipping ${version.name.split('/').pop()} – has protected tag.`
+        );
+      } else {
+        toDelete.push(version);
+      }
+    }
+
+    // ── PHASE 2: explicitly list & delete ALL tags, then mark safe to delete ──────
+    // listVersions does NOT populate relatedTags reliably. We must call listTags
+    // directly, filtered to each version we intend to remove.
+
+    const packagePath = parent; // same parent used for listVersions
+    const [allTags] = await client.listTags({ parent: packagePath });
+
+    // Build a map: versionName → [tag resource names]
+    const tagsByVersion = new Map();
+    for (const tag of allTags) {
+      // tag.version is the full version resource name e.g. .../versions/sha256:abc
+      const ver = tag.version || '';
+      if (!tagsByVersion.has(ver)) tagsByVersion.set(ver, []);
+      tagsByVersion.get(ver).push(tag.name); // tag.name is already the full resource path
+    }
+
+    logger.info(
+      `[Temporal Activity] Found ${allTags.length} total tags across all versions.`
+    );
+
+    const safeToDelete = [];
+
+    for (const version of toDelete) {
+      const tags = tagsByVersion.get(version.name) || [];
+
+      if (tags.length === 0) {
+        // No tags at all — safe to attempt deletion directly
+        safeToDelete.push(version);
         continue;
       }
 
-      // Sort by createTime descending (newest first)
-      const sortedVersions = versions.sort((a, b) => {
-        if (!a.createTime || !b.createTime) return 0;
-        const timeA = (Number(a.createTime.seconds) || 0) * 1000 + ((Number(a.createTime.nanos) || 0) / 1000000);
-        const timeB = (Number(b.createTime.seconds) || 0) * 1000 + ((Number(b.createTime.nanos) || 0) / 1000000);
-        return timeB - timeA;
-      });
-
-      const total = sortedVersions.length;
-      const toDelete = sortedVersions.slice(env.keepCount);
-
-      logger.info(`[Temporal Activity] Found ${total} versions for ${env.name}. Keeping ${env.keepCount}, deleting ${toDelete.length}...`);
-
-      let deletedCount = 0;
-      let failedCount = 0;
-
-      for (const version of toDelete) {
-        // Send heartbeat to Temporal to prevent timeout during long cleanups
-        try {
-          const { Context } = require('@temporalio/activity');
-          Context.current().heartbeat(`Cleaning up ${env.name}: ${deletedCount}/${toDelete.length}`);
-        } catch (e) {
-          // Ignore if not running in a worker context (e.g. tests)
-        }
-
-        // Safety check: Never delete a version that has tags (e.g., 'latest' or a version tag)
-        if (version.relatedTags && version.relatedTags.length > 0) {
-          const tagNames = version.relatedTags.map(t => typeof t === 'string' ? t : (t.name || 'unknown')).join(', ');
-          logger.info(`[Temporal Activity] Skipping version ${version.name} as it has tags: ${tagNames}`);
-          continue;
+      let tagError = false;
+      for (const tagResourceName of tags) {
+        const short = tagResourceName.split('/').pop();
+        
+        // Critical check: If it has a protected tag, we MUST skip the entire version
+        if (PROTECTED_TAGS.has(short)) {
+          logger.info(`[Temporal Activity] Skipping version ${version.name.split('/').pop()} as it has protected tag: ${short}`);
+          tagError = true;
+          break;
         }
 
         try {
-          await client.deleteVersion({ name: version.name });
-          deletedCount++;
+          await client.deleteTag({ name: tagResourceName });
+          logger.info(`[Temporal Activity] Deleted tag "${short}" from ${version.name.split('/').pop()}`);
         } catch (err) {
-          logger.error(`[Temporal Activity] Failed to delete version ${version.name}`, err);
-          failedCount++;
+          logger.error(
+            `[Temporal Activity] Could not delete tag "${short}" from ` +
+            `${version.name.split('/').pop()} — skipping this version. Reason: ${err.message}`
+          );
+          tagError = true;
+          break;
         }
       }
 
-      results.push({ 
-        env: env.name, 
-        total, 
-        deleted: deletedCount, 
-        failed: failedCount, 
-        kept: total - deletedCount 
-      });
-
-    } catch (error) {
-      logger.error(`[Temporal Activity] Artifact Registry cleanup failed for ${env.name}`, error);
-      results.push({ env: env.name, status: 'failed', error: error.message });
+      if (!tagError) {
+        safeToDelete.push(version);
+      }
     }
-  }
 
-  return results;
+    // ── PHASE 3: multi-pass version deletion (handles parent→child ordering) ──
+    let remaining = [...safeToDelete];
+    let deletedCount = 0;
+    let failedCount = 0;
+    const MAX_PASSES = 5;
+
+    for (let pass = 1; pass <= MAX_PASSES && remaining.length > 0; pass++) {
+      logger.info(
+        `[Temporal Activity] Deletion pass ${pass}/${MAX_PASSES} – ${remaining.length} version(s) remaining…`
+      );
+
+      const stillFailed = [];
+
+      for (const version of remaining) {
+        try {
+          const { Context } = require('@temporalio/activity');
+          Context.current().heartbeat(`Pass ${pass} – deleted ${deletedCount} so far`);
+        } catch (_) { /* ignore outside worker context */ }
+
+        try {
+          const [operation] = await client.deleteVersion({ name: version.name });
+          await operation.promise();
+          deletedCount++;
+          logger.info(`[Temporal Activity] Deleted ${version.name.split('/').pop()}`);
+        } catch (err) {
+          stillFailed.push(version);
+          if (pass === MAX_PASSES) {
+            failedCount++;
+            logger.error(
+              `[Temporal Activity] Permanently failed to delete ` +
+              `${version.name.split('/').pop()}: ${err.message}`
+            );
+          } else {
+            logger.warn(
+              `[Temporal Activity] Pass ${pass} – will retry ` +
+              `${version.name.split('/').pop()}: ${err.message}`
+            );
+          }
+        }
+      }
+
+      const madeProgress = stillFailed.length < remaining.length;
+      remaining = stillFailed;
+
+      if (!madeProgress) {
+        logger.warn(`[Temporal Activity] No progress on pass ${pass} – stopping early.`);
+        failedCount += remaining.length;
+        break;
+      }
+    }
+
+    const result = {
+      env: env.name,
+      total: sorted.length,
+      kept: env.keepCount,
+      skippedProtected: skippedProtected.length,
+      deleted: deletedCount,
+      failed: failedCount,
+    };
+
+    logger.info('[Temporal Activity] Artifact Registry cleanup complete', result);
+    return result;
+
+  } catch (error) {
+    logger.error(
+      `[Temporal Activity] Artifact Registry cleanup failed for ${env.name}`,
+      error
+    );
+    return { env: env.name, status: 'failed', error: error.message };
+  }
 }
 
 module.exports = {
@@ -358,3 +500,4 @@ module.exports = {
   processEmailVerificationRemindersActivity,
   cleanupArtifactRegistryActivity
 };
+
