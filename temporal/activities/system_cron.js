@@ -335,11 +335,15 @@ async function cleanupArtifactRegistryActivity() {
       }
 
       try {
-        await client.deleteVersion({ name: version.name });
+        const [operation] = await client.deleteVersion({ name: version.name });
+        // Wait for the long-running operation to complete
+        await operation.promise();
+        
         deletedCount++;
+        logger.info(`[Temporal Activity] Successfully deleted version: ${version.name.split('/').pop()}`);
       } catch (err) {
-        logger.error(`[Temporal Activity] Failed to delete version ${version.name}`, err);
         failedCount++;
+        logger.error(`[Temporal Activity] Failed to delete version ${version.name.split('/').pop()}: ${err.message}`);
       }
     }
 
