@@ -5,7 +5,8 @@ const {
   processExpenseRemindersActivity,
   processTimesheetRemindersActivity,
   processShiftRemindersActivity,
-  processEmailVerificationRemindersActivity
+  processEmailVerificationRemindersActivity,
+  cleanupArtifactRegistryActivity
 } = proxyActivities({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -55,10 +56,24 @@ async function EmailVerificationCronWorkflow() {
   return result;
 }
 
+/**
+ * Workflow that cleans up old Artifact Registry images.
+ */
+async function CleanupArtifactRegistryWorkflow() {
+  try {
+    const result = await cleanupArtifactRegistryActivity();
+    return { success: true, result };
+  } catch (error) {
+    // We log the error but don't fail the whole workflow to allow the schedule to continue
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   DunningCronWorkflow,
   ExpenseRemindersCronWorkflow,
   TimesheetRemindersCronWorkflow,
   ShiftRemindersCronWorkflow,
-  EmailVerificationCronWorkflow
+  EmailVerificationCronWorkflow,
+  CleanupArtifactRegistryWorkflow
 };
