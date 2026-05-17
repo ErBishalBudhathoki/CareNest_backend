@@ -274,7 +274,12 @@ async function processEmailVerificationRemindersActivity() {
  */
 async function cleanupArtifactRegistryActivity() {
   const credentials =
-    process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL
+    process.env.GCP_PRIVATE_KEY && process.env.GCP_CLIENT_EMAIL
+      ? {
+          client_email: process.env.GCP_CLIENT_EMAIL,
+          private_key: process.env.GCP_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }
+      : process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL
       ? {
           client_email: process.env.FIREBASE_CLIENT_EMAIL,
           private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
