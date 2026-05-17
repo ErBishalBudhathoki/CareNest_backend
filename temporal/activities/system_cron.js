@@ -445,7 +445,7 @@ async function cleanupArtifactRegistryActivity() {
         } catch (_) { /* ignore outside worker context */ }
 
         try {
-          const [operation] = await client.deleteVersion({ name: version.name });
+          const [operation] = await client.deleteVersion({ name: version.name, force: true });
           await operation.promise();
           deletedCount++;
           logger.info(`[Temporal Activity] Deleted ${version.name.split('/').pop()}`);
