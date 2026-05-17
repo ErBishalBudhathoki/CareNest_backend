@@ -287,7 +287,7 @@ async function cleanupArtifactRegistryActivity() {
 
   const env = {
     name: isProd ? 'Production' : 'Development',
-    project: projectId,
+    project: isProd ? 'carenest-prods' : 'invoice-660f3',
     package: isProd ? 'backend-prod' : 'backend-dev',
     keepCount: isProd ? 20 : 10,
   };
