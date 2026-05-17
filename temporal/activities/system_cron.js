@@ -429,6 +429,7 @@ async function cleanupArtifactRegistryActivity() {
     let remaining = [...safeToDelete];
     let deletedCount = 0;
     let failedCount = 0;
+    let skippedProtectedCount = toDelete.length - safeToDelete.length;
     const MAX_PASSES = 5;
 
     for (let pass = 1; pass <= MAX_PASSES && remaining.length > 0; pass++) {
@@ -450,37 +451,59 @@ async function cleanupArtifactRegistryActivity() {
           deletedCount++;
           logger.info(`[Temporal Activity] Deleted ${version.name.split('/').pop()}`);
         } catch (err) {
-          stillFailed.push(version);
-          if (pass === MAX_PASSES) {
-            failedCount++;
-            logger.error(
-              `[Temporal Activity] Permanently failed to delete ` +
-              `${version.name.split('/').pop()}: ${err.message}`
-            );
-          } else {
-            logger.warn(
-              `[Temporal Activity] Pass ${pass} – will retry ` +
-              `${version.name.split('/').pop()}: ${err.message}`
-            );
-          }
+          stillFailed.push({ version, err });
         }
       }
 
       const madeProgress = stillFailed.length < remaining.length;
-      remaining = stillFailed;
-
-      if (!madeProgress) {
-        logger.warn(`[Temporal Activity] No progress on pass ${pass} – stopping early.`);
-        failedCount += remaining.length;
-        break;
+      
+      // Process stillFailed at the end of the pass
+      const nextRemaining = [];
+      for (const { version, err } of stillFailed) {
+        if (pass === MAX_PASSES) {
+          if (err.code === 9) {
+            // FAILED_PRECONDITION: This is a child manifest whose parent is being KEPT in the top 20!
+            skippedProtectedCount++;
+            logger.info(
+              `[Temporal Activity] Skipped ${version.name.split('/').pop()} - it is a child layer referenced by a kept parent.`
+            );
+          } else {
+            failedCount++;
+            logger.error(
+              `[Temporal Activity] Permanently failed to delete ${version.name.split('/').pop()}: ${err.message}`
+            );
+          }
+        } else {
+          logger.warn(
+            `[Temporal Activity] Pass ${pass} – will retry ${version.name.split('/').pop()}: ${err.message}`
+          );
+          nextRemaining.push(version);
+        }
       }
+      
+      if (!madeProgress && nextRemaining.length === remaining.length) {
+        // If we made absolutely no progress, forcing more passes won't help
+        logger.warn(`[Temporal Activity] No progress made in pass ${pass}, stopping early.`);
+        // Fast-forward remaining to be processed as final pass failures/skips
+        if (pass < MAX_PASSES) {
+          pass = MAX_PASSES - 1; // Next iteration will be the final pass
+        }
+      }
+      
+      remaining = nextRemaining;
+    }
+
+    if (remaining.length > 0) {
+      logger.warn(
+        `[Temporal Activity] Gave up on ${remaining.length} version(s) after ${MAX_PASSES} passes.`
+      );
     }
 
     const result = {
       env: env.name,
       total: sorted.length,
       kept: env.keepCount,
-      skippedProtected: skippedProtected.length,
+      skippedProtected: skippedProtectedCount,
       deleted: deletedCount,
       failed: failedCount,
     };
