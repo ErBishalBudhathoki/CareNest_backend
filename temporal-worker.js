@@ -27,6 +27,12 @@ const {
   sendOnboardingReminderEmail,
   activateUserAccount,
 } = require('./temporal/activities/employeeOnboardingActivities');
+const {
+  sendVerificationEmailActivity,
+  sendPasswordResetEmailActivity,
+  sendPasswordChangeNotificationActivity,
+  sendGenericEmailActivity
+} = require('./temporal/activities/auth');
 
 async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
@@ -106,6 +112,10 @@ async function run() {
       sendVerificationReminderEmail,
       sendOnboardingReminderEmail,
       activateUserAccount,
+      sendVerificationEmailActivity,
+      sendPasswordResetEmailActivity,
+      sendPasswordChangeNotificationActivity,
+      sendGenericEmailActivity,
     },
   });
 

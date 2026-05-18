@@ -1,0 +1,411 @@
+🛠️  Configuring DEVELOPMENT environment
+2026-05-16 03:09:06 [[32minfo[39m]: [32mUsing ioredis-mock for test environment[39m
+WARNING: STRIPE_SECRET_KEY is not set. Payment processing will be disabled.
+Using Cloudflare R2 for storage
+R2 Account ID: 3fecfc3b7f7249ac7698b9a038c96dca
+R2 Bucket: businesslogo
+R2 Public Domain: https://assets.bishalbudhathoki.com
+R2 S3Client initialized successfully
+2026-05-16 03:09:07 [[33mwarn[39m]: [33mGCP_PROJECT_ID not found. AI features will run in fallback mode.[39m
+2026-05-16 03:09:07 [[32minfo[39m]: [32mSubscribed to 1 Redis channel(s)[39m
+2026-05-16 03:09:07 [[32minfo[39m]: [32mRedis connection established[39m
+2026-05-16 03:09:07 [[32minfo[39m]: [32mRedis client ready[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:09:11 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:09:11 [[31merror[39m]: [31mFailed to auto-create organization[39m
+DEBUG: Org creation error: TypeError: next is not a function
+    at model.next (/Users/bishal/Developer/invoice/backend/models/Organization.js:327:3)
+    at Kareem.execPre (/Users/bishal/Developer/invoice/backend/node_modules/kareem/index.js:59:39)
+    at model._execDocumentPreHooks (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:3209:29)
+    at model.validate (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:2702:30)
+    at model.$__save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:393:18)
+    at model.save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:667:16)
+    at model.create (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:2747:18)
+    at create (/Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:262:50)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Response[39m
+DEBUG Phase 1 variables: {
+  userId: '6a07533743a12a460ac79714',
+  organizationId: null,
+  data: {
+    userId: '6a07533743a12a460ac79714',
+    email: 'test-1778864947669@example.com',
+    firstName: 'Test',
+    lastName: 'Admin',
+    firebaseUid: 'test-firebase-uid-1778864951453-x37n3h',
+    customToken: 'test-custom-token',
+    organizationId: null
+  }
+}
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mIncoming request[39m
+[JWT Key Rotation] Failed to refresh key cache: Error: No active JWT secret found. Please rotate keys immediately.
+    at model.jwtSecretSchema.statics.getActiveKey (/Users/bishal/Developer/invoice/backend/models/JWTSecret.js:119:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at JWTKeyRotationService.refreshKeyCache (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:175:24)
+    at JWTKeyRotationService.getActiveKey (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:203:7)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:740:25
+2026-05-16 03:09:11 [[33mwarn[39m]: [33mKey rotation service unavailable, falling back to JWT_SECRET[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:11 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:11 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:09:11 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:09:12 [[31merror[39m]: [31mFailed to auto-create organization[39m
+DEBUG: Org creation error: TypeError: next is not a function
+    at model.next (/Users/bishal/Developer/invoice/backend/models/Organization.js:327:3)
+    at Kareem.execPre (/Users/bishal/Developer/invoice/backend/node_modules/kareem/index.js:59:39)
+    at model._execDocumentPreHooks (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:3209:29)
+    at model.validate (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:2702:30)
+    at model.$__save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:393:18)
+    at model.save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:667:16)
+    at model.create (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:2747:18)
+    at create (/Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:262:50)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:09:12 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:09:12 [[31merror[39m]: [31mFailed to auto-create organization[39m
+DEBUG: Org creation error: TypeError: next is not a function
+    at model.next (/Users/bishal/Developer/invoice/backend/models/Organization.js:327:3)
+    at Kareem.execPre (/Users/bishal/Developer/invoice/backend/node_modules/kareem/index.js:59:39)
+    at model._execDocumentPreHooks (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:3209:29)
+    at model.validate (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:2702:30)
+    at model.$__save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:393:18)
+    at model.save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:667:16)
+    at model.create (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:2747:18)
+    at create (/Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:262:50)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+[JWT Key Rotation] Failed to refresh key cache: Error: No active JWT secret found. Please rotate keys immediately.
+    at model.jwtSecretSchema.statics.getActiveKey (/Users/bishal/Developer/invoice/backend/models/JWTSecret.js:119:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at JWTKeyRotationService.refreshKeyCache (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:175:24)
+    at JWTKeyRotationService.getActiveKey (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:203:7)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:740:25
+2026-05-16 03:09:12 [[33mwarn[39m]: [33mKey rotation service unavailable, falling back to JWT_SECRET[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:09:12 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:09:12 [[31merror[39m]: [31mFailed to auto-create organization[39m
+DEBUG: Org creation error: TypeError: next is not a function
+    at model.next (/Users/bishal/Developer/invoice/backend/models/Organization.js:327:3)
+    at Kareem.execPre (/Users/bishal/Developer/invoice/backend/node_modules/kareem/index.js:59:39)
+    at model._execDocumentPreHooks (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:3209:29)
+    at model.validate (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/document.js:2702:30)
+    at model.$__save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:393:18)
+    at model.save (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:667:16)
+    at model.create (/Users/bishal/Developer/invoice/backend/node_modules/mongoose/lib/model.js:2747:18)
+    at create (/Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:262:50)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:09:12 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:09:12 [[35mhttp[39m]: [35mHTTP Response[39m
+FAIL tests/integration/multi_tenant_workflow.test.js (6.65 s)
+  Multi-Tenant Workflow Integration Tests
+    Phase 1: Organization Creation
+      ✕ should create a new organization and auto-create UserOrganization (332 ms)
+    Phase 2: User Authentication
+      ✕ should login and receive organization context (185 ms)
+    Phase 3: Organization Setup
+      ✕ should complete organization setup (22 ms)
+    Phase 4: Employee Creation
+      ✕ should create employee with auto UserOrganization (159 ms)
+    Phase 5: Client Creation with Validation
+      ✕ should create client with organization validation (18 ms)
+      ✕ should prevent duplicate client email within organization (41 ms)
+      ✕ should require organization ID for client creation (19 ms)
+    Phase 6: Multi-Org Isolation
+      ✕ should isolate data between organizations (334 ms)
+      ✕ should prevent cross-organization access (46 ms)
+    Phase 7: Assignment Creation
+      ✕ should create client assignment with organization context (258 ms)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 1: Organization Creation › should create a new organization and auto-create UserOrganization
+
+    expect(received).toBeTruthy()
+
+    Received: null
+
+      135 |       });
+      136 |
+    > 137 |       expect(userOrg).toBeTruthy();
+          |                       ^
+      138 |       expect(userOrg.role).toBe('admin');
+      139 |       expect(userOrg.isActive).toBe(true);
+      140 |     });
+
+      at Object.toBeTruthy (tests/integration/multi_tenant_workflow.test.js:137:23)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 2: User Authentication › should login and receive organization context
+
+    expect(received).toHaveProperty(path)
+
+    Expected path: "organization"
+    Received path: []
+
+    Received value: {"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2YTA3NTMzNzQzYTEyYTQ2MGFjNzk3MTQiLCJlbWFpbCI6InRlc3QtMTc3ODg2NDk0NzY2OUBleGFtcGxlLmNvbSIsInJvbGVzIjpbImVtcGxveWVlIl0sIm9yZ2FuaXphdGlvbklkIjpudWxsLCJpYXQiOjE3Nzg4NjQ5NTEsImV4cCI6MTc3ODk1MTM1MSwiYXVkIjoiaW52b2ljZS1hcHAtdXNlcnMiLCJpc3MiOiJpbnZvaWNlLWFwcCJ9.H6gDPrTcpRLIYyF11D7GyWPVHsEcLLizigiexjn7q6k", "user": {"activeAllowances": [], "createdAt": "2026-05-15T17:09:11.454Z", "email": "test-1778864947669@example.com", "firstName": "Test", "id": "6a07533743a12a460ac79714", "isActive": true, "isEmailVerified": false, "lastLogin": null, "lastName": "Admin", "multiOrgEnabled": false, "organizationId": null, "payRate": 0, "rates": {}, "role": "employee", "roles": ["employee"], "updatedAt": "2026-05-15T17:09:11.454Z"}}
+
+      152 |       expect(response.status).toBe(200);
+      153 |       expect(response.body.data).toHaveProperty('token');
+    > 154 |       expect(response.body.data).toHaveProperty('organization');
+          |                                  ^
+      155 |       expect(response.body.data.organization.id).toBe(organizationId);
+      156 |
+      157 |       authToken = response.body.data.token;
+
+      at Object.toHaveProperty (tests/integration/multi_tenant_workflow.test.js:154:34)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 3: Organization Setup › should complete organization setup
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      185 |         });
+      186 |
+    > 187 |       expect(response.status).toBe(200);
+          |                               ^
+      188 |       expect(response.body.success).toBe(true);
+      189 |     });
+      190 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:187:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 4: Employee Creation › should create employee with auto UserOrganization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: null
+    Received: undefined
+
+      207 |
+      208 |       expect(response.status).toBe(201);
+    > 209 |       expect(response.body.organizationId).toBe(organizationId);
+          |                                            ^
+      210 |
+      211 |       // Verify UserOrganization was auto-created
+      212 |       const userOrg = await UserOrganization.findOne({
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:209:44)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should create client with organization validation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 401
+
+      239 |         });
+      240 |
+    > 241 |       expect(response.status).toBe(201);
+          |                               ^
+      242 |       expect(response.body.success).toBe(true);
+      243 |       expect(response.body).toHaveProperty('clientId');
+      244 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:241:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should prevent duplicate client email within organization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      275 |         });
+      276 |
+    > 277 |       expect(response.status).toBe(400);
+          |                               ^
+      278 |       expect(response.body.message).toContain('already exists');
+      279 |     });
+      280 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:277:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should require organization ID for client creation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      291 |         });
+      292 |
+    > 293 |       expect(response.status).toBe(400);
+          |                               ^
+      294 |       expect(response.body.message).toContain('Organization ID is required');
+      295 |     });
+      296 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:293:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should isolate data between organizations
+
+    TypeError: Invalid value "undefined" for header "x-organization-id"
+
+      at Test.setHeader [as request] (node_modules/superagent/src/node/index.js:830:39)
+      at Test.request [as end] (node_modules/superagent/src/node/index.js:965:8)
+      at Test.end (node_modules/supertest/lib/test.js:136:11)
+      at end (node_modules/superagent/src/request-base.js:283:12)
+      at Test.RequestBase.then (node_modules/superagent/src/request-base.js:265:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should prevent cross-organization access
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 403
+    Received: 401
+
+      349 |         .set('x-organization-id', organizationId); // Wrong org context
+      350 |
+    > 351 |       expect(response.status).toBe(403);
+          |                               ^
+      352 |     });
+      353 |
+      354 |     afterAll(async () => {
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:351:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 7: Assignment Creation › should create client assignment with organization context
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      411 |         });
+      412 |
+    > 413 |       expect(response.status).toBe(200);
+          |                               ^
+      414 |       expect(response.body.success).toBe(true);
+      415 |     });
+      416 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:413:31)
+
+Test Suites: 1 failed, 1 total
+Tests:       10 failed, 10 total
+Snapshots:   0 total
+Time:        6.684 s, estimated 7 s
+Ran all test suites matching tests/integration/multi_tenant_workflow.test.js.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
