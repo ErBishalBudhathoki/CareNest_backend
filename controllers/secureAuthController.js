@@ -87,13 +87,13 @@ class SecureAuthController {
             email,
             firebaseUid: existingMongoUser.firebaseUid
           });
-          await existingMongoUser.deleteOne();
+          await User.deleteOne({ _id: existingMongoUser._id });
         }
       } else {
         // MongoDB user exists WITHOUT firebaseUid — orphaned record from a prior partial failure.
         // Delete it so the registration can proceed cleanly.
         logger.warn('Deleting orphaned MongoDB user (no firebaseUid)', { email });
-        await existingMongoUser.deleteOne();
+        await User.deleteOne({ _id: existingMongoUser._id });
       }
     }
 
@@ -102,6 +102,10 @@ class SecureAuthController {
     let firebaseUser;
     let customToken;
     try {
+      if (typeof admin?.auth === 'function') {
+        const authObj = admin.auth();
+        console.log('DEBUG: auth object keys:', Object.keys(authObj || {}));
+      }
       firebaseUser = await admin.auth().createUser({
         email: email,
         password: password,
@@ -167,6 +171,19 @@ class SecureAuthController {
       }
     }
 
+    // 4.5 RESOLVE ORGANIZATION ID
+    let resolvedOrganizationId = organizationId || null;
+    if (!isOwner && organizationCode && !resolvedOrganizationId) {
+      const organization = await Organization.findOne({
+        $or: [{ code: organizationCode }, { organizationCode: organizationCode }]
+      });
+      if (!organization) {
+        try { await admin.auth().deleteUser(firebaseUser.uid); } catch (e) {}
+        return res.status(404).json(SecureErrorHandler.createErrorResponse('Organization not found', 404, 'ORG_NOT_FOUND'));
+      }
+      resolvedOrganizationId = organization._id.toString();
+    }
+
     // 5. CREATE MONGODB USER — roll back Firebase user if this fails
     let newUser;
     try {
@@ -176,7 +193,7 @@ class SecureAuthController {
         lastName,
         abn: req.body.abn,
         organizationCode,
-        organizationId: organizationId || null,
+        organizationId: resolvedOrganizationId,
         phone: phone || null,
         role: isOwner ? 'admin' : 'employee',
         firebaseUid: firebaseUser.uid,
@@ -188,8 +205,10 @@ class SecureAuthController {
       logger.error('MongoDB user creation failed — rolling back Firebase user', {
         email,
         firebaseUid: firebaseUser.uid,
-        error: mongoError.message
+        error: mongoError.message,
+        stack: mongoError.stack
       });
+      console.error('DEBUG: MongoDB Error:', mongoError);
       try {
         await admin.auth().deleteUser(firebaseUser.uid);
         logger.info('Firebase user rolled back successfully', { email });
@@ -209,10 +228,32 @@ class SecureAuthController {
       );
     }
 
+    // Insert into login collection for /login endpoint compatibility
+    try {
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+      const mongoose = require('mongoose');
+      const authCollection = mongoose.connection.collection('login');
+      await authCollection.insertOne({
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        createdAt: new Date(),
+        lastLogin: null,
+        loginAttempts: 0,
+        lockUntil: null
+      });
+    } catch (loginColErr) {
+      logger.warn('Failed to insert into login collection (non-fatal)', {
+        email,
+        error: loginColErr.message
+      });
+    }
+
     let createdOrganization = null;
 
     // 6. AUTO-CREATE ORGANIZATION FOR OWNERS (Fresh Start Feature)
-    if (isOwner || (!organizationId && !organizationCode)) {
+    if (isOwner || (!resolvedOrganizationId && !organizationCode)) {
       try {
         // Generate unique 6-character organization code
         const generateOrgCode = () => {
@@ -234,6 +275,7 @@ class SecureAuthController {
         createdOrganization = await Organization.create({
           name: organizationName || `${firstName} ${lastName}'s Organization`,
           code: orgCode,
+          organizationCode: orgCode, // Required field in new schema
           ownerEmail: email,
           contactDetails: {
             email: email,
@@ -295,17 +337,18 @@ class SecureAuthController {
       } catch (orgError) {
         logger.error('Failed to auto-create organization', {
           userId: newUser._id.toString(),
-          error: orgError.message
+          error: orgError.message,
+          stack: orgError.stack
         });
-        // Don't fail registration — user can set up org later
+        console.error('DEBUG: Org creation error:', orgError);
       }
     }
     // 7. CREATE USER ORGANIZATION RECORD for members joining an existing org
-    else if (organizationId) {
+    else if (resolvedOrganizationId) {
       try {
         await UserOrganization.create({
           userId: newUser._id.toString(),
-          organizationId: organizationId,
+          organizationId: resolvedOrganizationId,
           role: 'employee',
           permissions: ['read', 'write'],
           isActive: true,
@@ -406,7 +449,7 @@ class SecureAuthController {
       emailService.addSubscriber(
         newUser.email,
         `${newUser.firstName || ''} ${newUser.lastName || ''}`.trim() || newUser.email
-      ).catch(() => {});
+      ).catch(() => { });
     }
   });
 

@@ -310,7 +310,7 @@ const organizationSchema = new mongoose.Schema({
   }
 });
 
-organizationSchema.pre('validate', function syncOrganizationCode(next) {
+organizationSchema.pre('validate', function syncOrganizationCode() {
   const canonicalCode = String(this.organizationCode || this.code || '')
     .trim()
     .toUpperCase();
@@ -323,8 +323,6 @@ organizationSchema.pre('validate', function syncOrganizationCode(next) {
       this.code = canonicalCode;
     }
   }
-
-  next();
 });
 
 // Indexes

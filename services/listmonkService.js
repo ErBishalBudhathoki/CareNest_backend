@@ -9,8 +9,7 @@
  *   emailService.getReceiptTemplate(...)
  *   emailService.getRefundTemplate(...)
  *
- * Additionally exposes:
- *   emailService.addSubscriber(email, name, listIds?)
+ * Additionally exposes auth-specific methods for transactional emails.
  *
  * Transport Strategy:
  *   - Transactional emails  → POST /api/tx  (uses Listmonk template ID 1 as base)
@@ -28,10 +27,6 @@ const LISTMONK_USERNAME    = process.env.LISTMONK_USERNAME    || 'carenest';
 const ONBOARDING_LIST_ID   = parseInt(process.env.LISTMONK_ONBOARDING_LIST_ID || '3', 10);
 
 // Build Authorization header.
-// Listmonk supports two schemes:
-//   - API key only (newer): "token api_key"
-//   - User:Token (classic): "token username:api_key"
-// We try API-key-only first; if your setup needs user:key change this string.
 function authHeader() {
   if (!LISTMONK_API_KEY) {
     throw new Error('listmonk_api_key env var is not set');
@@ -91,20 +86,12 @@ function listmonkRequest(method, path, body) {
 class ListmonkService {
   /**
    * Send a transactional email via Listmonk /api/tx.
-   *
-   * Compatible with the old nodemailer call:
-   *   emailService.sendEmail(to, subject, html, attachments?)
-   *
-   * Also handles the dunningService object-style call:
-   *   emailService.sendEmail({ to, subject, template, context })
    */
   async sendEmail(toOrOptions, subject, html, _attachments) {
-    // Support object-style call from dunningService
     if (toOrOptions && typeof toOrOptions === 'object' && !Array.isArray(toOrOptions)) {
       const opts = toOrOptions;
       const recipient = opts.to;
       const subj = opts.subject || '(no subject)';
-      // Build a basic HTML from context if no html body is provided
       const body = opts.html || this._buildGenericHtml(opts.subject, opts.context);
       return this._dispatchTx(recipient, subj, body);
     }
@@ -114,8 +101,6 @@ class ListmonkService {
 
   /**
    * Internal: send via Listmonk transactional API.
-   * Uses template_id: 1 ("base") as the wrapper, passing the full HTML
-   * as `body` so Listmonk renders it as-is.
    */
   async _dispatchTx(to, subject, html) {
     if (!to) {
@@ -131,16 +116,15 @@ class ListmonkService {
     try {
       const result = await listmonkRequest('POST', '/tx', {
         subscriber_email: to,
-        template_id: 1,          // Your default/base template in Listmonk
+        template_id: 1,
         subject,
-        data: { body: html },    // Pass full HTML body as a template variable {{ .Data.body }}
+        data: { body: html },
         content_type: 'html',
       });
 
       logger.info('[Listmonk] Transactional email sent', { to, subject });
       return result;
     } catch (err) {
-      // Never crash the caller — log and return null (same behaviour as old nodemailer)
       logger.error('[Listmonk] Failed to send transactional email', {
         to, subject, error: err.message, statusCode: err.statusCode,
       });
@@ -149,19 +133,11 @@ class ListmonkService {
   }
 
   /**
-   * Add a subscriber to a Listmonk list.
-   * Used automatically when new employees register (sign-in(onboarding) list ID 3).
-   *
-   * @param {string} email
-   * @param {string} name
-   * @param {number[]} listIds  — defaults to [3] (sign-in/onboarding list)
+   * Add/Update subscriber.
    */
   async addSubscriber(email, name, listIds = [ONBOARDING_LIST_ID]) {
     if (!email) return null;
-
-    if (process.env.NODE_ENV === 'test') {
-      return { skipped: true };
-    }
+    if (process.env.NODE_ENV === 'test') return { skipped: true };
 
     try {
       const result = await listmonkRequest('POST', '/subscribers', {
@@ -173,7 +149,6 @@ class ListmonkService {
       logger.info('[Listmonk] Subscriber added/updated', { email, lists: listIds });
       return result;
     } catch (err) {
-      // 409 = already exists — upsert gracefully
       if (err.statusCode === 409) {
         logger.info('[Listmonk] Subscriber already exists', { email });
         return { exists: true };
@@ -183,9 +158,66 @@ class ListmonkService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Legacy template helpers — kept identical so paymentService doesn't break
-  // ---------------------------------------------------------------------------
+  // --- Auth Specific Email Methods ---
+
+  async sendVerificationEmail(email, firstName, otp) {
+    const subject = 'Verify your email - CareNest';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="color: #4CAF50;">Welcome to CareNest</h2>
+        </div>
+        <p>Hi ${firstName || 'there'},</p>
+        <p>Thank you for signing up. Please use the code below to verify your email address:</p>
+        <div style="margin: 30px 0; text-align: center;">
+          <div style="display: inline-block; padding: 15px 30px; background-color: #f9f9f9; border: 2px dashed #4CAF50; border-radius: 5px;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #333;">${otp}</span>
+          </div>
+        </div>
+        <p>This code will expire in 15 minutes.</p>
+        <p>If you didn't create an account, you can safely ignore this email.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #999; text-align: center;">© 2026 CareNest. All rights reserved.</p>
+      </div>`;
+    return this.sendEmail(email, subject, html);
+  }
+
+  async sendPasswordResetEmail(email, otp) {
+    const subject = 'Password Reset Code - CareNest';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="color: #1a1a2e;">Password Reset Request</h2>
+        </div>
+        <p>We received a request to reset your password. Use the code below to proceed:</p>
+        <div style="margin: 30px 0; text-align: center;">
+          <div style="display: inline-block; padding: 15px 30px; background-color: #f4f4f4; border-radius: 5px;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #333;">${otp}</span>
+          </div>
+        </div>
+        <p>This code will expire in 10 minutes.</p>
+        <p>If you didn't request a password reset, please secure your account.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #999; text-align: center;">CareNest Security Team</p>
+      </div>`;
+    return this.sendEmail(email, subject, html);
+  }
+
+  async sendPasswordChangeNotification(email, firstName) {
+    const subject = 'Your password was changed - CareNest';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+        <h2 style="color: #333;">Password Changed Successfully</h2>
+        <p>Hi ${firstName || 'there'},</p>
+        <p>This is a confirmation that the password for your CareNest account has been successfully changed.</p>
+        <p>If you did not perform this action, please contact our support team immediately.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #999; text-align: center;">CareNest Security Notification</p>
+      </div>`;
+    return this.sendEmail(email, subject, html);
+  }
+
+  // --- Legacy helpers ---
 
   getReceiptTemplate(amount, currency, invoiceNumber, date, paymentMethod) {
     return `
@@ -229,10 +261,6 @@ class ListmonkService {
       </div>`;
   }
 
-  /**
-   * Builds a minimal HTML email from a subject + context object.
-   * Used as a fallback for dunningService's template-style calls.
-   */
   _buildGenericHtml(subject, context = {}) {
     const rows = Object.entries(context)
       .map(([k, v]) => `<tr><td style="padding:6px 0;color:#555;"><strong>${k}:</strong></td><td style="padding:6px 0;">${v}</td></tr>`)
