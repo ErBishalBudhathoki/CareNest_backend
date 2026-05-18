@@ -10,12 +10,6 @@
  *   emailService.getRefundTemplate(...)
  *
  * Additionally exposes auth-specific methods for transactional emails.
- *
- * Transport Strategy:
- *   - Transactional emails  → POST /api/tx  (uses Listmonk template ID 1 as base)
- *     We pass the full HTML as the "body" override so we don't need a separate
- *     template per email type — Listmonk renders whatever HTML we send.
- *   - Subscriber sign-ups   → POST /api/subscribers  (adds to list ID 3)
  */
 
 const https = require('https');
@@ -25,6 +19,7 @@ const LISTMONK_BASE_URL    = process.env.LISTMONK_BASE_URL    || 'https://listmo
 const LISTMONK_API_KEY     = process.env.listmonk_api_key;
 const LISTMONK_USERNAME    = process.env.LISTMONK_USERNAME    || 'carenest';
 const ONBOARDING_LIST_ID   = parseInt(process.env.LISTMONK_ONBOARDING_LIST_ID || '3', 10);
+const LISTMONK_TEMPLATE_ID = parseInt(process.env.LISTMONK_TEMPLATE_ID || '1', 10);
 
 // Build Authorization header.
 function authHeader() {
@@ -84,9 +79,6 @@ function listmonkRequest(method, path, body) {
 }
 
 class ListmonkService {
-  /**
-   * Send a transactional email via Listmonk /api/tx.
-   */
   async sendEmail(toOrOptions, subject, html, _attachments) {
     if (toOrOptions && typeof toOrOptions === 'object' && !Array.isArray(toOrOptions)) {
       const opts = toOrOptions;
@@ -95,19 +87,14 @@ class ListmonkService {
       const body = opts.html || this._buildGenericHtml(opts.subject, opts.context);
       return this._dispatchTx(recipient, subj, body);
     }
-
     return this._dispatchTx(toOrOptions, subject, html);
   }
 
-  /**
-   * Internal: send via Listmonk transactional API.
-   */
   async _dispatchTx(to, subject, html) {
     if (!to) {
       logger.warn('[Listmonk] sendEmail called with empty recipient — skipping');
       return null;
     }
-
     if (process.env.NODE_ENV === 'test') {
       logger.info('[Listmonk] Skipping email in test environment', { to, subject });
       return { skipped: true };
@@ -116,12 +103,11 @@ class ListmonkService {
     try {
       const result = await listmonkRequest('POST', '/tx', {
         subscriber_email: to,
-        template_id: 1,
+        template_id: LISTMONK_TEMPLATE_ID,
         subject,
         data: { body: html },
         content_type: 'html',
       });
-
       logger.info('[Listmonk] Transactional email sent', { to, subject });
       return result;
     } catch (err) {
@@ -132,9 +118,6 @@ class ListmonkService {
     }
   }
 
-  /**
-   * Add/Update subscriber.
-   */
   async addSubscriber(email, name, listIds = [ONBOARDING_LIST_ID]) {
     if (!email) return null;
     if (process.env.NODE_ENV === 'test') return { skipped: true };
