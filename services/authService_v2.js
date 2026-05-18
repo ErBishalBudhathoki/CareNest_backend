@@ -6,15 +6,23 @@ const crypto = require('crypto');
 const { createLogger } = require('../utils/logger');
 const { admin } = require('../firebase-admin-config');
 const { verifyFirebaseCredentials } = require('../utils/firebasePasswordVerifier');
+const TemporalManager = require('../core/TemporalManager');
 const logger = createLogger('AuthServiceV2');
 
 // Constants
-const ACCESS_TOKEN_EXPIRE = process.env.JWT_EXPIRES_IN || '24h'; // Align with .env
+const ACCESS_TOKEN_EXPIRE = process.env.JWT_EXPIRES_IN || '24h';
 const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
-class AuthServiceV2 {
+/**
+ * Task queue helper
+ */
+function getTaskQueue() {
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
+    const isProd = projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
+    return `default-${isProd ? 'prod' : 'dev'}`;
+}
 
-    // Removed manual hash/verify methods in favor of User model methods
+class AuthServiceV2 {
 
     /**
      * Generate Access and Refresh tokens
@@ -42,6 +50,43 @@ class AuthServiceV2 {
     }
 
     /**
+     * Generate and send verification OTP for new registration
+     * @param {string} email 
+     * @param {string} firstName 
+     */
+    async sendVerificationOTP(email, firstName) {
+        try {
+            const otp = crypto.randomInt(100000, 1000000).toString();
+            const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+            await User.updateOne(
+                { email: email.toLowerCase() },
+                {
+                    $set: {
+                        otp: otp,
+                        otpExpiry: otpExpiry,
+                        otpUsed: false
+                    }
+                }
+            );
+
+            // Trigger Temporal Workflow
+            await TemporalManager.startWorkflow('authNotificationWorkflow', {
+                workflowId: `auth-verify-${email.toLowerCase().replace(/[@.]/g, '-')}-${Date.now()}`,
+                taskQueue: getTaskQueue(),
+                args: [{
+                    type: 'VERIFICATION',
+                    data: { email, firstName, otp }
+                }]
+            });
+
+            return otp;
+        } catch (error) {
+            logger.error('Error sending verification OTP via Temporal', { email, error: error.message });
+        }
+    }
+
+    /**
      * Authenticate user
      * @param {string} email 
      * @param {string} password 
@@ -57,22 +102,18 @@ class AuthServiceV2 {
             throw new Error('Account disabled');
         }
 
-        // Use User model instance method (Bcrypt)
         const valid = await user.comparePassword(password);
         if (!valid) {
-            // Lockout logic should be centralized, duplicating basic increment here
             await User.updateOne({ _id: user._id }, { $inc: { loginAttempts: 1 } });
             throw new Error('Invalid credentials');
         }
 
-        // Reset attempts
         if (user.loginAttempts > 0) {
             await User.updateOne({ _id: user._id }, { $set: { loginAttempts: 0 } });
         }
 
         const { accessToken, refreshToken, refreshTokenExpiry } = this.generateTokens(user);
 
-        // Save refresh token
         const tokenModel = {
             token: refreshToken,
             expires: refreshTokenExpiry,
@@ -112,7 +153,6 @@ class AuthServiceV2 {
             throw new Error('Email already registered');
         }
 
-        // Pass plain password. Pre-save hook will hash it.
         const user = new User({
             ...userData,
             email: userData.email.toLowerCase(),
@@ -124,7 +164,11 @@ class AuthServiceV2 {
 
         await user.save();
 
-        // Create UserOrganization record (Zero-Trust requirement)
+        // Add to Listmonk and trigger verification workflow
+        const emailService = require('./emailService');
+        await emailService.addSubscriber(user.email, `${user.firstName} ${user.lastName}`);
+        await this.sendVerificationOTP(user.email, user.firstName);
+
         if (userData.organizationId) {
             try {
                 await UserOrganization.create({
@@ -166,7 +210,6 @@ class AuthServiceV2 {
             throw new Error('Invalid Refresh Token');
         }
 
-        // Reuse Detection
         if (currentToken.revoked) {
             logger.security('Refresh Token Reuse Detected! Revoking all tokens.', {
                 userId: user._id,
@@ -174,15 +217,13 @@ class AuthServiceV2 {
                 ip: ipAddress
             });
 
-            user.refreshTokens = []; // Clear all sessions
+            user.refreshTokens = []; 
             await user.save();
 
             throw new Error('Security Alert: Token Reuse Detected. Please login again.');
         }
 
-        // Check expiry
         if (Date.now() >= currentToken.expires) {
-            // Remove expired token
             await User.updateOne(
                 { _id: user._id },
                 { $pull: { refreshTokens: { token: requestToken } } }
@@ -190,11 +231,8 @@ class AuthServiceV2 {
             throw new Error('Refresh Token Expired');
         }
 
-        // Valid token. Rotate it.
         const { accessToken, refreshToken, refreshTokenExpiry } = this.generateTokens(user);
 
-        // Mark old as revoked
-        // Note: Using updateOne with positional operator $ to update specific element array
         await User.updateOne(
             { _id: user._id, 'refreshTokens.token': requestToken },
             {
@@ -213,8 +251,6 @@ class AuthServiceV2 {
                 }
             }
         );
-
-        // Clean up logic (optional, keep it simple for now)
 
         return {
             accessToken,
@@ -237,7 +273,7 @@ class AuthServiceV2 {
 
     async changePassword(userId, currentPassword, newPassword, ipAddress) {
         const user = await User.findById(userId).select(
-            'email firebaseUid refreshTokens'
+            'email firstName firebaseUid refreshTokens'
         );
         if (!user) {
             throw new Error('User not found');
@@ -266,7 +302,16 @@ class AuthServiceV2 {
         await admin.auth().updateUser(firebaseUid, { password: newPassword });
         await admin.auth().revokeRefreshTokens(firebaseUid);
 
-        // Revoke all existing sessions
+        // Trigger Temporal Workflow for Notification
+        await TemporalManager.startWorkflow('authNotificationWorkflow', {
+            workflowId: `auth-changed-${email.replace(/[@.]/g, '-')}-${Date.now()}`,
+            taskQueue: getTaskQueue(),
+            args: [{
+                type: 'PASSWORD_CHANGED',
+                data: { email, firstName: user.firstName }
+            }]
+        });
+
         user.refreshTokens.forEach(t => {
             if (!t.revoked) {
                 t.revoked = new Date();

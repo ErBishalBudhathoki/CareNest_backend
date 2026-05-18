@@ -1,0 +1,109 @@
+# Production Temporal Worker — Oracle VPS (Dokploy managed)
+#
+# Add this file to Dokploy as a Compose application.
+# Set all variables in Dokploy's "Environment Variables" section — they are
+# substituted via ${VAR} syntax before the stack is deployed.
+#
+# Deploy command (Dokploy runs this internally):
+#   docker stack deploy -c docker-compose.prod-worker.yml temporal-backend-prod
+
+version: '3.8'
+
+services:
+  worker:
+    image: temporal-backend-xzhsod:latest   # same image built by Dokploy for dev worker
+    command: ["node", "temporal-worker.js"]
+    networks:
+      - dokploy-network
+    environment:
+      # ── Runtime ──────────────────────────────────────────────────────────
+      - NODE_ENV=production
+      - PORT=8081
+
+      # ── Temporal ─────────────────────────────────────────────────────────
+      - TEMPORAL_ADDRESS=172.17.0.1:7237   # fixed: Docker bridge to Temporal server on same VPS
+      - TEMPORAL_TLS=false
+      - REGISTER_TEMPORAL_SCHEDULES=true
+
+      # ── GCP / Firebase (carenest-prods) ──────────────────────────────────
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
+      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+      - FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
+      - FIREBASE_CLIENT_CERT_URL=${FIREBASE_CLIENT_CERT_URL}
+
+      # ── MongoDB ───────────────────────────────────────────────────────────
+      - MONGODB_URI=${MONGODB_URI}
+      - DB_NAME=${DB_NAME}
+
+      # ── Auth ─────────────────────────────────────────────────────────────
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+      - JWT_EXPIRY=${JWT_EXPIRY}
+      - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY}
+      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS}
+
+      # ── Rate Limiting ────────────────────────────────────────────────────
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS}
+      - MAX_LOGIN_ATTEMPTS=${MAX_LOGIN_ATTEMPTS}
+      - LOCKOUT_TIME_MS=${LOCKOUT_TIME_MS}
+
+      # ── Password Policy ──────────────────────────────────────────────────
+      - PASSWORD_MIN_LENGTH=${PASSWORD_MIN_LENGTH}
+      - PASSWORD_REQUIRE_UPPERCASE=${PASSWORD_REQUIRE_UPPERCASE}
+      - PASSWORD_REQUIRE_LOWERCASE=${PASSWORD_REQUIRE_LOWERCASE}
+      - PASSWORD_REQUIRE_NUMBERS=${PASSWORD_REQUIRE_NUMBERS}
+      - PASSWORD_REQUIRE_SYMBOLS=${PASSWORD_REQUIRE_SYMBOLS}
+
+      # ── Email / SMTP ─────────────────────────────────────────────────────
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - SMTP_ADMIN_EMAIL=${SMTP_ADMIN_EMAIL}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - APP_PASSWORD=${APP_PASSWORD}
+
+      # ── Storage / GCS ────────────────────────────────────────────────────
+      - NDIS_CATALOG_PROVIDER=gcs
+      - NDIS_CATALOG_BUCKET=${NDIS_CATALOG_BUCKET}
+      - NDIS_CATALOG_OBJECT_KEY=ndis_support_items/ndis_support_items.json
+      - NDIS_CATALOG_WATCH_PREFIX=ndis_support_items/
+      - NDIS_CATALOG_WEBHOOK_TOKEN=${NDIS_CATALOG_WEBHOOK_TOKEN}
+      - GCS_HMAC_ACCESS_KEY_ID=${GCS_HMAC_ACCESS_KEY_ID}
+      - GCS_HMAC_SECRET_ACCESS_KEY=${GCS_HMAC_SECRET_ACCESS_KEY}
+
+      # ── Cloudflare R2 ────────────────────────────────────────────────────
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+
+      # ── Redis ────────────────────────────────────────────────────────────
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_REJECT_UNAUTHORIZED=false
+
+      # ── Misc ─────────────────────────────────────────────────────────────
+      - HOLIDAY_CSV=${HOLIDAY_CSV}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - LOG_LEVEL=info
+      - DEBUG_MODE=false
+
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 0
+      update_config:
+        parallelism: 1
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        failure_action: pause
+        order: start-first
+
+networks:
+  dokploy-network:
+    external: true

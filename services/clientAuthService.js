@@ -3,7 +3,17 @@ const User = require('../models/User');
 const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
+const TemporalManager = require('../core/TemporalManager');
 const { admin } = require('../firebase-admin-config');
+
+/**
+ * Task queue helper
+ */
+function getTaskQueue() {
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
+  const isProd = projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
+  return `default-${isProd ? 'prod' : 'dev'}`;
+}
 
 class ClientAuthService {
   _normalizeEmail(email) {
@@ -206,11 +216,12 @@ class ClientAuthService {
       const crypto = require('crypto');
       const temporaryPassword = `Temp#${crypto.randomBytes(6).toString('hex')}A1`;
 
+      const wasAlreadyActivated = client.isActivated;
+
       // 2. Ensure Firebase user exists
       let firebaseUser;
       try {
         firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
-        // Rotate password on each activation email so prior credentials cannot be reused.
         firebaseUser = await admin.auth().updateUser(firebaseUser.uid, {
           disabled: false,
           password: temporaryPassword,
@@ -222,8 +233,6 @@ class ClientAuthService {
           throw firebaseLookupError;
         }
 
-        // Create Firebase user with temporary random password.
-        // Client sets their own password using the activation reset link.
         firebaseUser = await admin.auth().createUser({
           email: normalizedEmail,
           password: temporaryPassword,
@@ -257,7 +266,6 @@ class ClientAuthService {
           { _id: mongoUser._id },
           {
             $set: userUpdate,
-            // Remove any stale local-password auth remnants.
             $unset: { password: '' }
           }
         );
@@ -330,18 +338,29 @@ class ClientAuthService {
         this._buildWebResetLink(resetParams) ||
         resetLink;
 
-      // 7. Send activation email
+      // 7. Trigger Temporal Workflow for Activation Email
       const emailSubject = 'Set up your CareNest client account';
       const emailHtml = this._buildActivationEmailHtml({
         firstName: client.clientFirstName,
         webResetLink: stableWebResetLink,
         appResetLink
       });
-      const emailResult = await emailService.sendEmail(
-        normalizedEmail,
-        emailSubject,
-        emailHtml
-      );
+
+      // Add to Listmonk first
+      await emailService.addSubscriber(normalizedEmail, `${client.clientFirstName} ${client.clientLastName}`);
+
+      const handle = await TemporalManager.startWorkflow('authNotificationWorkflow', {
+        workflowId: `client-activation-${normalizedEmail.replace(/[@.]/g, '-')}-${Date.now()}`,
+        taskQueue: getTaskQueue(),
+        args: [{
+          type: 'GENERIC',
+          data: { 
+            email: normalizedEmail, 
+            subject: emailSubject, 
+            html: emailHtml 
+          }
+        }]
+      });
 
       // 8. Log audit trail
       await auditService.createAuditLog({
@@ -356,10 +375,9 @@ class ClientAuthService {
           firebaseUid: firebaseUser.uid
         },
         metadata: {
-          resetLinkSent: Boolean(emailResult),
+          workflowId: handle.workflowId,
           alreadyActivated: wasAlreadyActivated,
-          activationPending: true,
-          appResetLinkGenerated: Boolean(appResetLink)
+          activationPending: true
         }
       });
 
@@ -368,12 +386,9 @@ class ClientAuthService {
         clientId: client._id.toString(),
         email: normalizedEmail,
         firebaseUid: firebaseUser.uid,
-        emailSent: Boolean(emailResult),
+        workflowId: handle.workflowId,
         alreadyActivated: wasAlreadyActivated,
-        activationPending: true,
-        activationLinkFormat: appResetLink
-          ? 'com.bishal.invoice://reset-password?mode=resetPassword&oobCode=...'
-          : 'firebase-web-link'
+        activationPending: true
       };
     } catch (error) {
       throw new Error(`Client activation failed: ${error.message}`);

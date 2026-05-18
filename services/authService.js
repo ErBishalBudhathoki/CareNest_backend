@@ -5,6 +5,7 @@ const Organization = require('../models/Organization');
 const UserOrganization = require('../models/UserOrganization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
+const TemporalManager = require('../core/TemporalManager');
 const { admin } = require('../firebase-admin-config');
 const {
   backfillLegacyOrganizationCodes,
@@ -56,6 +57,15 @@ function getOrganizationPermissions(role) {
   }
 }
 
+/**
+ * Task queue helper
+ */
+function getTaskQueue() {
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
+  const isProd = projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
+  return `default-${isProd ? 'prod' : 'dev'}`;
+}
+
 class AuthService {
   /**
    * Check if email exists in the system
@@ -69,6 +79,44 @@ class AuthService {
       return user;
     } catch (error) {
       throw new Error(`Error checking email: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate and send verification OTP for new registration
+   * @param {string} email 
+   * @param {string} firstName 
+   */
+  async sendVerificationOTP(email, firstName) {
+    try {
+      const crypto = require('crypto');
+      const otp = crypto.randomInt(100000, 1000000).toString();
+      const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+      await User.updateOne(
+        { email: email.toLowerCase() },
+        {
+          $set: {
+            otp: otp,
+            otpExpiry: otpExpiry,
+            otpUsed: false
+          }
+        }
+      );
+
+      // Trigger Temporal Workflow
+      await TemporalManager.startWorkflow('authNotificationWorkflow', {
+        workflowId: `auth-verify-${email.toLowerCase().replace(/[@.]/g, '-')}-${Date.now()}`,
+        taskQueue: getTaskQueue(),
+        args: [{
+          type: 'VERIFICATION',
+          data: { email, firstName, otp }
+        }]
+      });
+
+      return otp;
+    } catch (error) {
+      console.error('Error sending verification OTP via Temporal:', error);
     }
   }
 
@@ -160,6 +208,10 @@ class AuthService {
 
       const savedUser = await newUser.save();
 
+      // Add to Listmonk and trigger verification workflow
+      await emailService.addSubscriber(savedUser.email, `${savedUser.firstName} ${savedUser.lastName}`);
+      await this.sendVerificationOTP(savedUser.email, savedUser.firstName);
+
       // Create UserOrganization record (Zero-Trust requirement)
       if (userData.organizationId) {
         try {
@@ -177,7 +229,6 @@ class AuthService {
           });
         } catch (orgError) {
           console.error('Failed to create UserOrganization record:', orgError.message);
-          // Don't fail user creation, but log the error
         }
       }
 
@@ -331,7 +382,6 @@ class AuthService {
         return null;
       }
 
-      // 1. Check for R2 URL (photoUrl or profilePic)
       if (user.photoUrl) {
         return { type: 'url', url: user.photoUrl };
       }
@@ -339,7 +389,6 @@ class AuthService {
         return { type: 'url', url: user.profilePic };
       }
 
-      // Legacy buffer fallback removed as requested.
       return null;
     } catch (error) {
       throw new Error(`Error getting user photo: ${error.message}`);
@@ -412,8 +461,6 @@ class AuthService {
         throw new Error('User not found');
       }
 
-      // Extract salt from stored password (last 64 characters)
-      // Password format: hash(64 chars) + salt(64 chars)
       if (!user.password || user.password.length < 64) {
         throw new Error('Invalid password format');
       }
@@ -455,20 +502,15 @@ class AuthService {
         }
       );
 
-      const emailSubject = 'Password Reset Code - CareNest';
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
-          <h2 style="color: #4CAF50;">Password Reset Request</h2>
-          <p>Use the code below to verify your identity and reset your password.</p>
-          <div style="margin: 20px 0; padding: 10px; background-color: #f4f4f4; border-radius: 5px; display: inline-block;">
-            <strong style="font-size: 28px; letter-spacing: 5px; color: #333;">${otp}</strong>
-          </div>
-          <p>This code will expire in 10 minutes.</p>
-          <p style="color: #777; font-size: 12px;">If you did not request a password reset, you can ignore this email.</p>
-        </div>
-      `;
-
-      await emailService.sendEmail(normalizedEmail, emailSubject, emailHtml);
+      // Trigger Temporal Workflow
+      await TemporalManager.startWorkflow('authNotificationWorkflow', {
+        workflowId: `auth-reset-${normalizedEmail.replace(/[@.]/g, '-')}-${Date.now()}`,
+        taskQueue: getTaskQueue(),
+        args: [{
+          type: 'PASSWORD_RESET',
+          data: { email: normalizedEmail, otp }
+        }]
+      });
 
       // Create audit trail
       await auditService.createAuditLog({
@@ -508,33 +550,28 @@ class AuthService {
         throw new Error('User not found');
       }
 
-      // Check if OTP exists
       if (!user.otp) {
         throw new Error('No valid OTP found');
       }
 
-      // Check if used (unless we allow already used OTPs)
       if (user.otpUsed && !options.allowAlreadyUsed) {
-        throw new Error('No valid OTP found'); // Maintain same error message for security/consistency
+        throw new Error('No valid OTP found');
       }
 
       if (new Date() > user.otpExpiry) {
         throw new Error('OTP has expired');
       }
 
-      // Ensure strict string comparison to handle cases where frontend sends number
       if (String(user.otp).trim() !== String(otp).trim()) {
         throw new Error('Invalid OTP');
       }
 
-      // Mark OTP as used (unless prevented)
       if (!options.preventConsumption && !user.otpUsed) {
         await User.updateOne(
           { email: normalizedEmail },
           { $set: { otpUsed: true } }
         );
 
-        // Create audit trail only on first consumption
         await auditService.createAuditLog({
           action: 'OTP_VERIFIED',
           entityType: 'user',
@@ -569,7 +606,6 @@ class AuthService {
 
       let firebaseUid = user.firebaseUid;
 
-      // Resolve Firebase identity by email when firebaseUid is not yet synced.
       if (!firebaseUid) {
         try {
           const firebaseUser = await admin.auth().getUserByEmail(normalizedEmail);
@@ -591,7 +627,6 @@ class AuthService {
         }
       }
 
-      // Firebase is the source of truth for sign-in credentials.
       await admin.auth().updateUser(firebaseUid, { password: newPassword });
       const now = new Date();
 
@@ -612,7 +647,16 @@ class AuthService {
         }
       );
 
-      // Create audit trail
+      // Trigger Temporal Workflow
+      await TemporalManager.startWorkflow('authNotificationWorkflow', {
+        workflowId: `auth-changed-${normalizedEmail.replace(/[@.]/g, '-')}-${Date.now()}`,
+        taskQueue: getTaskQueue(),
+        args: [{
+          type: 'PASSWORD_CHANGED',
+          data: { email: normalizedEmail, firstName: user.firstName }
+        }]
+      });
+
       await auditService.createAuditLog({
         action: 'PASSWORD_UPDATED',
         entityType: 'user',
@@ -648,7 +692,6 @@ class AuthService {
         throw new Error('User not found');
       }
 
-      // Get organization details if user belongs to one
       let organizationDetails = null;
       if (user.organizationId) {
         organizationDetails = await Organization.findById(user.organizationId);

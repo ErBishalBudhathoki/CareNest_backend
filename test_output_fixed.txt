@@ -1,0 +1,342 @@
+🛠️  Configuring DEVELOPMENT environment
+2026-05-16 03:01:11 [[32minfo[39m]: [32mUsing ioredis-mock for test environment[39m
+WARNING: STRIPE_SECRET_KEY is not set. Payment processing will be disabled.
+Using Cloudflare R2 for storage
+R2 Account ID: 3fecfc3b7f7249ac7698b9a038c96dca
+R2 Bucket: businesslogo
+R2 Public Domain: https://assets.bishalbudhathoki.com
+R2 S3Client initialized successfully
+2026-05-16 03:01:12 [[33mwarn[39m]: [33mGCP_PROJECT_ID not found. AI features will run in fallback mode.[39m
+2026-05-16 03:01:12 [[32minfo[39m]: [32mSubscribed to 1 Redis channel(s)[39m
+2026-05-16 03:01:12 [[32minfo[39m]: [32mRedis connection established[39m
+2026-05-16 03:01:12 [[32minfo[39m]: [32mRedis client ready[39m
+2026-05-16 03:01:15 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:15 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:15 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:01:16 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:01:16 [[31merror[39m]: [31mFailed to auto-create organization[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:01:16 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:01:16 [[31merror[39m]: [31mFailed to auto-create organization[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:01:16 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:01:16 [[31merror[39m]: [31mFailed to auto-create organization[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:16 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:16 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 03:01:17 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 03:01:17 [[31merror[39m]: [31mFailed to auto-create organization[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 03:01:17 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:17 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:17 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:17 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 03:01:17 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 03:01:17 [[35mhttp[39m]: [35mHTTP Response[39m
+FAIL tests/integration/multi_tenant_workflow.test.js (6.11 s)
+  Multi-Tenant Workflow Integration Tests
+    Phase 1: Organization Creation
+      ✕ should create a new organization and auto-create UserOrganization (418 ms)
+    Phase 2: User Authentication
+      ✕ should login and receive organization context (29 ms)
+    Phase 3: Organization Setup
+      ✕ should complete organization setup (43 ms)
+    Phase 4: Employee Creation
+      ✕ should create employee with auto UserOrganization (68 ms)
+    Phase 5: Client Creation with Validation
+      ✕ should create client with organization validation (95 ms)
+      ✕ should prevent duplicate client email within organization (132 ms)
+      ✕ should require organization ID for client creation (27 ms)
+    Phase 6: Multi-Org Isolation
+      ✕ should isolate data between organizations (162 ms)
+      ✕ should prevent cross-organization access (39 ms)
+    Phase 7: Assignment Creation
+      ✕ should create client assignment with organization context (115 ms)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 1: Organization Creation › should create a new organization and auto-create UserOrganization
+
+    expect(received).toBeTruthy()
+
+    Received: null
+
+      133 |       });
+      134 |
+    > 135 |       expect(userOrg).toBeTruthy();
+          |                       ^
+      136 |       expect(userOrg.role).toBe('admin');
+      137 |       expect(userOrg.isActive).toBe(true);
+      138 |     });
+
+      at Object.toBeTruthy (tests/integration/multi_tenant_workflow.test.js:135:23)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 2: User Authentication › should login and receive organization context
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      148 |         });
+      149 |
+    > 150 |       expect(response.status).toBe(200);
+          |                               ^
+      151 |       expect(response.body.data).toHaveProperty('token');
+      152 |       expect(response.body.data).toHaveProperty('organization');
+      153 |       expect(response.body.data.organization.id).toBe(organizationId);
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:150:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 3: Organization Setup › should complete organization setup
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      183 |         });
+      184 |
+    > 185 |       expect(response.status).toBe(200);
+          |                               ^
+      186 |       expect(response.body.success).toBe(true);
+      187 |     });
+      188 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:185:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 4: Employee Creation › should create employee with auto UserOrganization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: null
+    Received: undefined
+
+      205 |
+      206 |       expect(response.status).toBe(201);
+    > 207 |       expect(response.body.organizationId).toBe(organizationId);
+          |                                            ^
+      208 |
+      209 |       // Verify UserOrganization was auto-created
+      210 |       const userOrg = await UserOrganization.findOne({
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:207:44)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should create client with organization validation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 401
+
+      237 |         });
+      238 |
+    > 239 |       expect(response.status).toBe(201);
+          |                               ^
+      240 |       expect(response.body.success).toBe(true);
+      241 |       expect(response.body).toHaveProperty('clientId');
+      242 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:239:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should prevent duplicate client email within organization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      273 |         });
+      274 |
+    > 275 |       expect(response.status).toBe(400);
+          |                               ^
+      276 |       expect(response.body.message).toContain('already exists');
+      277 |     });
+      278 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:275:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should require organization ID for client creation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      289 |         });
+      290 |
+    > 291 |       expect(response.status).toBe(400);
+          |                               ^
+      292 |       expect(response.body.message).toContain('Organization ID is required');
+      293 |     });
+      294 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:291:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should isolate data between organizations
+
+    TypeError: Invalid value "undefined" for header "x-organization-id"
+
+      at Test.setHeader [as request] (node_modules/superagent/src/node/index.js:830:39)
+      at Test.request [as end] (node_modules/superagent/src/node/index.js:965:8)
+      at Test.end (node_modules/supertest/lib/test.js:136:11)
+      at end (node_modules/superagent/src/request-base.js:283:12)
+      at Test.RequestBase.then (node_modules/superagent/src/request-base.js:265:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should prevent cross-organization access
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 403
+    Received: 401
+
+      347 |         .set('x-organization-id', organizationId); // Wrong org context
+      348 |
+    > 349 |       expect(response.status).toBe(403);
+          |                               ^
+      350 |     });
+      351 |
+      352 |     afterAll(async () => {
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:349:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 7: Assignment Creation › should create client assignment with organization context
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      409 |         });
+      410 |
+    > 411 |       expect(response.status).toBe(200);
+          |                               ^
+      412 |       expect(response.body.success).toBe(true);
+      413 |     });
+      414 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:411:31)
+
+Test Suites: 1 failed, 1 total
+Tests:       10 failed, 10 total
+Snapshots:   0 total
+Time:        6.143 s, estimated 7 s
+Ran all test suites matching tests/integration/multi_tenant_workflow.test.js.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
