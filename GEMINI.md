@@ -9,6 +9,5 @@
 - `main` branch -> Google Cloud Production Build (budhathokib085@gmail.com / main branch)
 
 ## Authorship
-- **Commit Name**: Always use "Er Bishal Budhathoki".
-- **Commit Email (dev)**: Always use `REDACTED_EMAIL`.
-- **Commit Email (main)**: Always use `budhathokib085@gmail.com`.
+- **Commit Name**: Always use "Er Bishal Budhathoki (ErBishalBudhathoki)".
+- **Commit Email**: Always use `REDACTED_EMAIL` for all branches.
