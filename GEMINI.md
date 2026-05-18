@@ -7,3 +7,8 @@
 ## Deployment
 - `dev` branch -> Google Cloud Development Build (deverbishal331@gmail.com / dev branch)
 - `main` branch -> Google Cloud Production Build (budhathokib085@gmail.com / main branch)
+
+## Authorship
+- **Commit Name**: Always use "Er Bishal Budhathoki".
+- **Commit Email (dev)**: Always use `deverbishal331@gmail.com`.
+- **Commit Email (main)**: Always use `budhathokib085@gmail.com`.
