@@ -1,0 +1,345 @@
+🛠️  Configuring DEVELOPMENT environment
+2026-05-16 02:59:53 [[32minfo[39m]: [32mUsing ioredis-mock for test environment[39m
+WARNING: STRIPE_SECRET_KEY is not set. Payment processing will be disabled.
+Using Cloudflare R2 for storage
+R2 Account ID: 3fecfc3b7f7249ac7698b9a038c96dca
+R2 Bucket: businesslogo
+R2 Public Domain: https://assets.bishalbudhathoki.com
+R2 S3Client initialized successfully
+2026-05-16 02:59:53 [[33mwarn[39m]: [33mGCP_PROJECT_ID not found. AI features will run in fallback mode.[39m
+2026-05-16 02:59:54 [[32minfo[39m]: [32mSubscribed to 1 Redis channel(s)[39m
+2026-05-16 02:59:54 [[32minfo[39m]: [32mRedis connection established[39m
+2026-05-16 02:59:54 [[32minfo[39m]: [32mRedis client ready[39m
+2026-05-16 02:59:54 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:54 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:54 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 02:59:55 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 02:59:57 [[31merror[39m]: [31mFailed to auto-create organization[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 02:59:57 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:57 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:57 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 02:59:58 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 02:59:58 [[31merror[39m]: [31mMongoDB user creation failed — rolling back Firebase user[39m
+DEBUG: MongoDB Error: Error: Error creating user: E11000 duplicate key error collection: test.users index: firebaseUid_1 dup key: { firebaseUid: "test-firebase-uid" }
+    at AuthService.createUser (/Users/bishal/Developer/invoice/backend/services/authService.js:204:13)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:177:17
+2026-05-16 02:59:58 [[32minfo[39m]: [32mFirebase user rolled back successfully[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 02:59:58 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 02:59:58 [[31merror[39m]: [31mMongoDB user creation failed — rolling back Firebase user[39m
+DEBUG: MongoDB Error: Error: Error creating user: E11000 duplicate key error collection: test.users index: firebaseUid_1 dup key: { firebaseUid: "test-firebase-uid" }
+    at AuthService.createUser (/Users/bishal/Developer/invoice/backend/services/authService.js:204:13)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:177:17
+2026-05-16 02:59:58 [[32minfo[39m]: [32mFirebase user rolled back successfully[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 02:59:58 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 02:59:58 [[31merror[39m]: [31mMongoDB user creation failed — rolling back Firebase user[39m
+DEBUG: MongoDB Error: Error: Error creating user: E11000 duplicate key error collection: test.users index: firebaseUid_1 dup key: { firebaseUid: "test-firebase-uid" }
+    at AuthService.createUser (/Users/bishal/Developer/invoice/backend/services/authService.js:204:13)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:177:17
+2026-05-16 02:59:58 [[32minfo[39m]: [32mFirebase user rolled back successfully[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 02:59:58 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 02:59:58 [[35mhttp[39m]: [35mHTTP Response[39m
+FAIL tests/integration/multi_tenant_workflow.test.js (6.023 s)
+  Multi-Tenant Workflow Integration Tests
+    Phase 1: Organization Creation
+      ✕ should create a new organization and auto-create UserOrganization (2725 ms)
+    Phase 2: User Authentication
+      ✕ should login and receive organization context (317 ms)
+    Phase 3: Organization Setup
+      ✕ should complete organization setup (127 ms)
+    Phase 4: Employee Creation
+      ✕ should create employee with auto UserOrganization (463 ms)
+    Phase 5: Client Creation with Validation
+      ✕ should create client with organization validation (22 ms)
+      ✕ should prevent duplicate client email within organization (34 ms)
+      ✕ should require organization ID for client creation (18 ms)
+    Phase 6: Multi-Org Isolation
+      ✕ should isolate data between organizations (51 ms)
+      ✕ should prevent cross-organization access (26 ms)
+    Phase 7: Assignment Creation
+      ✕ should create client assignment with organization context (109 ms)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 1: Organization Creation › should create a new organization and auto-create UserOrganization
+
+    expect(received).toBeTruthy()
+
+    Received: null
+
+      127 |       });
+      128 |
+    > 129 |       expect(userOrg).toBeTruthy();
+          |                       ^
+      130 |       expect(userOrg.role).toBe('admin');
+      131 |       expect(userOrg.isActive).toBe(true);
+      132 |     });
+
+      at Object.toBeTruthy (tests/integration/multi_tenant_workflow.test.js:129:23)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 2: User Authentication › should login and receive organization context
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      142 |         });
+      143 |
+    > 144 |       expect(response.status).toBe(200);
+          |                               ^
+      145 |       expect(response.body.data).toHaveProperty('token');
+      146 |       expect(response.body.data).toHaveProperty('organization');
+      147 |       expect(response.body.data.organization.id).toBe(organizationId);
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:144:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 3: Organization Setup › should complete organization setup
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      177 |         });
+      178 |
+    > 179 |       expect(response.status).toBe(200);
+          |                               ^
+      180 |       expect(response.body.success).toBe(true);
+      181 |     });
+      182 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:179:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 4: Employee Creation › should create employee with auto UserOrganization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 500
+
+      198 |         });
+      199 |
+    > 200 |       expect(response.status).toBe(201);
+          |                               ^
+      201 |       expect(response.body.organizationId).toBe(organizationId);
+      202 |
+      203 |       // Verify UserOrganization was auto-created
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:200:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should create client with organization validation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 401
+
+      231 |         });
+      232 |
+    > 233 |       expect(response.status).toBe(201);
+          |                               ^
+      234 |       expect(response.body.success).toBe(true);
+      235 |       expect(response.body).toHaveProperty('clientId');
+      236 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:233:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should prevent duplicate client email within organization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      267 |         });
+      268 |
+    > 269 |       expect(response.status).toBe(400);
+          |                               ^
+      270 |       expect(response.body.message).toContain('already exists');
+      271 |     });
+      272 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:269:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should require organization ID for client creation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      283 |         });
+      284 |
+    > 285 |       expect(response.status).toBe(400);
+          |                               ^
+      286 |       expect(response.body.message).toContain('Organization ID is required');
+      287 |     });
+      288 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:285:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should isolate data between organizations
+
+    TypeError: Invalid value "undefined" for header "x-organization-id"
+
+      at Test.setHeader [as request] (node_modules/superagent/src/node/index.js:830:39)
+      at Test.request [as end] (node_modules/superagent/src/node/index.js:965:8)
+      at Test.end (node_modules/supertest/lib/test.js:136:11)
+      at end (node_modules/superagent/src/request-base.js:283:12)
+      at Test.RequestBase.then (node_modules/superagent/src/request-base.js:265:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should prevent cross-organization access
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 403
+    Received: 401
+
+      341 |         .set('x-organization-id', organizationId); // Wrong org context
+      342 |
+    > 343 |       expect(response.status).toBe(403);
+          |                               ^
+      344 |     });
+      345 |
+      346 |     afterAll(async () => {
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:343:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 7: Assignment Creation › should create client assignment with organization context
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      403 |         });
+      404 |
+    > 405 |       expect(response.status).toBe(200);
+          |                               ^
+      406 |       expect(response.body.success).toBe(true);
+      407 |     });
+      408 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:405:31)
+
+Test Suites: 1 failed, 1 total
+Tests:       10 failed, 10 total
+Snapshots:   0 total
+Time:        6.057 s
+Ran all test suites matching tests/integration/multi_tenant_workflow.test.js.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
