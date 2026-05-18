@@ -1,0 +1,330 @@
+🛠️  Configuring DEVELOPMENT environment
+2026-05-16 14:27:00 [[32minfo[39m]: [32mUsing ioredis-mock for test environment[39m
+WARNING: STRIPE_SECRET_KEY is not set. Payment processing will be disabled.
+Using Cloudflare R2 for storage
+R2 Account ID: 3fecfc3b7f7249ac7698b9a038c96dca
+R2 Bucket: businesslogo
+R2 Public Domain: https://assets.bishalbudhathoki.com
+R2 S3Client initialized successfully
+2026-05-16 14:27:01 [[33mwarn[39m]: [33mGCP_PROJECT_ID not found. AI features will run in fallback mode.[39m
+2026-05-16 14:27:01 [[32minfo[39m]: [32mSubscribed to 1 Redis channel(s)[39m
+2026-05-16 14:27:01 [[32minfo[39m]: [32mRedis connection established[39m
+2026-05-16 14:27:01 [[32minfo[39m]: [32mRedis client ready[39m
+2026-05-16 14:27:04 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:04 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:04 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 14:27:04 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mAudit log created[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mAuto-created organization for new owner[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+DEBUG Phase 1 variables: {
+  userId: '6a07f2183d8f436b83c6a28a',
+  organizationId: '6a07f2193d8f436b83c6a28c',
+  data: {
+    userId: '6a07f2183d8f436b83c6a28a',
+    email: 'test-1778905621588@example.com',
+    firstName: 'Test',
+    lastName: 'Admin',
+    firebaseUid: 'test-firebase-uid-1778905624784-bsgtzd',
+    customToken: 'test-custom-token',
+    organizationId: '6a07f2193d8f436b83c6a28c',
+    organizationCode: 'I5QVMX',
+    organization: {
+      id: '6a07f2193d8f436b83c6a28c',
+      name: 'Test Organization',
+      code: 'I5QVMX'
+    }
+  }
+}
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+[JWT Key Rotation] Failed to refresh key cache: Error: No active JWT secret found. Please rotate keys immediately.
+    at model.jwtSecretSchema.statics.getActiveKey (/Users/bishal/Developer/invoice/backend/models/JWTSecret.js:119:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at JWTKeyRotationService.refreshKeyCache (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:175:24)
+    at JWTKeyRotationService.getActiveKey (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:203:7)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:753:25
+2026-05-16 14:27:05 [[33mwarn[39m]: [33mKey rotation service unavailable, falling back to JWT_SECRET[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+DEBUG Phase 3 401 Error: {
+  success: false,
+  message: 'User account not found. Please register first.',
+  statusCode: 401,
+  code: 'USER_NOT_FOUND',
+  timestamp: '2026-05-16T04:27:05.354Z'
+}
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 14:27:05 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mAudit log created[39m
+2026-05-16 14:27:05 [[31merror[39m]: [31mFailed to create UserOrganization record[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 14:27:05 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mAudit log created[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mAuto-created organization for new owner[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:05 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:05 [[32minfo[39m]: [32mIncoming request[39m
+[JWT Key Rotation] Failed to refresh key cache: Error: No active JWT secret found. Please rotate keys immediately.
+    at model.jwtSecretSchema.statics.getActiveKey (/Users/bishal/Developer/invoice/backend/models/JWTSecret.js:119:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at JWTKeyRotationService.refreshKeyCache (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:175:24)
+    at JWTKeyRotationService.getActiveKey (/Users/bishal/Developer/invoice/backend/services/jwtKeyRotationService.js:203:7)
+    at /Users/bishal/Developer/invoice/backend/controllers/secureAuthController.js:753:25
+2026-05-16 14:27:06 [[33mwarn[39m]: [33mKey rotation service unavailable, falling back to JWT_SECRET[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mIncoming request[39m
+DEBUG: auth object keys: [
+  'createUser',
+  'getUserByEmail',
+  'deleteUser',
+  'verifyIdToken',
+  'createCustomToken',
+  'setCustomUserClaims'
+]
+2026-05-16 14:27:06 [[32minfo[39m]: [32mFirebase user created via Admin SDK[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mAudit log created[39m
+2026-05-16 14:27:06 [[31merror[39m]: [31mFailed to create UserOrganization record[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mResolved 172.17.0.1 to 172.17.0.1[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mTemporal TLS disabled — using plaintext gRPC[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mConnecting to Temporal at 172.17.0.1:7236 (tls=false, namespace=default)[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Response[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mIncoming request[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mRequest completed[39m
+2026-05-16 14:27:06 [[32minfo[39m]: [32mBusiness Event[39m
+2026-05-16 14:27:06 [[35mhttp[39m]: [35mHTTP Response[39m
+FAIL tests/integration/multi_tenant_workflow.test.js (6.294 s)
+  Multi-Tenant Workflow Integration Tests
+    Phase 1: Organization Creation
+      ✓ should create a new organization and auto-create UserOrganization (820 ms)
+    Phase 2: User Authentication
+      ✓ should login and receive organization context (191 ms)
+    Phase 3: Organization Setup
+      ✕ should complete organization setup (18 ms)
+    Phase 4: Employee Creation
+      ✓ should create employee with auto UserOrganization (238 ms)
+    Phase 5: Client Creation with Validation
+      ✕ should create client with organization validation (21 ms)
+      ✕ should prevent duplicate client email within organization (38 ms)
+      ✕ should require organization ID for client creation (17 ms)
+    Phase 6: Multi-Org Isolation
+      ✕ should isolate data between organizations (382 ms)
+      ✕ should prevent cross-organization access (15 ms)
+    Phase 7: Assignment Creation
+      ✕ should create client assignment with organization context (238 ms)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 3: Organization Setup › should complete organization setup
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      180 |       }
+      181 |
+    > 182 |       expect(response.status).toBe(200);
+          |                               ^
+      183 |       expect(response.body.success).toBe(true);
+      184 |     });
+      185 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:182:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should create client with organization validation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 201
+    Received: 401
+
+      234 |         });
+      235 |
+    > 236 |       expect(response.status).toBe(201);
+          |                               ^
+      237 |       expect(response.body.success).toBe(true);
+      238 |       expect(response.body).toHaveProperty('clientId');
+      239 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:236:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should prevent duplicate client email within organization
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      270 |         });
+      271 |
+    > 272 |       expect(response.status).toBe(400);
+          |                               ^
+      273 |       expect(response.body.message).toContain('already exists');
+      274 |     });
+      275 |
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:272:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 5: Client Creation with Validation › should require organization ID for client creation
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 400
+    Received: 401
+
+      286 |         });
+      287 |
+    > 288 |       expect(response.status).toBe(400);
+          |                               ^
+      289 |       expect(response.body.message).toContain('Organization ID is required');
+      290 |     });
+      291 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:288:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should isolate data between organizations
+
+    TypeError: Invalid value "undefined" for header "x-organization-id"
+
+      at Test.setHeader [as request] (node_modules/superagent/src/node/index.js:830:39)
+      at Test.request [as end] (node_modules/superagent/src/node/index.js:965:8)
+      at Test.end (node_modules/supertest/lib/test.js:136:11)
+      at end (node_modules/superagent/src/request-base.js:283:12)
+      at Test.RequestBase.then (node_modules/superagent/src/request-base.js:265:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 6: Multi-Org Isolation › should prevent cross-organization access
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 403
+    Received: 401
+
+      344 |         .set('x-organization-id', organizationId); // Wrong org context
+      345 |
+    > 346 |       expect(response.status).toBe(403);
+          |                               ^
+      347 |     });
+      348 |
+      349 |     afterAll(async () => {
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:346:31)
+
+  ● Multi-Tenant Workflow Integration Tests › Phase 7: Assignment Creation › should create client assignment with organization context
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 401
+
+      406 |         });
+      407 |
+    > 408 |       expect(response.status).toBe(200);
+          |                               ^
+      409 |       expect(response.body.success).toBe(true);
+      410 |     });
+      411 |   });
+
+      at Object.toBe (tests/integration/multi_tenant_workflow.test.js:408:31)
+
+Test Suites: 1 failed, 1 total
+Tests:       7 failed, 3 passed, 10 total
+Snapshots:   0 total
+Time:        6.332 s, estimated 8 s
+Ran all test suites matching tests/integration/multi_tenant_workflow.test.js.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
