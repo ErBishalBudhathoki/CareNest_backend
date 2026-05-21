@@ -11,7 +11,8 @@ const {
   TimesheetRemindersCronWorkflow,
   ShiftRemindersCronWorkflow,
   EmailVerificationCronWorkflow,
-  CleanupArtifactRegistryWorkflow
+  CleanupArtifactRegistryWorkflow,
+  InvoiceAICronWorkflow
 } = require('./system_cron');
 const { EmployeeOnboardingWorkflow } = require('./employeeOnboarding');
 const { authNotificationWorkflow } = require('./auth');
@@ -29,5 +30,6 @@ module.exports = {
   EmailVerificationCronWorkflow,
   EmployeeOnboardingWorkflow,
   CleanupArtifactRegistryWorkflow,
-  authNotificationWorkflow
+  authNotificationWorkflow,
+  InvoiceAICronWorkflow
 };
