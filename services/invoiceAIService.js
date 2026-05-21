@@ -6,8 +6,8 @@
 const { VertexAI, SchemaType } = require('@google-cloud/vertexai');
 
 // Initialize Vertex AI
-const project = process.env.GOOGLE_CLOUD_PROJECT || 'your-project-id';
-const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || process.env.GCLOUD_PROJECT || 'your-project-id';
+const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.REGION || 'us-central1';
 let vertexAi;
 let generativeModel;
 
