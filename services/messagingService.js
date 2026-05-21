@@ -608,21 +608,33 @@ exports.getUserConversations = async (userId, options = {}) => {
     .sort({ lastMessageAt: -1, createdAt: -1 })
     .lean();
 
-  return rows.map((row) => {
-    const shiftWindow = buildChatWindow({
-      startAt: row.shiftStartAt,
-      endAt: row.shiftEndAt,
-      now: new Date(),
-    });
+  // Resolve human-readable names for worker and client in parallel
+  const enriched = await Promise.all(
+    rows.map(async (row) => {
+      const shiftWindow = buildChatWindow({
+        startAt: row.shiftStartAt,
+        endAt: row.shiftEndAt,
+        now: new Date(),
+      });
 
-    return {
-      ...toPlainConversation(row),
-      canMessage: shiftWindow.isOpen,
-      chatWindowStatus: shiftWindow.status,
-      chatStartAt: shiftWindow.chatStartAt,
-      chatEndAt: shiftWindow.chatEndAt,
-    };
-  });
+      const [workerName, clientName] = await Promise.all([
+        resolveParticipantName(row.workerId || row.workerEmail, 'worker'),
+        resolveParticipantName(row.clientId || row.clientEmail, 'client'),
+      ]);
+
+      return {
+        ...toPlainConversation(row),
+        workerName,
+        clientName,
+        canMessage: shiftWindow.isOpen,
+        chatWindowStatus: shiftWindow.status,
+        chatStartAt: shiftWindow.chatStartAt,
+        chatEndAt: shiftWindow.chatEndAt,
+      };
+    })
+  );
+
+  return enriched;
 };
 
 /**
