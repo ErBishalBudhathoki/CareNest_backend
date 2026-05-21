@@ -266,3 +266,45 @@ exports.getSmartReminders = async (req, res) => {
     });
   }
 };
+
+/**
+ * Generate invoice from free text prompt
+ * POST /api/invoice-ai/generate-from-text
+ */
+exports.generateFromText = async (req, res) => {
+  try {
+    const { organizationId, textNote } = req.body;
+    if (!organizationId || !textNote) {
+      return res.status(400).json({ success: false, message: 'organizationId and textNote are required' });
+    }
+
+    const Client = require('../models/Client');
+    // Fetch active clients for context
+    const clientsRaw = await Client.find({ organizationId, isActive: true }).select('_id clientFirstName clientLastName clientEmail');
+    const clients = clientsRaw.map(c => ({ id: c._id.toString(), name: `${c.clientFirstName} ${c.clientLastName}`.trim(), email: c.clientEmail }));
+
+    // Fetch historical invoices for context
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const historicalInvoicesRaw = await Invoice.find({
+      organizationId,
+      createdAt: { $gte: thirtyDaysAgo }
+    }).select('clientId lineItems.supportItemName lineItems.price lineItems.quantity -_id');
+    
+    const historicalInvoices = historicalInvoicesRaw.map(inv => ({
+      clientId: inv.clientId,
+      lineItems: inv.lineItems.map(li => ({
+        description: li.supportItemName,
+        price: li.price,
+        quantity: li.quantity
+      }))
+    }));
+
+    const result = await invoiceAIService.generateInvoiceFromText(organizationId, textNote, clients, historicalInvoices);
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Error generating invoice from text:', error);
+    res.status(500).json({ success: false, message: 'Error generating invoice from text', error: error.message });
+  }
+};

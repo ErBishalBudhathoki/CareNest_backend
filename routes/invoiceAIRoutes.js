@@ -7,6 +7,7 @@ router.post('/validate', invoiceAIController.validateInvoice);
 router.post('/detect-anomalies', invoiceAIController.detectAnomalies);
 router.get('/payment-prediction/:invoiceId', invoiceAIController.predictPayment);
 router.post('/auto-generate', invoiceAIController.autoGenerateInvoices);
+router.post('/generate-from-text', invoiceAIController.generateFromText);
 router.get('/smart-reminders/:invoiceId', invoiceAIController.getSmartReminders);
 
 module.exports = router;

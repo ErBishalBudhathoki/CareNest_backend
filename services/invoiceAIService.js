@@ -252,3 +252,104 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
   result.summary = `Generated ${result.successfulInvoices}/${result.totalInvoices} invoices successfully using Gemini AI`;
   return result;
 };
+
+/**
+ * Generate a single invoice from a free-text prompt
+ * @param {String} organizationId 
+ * @param {String} textNote 
+ * @param {Array} clients 
+ * @param {Array} historicalInvoices 
+ */
+exports.generateInvoiceFromText = async (organizationId, textNote, clients, historicalInvoices) => {
+  const schema = {
+    type: SchemaType.OBJECT,
+    properties: {
+      success: { type: SchemaType.BOOLEAN, description: "Whether the AI successfully parsed the text into an invoice" },
+      reasoning: { type: SchemaType.STRING, description: "Explanation of how the text was matched to the client and line items" },
+      invoice: {
+        type: SchemaType.OBJECT,
+        properties: {
+          clientId: { type: SchemaType.STRING },
+          organizationId: { type: SchemaType.STRING },
+          totalAmount: { type: SchemaType.NUMBER },
+          subtotal: { type: SchemaType.NUMBER },
+          taxAmount: { type: SchemaType.NUMBER },
+          dueDate: { type: SchemaType.STRING, description: "ISO Date String 30 days from now" },
+          employeeContext: {
+            type: SchemaType.OBJECT,
+            properties: {
+              employeeName: { type: SchemaType.STRING }
+            }
+          },
+          lineItems: {
+            type: SchemaType.ARRAY,
+            items: {
+              type: SchemaType.OBJECT,
+              properties: {
+                description: { type: SchemaType.STRING, description: "Beautifully formatted service description" },
+                amount: { type: SchemaType.NUMBER },
+                quantity: { type: SchemaType.NUMBER, description: "e.g., hours or units" }
+              },
+              required: ["description", "amount", "quantity"]
+            }
+          }
+        },
+        required: ["clientId", "organizationId", "totalAmount", "subtotal", "taxAmount", "dueDate", "lineItems"]
+      }
+    },
+    required: ["success", "reasoning", "invoice"]
+  };
+
+  const prompt = `You are a billing software assistant processing a natural language note into a formal invoice for a SINGLE organization.
+  CRITICAL: You must NEVER hallucinate client IDs. Find the closest match in the 'Available Clients' list based on the name mentioned in the note.
+  CRITICAL: Read the note carefully. If an exact dollar amount or billing rate is specified, USE IT.
+  CRITICAL: If the note lacks specific pricing or service details, refer to the 'Historical Client Invoices' to infer the standard NDIS rates and line item descriptions for that matched client.
+  Rules: Subtotal + 10% tax = totalAmount. Format descriptions professionally. Set the employee name if mentioned (e.g. "Eva").
+  Note: "${textNote}"
+  Organization ID: ${organizationId}
+  Available Clients: ${JSON.stringify(clients)}
+  Historical Client Invoices: ${JSON.stringify(historicalInvoices)}`;
+
+  const aiResult = await callGeminiStructured(prompt, schema);
+
+  if (!aiResult.success || !aiResult.invoice || !aiResult.invoice.clientId) {
+    throw new Error("AI could not generate a valid invoice from the provided text. Reasoning: " + aiResult.reasoning);
+  }
+
+  const inv = aiResult.invoice;
+  inv.invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  inv.dueDate = new Date(inv.dueDate);
+  // Set default status to draft for review since it's free-text
+  inv.workflow = { status: 'draft' };
+  inv.payment = { status: 'pending' };
+  inv.auditTrail = { createdAt: new Date() };
+  
+  // Look up client to fill in details
+  const clientMatch = clients.find(c => c.id === inv.clientId);
+  if (clientMatch) {
+    inv.clientName = clientMatch.name;
+    inv.clientEmail = clientMatch.email;
+  }
+
+  // Use the existing validation logic if available
+  try {
+    const validation = await exports.validateInvoice(inv);
+    inv.compliance = {
+      validationPassed: validation.isValid,
+      validationErrors: validation.errors
+    };
+  } catch (err) {
+    // ignore validation errors, we'll still try to save the draft
+  }
+
+  // Save the invoice to DB
+  const { Invoice } = require('../models/Invoice');
+  const invoiceDoc = new Invoice(inv);
+  await invoiceDoc.save();
+
+  return {
+    successfulInvoices: 1,
+    invoiceIds: [inv.invoiceNumber],
+    reasoning: aiResult.reasoning
+  };
+};
