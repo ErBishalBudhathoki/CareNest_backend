@@ -1,5 +1,5 @@
 const invoiceAIService = require('../services/invoiceAIService');
-const Invoice = require('../models/Invoice');
+const { Invoice } = require('../models/Invoice');
 const Appointment = require('../models/Appointment');
 
 /**
@@ -173,11 +173,34 @@ exports.autoGenerateInvoices = async (req, res) => {
       });
     }
 
-    // Auto-generate invoices
+    // Gather unique client IDs from appointments to fetch their recent invoices for AI context
+    const clientIds = [...new Set(appointments.map(a => a.client.id || a.client._id).filter(Boolean))];
+    
+    // Fetch historical invoices (last 7 days) to provide pricing context without leaking data
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const historicalInvoicesRaw = await Invoice.find({
+      organizationId,
+      clientId: { $in: clientIds },
+      createdAt: { $gte: sevenDaysAgo }
+    }).select('clientId lineItems.supportItemName lineItems.price lineItems.quantity -_id');
+    
+    // Aggressively anonymize and strip down the history for the AI
+    const historicalInvoices = historicalInvoicesRaw.map(inv => ({
+      clientId: inv.clientId,
+      lineItems: inv.lineItems.map(li => ({
+        description: li.supportItemName,
+        price: li.price,
+        quantity: li.quantity
+      }))
+    }));
+
+    // Auto-generate invoices with historical context
     const result = await invoiceAIService.autoGenerateInvoices(appointments, {
       validateBeforeGeneration: validateBeforeGeneration !== false,
       groupByClient: groupByClient === true,
-    });
+    }, historicalInvoices);
 
     // Update last run date
     if (org.settings) {

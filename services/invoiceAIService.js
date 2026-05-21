@@ -169,9 +169,10 @@ exports.suggestReminders = async (invoice, prediction) => {
  * Auto-generate invoices for a period
  * @param {Array} appointments - Appointments to invoice
  * @param {Object} options - Generation options
+ * @param {Array} historicalInvoices - Anonymized historical invoices for context
  * @returns {Object} Generation result
  */
-exports.autoGenerateInvoices = async (appointments, options = {}) => {
+exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvoices = []) => {
   // Let the AI do the heavy lifting of grouping and calculating
   const schema = {
     type: SchemaType.OBJECT,
@@ -210,8 +211,10 @@ exports.autoGenerateInvoices = async (appointments, options = {}) => {
   const prompt = `You are billing software processing appointments for a SINGLE organization to generate invoices. 
   CRITICAL: You must NEVER mix client or employee data. Process strictly for the provided Organization ID.
   CRITICAL: Read the appointment notes/descriptions carefully. If an exact dollar amount or billing rate is specified in the notes, YOU MUST USE THAT EXACT AMOUNT over the default amount.
+  CRITICAL: If the appointment notes lack specific pricing or service details, refer to the 'Historical Client Invoices' to infer the standard rates and line item descriptions for that client.
   Rules: Subtotal + 10% tax = totalAmount. Format descriptions professionally. 
   Options: ${JSON.stringify(options)}
+  Historical Client Invoices: ${JSON.stringify(historicalInvoices)}
   Appointments: ${JSON.stringify(appointments)}`;
 
   const aiResult = await callGeminiStructured(prompt, schema);
