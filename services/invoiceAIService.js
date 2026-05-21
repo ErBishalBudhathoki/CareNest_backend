@@ -246,6 +246,6 @@ exports.autoGenerateInvoices = async (appointments, options = {}) => {
     }
   }
 
-  result.summary = \`Generated \${result.successfulInvoices}/\${result.totalInvoices} invoices successfully using Gemini AI\`;
+  result.summary = `Generated ${result.successfulInvoices}/${result.totalInvoices} invoices successfully using Gemini AI`;
   return result;
 };
