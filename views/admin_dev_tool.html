@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CareNest Admin Dev Tool - AI Configuration</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    h1 { color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
+    th { background-color: #f8f9fa; color: #555; }
+    select, button { padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
+    button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: background 0.3s; }
+    button:hover { background-color: #2980b9; }
+    .global-controls { background: #e8f4f8; padding: 15px; border-radius: 6px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; }
+    .alert { padding: 10px; border-radius: 4px; margin-bottom: 15px; display: none; }
+    .alert.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CareNest AI Invoice Settings (Dev Tool)</h1>
+    
+    <div id="alertBox" class="alert"></div>
+
+    <div class="global-controls">
+      <strong>Global Override:</strong>
+      <select id="globalFrequency">
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="manual">Manual Only</option>
+        <option value="off">Completely Off</option>
+      </select>
+      <button onclick="applyGlobalSettings()">Apply to ALL Organizations</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Organization Name</th>
+          <th>Code</th>
+          <th>AI Frequency</th>
+          <th>Last Run Date</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="orgTableBody">
+        <tr><td colspan="5">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    async function fetchOrganizations() {
+      try {
+        const response = await fetch('/admin-dev/api/organizations');
+        const data = await response.json();
+        
+        if (data.success) {
+          const tbody = document.getElementById('orgTableBody');
+          tbody.innerHTML = '';
+          
+          data.data.forEach(org => {
+            const aiSettings = org.settings?.aiInvoiceGeneration || {};
+            const frequency = aiSettings.frequency || 'manual';
+            const lastRunDate = aiSettings.lastRunDate ? new Date(aiSettings.lastRunDate).toLocaleString() : 'Never';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${org.name}</td>
+              <td>${org.organizationCode || 'N/A'}</td>
+              <td>
+                <select id="freq-${org._id}">
+                  <option value="weekly" ${frequency === 'weekly' ? 'selected' : ''}>Weekly</option>
+                  <option value="monthly" ${frequency === 'monthly' ? 'selected' : ''}>Monthly</option>
+                  <option value="manual" ${frequency === 'manual' ? 'selected' : ''}>Manual Only</option>
+                  <option value="off" ${frequency === 'off' ? 'selected' : ''}>Off</option>
+                </select>
+              </td>
+              <td>${lastRunDate}</td>
+              <td><button onclick="updateOrg('${org._id}')">Save</button></td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (error) {
+        showAlert('Error loading organizations: ' + error.message, 'error');
+      }
+    }
+
+    async function updateOrg(orgId) {
+      const frequency = document.getElementById(`freq-${orgId}`).value;
+      try {
+        const response = await fetch(`/admin-dev/api/organizations/${orgId}/ai-settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frequency })
+        });
+        const data = await response.json();
+        if (data.success) {
+          showAlert('Settings updated successfully', 'success');
+        } else {
+          showAlert('Error: ' + data.message, 'error');
+        }
+      } catch (error) {
+        showAlert('Error updating settings: ' + error.message, 'error');
+      }
+    }
+
+    async function applyGlobalSettings() {
+      const frequency = document.getElementById('globalFrequency').value;
+      if (!confirm(`Are you sure you want to set ALL organizations to "${frequency}"?`)) return;
+
+      try {
+        const response = await fetch('/admin-dev/api/organizations/global-ai-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frequency })
+        });
+        const data = await response.json();
+        if (data.success) {
+          showAlert(data.message, 'success');
+          fetchOrganizations(); // Refresh table
+        } else {
+          showAlert('Error: ' + data.message, 'error');
+        }
+      } catch (error) {
+        showAlert('Error applying global settings: ' + error.message, 'error');
+      }
+    }
+
+    function showAlert(message, type) {
+      const alertBox = document.getElementById('alertBox');
+      alertBox.textContent = message;
+      alertBox.className = `alert ${type}`;
+      alertBox.style.display = 'block';
+      setTimeout(() => alertBox.style.display = 'none', 3000);
+    }
+
+    // Load data on start
+    fetchOrganizations();
+  </script>
+</body>
+</html>

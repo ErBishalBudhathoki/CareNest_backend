@@ -107,31 +107,57 @@ exports.predictPayment = async (req, res) => {
   }
 };
 
+const Organization = require('../models/Organization');
+
 /**
  * Auto-generate invoices for a period
  * POST /api/invoice-ai/auto-generate
  */
 exports.autoGenerateInvoices = async (req, res) => {
   try {
-    const { organizationId, startDate, endDate, validateBeforeGeneration, groupByClient } = req.body;
+    const { organizationId, startDate, endDate, validateBeforeGeneration, groupByClient, forceManual } = req.body;
 
-    if (!organizationId || !startDate || !endDate) {
+    if (!organizationId) {
       return res.status(400).json({
         success: false,
-        message: 'organizationId, startDate, and endDate are required',
+        message: 'organizationId is required',
       });
     }
 
-    // Get appointments for the period
-    const appointments = await Appointment.find({
+    // Cost Control: Check Organization AI Generation Frequency
+    const org = await Organization.findById(organizationId);
+    if (!org) {
+      return res.status(404).json({ success: false, message: 'Organization not found' });
+    }
+
+    const { frequency, lastRunDate } = org.settings?.aiInvoiceGeneration || {};
+    
+    // Prevent accidental excessive AI generation bills
+    if (!forceManual && lastRunDate) {
+      const daysSince = (new Date() - new Date(lastRunDate)) / (1000 * 60 * 60 * 24);
+      if (frequency === 'weekly' && daysSince < 7) {
+        return res.status(429).json({ success: false, message: 'AI cost limit: Weekly generation limit reached.' });
+      } else if (frequency === 'monthly' && daysSince < 28) {
+        return res.status(429).json({ success: false, message: 'AI cost limit: Monthly generation limit reached.' });
+      }
+    }
+
+    // Build query for appointments
+    const query = {
       organizationId,
-      'schedule.date': {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      },
       status: 'completed',
       invoiced: { $ne: true },
-    });
+    };
+
+    if (startDate && endDate) {
+      query['schedule.date'] = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    // Get appointments for the period
+    const appointments = await Appointment.find(query);
 
     if (appointments.length === 0) {
       return res.json({
@@ -152,6 +178,13 @@ exports.autoGenerateInvoices = async (req, res) => {
       validateBeforeGeneration: validateBeforeGeneration !== false,
       groupByClient: groupByClient === true,
     });
+
+    // Update last run date
+    if (org.settings) {
+      if (!org.settings.aiInvoiceGeneration) org.settings.aiInvoiceGeneration = {};
+      org.settings.aiInvoiceGeneration.lastRunDate = new Date();
+      await org.save();
+    }
 
     res.json({
       success: true,
