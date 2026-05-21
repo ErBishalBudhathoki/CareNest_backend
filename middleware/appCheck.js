@@ -4,15 +4,15 @@ const { createLogger } = require('../utils/logger');
 const logger = createLogger('AppCheckMiddleware');
 
 function isAppCheckEnforced() {
-  if (process.env.NODE_ENV === 'test') {
-    return false;
-  }
-
   // Explicit flag takes precedence.
   if (process.env.APP_CHECK_ENFORCEMENT === 'true') {
     return true;
   }
   if (process.env.APP_CHECK_ENFORCEMENT === 'false') {
+    return false;
+  }
+
+  if (process.env.NODE_ENV === 'test') {
     return false;
   }
 
