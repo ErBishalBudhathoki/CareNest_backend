@@ -520,12 +520,66 @@ async function cleanupArtifactRegistryActivity() {
   }
 }
 
+/**
+ * Activity: Invoice AI Generation
+ */
+async function processInvoiceAIActivity() {
+  logger.info('[Temporal Activity] Starting Invoice AI generation process...');
+  try {
+    const Organization = require('../../models/Organization');
+    const Appointment = require('../../models/Appointment');
+    const invoiceAIService = require('../../services/invoiceAIService');
+
+    // Find all organizations with weekly AI generation enabled
+    const organizations = await Organization.find({
+      'settings.aiInvoiceGeneration.frequency': 'weekly'
+    });
+
+    let totalOrganizations = organizations.length;
+    let totalGenerated = 0;
+
+    for (const org of organizations) {
+      // Prevent running if it has been run in the last 6 days to avoid over-billing
+      const lastRun = org.settings.aiInvoiceGeneration.lastRunDate;
+      if (lastRun) {
+        const daysSince = (new Date() - new Date(lastRun)) / (1000 * 60 * 60 * 24);
+        if (daysSince < 6) {
+          logger.info(`[Temporal Activity] Skipping Invoice AI for org ${org._id} - already ran recently.`);
+          continue;
+        }
+      }
+
+      const appointments = await Appointment.find({
+        organizationId: org._id,
+        status: 'completed',
+        invoiced: { $ne: true },
+      });
+
+      if (appointments.length > 0) {
+        logger.info(`[Temporal Activity] Generating AI Invoices for org ${org._id}, found ${appointments.length} appointments.`);
+        const result = await invoiceAIService.autoGenerateInvoices(appointments, { groupByClient: true });
+        totalGenerated += result.successfulInvoices;
+        
+        org.settings.aiInvoiceGeneration.lastRunDate = new Date();
+        await org.save();
+      }
+    }
+
+    logger.info(`[Temporal Activity] Invoice AI generation completed. Processed ${totalOrganizations} orgs, generated ${totalGenerated} invoices.`);
+    return { organizationsProcessed: totalOrganizations, invoicesGenerated: totalGenerated };
+  } catch (error) {
+    logger.error('[Temporal Activity] Invoice AI generation process failed', error);
+    throw error;
+  }
+}
+
 module.exports = {
   processDunningActivity,
   processExpenseRemindersActivity,
   processTimesheetRemindersActivity,
   processShiftRemindersActivity,
   processEmailVerificationRemindersActivity,
-  cleanupArtifactRegistryActivity
+  cleanupArtifactRegistryActivity,
+  processInvoiceAIActivity
 };
 
