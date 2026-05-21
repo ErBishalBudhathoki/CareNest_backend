@@ -6,12 +6,12 @@ const Organization = require('../models/Organization');
 // Simple basic auth middleware for the dev tool
 const devAuth = (req, res, next) => {
   const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
-  const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+  const [login, userPass] = Buffer.from(b64auth, 'base64').toString().split(':');
 
   const adminUser = process.env.ADMIN_DEV_USER || 'admin';
-  const adminPass = process.env.ADMIN_DEV_PASSWORD;
+  const adminSecret = process.env.ADMIN_DEV_PASSWORD;
 
-  if (login && password && login === adminUser && password === adminPass && adminPass) {
+  if (login && userPass && login === adminUser && userPass === adminSecret && adminSecret) {
     return next();
   }
 
