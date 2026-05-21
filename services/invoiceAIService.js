@@ -226,14 +226,14 @@ exports.autoGenerateInvoices = async (appointments, options = {}) => {
 
   for (const inv of aiResult.invoices) {
     try {
-      inv.invoiceNumber = \`INV-\${Date.now()}-\${Math.random().toString(36).substr(2, 9)}\`;
+      inv.invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       inv.dueDate = new Date(inv.dueDate);
       
       if (options.validateBeforeGeneration) {
         const validation = await exports.validateInvoice(inv);
         if (!validation.isValid) {
           result.failedInvoices++;
-          result.errors.push(\`Validation failed for client \${inv.clientId}\`);
+          result.errors.push(`Validation failed for client ${inv.clientId}`);
           continue;
         }
       }
