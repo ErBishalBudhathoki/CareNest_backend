@@ -268,6 +268,16 @@ const organizationSchema = new mongoose.Schema({
         type: Number,
         default: 0
       }
+    },
+    aiInvoiceGeneration: {
+      frequency: {
+        type: String,
+        enum: ['manual', 'weekly', 'monthly'],
+        default: 'manual'
+      },
+      lastRunDate: {
+        type: Date
+      }
     }
   },
   timesheetReminders: {

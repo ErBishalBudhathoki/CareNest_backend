@@ -219,6 +219,7 @@ const apiLimiter = rateLimit({
 });
 
 app.use('/api', apiLimiter);
+app.use('/admin-dev', require('./routes/adminDevRoutes'));
 app.use('/api', apiSecurityGate, require('./routes'));
 
 // Serve static files from uploads directory

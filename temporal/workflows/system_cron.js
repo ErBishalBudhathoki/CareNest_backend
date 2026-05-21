@@ -6,7 +6,8 @@ const {
   processTimesheetRemindersActivity,
   processShiftRemindersActivity,
   processEmailVerificationRemindersActivity,
-  cleanupArtifactRegistryActivity
+  cleanupArtifactRegistryActivity,
+  processInvoiceAIActivity
 } = proxyActivities({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -69,11 +70,20 @@ async function CleanupArtifactRegistryWorkflow() {
   }
 }
 
+/**
+ * Workflow that runs weekly AI invoice generation
+ */
+async function InvoiceAICronWorkflow() {
+  const result = await processInvoiceAIActivity();
+  return result;
+}
+
 module.exports = {
   DunningCronWorkflow,
   ExpenseRemindersCronWorkflow,
   TimesheetRemindersCronWorkflow,
   ShiftRemindersCronWorkflow,
   EmailVerificationCronWorkflow,
-  CleanupArtifactRegistryWorkflow
+  CleanupArtifactRegistryWorkflow,
+  InvoiceAICronWorkflow
 };

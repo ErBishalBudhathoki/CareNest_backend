@@ -47,6 +47,11 @@ const schedules = [
     scheduleId: 'artifact-registry-cleanup-schedule',
     cron: '0 2 * * 0',
     workflow: 'CleanupArtifactRegistryWorkflow'
+  },
+  {
+    scheduleId: 'invoice-ai-weekly-schedule',
+    cron: '0 0 * * 0', // Weekly on Sundays
+    workflow: 'InvoiceAICronWorkflow'
   }
 ];
 
