@@ -350,8 +350,12 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
   await invoiceDoc.save();
 
   return {
+    totalInvoices: 1,
     successfulInvoices: 1,
+    failedInvoices: 0,
     invoiceIds: [inv.invoiceNumber],
+    errors: [],
+    summary: aiResult.reasoning,
     reasoning: aiResult.reasoning
   };
 };
