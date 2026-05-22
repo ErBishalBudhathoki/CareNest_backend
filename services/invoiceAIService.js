@@ -253,7 +253,17 @@ function constructInvoicePdfPayload(org, client, invoiceNumber, lineItems, finan
     },
   };
 
-  return { header, calculatedPayloadData, pdfRenderSnapshot };
+  return { 
+    header, 
+    calculatedPayloadData, 
+    pdfRenderSnapshot,
+    correctedFinancials: {
+      subtotal: Math.round(correctSubtotal * 100) / 100,
+      taxAmount: Math.round(correctTaxAmount * 100) / 100,
+      totalAmount: Math.round(correctTotalAmount * 100) / 100,
+      taxRate: taxRate
+    }
+  };
 }
 
 /**
@@ -594,12 +604,19 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
             ? Math.round((inv.taxAmount / inv.subtotal) * 100)
             : (inv.taxAmount > 0 ? 10 : 0);
 
-          const { header, calculatedPayloadData, pdfRenderSnapshot } =
+          const { header, calculatedPayloadData, pdfRenderSnapshot, correctedFinancials } =
             constructInvoicePdfPayload(
               orgDoc, clientDoc, inv.invoiceNumber, mappedLineItems,
               { subtotal: inv.subtotal || 0, taxAmount: inv.taxAmount || 0, totalAmount: inv.totalAmount || 0, taxRate },
               dateBounds
             );
+
+          if (correctedFinancials) {
+            invoiceData.financialSummary.subtotal = correctedFinancials.subtotal;
+            invoiceData.financialSummary.taxAmount = correctedFinancials.taxAmount;
+            invoiceData.financialSummary.totalAmount = correctedFinancials.totalAmount;
+            invoiceData.payment.balanceDue = correctedFinancials.totalAmount;
+          }
 
           invoiceData.header = header;
           invoiceData.calculatedPayloadData = calculatedPayloadData;
@@ -834,12 +851,19 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
           ? Math.round((inv.taxAmount / inv.subtotal) * 100)
           : (inv.taxAmount > 0 ? 10 : 0);
 
-        const { header, calculatedPayloadData, pdfRenderSnapshot } =
+        const { header, calculatedPayloadData, pdfRenderSnapshot, correctedFinancials } =
           constructInvoicePdfPayload(
             orgDoc, clientDoc, inv.invoiceNumber, mappedLineItems,
             { subtotal: inv.subtotal || 0, taxAmount: inv.taxAmount || 0, totalAmount: inv.totalAmount || 0, taxRate },
             dateBounds
           );
+
+        if (correctedFinancials) {
+          invoiceData.financialSummary.subtotal = correctedFinancials.subtotal;
+          invoiceData.financialSummary.taxAmount = correctedFinancials.taxAmount;
+          invoiceData.financialSummary.totalAmount = correctedFinancials.totalAmount;
+          invoiceData.payment.balanceDue = correctedFinancials.totalAmount;
+        }
 
         invoiceData.header = header;
         invoiceData.calculatedPayloadData = calculatedPayloadData;
