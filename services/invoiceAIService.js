@@ -234,6 +234,8 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
       inv.invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       inv.dueDate = new Date(inv.dueDate);
 
+      let validationPassed = true;
+      let validationErrors = [];
       if (options.validateBeforeGeneration) {
         const validation = await exports.validateInvoice(inv);
         if (!validation.isValid) {
@@ -241,7 +243,106 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
           result.errors.push(`Validation failed for client ${inv.clientId}`);
           continue;
         }
+        validationErrors = validation.warnings || [];
       }
+
+      // Map client name and email if available
+      let clientName = '';
+      let clientEmail = '';
+      try {
+        const Client = require('../models/Client');
+        const clientMatch = await Client.findById(inv.clientId).select('clientFirstName clientLastName clientEmail');
+        if (clientMatch) {
+          clientName = `${clientMatch.clientFirstName} ${clientMatch.clientLastName}`.trim();
+          clientEmail = clientMatch.clientEmail;
+        }
+      } catch (err) {
+        // ignore client lookup errors
+      }
+
+      // Map line items
+      let mappedLineItems = [];
+      if (inv.lineItems && Array.isArray(inv.lineItems)) {
+        mappedLineItems = inv.lineItems.map(item => {
+          return {
+            supportItemName: item.description || 'Service',
+            price: item.amount || 0,
+            quantity: 1,
+            totalPrice: item.amount || 0,
+            unit: 'unit',
+            organizationId: inv.organizationId
+          };
+        });
+      }
+
+      // Construct Mongoose schema compatible document
+      const invoiceData = {
+        invoiceNumber: inv.invoiceNumber,
+        organizationId: inv.organizationId,
+        clientId: inv.clientId,
+        clientName: clientName,
+        clientEmail: clientEmail,
+        lineItems: mappedLineItems,
+        financialSummary: {
+          subtotal: inv.subtotal || 0,
+          taxAmount: inv.taxAmount || 0,
+          totalAmount: inv.totalAmount || 0,
+          dueDate: inv.dueDate,
+          currency: 'AUD',
+          exchangeRate: 1.0,
+          paymentTerms: 30
+        },
+        metadata: {
+          invoiceType: 'client',
+          generationMethod: 'ai_auto',
+          templateUsed: 'default',
+          priority: 'normal',
+          internalNotes: 'Auto-generated from appointments'
+        },
+        compliance: {
+          validationPassed: validationPassed,
+          validationErrors: validationErrors,
+          ndisCompliant: validationPassed,
+          lastComplianceCheck: new Date()
+        },
+        workflow: {
+          status: 'generated',
+          approvalRequired: false,
+          currentStep: 'generated',
+          nextAction: 'send'
+        },
+        payment: {
+          status: 'pending',
+          paidAmount: 0,
+          balanceDue: inv.totalAmount || 0
+        },
+        delivery: {
+          status: 'pending',
+          deliveryAttempts: 0
+        },
+        auditTrail: {
+          createdBy: 'system',
+          createdAt: new Date(),
+          updatedBy: 'system',
+          updatedAt: new Date(),
+          version: 1,
+          changeHistory: [{
+            timestamp: new Date(),
+            userId: 'system',
+            action: 'created',
+            changes: { status: 'Invoice created' },
+            reason: 'AI Bulk Generation'
+          }]
+        },
+        deletion: {
+          isDeleted: false
+        }
+      };
+
+      // Save to database
+      const { Invoice } = require('../models/Invoice');
+      const invoiceDoc = new Invoice(invoiceData);
+      await invoiceDoc.save();
 
       result.successfulInvoices++;
       result.invoiceIds.push(inv.invoiceNumber);
@@ -321,10 +422,6 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
   const inv = aiResult.invoice;
   inv.invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   inv.dueDate = new Date(inv.dueDate);
-  // Set default status to draft for review since it's free-text
-  inv.workflow = { status: 'draft' };
-  inv.payment = { status: 'pending' };
-  inv.auditTrail = { createdAt: new Date() };
 
   // Look up client to fill in details
   const clientMatch = clients.find(c => c.id === inv.clientId);
@@ -334,19 +431,107 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
   }
 
   // Use the existing validation logic if available
+  let validationPassed = true;
+  let validationErrors = [];
   try {
     const validation = await exports.validateInvoice(inv);
-    inv.compliance = {
-      validationPassed: validation.isValid,
-      validationErrors: validation.errors
-    };
+    validationPassed = validation.isValid;
+    validationErrors = validation.warnings || [];
   } catch (err) {
-    // ignore validation errors, we'll still try to save the draft
+    // ignore validation errors
+  }
+
+  // Map line items
+  let mappedLineItems = [];
+  if (inv.lineItems && Array.isArray(inv.lineItems)) {
+    mappedLineItems = inv.lineItems.map(item => {
+      const qty = item.quantity || 1;
+      const amt = item.amount || 0;
+      return {
+        supportItemName: item.description || 'Service',
+        price: amt,
+        quantity: qty,
+        totalPrice: amt * qty,
+        unit: 'hour',
+        organizationId: organizationId
+      };
+    });
+  }
+
+  // Construct Mongoose schema compatible document
+  const invoiceData = {
+    invoiceNumber: inv.invoiceNumber,
+    organizationId: organizationId,
+    clientId: inv.clientId,
+    clientName: inv.clientName || '',
+    clientEmail: inv.clientEmail || '',
+    lineItems: mappedLineItems,
+    financialSummary: {
+      subtotal: inv.subtotal || 0,
+      taxAmount: inv.taxAmount || 0,
+      totalAmount: inv.totalAmount || 0,
+      dueDate: inv.dueDate,
+      currency: 'AUD',
+      exchangeRate: 1.0,
+      paymentTerms: 30
+    },
+    metadata: {
+      invoiceType: 'client',
+      generationMethod: 'ai_text_note',
+      templateUsed: 'default',
+      priority: 'normal',
+      internalNotes: aiResult.reasoning || ''
+    },
+    compliance: {
+      validationPassed: validationPassed,
+      validationErrors: validationErrors,
+      ndisCompliant: validationPassed,
+      lastComplianceCheck: new Date()
+    },
+    workflow: {
+      status: 'draft',
+      approvalRequired: false,
+      currentStep: 'draft',
+      nextAction: 'review'
+    },
+    payment: {
+      status: 'pending',
+      paidAmount: 0,
+      balanceDue: inv.totalAmount || 0
+    },
+    delivery: {
+      status: 'pending',
+      deliveryAttempts: 0
+    },
+    auditTrail: {
+      createdBy: 'system',
+      createdAt: new Date(),
+      updatedBy: 'system',
+      updatedAt: new Date(),
+      version: 1,
+      changeHistory: [{
+        timestamp: new Date(),
+        userId: 'system',
+        action: 'created',
+        changes: { status: 'Invoice created' },
+        reason: 'AI Text Note Generation'
+      }]
+    },
+    deletion: {
+      isDeleted: false
+    }
+  };
+
+  // Add employeeContext if provided
+  if (inv.employeeContext && inv.employeeContext.employeeName) {
+    invoiceData.employeeContext = {
+      employeeName: inv.employeeContext.employeeName
+    };
   }
 
   // Save the invoice to DB
   const { Invoice } = require('../models/Invoice');
-  const invoiceDoc = new Invoice(inv);
+  const invoiceDoc = new Invoice(invoiceData);
   await invoiceDoc.save();
 
   return {
