@@ -51,6 +51,191 @@ async function callGeminiStructured(prompt, schema) {
 }
 
 /**
+ * Build the header, calculatedPayloadData and pdfRenderSnapshot structures
+ * that the Flutter PDF engine requires, using live Organization + Client data.
+ *
+ * @param {Object} org      - Mongoose Organization document
+ * @param {Object} client   - Mongoose Client document
+ * @param {String} invoiceNumber
+ * @param {Array}  lineItems - Mapped line items (with price, quantity, supportItemName, totalPrice)
+ * @param {Object} financial - { subtotal, taxAmount, totalAmount, taxRate }
+ * @param {Object} dateBounds - { startDate: 'DD/MM/YYYY', endDate: 'DD/MM/YYYY' }
+ * @returns {{ header, calculatedPayloadData, pdfRenderSnapshot }}
+ */
+function constructInvoicePdfPayload(org, client, invoiceNumber, lineItems, financial, dateBounds) {
+  // --- Issuer (organization) ---
+  const orgAddress = org.address
+    ? [
+        org.address.street,
+        org.address.city,
+        org.address.state,
+        org.address.postcode,
+        org.address.country,
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : '';
+
+  const issuer = {
+    businessName: org.tradingName || org.name || '',
+    businessAddress: orgAddress,
+    contactEmail: org.contactDetails?.email || '',
+    contactPhone: org.contactDetails?.phone || '',
+    taxIdentifiers: { abn: org.abn || '' },
+    abn: org.abn || '',
+  };
+
+  // --- Billed-to (client) ---
+  const clientFullName = `${client.clientFirstName || ''} ${client.clientLastName || ''}`.trim();
+  const clientDisplayName = client.businessName
+    ? `${clientFullName} (${client.businessName})`
+    : clientFullName;
+
+  const clientAddressParts = [
+    client.clientAddress,
+    client.clientCity,
+    client.clientState,
+    client.clientZip,
+  ].filter(Boolean);
+  const clientAddressString = clientAddressParts.join(', ');
+
+  const billedTo = {
+    name: clientDisplayName,
+    email: client.clientEmail || '',
+    address: clientAddressString,
+    phone: client.clientPhone || '',
+    businessName: client.businessName || '',
+    abn: client.abn || '',
+  };
+
+  const header = { issuer, billedTo };
+
+  // --- Organization bank details (never fall back to employee) ---
+  const orgBank = org.bankDetails || {};
+  const bankDetails = {
+    bankName: orgBank.bankName || '',
+    accountName: orgBank.accountName || '',
+    bsb: orgBank.bsb || '',
+    accountNumber: orgBank.accountNumber || '',
+  };
+
+  // --- adminProfile (mirrors issuer for the PDF renderer) ---
+  const adminProfile = {
+    businessName: issuer.businessName,
+    businessAddress: issuer.businessAddress,
+    contactEmail: issuer.contactEmail,
+    contactPhone: issuer.contactPhone,
+    taxIdentifiers: { abn: issuer.abn },
+  };
+
+  // --- Map line items to calculatedPayloadData items format ---
+  const mappedItems = lineItems.map((li) => ({
+    date: li.date ? new Date(li.date).toISOString().split('T')[0] : '',
+    day: '',
+    startTime: '',
+    endTime: '',
+    hours: li.quantity || 0,
+    rate: li.price || 0,
+    expectedRate: null,
+    amount: li.totalPrice || 0,
+    rateSource: 'AI_GENERATED',
+    itemName: li.supportItemName || 'Service',
+    itemCode: li.supportItemNumber || '',
+    workedTimeSource: 'ai',
+    ndisItem: li.supportItemNumber
+      ? { itemNumber: li.supportItemNumber, itemName: li.supportItemName }
+      : null,
+    ndisItemNumber: li.supportItemNumber || '',
+    ndisItemName: li.supportItemName || '',
+  }));
+
+  const { subtotal = 0, taxAmount = 0, totalAmount = 0, taxRate = 10 } = financial;
+  const showTax = taxAmount > 0;
+
+  const clientPayloadEntry = {
+    clientId: client._id.toString(),
+    clientEmail: client.clientEmail || '',
+    clientName: clientFullName,
+    clientFirstName: client.clientFirstName || '',
+    clientLastName: client.clientLastName || '',
+    clientAddress: client.clientAddress || '',
+    clientCity: client.clientCity || '',
+    clientState: client.clientState || '',
+    clientZip: client.clientZip || '',
+    clientPhone: client.clientPhone || '',
+    businessName: client.businessName || '',
+    employeeName: '',
+    providerABN: org.abn || '',
+    employeeEmail: '',
+    startDate: dateBounds.startDate || '',
+    endDate: dateBounds.endDate || '',
+    invoiceNumber,
+    items: mappedItems,
+    expenses: [],
+    itemsSubtotal: subtotal,
+    expensesTotal: 0,
+    subtotal,
+    taxAmount,
+    total: totalAmount,
+    applyTax: showTax,
+    showTax,
+    includesTax: showTax,
+    taxRate: showTax ? taxRate : 0,
+    employeeDetails: {
+      name: '',
+      email: '',
+      address: '',
+      phone: '',
+      firstName: '',
+      lastName: '',
+      abn: '',
+    },
+    bankDetails,
+    billTo: billedTo,
+    useAdminBankDetails: true,
+    adminProfile,
+  };
+
+  const calculatedPayloadData = {
+    clients: [clientPayloadEntry],
+    invoiceNumber,
+    metadata: {
+      generationTimestamp: new Date().toISOString(),
+      validatePrices: false,
+      allowPriceCapOverride: true,
+      includeDetailedPricingInfo: false,
+      version: '2.0',
+      generationMethod: 'ai_generated',
+    },
+  };
+
+  const pdfRenderSnapshot = {
+    renderPayload: calculatedPayloadData,
+    sourceContext: {
+      issuer,
+      billedTo,
+      lineItems: mappedItems,
+      bankDetails,
+    },
+  };
+
+  return { header, calculatedPayloadData, pdfRenderSnapshot };
+}
+
+/**
+ * Format a Date object to 'DD/MM/YYYY'
+ */
+function formatDateDMY(date) {
+  if (!date) return '';
+  const d = new Date(date);
+  if (isNaN(d)) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+/**
  * Detect anomalies in an invoice using AI
  * @param {Object} invoice - Invoice data
  * @returns {Array} List of detected anomalies
@@ -189,6 +374,7 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
             totalAmount: { type: SchemaType.NUMBER },
             subtotal: { type: SchemaType.NUMBER },
             taxAmount: { type: SchemaType.NUMBER },
+            taxRate: { type: SchemaType.NUMBER, description: "Tax rate as percentage (e.g. 10 for 10%)" },
             dueDate: { type: SchemaType.STRING, description: "ISO Date String 30 days from now" },
             lineItems: {
               type: SchemaType.ARRAY,
@@ -196,10 +382,12 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
                 type: SchemaType.OBJECT,
                 properties: {
                   description: { type: SchemaType.STRING, description: "Beautifully formatted service description" },
-                  amount: { type: SchemaType.NUMBER },
+                  amount: { type: SchemaType.NUMBER, description: "Total for this line (quantity * rate)" },
+                  quantity: { type: SchemaType.NUMBER, description: "Hours worked or units delivered" },
+                  rate: { type: SchemaType.NUMBER, description: "Hourly or unit rate" },
                   appointmentId: { type: SchemaType.STRING }
                 },
-                required: ["description", "amount", "appointmentId"]
+                required: ["description", "amount", "quantity", "rate", "appointmentId"]
               }
             }
           },
@@ -229,6 +417,15 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
     errors: [],
   };
 
+  // Fetch the organization once for the entire batch
+  const Organization = require('../models/Organization');
+  let orgDoc = null;
+  try {
+    const batchOrgId = (appointments[0] && appointments[0].organizationId) ||
+      (aiResult.invoices[0] && aiResult.invoices[0].organizationId);
+    orgDoc = await Organization.findById(batchOrgId);
+  } catch (_) { /* non-fatal */ }
+
   for (const inv of aiResult.invoices) {
     try {
       inv.invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -246,30 +443,34 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
         validationErrors = validation.warnings || [];
       }
 
-      // Map client name and email if available
+      // Fetch full client document for complete billing details
+      let clientDoc = null;
       let clientName = '';
       let clientEmail = '';
       try {
         const Client = require('../models/Client');
-        const clientMatch = await Client.findById(inv.clientId).select('clientFirstName clientLastName clientEmail');
-        if (clientMatch) {
-          clientName = `${clientMatch.clientFirstName} ${clientMatch.clientLastName}`.trim();
-          clientEmail = clientMatch.clientEmail;
+        clientDoc = await Client.findById(inv.clientId);
+        if (clientDoc) {
+          clientName = `${clientDoc.clientFirstName} ${clientDoc.clientLastName}`.trim();
+          clientEmail = clientDoc.clientEmail;
         }
       } catch (err) {
         // ignore client lookup errors
       }
 
-      // Map line items
+      // Map line items — reconcile amount with quantity * rate
       let mappedLineItems = [];
       if (inv.lineItems && Array.isArray(inv.lineItems)) {
         mappedLineItems = inv.lineItems.map(item => {
+          const qty = item.quantity || 1;
+          const rate = item.rate || (qty > 0 ? (item.amount || 0) / qty : 0);
+          const totalPrice = item.amount || (qty * rate);
           return {
             supportItemName: item.description || 'Service',
-            price: item.amount || 0,
-            quantity: 1,
-            totalPrice: item.amount || 0,
-            unit: 'unit',
+            price: rate,
+            quantity: qty,
+            totalPrice,
+            unit: 'hour',
             organizationId: inv.organizationId
           };
         });
@@ -339,6 +540,41 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
         }
       };
 
+      // Build and attach PDF rendering payload if we have a valid org + client
+      if (orgDoc && clientDoc) {
+        try {
+          // Derive billing period from appointment dates (min/max schedule dates)
+          const apptDates = appointments
+            .filter(a => (a.clientId && a.clientId.toString() === inv.clientId) || a.clientEmail === clientEmail)
+            .flatMap(a => (a.schedule || []).map(s => s.date ? new Date(s.date) : null).filter(Boolean));
+
+          const minDate = apptDates.length ? new Date(Math.min(...apptDates)) : new Date();
+          const maxDate = apptDates.length ? new Date(Math.max(...apptDates)) : new Date();
+
+          const dateBounds = {
+            startDate: formatDateDMY(minDate),
+            endDate: formatDateDMY(maxDate),
+          };
+
+          const taxRate = inv.subtotal > 0
+            ? Math.round((inv.taxAmount / inv.subtotal) * 100)
+            : (inv.taxAmount > 0 ? 10 : 0);
+
+          const { header, calculatedPayloadData, pdfRenderSnapshot } =
+            constructInvoicePdfPayload(
+              orgDoc, clientDoc, inv.invoiceNumber, mappedLineItems,
+              { subtotal: inv.subtotal || 0, taxAmount: inv.taxAmount || 0, totalAmount: inv.totalAmount || 0, taxRate },
+              dateBounds
+            );
+
+          invoiceData.header = header;
+          invoiceData.calculatedPayloadData = calculatedPayloadData;
+          invoiceData.pdfRenderSnapshot = pdfRenderSnapshot;
+        } catch (pdfErr) {
+          console.warn('[invoiceAIService] Could not build PDF payload for invoice', inv.invoiceNumber, pdfErr.message);
+        }
+      }
+
       // Save to database
       const { Invoice } = require('../models/Invoice');
       const invoiceDoc = new Invoice(invoiceData);
@@ -390,10 +626,11 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
               type: SchemaType.OBJECT,
               properties: {
                 description: { type: SchemaType.STRING, description: "Beautifully formatted service description" },
-                amount: { type: SchemaType.NUMBER },
-                quantity: { type: SchemaType.NUMBER, description: "e.g., hours or units" }
+                amount: { type: SchemaType.NUMBER, description: "Total for this line (quantity * rate)" },
+                quantity: { type: SchemaType.NUMBER, description: "e.g., hours or units" },
+                rate: { type: SchemaType.NUMBER, description: "Hourly or unit rate" }
               },
-              required: ["description", "amount", "quantity"]
+              required: ["description", "amount", "quantity", "rate"]
             }
           }
         },
@@ -423,11 +660,23 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
   inv.invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   inv.dueDate = new Date(inv.dueDate);
 
-  // Look up client to fill in details
-  const clientMatch = clients.find(c => c.id === inv.clientId);
-  if (clientMatch) {
-    inv.clientName = clientMatch.name;
-    inv.clientEmail = clientMatch.email;
+  // Fetch full client document from DB for complete billing details
+  const Client = require('../models/Client');
+  let clientDoc = null;
+  try {
+    clientDoc = await Client.findById(inv.clientId);
+  } catch (_) { /* non-fatal */ }
+
+  if (clientDoc) {
+    inv.clientName = `${clientDoc.clientFirstName} ${clientDoc.clientLastName}`.trim();
+    inv.clientEmail = clientDoc.clientEmail;
+  } else {
+    // Fallback: use the basic details we passed to the AI
+    const clientMatch = clients.find(c => c.id === inv.clientId);
+    if (clientMatch) {
+      inv.clientName = clientMatch.name;
+      inv.clientEmail = clientMatch.email;
+    }
   }
 
   // Use the existing validation logic if available
@@ -441,17 +690,18 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
     // ignore validation errors
   }
 
-  // Map line items
+  // Map line items — use AI-provided rate if available, otherwise derive from amount/quantity
   let mappedLineItems = [];
   if (inv.lineItems && Array.isArray(inv.lineItems)) {
     mappedLineItems = inv.lineItems.map(item => {
       const qty = item.quantity || 1;
-      const amt = item.amount || 0;
+      const rate = item.rate || (qty > 0 ? (item.amount || 0) / qty : 0);
+      const totalPrice = item.amount || (qty * rate);
       return {
         supportItemName: item.description || 'Service',
-        price: amt,
+        price: rate,
         quantity: qty,
-        totalPrice: amt * qty,
+        totalPrice,
         unit: 'hour',
         organizationId: organizationId
       };
@@ -527,6 +777,43 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
     invoiceData.employeeContext = {
       employeeName: inv.employeeContext.employeeName
     };
+  }
+
+  // Build and attach PDF rendering payload
+  if (clientDoc) {
+    try {
+      const Organization = require('../models/Organization');
+      const orgDoc = await Organization.findById(organizationId);
+
+      if (orgDoc) {
+        // For text-note invoices use today as a 14-day window fallback
+        const today = new Date();
+        const twoWeeksAgo = new Date(today);
+        twoWeeksAgo.setDate(today.getDate() - 14);
+
+        const dateBounds = {
+          startDate: formatDateDMY(twoWeeksAgo),
+          endDate: formatDateDMY(today),
+        };
+
+        const taxRate = inv.subtotal > 0
+          ? Math.round((inv.taxAmount / inv.subtotal) * 100)
+          : (inv.taxAmount > 0 ? 10 : 0);
+
+        const { header, calculatedPayloadData, pdfRenderSnapshot } =
+          constructInvoicePdfPayload(
+            orgDoc, clientDoc, inv.invoiceNumber, mappedLineItems,
+            { subtotal: inv.subtotal || 0, taxAmount: inv.taxAmount || 0, totalAmount: inv.totalAmount || 0, taxRate },
+            dateBounds
+          );
+
+        invoiceData.header = header;
+        invoiceData.calculatedPayloadData = calculatedPayloadData;
+        invoiceData.pdfRenderSnapshot = pdfRenderSnapshot;
+      }
+    } catch (pdfErr) {
+      console.warn('[invoiceAIService] Could not build PDF payload for text-note invoice', inv.invoiceNumber, pdfErr.message);
+    }
   }
 
   // Save the invoice to DB
