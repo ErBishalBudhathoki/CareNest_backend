@@ -149,8 +149,41 @@ function constructInvoicePdfPayload(org, client, invoiceNumber, lineItems, finan
     ndisItemName: li.supportItemName || '',
   }));
 
-  const { subtotal = 0, taxAmount = 0, totalAmount = 0, taxRate = 10 } = financial;
-  const showTax = taxAmount > 0;
+  // --- Split line items: service items vs reimbursements ---
+  // Reimbursements are pass-through costs — the business recovers money it
+  // already spent on behalf of the client. GST/tax must NOT apply to them.
+  // Any line item whose name contains "reimburse" (case-insensitive) is routed
+  // to expenses[] so it is excluded from the taxable itemsSubtotal.
+  const REIMBURSEMENT_PATTERN = /reimburse|reimbursement/i;
+
+  const serviceItems = mappedItems.filter(
+    (li) => !REIMBURSEMENT_PATTERN.test(li.itemName || '')
+  );
+  const reimbursementExpenses = mappedItems
+    .filter((li) => REIMBURSEMENT_PATTERN.test(li.itemName || ''))
+    .map((li) => ({
+      description: li.itemName,
+      totalAmount: li.amount || 0,
+      unitCost: li.amount || 0,
+      quantity: li.hours || 1,
+      isReimbursement: true,
+    }));
+
+  const computedItemsSubtotal = serviceItems.reduce(
+    (sum, li) => sum + (li.amount || 0), 0
+  );
+  const computedExpensesTotal = reimbursementExpenses.reduce(
+    (sum, e) => sum + (e.totalAmount || 0), 0
+  );
+
+  const { subtotal: _rawSubtotal = 0, taxAmount: _rawTax = 0, totalAmount: _rawTotal = 0, taxRate = 10 } = financial;
+  const showTax = _rawTax > 0 || taxRate > 0;
+
+  // Always re-derive from correct bases (ignoring the AI-supplied totals which
+  // may have been computed on the full subtotal including reimbursements).
+  const correctSubtotal    = computedItemsSubtotal + computedExpensesTotal;
+  const correctTaxAmount   = showTax ? Math.round(computedItemsSubtotal * taxRate) / 100 : 0;
+  const correctTotalAmount = correctSubtotal + correctTaxAmount;
 
   const clientPayloadEntry = {
     clientId: client._id.toString(),
@@ -170,13 +203,14 @@ function constructInvoicePdfPayload(org, client, invoiceNumber, lineItems, finan
     startDate: dateBounds.startDate || '',
     endDate: dateBounds.endDate || '',
     invoiceNumber,
-    items: mappedItems,
-    expenses: [],
-    itemsSubtotal: subtotal,
-    expensesTotal: 0,
-    subtotal,
-    taxAmount,
-    total: totalAmount,
+    items: serviceItems,
+    expenses: reimbursementExpenses,
+    itemsSubtotal: Math.round(computedItemsSubtotal * 100) / 100,
+    expensesTotal: Math.round(computedExpensesTotal * 100) / 100,
+    subtotal: Math.round(correctSubtotal * 100) / 100,
+    taxAmount: Math.round(correctTaxAmount * 100) / 100,
+    tax: Math.round(correctTaxAmount * 100) / 100,
+    total: Math.round(correctTotalAmount * 100) / 100,
     applyTax: showTax,
     showTax,
     includesTax: showTax,
