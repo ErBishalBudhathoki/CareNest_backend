@@ -413,6 +413,7 @@ class ClientPortalService {
       startTime: appt.startTime,
       endTime: appt.endTime,
       userEmail: appt.userEmail,
+      workerName: appt.workerName,
       assignmentId: appt.assignmentId,
       scheduleId: appt.scheduleId,
     }));
