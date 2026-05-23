@@ -446,7 +446,8 @@ exports.autoGenerateInvoices = async (appointments, options = {}, historicalInvo
   CRITICAL: You must NEVER mix client or employee data. Process strictly for the provided Organization ID.
   CRITICAL: Read the appointment notes/descriptions carefully. If an exact dollar amount or billing rate is specified in the notes, YOU MUST USE THAT EXACT AMOUNT over the default amount.
   CRITICAL: If the appointment notes lack specific pricing or service details, refer to the 'Historical Client Invoices' to infer the standard rates and line item descriptions for that client.
-  Rules: Subtotal + 10% tax = totalAmount. Format descriptions professionally. 
+  CRITICAL RULE FOR OVERTIME: If a shift requires an 'Overtime' line (e.g., >10 hours), the Overtime quantity MUST ONLY be the excess hours (e.g., total_hours - 10). The Ordinary line quantity MUST be capped at the standard threshold (e.g., 10). NEVER charge the total shift hours at the overtime rate.
+  Rules: Subtotal is the exact sum of all line item amounts. Tax must be either 0% or 10% of taxable items. TotalAmount = Subtotal + Tax. Format descriptions professionally. 
   Options: ${JSON.stringify(options)}
   Historical Client Invoices: ${JSON.stringify(historicalInvoices)}
   Appointments: ${JSON.stringify(appointments)}`;
@@ -695,7 +696,8 @@ exports.generateInvoiceFromText = async (organizationId, textNote, clients, hist
   CRITICAL: You must NEVER hallucinate client IDs. Find the closest match in the 'Available Clients' list based on the name mentioned in the note.
   CRITICAL: Read the note carefully. If an exact dollar amount or billing rate is specified, USE IT.
   CRITICAL: If the note lacks specific pricing or service details, refer to the 'Historical Client Invoices' to infer the standard NDIS rates and line item descriptions for that matched client.
-  Rules: Subtotal + 10% tax = totalAmount. Format descriptions professionally. Set the employee name if mentioned (e.g. "Eva").
+  CRITICAL RULE FOR OVERTIME: If a shift requires an 'Overtime' line (e.g., >10 hours), the Overtime quantity MUST ONLY be the excess hours (e.g., total_hours - 10). The Ordinary line quantity MUST be capped at the standard threshold (e.g., 10). NEVER charge the total shift hours at the overtime rate.
+  Rules: Subtotal is the exact sum of all line item amounts. Tax must be either 0% or 10% of taxable items. TotalAmount = Subtotal + Tax. Format descriptions professionally. Set the employee name if mentioned (e.g. "Eva").
   Note: "${textNote}"
   Organization ID: ${organizationId}
   Available Clients: ${JSON.stringify(clients)}
