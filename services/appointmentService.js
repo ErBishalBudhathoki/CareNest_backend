@@ -222,6 +222,22 @@ class AppointmentService {
 
       const appointment = appointmentDetails[0];
 
+      // Get all worked time records for this user and client to populate history correctly
+      const timeRecords = await WorkedTime.find({
+        userEmail: safeUserEmail,
+        clientEmail: safeClientEmail,
+        isActive: true
+      }).lean();
+
+      // Map to fields expected by the frontend (using shiftDate/shiftStartTime)
+      appointment.timeRecords = timeRecords.map(record => ({
+        ...record,
+        id: record._id ? record._id.toString() : null,
+        date: record.shiftDate || (record.workDate ? record.workDate.toISOString().split('T')[0] : null),
+        startTime: record.shiftStartTime || null,
+        endTime: record.shiftEndTime || null
+      }));
+
       return {
         assignedClient: appointment,
         clientDetails: [appointment.clientDetails]
