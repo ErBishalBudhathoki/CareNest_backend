@@ -16,8 +16,13 @@ class WorkerService {
   async getDashboardData(userEmail, organizationId) {
     try {
       const now = new Date();
-      const startOfDay = new Date(now.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(now.setHours(23, 59, 59, 999));
+      const startOfYesterday = new Date(now);
+      startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+      startOfYesterday.setHours(0, 0, 0, 0);
+
+      const endOfTomorrow = new Date(now);
+      endOfTomorrow.setDate(endOfTomorrow.getDate() + 1);
+      endOfTomorrow.setHours(23, 59, 59, 999);
 
       // 1. Get Active Timer (Clock In Status)
       const { toSafeString } = require('../utils/security');
@@ -30,11 +35,11 @@ class WorkerService {
         endTime: null // Assuming null endTime means running, or check logic
       }).lean();
 
-      // 2. Get Today's Shifts
+      // 2. Get Shifts for Yesterday, Today, and Tomorrow
       const todayShifts = await Shift.find({
         employeeEmail: safeEmail,
         organizationId: safeOrgId,
-        startTime: { $gte: startOfDay, $lte: endOfDay },
+        startTime: { $gte: startOfYesterday, $lte: endOfTomorrow },
         status: { $ne: 'cancelled' }
       }).sort({ startTime: 1 }).lean();
 
