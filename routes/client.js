@@ -35,20 +35,20 @@ const assignValidation = [
 
 // Protected routes
 router.use(authenticateUser);
-router.use(organizationContextMiddleware);
 
-router.post('/activate', clientLimiter, body('email').isEmail(), clientController.activateClient);
-router.post('/addClient', clientLimiter, addClientValidation, clientController.addClient);
-router.get('/clients/:organizationId', clientLimiter, param('organizationId').isMongoId(), requireOrganizationMatch('organizationId'), clientController.getClients);
-router.get('/getClients', clientLimiter, clientController.getClients);
+router.post('/activate', clientLimiter, organizationContextMiddleware, body('email').isEmail(), clientController.activateClient);
+router.post('/addClient', clientLimiter, organizationContextMiddleware, addClientValidation, clientController.addClient);
+router.get('/clients/:organizationId', clientLimiter, organizationContextMiddleware, param('organizationId').isMongoId(), requireOrganizationMatch('organizationId'), clientController.getClients);
+router.get('/getClients', clientLimiter, organizationContextMiddleware, clientController.getClients);
 
 // Get client details by ID
-router.get('/details/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.getClientById);
+router.get('/details/:clientId', clientLimiter, organizationContextMiddleware, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.getClientById);
 
 // Update client core details
 router.put(
   '/client/:clientId',
   clientLimiter,
+  organizationContextMiddleware,
   param('clientId').isMongoId(),
   body('organizationId').optional().isMongoId(),
   body('userEmail').optional().isEmail(),
@@ -60,6 +60,7 @@ router.put(
 router.post(
   '/client/:clientId/delete',
   clientLimiter,
+  organizationContextMiddleware,
   param('clientId').isMongoId(),
   body('organizationId').optional().isMongoId(),
   body('userEmail').optional().isEmail(),
@@ -71,6 +72,7 @@ router.post(
 router.post(
   '/client/:clientId/mark-activated',
   clientLimiter,
+  organizationContextMiddleware,
   param('clientId').isMongoId(),
   body('organizationId').optional().isMongoId(),
   body('userEmail').optional().isEmail(),
@@ -82,6 +84,7 @@ router.post(
 router.post(
   '/client/:clientId/restore',
   clientLimiter,
+  organizationContextMiddleware,
   param('clientId').isMongoId(),
   body('organizationId').optional().isMongoId(),
   body('userEmail').optional().isEmail(),
@@ -89,9 +92,9 @@ router.post(
   clientController.restoreClient
 );
 
-router.post('/updateCareNotes/:clientId', clientLimiter, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.updateCareNotes);
-router.get('/getMultipleClients/:emails', clientLimiter, clientController.getMultipleClients);
-router.post('/assignClientToUser', clientLimiter, assignValidation, clientController.assignClientToUser);
-router.get('/getUserAssignments/:userEmail', clientLimiter, param('userEmail').isEmail(), clientController.getUserAssignments);
+router.post('/updateCareNotes/:clientId', clientLimiter, organizationContextMiddleware, param('clientId').isMongoId(), requireOrganizationOwnership('clientId', () => require('../models/Client')), clientController.updateCareNotes);
+router.get('/getMultipleClients/:emails', clientLimiter, organizationContextMiddleware, clientController.getMultipleClients);
+router.post('/assignClientToUser', clientLimiter, organizationContextMiddleware, assignValidation, clientController.assignClientToUser);
+router.get('/getUserAssignments/:userEmail', clientLimiter, organizationContextMiddleware, param('userEmail').isEmail(), clientController.getUserAssignments);
 
 module.exports = router;
