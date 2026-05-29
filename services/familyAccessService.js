@@ -710,6 +710,22 @@ exports.updateMemberStatus = async ({
   return buildFamilyMemberDto(member);
 };
 
+exports.getMyFamilyPermissions = async ({ userId, email, clientId }) => {
+  const member = await FamilyMember.findOne({
+    clientId: assertObjectId(clientId, 'clientId'),
+    email: (email || '').toString().trim().toLowerCase(),
+    status: 'active',
+  }).lean();
+
+  if (!member) {
+    const notFound = new Error('No active family membership found for this client.');
+    notFound.statusCode = 404;
+    throw notFound;
+  }
+
+  return buildFamilyMemberDto(member);
+};
+
 exports.assertObjectId = assertObjectId;
 exports.normalizeManageableStatus = normalizeManageableStatus;
 
