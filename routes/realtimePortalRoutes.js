@@ -127,6 +127,15 @@ router.get(
   realtimePortalController.getFamilyMembers
 );
 
+// Get own family permissions (self-lookup for family members)
+router.get(
+  '/family/my-permissions/:clientId',
+  familyReadLimiter,
+  familyMembersValidation,
+  handleValidationErrors,
+  realtimePortalController.getMyFamilyPermissions
+);
+
 // Update permissions
 router.put(
   '/family/permissions',

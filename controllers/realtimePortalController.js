@@ -561,6 +561,34 @@ exports.getFamilyMembers = async (req, res) => {
 };
 
 /**
+ * Get own family permissions (self-lookup)
+ * GET /api/realtime-portal/family/my-permissions/:clientId
+ */
+exports.getMyFamilyPermissions = async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    const member = await familyAccessService.getMyFamilyPermissions({
+      userId: req.user?.userId,
+      email: req.user?.email,
+      clientId,
+    });
+
+    res.json({
+      success: true,
+      data: member,
+    });
+  } catch (error) {
+    console.error('Error getting own family permissions:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: 'Error getting own family permissions',
+      error: error.message,
+    });
+  }
+};
+
+/**
  * Update permissions
  * PUT /api/realtime-portal/family/permissions
  */
