@@ -28,16 +28,17 @@ const actorSnapshotSchema = new mongoose.Schema(
 
 const familyPermissionsSchema = new mongoose.Schema(
   {
-    viewAppointments: { type: Boolean, default: true },
+    viewAppointments: { type: Boolean, default: false },
     viewDocuments: { type: Boolean, default: false },
     viewInvoices: { type: Boolean, default: false },
     editProfile: { type: Boolean, default: false },
     approveServices: { type: Boolean, default: false },
     manageFamily: { type: Boolean, default: false },
-    viewMessages: { type: Boolean, default: true },
+    viewMessages: { type: Boolean, default: false },
     sendMessages: { type: Boolean, default: false },
     viewLocation: { type: Boolean, default: false },
-    receiveNotifications: { type: Boolean, default: true },
+    viewServiceHistory: { type: Boolean, default: false },
+    receiveNotifications: { type: Boolean, default: false },
   },
   { _id: false }
 );

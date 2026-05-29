@@ -93,6 +93,7 @@ function buildDefaultPermissions(role) {
         viewMessages: true,
         sendMessages: true,
         viewLocation: true,
+        viewServiceHistory: true,
         receiveNotifications: true,
       };
     case 'viewer':
@@ -106,20 +107,22 @@ function buildDefaultPermissions(role) {
         viewMessages: true,
         sendMessages: false,
         viewLocation: false,
+        viewServiceHistory: false,
         receiveNotifications: true,
       };
     default:
       return {
-        viewAppointments: true,
-        viewDocuments: true,
-        viewInvoices: true,
+        viewAppointments: false,
+        viewDocuments: false,
+        viewInvoices: false,
         editProfile: false,
         approveServices: false,
         manageFamily: false,
-        viewMessages: true,
-        sendMessages: true,
-        viewLocation: true,
-        receiveNotifications: true,
+        viewMessages: false,
+        sendMessages: false,
+        viewLocation: false,
+        viewServiceHistory: false,
+        receiveNotifications: false,
       };
   }
 }
