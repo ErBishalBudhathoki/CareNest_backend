@@ -270,7 +270,7 @@ function parseConnectionOptions(redisUrl) {
     connectTimeout: 20000,
     commandTimeout: 15000,
     keepAlive: 10000,
-    enableOfflineQueue: false,
+    enableOfflineQueue: true, // MUST be true for Cloud Run cold starts so initial requests don't instantly fail while connecting
     retryStrategy: (times) => {
       if (times > 3) {
         logger.error('Redis connection retry limit exceeded', { attempts: times });
