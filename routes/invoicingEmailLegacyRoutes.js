@@ -59,6 +59,20 @@ router.get(
 );
 
 router.post(
+  '/sendInvoiceEmail',
+  [
+    body('userEmail').isEmail().normalizeEmail().withMessage('Valid userEmail is required'),
+    body('recipientEmail').isEmail().normalizeEmail().withMessage('Valid recipientEmail is required'),
+    body('subject').trim().notEmpty().withMessage('subject is required'),
+    body('pdfBase64').trim().notEmpty().withMessage('pdfBase64 is required'),
+    body('fileName').optional().trim(),
+    body('invoiceText').optional().trim(),
+  ],
+  handleValidationErrors,
+  invoicingEmailController.sendInvoiceEmail
+);
+
+router.post(
   '/getEmailDetailToSendEmail',
   [
     body('userEmail').isEmail().normalizeEmail().withMessage('Valid userEmail is required'),
