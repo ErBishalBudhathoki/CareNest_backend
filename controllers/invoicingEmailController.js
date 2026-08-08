@@ -303,6 +303,81 @@ class InvoicingEmailController {
       });
     }
   }
+  /**
+   * Send an invoice PDF to a recipient using the server-side SMTP account.
+   * Credentials live only on the backend — never in the mobile app.
+   */
+  async sendInvoiceEmail(req, res) {
+    try {
+      const recipientEmail = this._normalizeEmail(req.body?.recipientEmail);
+      const subject = String(req.body?.subject || 'Invoice');
+      const pdfBase64 = String(req.body?.pdfBase64 || '').trim();
+      const fileName = String(req.body?.fileName || 'invoice.pdf').trim();
+      const invoiceText = String(req.body?.invoiceText || '').trim();
+
+      if (!recipientEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'recipientEmail is required',
+        });
+      }
+      if (!pdfBase64) {
+        return res.status(400).json({
+          success: false,
+          message: 'pdfBase64 is required',
+        });
+      }
+
+      const smtpUser = process.env.SMTP_ADMIN_EMAIL;
+      const smtpPass = process.env.SMTP_PASSWORD;
+      if (!smtpUser || !smtpPass) {
+        return res.status(500).json({
+          success: false,
+          message: 'Server SMTP is not configured',
+        });
+      }
+
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      if (pdfBuffer.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'pdfBase64 did not decode to a valid PDF',
+        });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'mail.smtp2go.com',
+        port: Number(process.env.SMTP_PORT || '587'),
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+
+      const info = await transporter.sendMail({
+        from: `"CareNest" <${smtpUser}>`,
+        to: recipientEmail,
+        subject,
+        text: invoiceText || 'Please find the attached invoice.',
+        attachments: [
+          {
+            filename: fileName,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Invoice email sent',
+        messageId: info?.messageId || null,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send invoice email',
+        error: error.message,
+      });
+    }
+  }
 }
 
 module.exports = new InvoicingEmailController();
