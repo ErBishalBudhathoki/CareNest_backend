@@ -58,7 +58,6 @@ class StripeConnectOAuthController {
         code,
         state,
         organizationId,
-        userId: req.user?.userId,
       });
       res.send(
         this._renderSuccessPage({

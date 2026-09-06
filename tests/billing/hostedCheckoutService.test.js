@@ -3,9 +3,9 @@ const Invoice = require('../../models/Invoice');
 const Organization = require('../../models/Organization');
 const hostedCheckoutService = require('../../services/billing/hostedCheckoutService');
 
-jest.mock('../../backend/models/billing/HostedCheckoutGrant');
-jest.mock('../../backend/models/Invoice');
-jest.mock('../../backend/models/Organization');
+jest.mock('../../models/billing/HostedCheckoutGrant');
+jest.mock('../../models/Invoice');
+jest.mock('../../models/Organization');
 
 jest.mock('stripe', () => {
   return jest.fn().mockImplementation(() => ({

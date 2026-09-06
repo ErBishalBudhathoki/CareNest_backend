@@ -4,10 +4,10 @@ const entitlementService = require('../../services/billing/entitlementService');
 const appleVerifier = require('../../services/billing/appleReceiptVerifier');
 const googleVerifier = require('../../services/billing/googlePlayReceiptVerifier');
 
-jest.mock('../../backend/models/billing/Entitlement');
-jest.mock('../../backend/models/Organization');
-jest.mock('../../backend/services/billing/appleReceiptVerifier');
-jest.mock('../../backend/services/billing/googlePlayReceiptVerifier');
+jest.mock('../../models/billing/Entitlement');
+jest.mock('../../models/Organization');
+jest.mock('../../services/billing/appleReceiptVerifier');
+jest.mock('../../services/billing/googlePlayReceiptVerifier');
 
 describe('EntitlementService', () => {
   beforeEach(() => jest.clearAllMocks());
