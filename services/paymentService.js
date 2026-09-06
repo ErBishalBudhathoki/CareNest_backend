@@ -22,9 +22,12 @@ class PaymentService {
    * Create a Payment Intent via Stripe
    * Supports Stripe Connect (Standard) if organizationId is provided and has a connected account.
    */
-  async createPaymentIntent(invoiceId, amount, currency = 'aud', clientEmail, organizationId) {
+  async createPaymentIntent(invoiceId, organizationId) {
     if (!this.stripeEnabled) {
       throw new Error('Stripe is not configured on the server');
+    }
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      throw new Error('Stripe publishable configuration is missing');
     }
 
     try {
@@ -32,25 +35,39 @@ class PaymentService {
       const safeInvoiceId = toSafeString(invoiceId);
       const safeOrgId = toSafeString(organizationId);
 
-      // 1. Check for Connected Account
-      let stripeAccountHeader = {};
-      if (safeOrgId) {
-        const org = await Organization.findById(safeOrgId);
-        if (org && org.stripeAccountId) {
-           // For Standard Connect, we authenticate as the connected account
-           stripeAccountHeader = { stripeAccount: org.stripeAccountId };
-        }
+      const [invoice, org] = await Promise.all([
+        Invoice.findOne({ _id: safeInvoiceId, organizationId: safeOrgId }),
+        Organization.findById(safeOrgId),
+      ]);
+      if (!invoice) throw new Error('Invoice not found');
+      if (!org?.stripeAccountId) {
+        throw new Error('Organization must complete Stripe Connect onboarding');
+      }
+      const account = await stripe.accounts.retrieve(org.stripeAccountId);
+      if (!account.details_submitted || !account.charges_enabled) {
+        throw new Error('Organization must complete Stripe Connect onboarding');
       }
 
-      // Amount in cents
-      const amountInCents = Math.round(amount * 100);
+      const totalAmount = Number(invoice.financialSummary?.totalAmount);
+      const paidAmount = Number(invoice.payment?.paidAmount || 0);
+      const balanceDue = Math.max(0, totalAmount - paidAmount);
+      if (!Number.isFinite(balanceDue) || balanceDue <= 0) {
+        throw new Error('Invoice has no payable balance');
+      }
+
+      const invoiceCurrency = String(invoice.financialSummary?.currency || 'AUD').toLowerCase();
+      const amountInCents = Math.round(balanceDue * 100);
+      const stripeRequestOptions = {
+        stripeAccount: org.stripeAccountId,
+        idempotencyKey: `invoice-${safeInvoiceId}-${amountInCents}`,
+      };
       
       const paymentIntentPayload = {
         amount: amountInCents,
-        currency: currency.toLowerCase(),
-        metadata: { invoiceId: safeInvoiceId, clientEmail, organizationId: safeOrgId },
-        receipt_email: clientEmail,
-        automatic_payment_methods: { enabled: true },
+        currency: invoiceCurrency,
+        metadata: { invoiceId: safeInvoiceId, organizationId: safeOrgId },
+        receipt_email: invoice.clientEmail,
+        payment_method_types: ['card'],
       };
 
       // If we are a platform taking a fee, we would add application_fee_amount here.
@@ -58,13 +75,14 @@ class PaymentService {
 
       const paymentIntent = await stripe.paymentIntents.create(
         paymentIntentPayload,
-        stripeAccountHeader // This routes the payment to the connected account
+        stripeRequestOptions
       );
 
       return {
         clientSecret: paymentIntent.client_secret,
         paymentIntentId: paymentIntent.id,
-        connectedAccountId: stripeAccountHeader.stripeAccount
+        connectedAccountId: stripeRequestOptions.stripeAccount,
+        publishableKey: process.env.STRIPE_PUBLISHABLE_KEY
       };
     } catch (error) {
       console.error('Error creating payment intent:', error);
@@ -77,6 +95,23 @@ class PaymentService {
    */
   async createOnboardingLink(organizationId, userEmail) {
     if (!this.stripeEnabled) throw new Error('Stripe not configured');
+
+    const refreshUrl = process.env.STRIPE_CONNECT_REFRESH_URL;
+    const returnUrl = process.env.STRIPE_CONNECT_RETURN_URL;
+    if (!refreshUrl || !returnUrl) {
+      throw new Error('Stripe Connect return URLs are not configured');
+    }
+    for (const url of [refreshUrl, returnUrl]) {
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        throw new Error('Stripe Connect return URLs must be valid HTTPS URLs');
+      }
+      if (parsedUrl.protocol !== 'https:') {
+        throw new Error('Stripe Connect return URLs must be valid HTTPS URLs');
+      }
+    }
 
     const { toSafeString } = require('../utils/security');
     const org = await Organization.findById(toSafeString(organizationId));
@@ -96,12 +131,36 @@ class PaymentService {
     // 2. Create Account Link
     const accountLink = await stripe.accountLinks.create({
       account: org.stripeAccountId,
-      refresh_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/stripe/refresh`, // TODO: Define frontend routes
-      return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin/stripe/return`,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
       type: 'account_onboarding',
     });
 
     return { url: accountLink.url };
+  }
+
+  async getConnectStatus(organizationId) {
+    if (!this.stripeEnabled) throw new Error('Stripe not configured');
+
+    const { toSafeString } = require('../utils/security');
+    const org = await Organization.findById(toSafeString(organizationId));
+    if (!org) throw new Error('Organization not found');
+    if (!org.stripeAccountId) {
+      return {
+        hasAccount: false,
+        detailsSubmitted: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+      };
+    }
+
+    const account = await stripe.accounts.retrieve(org.stripeAccountId);
+    return {
+      hasAccount: true,
+      detailsSubmitted: account.details_submitted === true,
+      chargesEnabled: account.charges_enabled === true,
+      payoutsEnabled: account.payouts_enabled === true,
+    };
   }
 
   /**
@@ -113,6 +172,20 @@ class PaymentService {
       if (!invoice) throw new Error('Invoice not found');
 
       const amount = Number(paymentData.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Payment amount must be greater than zero');
+      }
+      const reference = paymentData.reference && String(paymentData.reference);
+      if (reference && invoice.payment?.transactions?.some(
+        (transaction) => transaction.reference === reference
+      )) {
+        return {
+          success: true,
+          duplicate: true,
+          newStatus: invoice.payment.status,
+          balanceDue: invoice.payment.balanceDue
+        };
+      }
       const newPaidAmount = (invoice.payment?.paidAmount || 0) + amount;
       const totalAmount = invoice.financialSummary.totalAmount;
       const balanceDue = totalAmount - newPaidAmount;
@@ -126,7 +199,7 @@ class PaymentService {
         date: new Date(),
         amount: amount,
         method: paymentData.method, // 'stripe', 'bank_transfer', etc.
-        reference: paymentData.reference,
+        reference,
         status: 'success',
         notes: paymentData.notes
       };

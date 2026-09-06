@@ -82,6 +82,9 @@ app.use(cors(corsOptions));
 
 // Webhook routes (Must be before express.json() to capture raw body)
 app.use('/webhooks', require('./routes/webhookRoutes'));
+// Public browser callbacks for Stripe Connect OAuth. Must remain public
+// because the user is redirected from Stripe's site and has no App Check.
+app.use('/public/connect/oauth', require('./routes/billing/connectPublicRoutes'));
 
 // Body parsing
 app.use(express.json({
