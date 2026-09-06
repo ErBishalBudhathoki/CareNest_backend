@@ -4,11 +4,13 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
-const { requireAdmin, requireOrganizationMatch } = require('../middleware/rbac');
-const { 
-  organizationContextMiddleware, 
-  requireOrganizationOwnership 
+const { requireAdmin } = require('../middleware/rbac');
+const {
+  organizationContextMiddleware,
+  requireOrganizationOwnership,
+  requireOrganizationMatch,
 } = require('../middleware/organizationContext');
+const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 const {
   getInvoicesList,
   getInvoiceDetails,
@@ -132,12 +134,14 @@ const statsValidation = [
 ];
 
 // Create a new invoice
-router.post('/invoices', 
-  authenticateUser, 
+router.post('/invoices',
+  authenticateUser,
   organizationContextMiddleware,
-  standardLimiter, 
-  createInvoiceValidation, 
-  handleValidationErrors, 
+  requireOrganizationMatch('organizationId'),
+  requireEntitlement('create_invoice'),
+  standardLimiter,
+  createInvoiceValidation,
+  handleValidationErrors,
   createInvoice
 );
 

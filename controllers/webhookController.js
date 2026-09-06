@@ -3,6 +3,9 @@ const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 const paymentService = require('../services/paymentService');
 const ndisCatalogSyncService = require('../services/ndisCatalogSyncService');
+const HostedCheckoutGrant = require('../models/billing/HostedCheckoutGrant');
+const Organization = require('../models/Organization');
+const recurringAgreementService = require('../services/billing/recurringAgreementService');
 
 let stripe;
 if (process.env.STRIPE_SECRET_KEY) {
@@ -220,6 +223,21 @@ class WebhookController {
         await this.handlePaymentSuccess(paymentIntent);
         break;
       }
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        await this.handleCheckoutSessionCompleted(session);
+        break;
+      }
+      case 'setup_intent.succeeded': {
+        const setupIntent = event.data.object;
+        await this.handleSetupIntentSucceeded(setupIntent);
+        break;
+      }
+      case 'account.updated': {
+        const account = event.data.object;
+        await this.handleConnectAccountUpdated(account);
+        break;
+      }
       default:
         logger.business('Unhandled webhook event type', {
           action: 'UNHANDLED_WEBHOOK_EVENT',
@@ -240,7 +258,7 @@ class WebhookController {
     });
   });
 
-  handlePaymentSuccess = catchAsync(async (paymentIntent) => {
+  handlePaymentSuccess = async (paymentIntent) => {
     const { invoiceId } = paymentIntent.metadata;
 
     if (!invoiceId) {
@@ -267,7 +285,78 @@ class WebhookController {
       paymentIntentId: paymentIntent.id,
       amount
     });
-  });
+  };
+
+  /**
+   * Consume a hosted-checkout grant when Stripe confirms the session
+   * completed. The session metadata carries the grant id; we do not trust
+   * query params or client-side success URLs.
+   */
+  handleCheckoutSessionCompleted = async (session) => {
+    const hostedGrantId = session.metadata?.hostedGrantId;
+    if (!hostedGrantId) return;
+    await HostedCheckoutGrant.updateOne(
+      { _id: hostedGrantId, status: 'active' },
+      {
+        $set: {
+          status: 'consumed',
+          consumedAt: new Date(),
+        },
+      }
+    );
+    logger.business('Hosted checkout grant consumed', {
+      action: 'HOSTED_CHECKOUT_CONSUMED',
+      hostedGrantId,
+    });
+  };
+
+  /**
+   * Activate a recurring invoice agreement once Stripe confirms the
+   * client has completed the setup-mode consent flow.
+   */
+  handleSetupIntentSucceeded = async (setupIntent) => {
+    const metadata = setupIntent.metadata || {};
+    const organizationId = metadata.organizationId;
+    const agreementId = metadata.agreementId;
+    if (!organizationId || !agreementId) return;
+    await recurringAgreementService.activateFromSetup({
+      organizationId,
+      agreementId,
+      paymentMethodId: setupIntent.payment_method,
+      customerId: setupIntent.customer,
+    });
+    logger.business('Recurring agreement activated', {
+      action: 'RECURRING_AGREEMENT_ACTIVATED',
+      organizationId,
+      agreementId,
+    });
+  };
+
+  /**
+   * Update the cached organization status when Stripe reports a
+   * connected account change (onboarding completion, capability
+   * revocation, etc).
+   */
+  handleConnectAccountUpdated = async (account) => {
+    if (!account?.id) return;
+    const org = await Organization.findOne({ stripeAccountId: account.id });
+    if (!org) return;
+    await Organization.updateOne(
+      { _id: org._id },
+      {
+        $set: {
+          'subscription.chargesEnabled': account.charges_enabled === true,
+          'subscription.detailsSubmitted': account.details_submitted === true,
+          'subscription.payoutsEnabled': account.payouts_enabled === true,
+        },
+      }
+    );
+    logger.business('Connected account status updated', {
+      action: 'CONNECT_ACCOUNT_UPDATED',
+      organizationId: String(org._id),
+      chargesEnabled: account.charges_enabled === true,
+    });
+  };
 
   handleNdisCatalogWebhook = catchAsync(async (req, res) => {
     const rawPayload = this._getRawPayload(req);

@@ -28,9 +28,7 @@ const refundLimiter = rateLimit({
 // Validation
 const createIntentValidation = [
   body('invoiceId').notEmpty().withMessage('Invoice ID is required'),
-  body('amount').notEmpty().isNumeric().withMessage('Amount must be a number'),
-  body('organizationId').notEmpty().withMessage('Organization ID is required'),
-  body('currency').optional().isIn(['AUD', 'USD', 'EUR', 'GBP']).withMessage('Invalid currency')
+  body('organizationId').notEmpty().withMessage('Organization ID is required')
 ];
 
 const recordPaymentValidation = [
@@ -76,6 +74,14 @@ router.post('/onboarding-link',
   body('organizationId').notEmpty().withMessage('Organization ID is required'),
   handleValidationErrors, 
   paymentController.createOnboardingLink
+);
+
+router.get('/connect-status',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  paymentLimiter,
+  paymentController.getConnectStatus
 );
 
 router.post('/record', 
