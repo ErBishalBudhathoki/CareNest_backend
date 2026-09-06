@@ -44,6 +44,8 @@ const API_SECURITY_BYPASS_PREFIXES = [
   // Uses Cloud Scheduler OIDC auth and should not be forced through
   // the mobile app App Check + bearer token gate.
   '/api/scheduler',
+  '/api/public/checkout/session',
+  '/api/public/connect/oauth/callback',
 ];
 
 function isPublicAuthPath(path) {

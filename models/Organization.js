@@ -300,7 +300,20 @@ const organizationSchema = new mongoose.Schema({
     plan: { type: String, enum: ['basic', 'professional', 'enterprise'], default: 'basic' },
     maxUsers: { type: Number, default: 10 },
     maxSharedEmployees: { type: Number, default: 5 },
-    features: [String]
+    features: [String],
+    // Entitlement fields written ONLY by backend receipt verification.
+    status: { type: String, enum: ['none', 'pending_verification', 'active', 'grace', 'billing_retry', 'expired', 'revoked', 'refunded'], default: 'none' },
+    entitlementId: { type: mongoose.Schema.Types.ObjectId, ref: 'Entitlement' },
+    source: { type: String, enum: ['apple_app_store', 'google_play_store', 'manual', 'none'], default: 'none' },
+    expiresAt: { type: Date },
+    graceEndsAt: { type: Date },
+    lastVerifiedAt: { type: Date },
+    // Stripe Connect status snapshot, refreshed by account.updated webhook.
+    chargesEnabled: { type: Boolean, default: false },
+    detailsSubmitted: { type: Boolean, default: false },
+    payoutsEnabled: { type: Boolean, default: false },
+    connectedAt: { type: Date },
+    connectedAccountSource: { type: String, enum: ['account_link', 'oauth', 'none'], default: 'none' },
   }
 }, {
   timestamps: true,

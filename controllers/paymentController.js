@@ -4,24 +4,22 @@ const logger = require('../config/logger');
 
 class PaymentController {
   createPaymentIntent = catchAsync(async (req, res) => {
-    const { invoiceId, amount, currency, clientEmail, organizationId } = req.body;
+    const { invoiceId, organizationId } = req.body;
     
-    if (!invoiceId || !amount || !organizationId) {
+    if (!invoiceId || !organizationId) {
       return res.status(400).json({
         success: false,
         code: 'VALIDATION_ERROR',
-        message: 'Missing required fields: invoiceId, amount, organizationId'
+        message: 'Missing required fields: invoiceId, organizationId'
       });
     }
     
-    const result = await paymentService.createPaymentIntent(invoiceId, amount, currency, clientEmail, organizationId);
+    const result = await paymentService.createPaymentIntent(invoiceId, organizationId);
     
     logger.business('Payment intent created', {
       action: 'payment_intent_create',
       invoiceId,
-      organizationId,
-      amount,
-      clientEmail
+      organizationId
     });
     
     res.status(200).json({
@@ -34,12 +32,27 @@ class PaymentController {
   createOnboardingLink = catchAsync(async (req, res) => {
     const { organizationId } = req.body;
     const userEmail = req.user ? req.user.email : 'system';
+    if (!req.organizationContext?.permissions?.includes('manage_billing')) {
+      return res.status(403).json({
+        success: false,
+        code: 'BILLING_PERMISSION_REQUIRED',
+        message: 'Organization billing permission is required',
+      });
+    }
     
     if (!organizationId) {
       return res.status(400).json({
         success: false,
         code: 'VALIDATION_ERROR',
         message: 'organizationId is required'
+      });
+    }
+
+    if (!req.organizationContext?.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'ADMIN_REQUIRED',
+        message: 'Organization administrator access is required'
       });
     }
     
@@ -54,6 +67,17 @@ class PaymentController {
     res.status(200).json({
       success: true,
       code: 'ONBOARDING_LINK_CREATED',
+      ...result
+    });
+  });
+
+  getConnectStatus = catchAsync(async (req, res) => {
+    const { organizationId } = req.query;
+    const result = await paymentService.getConnectStatus(organizationId);
+
+    res.status(200).json({
+      success: true,
+      code: 'STRIPE_CONNECT_STATUS',
       ...result
     });
   });
