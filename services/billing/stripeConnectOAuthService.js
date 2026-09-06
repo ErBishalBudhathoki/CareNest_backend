@@ -57,7 +57,7 @@ async function createAuthorizationUrl({ organizationId, userId }) {
   return { url: url.toString() };
 }
 
-async function consumeStateAndExchange({ code, state, organizationId, userId }) {
+async function consumeStateAndExchange({ code, state, organizationId }) {
   if (!stripe) throw new Error('Stripe is not configured on the server');
   if (typeof code !== 'string' || typeof state !== 'string') {
     throw new Error('Missing OAuth code or state');
@@ -70,9 +70,9 @@ async function consumeStateAndExchange({ code, state, organizationId, userId }) 
   if (String(stateDoc.organizationId) !== String(organizationId)) {
     throw new Error('OAuth state does not match the requesting organization');
   }
-  if (String(stateDoc.initiatingUserId) !== String(userId)) {
-    throw new Error('OAuth state does not match the requesting user');
-  }
+  // Note: the callback is a public browser redirect with no bearer auth.
+  // Authorization is carried by the single-use 32-byte state token bound
+  // to the organization and initiating user at start time.
   if (stateDoc.expiresAt.getTime() < Date.now()) {
     await OAuthState.deleteOne({ _id: stateDoc._id });
     throw new Error('OAuth state has expired');

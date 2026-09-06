@@ -2,8 +2,8 @@ const OAuthState = require('../../models/billing/OAuthState');
 const Organization = require('../../models/Organization');
 const stripeConnectOAuthService = require('../../services/billing/stripeConnectOAuthService');
 
-jest.mock('../../backend/models/billing/OAuthState');
-jest.mock('../../backend/models/Organization');
+jest.mock('../../models/billing/OAuthState');
+jest.mock('../../models/Organization');
 
 jest.mock('stripe', () => {
   return jest.fn().mockImplementation(() => ({

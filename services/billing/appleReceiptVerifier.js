@@ -38,7 +38,8 @@ class AppleReceiptVerifier {
    * supplied via env (not committed) so this module never holds the secret.
    */
   buildDeveloperJwt() {
-    // Lazy import to keep the dependency optional until first use.
+    // Lazy import: jsonwebtoken is only needed when Apple verification is
+    // actually used, keeping the module loadable in every environment.
     const jwt = require('jsonwebtoken');
     return jwt.sign(
       { iss: process.env.APPLE_ISSUER_ID, iat: Math.floor(Date.now() / 1000) },

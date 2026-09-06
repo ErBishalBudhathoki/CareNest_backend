@@ -96,7 +96,6 @@ router.use('/organisation', organizationRoutesV1);
 // Core Feature Routes
 router.use('/webhooks', webhookRoutes);
 router.use('/', metricsRoutes);
-router.use('/public/checkout', billingRoutes);
 router.use('/', invoiceManagementRoutes);
 router.use('/auth', authRoutes);
 router.use('/auth/v2', authRoutesV2);

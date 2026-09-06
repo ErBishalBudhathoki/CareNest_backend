@@ -48,25 +48,14 @@ async function createConsent({ organizationId, createdByUser, payload }) {
     { stripeAccount: org.stripeAccountId }
   );
 
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: 'setup',
-      customer: customer.id,
-      payment_method_types: ['card'],
-      metadata: {
-        organizationId: String(organizationId),
-        invoiceId: String(invoiceId),
-      },
-    },
-    { stripeAccount: org.stripeAccountId }
-  );
-
   const consentText = `I authorise ${org.name || 'this organization'} to charge my saved payment method on the ${frequency} cadence to pay CareNest invoice ${invoice.invoiceNumber} (${currency} ${totalAmount.toFixed(2)}). I can cancel at any time before the next scheduled charge.`;
   const consentHash = crypto
     .createHash('sha256')
     .update(consentText)
     .digest('hex');
 
+  // Create the agreement BEFORE the Checkout session so its id can be
+  // embedded in the SetupIntent metadata for webhook activation.
   const agreement = await RecurringInvoiceAgreement.create({
     organizationId,
     invoiceTemplateId: invoiceId,
@@ -86,6 +75,28 @@ async function createConsent({ organizationId, createdByUser, payload }) {
     status: 'paused',
     nextRunAt: new Date(Date.now() + (FREQUENCY_TO_DAYS[frequency] || 30) * 24 * 60 * 60 * 1000),
   });
+
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: 'setup',
+      customer: customer.id,
+      payment_method_types: ['card'],
+      metadata: {
+        organizationId: String(organizationId),
+        invoiceId: String(invoiceId),
+      },
+      setup_intent_data: {
+        // The SetupIntent is what `setup_intent.succeeded` carries; without
+        // this metadata the webhook cannot resolve the agreement to activate.
+        metadata: {
+          organizationId: String(organizationId),
+          invoiceId: String(invoiceId),
+          agreementId: String(agreement._id),
+        },
+      },
+    },
+    { stripeAccount: org.stripeAccountId }
+  );
 
   return { agreement, setupSessionUrl: session.url };
 }

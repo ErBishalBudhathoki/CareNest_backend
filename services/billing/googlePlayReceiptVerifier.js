@@ -5,7 +5,6 @@
  * only; the private key never appears in this file.
  */
 const axios = require('axios');
-const { google } = require('googleapis');
 
 class GooglePlayReceiptVerifier {
   isConfigured() {
@@ -17,6 +16,9 @@ class GooglePlayReceiptVerifier {
   }
 
   getAuthClient() {
+    // Lazy import: googleapis is only needed when Google verification is
+    // actually used, keeping the module loadable in every environment.
+    const { google } = require('googleapis');
     const jwtClient = new google.auth.JWT({
       email: process.env.GOOGLE_PLAY_CLIENT_EMAIL,
       key: process.env.GOOGLE_PLAY_PRIVATE_KEY,

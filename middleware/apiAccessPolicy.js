@@ -44,7 +44,9 @@ const API_SECURITY_BYPASS_PREFIXES = [
   // Uses Cloud Scheduler OIDC auth and should not be forced through
   // the mobile app App Check + bearer token gate.
   '/api/scheduler',
-  '/api/public/checkout/session',
+  // Public browser checkout: the client opens a single-use hosted-payment
+  // link with no CareNest login. Route-local rate limiting applies.
+  '/api/billing/public',
   '/api/public/connect/oauth/callback',
 ];
 
