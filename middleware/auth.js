@@ -755,15 +755,29 @@ function rateLimitMiddleware(type) {
   };
 
   if (process.env.NODE_ENV !== 'test') {
-    if (redis.isConfigured !== false) {
+    // When Redis is disabled (circuit-open, disabled, or explicitly not configured)
+    // fall back to in-memory rate limiting so the server never crashes on Redis timeout.
+    const redisOk = redis.isConfigured !== false &&
+                    redis.status !== 'disabled' &&
+                    redis.status !== 'circuit-open';
+    if (redisOk) {
       rateLimitOptions.store = new RedisStore({
-        sendCommand: (...args) => redis.call(...args),
+        sendCommand: (...args) => {
+          try {
+            const result = redis.call(...args);
+            return result && typeof result.catch === 'function'
+              ? result.catch(() => null)   // swallow ioredis timeouts / rejections
+              : (result ?? null);
+          } catch {
+            return null;
+          }
+        },
         prefix: `rl:${type}:`, // Unique prefix for each rate limiter type
       });
       // Keep auth endpoints available even during transient Redis issues.
       rateLimitOptions.passOnStoreError = true;
     } else {
-      logger.warn('Redis not configured; using in-memory rate limiter store', { type });
+      logger.warn('Redis not available; using in-memory rate limiter store', { type });
     }
   }
 
