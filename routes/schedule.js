@@ -12,6 +12,7 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const ScheduleController = require('../controllers/scheduleController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 
 // Rate limiting
 const scheduleLimiter = rateLimit({
@@ -75,17 +76,17 @@ const orgIdValidation = [
 router.use(authenticateUser);
 
 // Shift Management
-router.post('/shift', strictLimiter, shiftValidation, handleValidationErrors, ScheduleController.createShift);
-router.post('/bulk', strictLimiter, bulkValidation, handleValidationErrors, ScheduleController.bulkDeploy);
+router.post('/shift', strictLimiter, requireEntitlement('create_shift'), shiftValidation, handleValidationErrors, ScheduleController.createShift);
+router.post('/bulk', strictLimiter, requireEntitlement('create_shift'), bulkValidation, handleValidationErrors, ScheduleController.bulkDeploy);
 router.get('/shifts/:organizationId', scheduleLimiter, orgIdValidation, handleValidationErrors, ScheduleController.getShifts);
-router.put('/shift/:id', strictLimiter, shiftIdValidation, shiftValidation, handleValidationErrors, ScheduleController.updateShift);
-router.delete('/shift/:id', strictLimiter, shiftIdValidation, handleValidationErrors, ScheduleController.deleteShift);
+router.put('/shift/:id', strictLimiter, requireEntitlement('update_shift'), shiftIdValidation, shiftValidation, handleValidationErrors, ScheduleController.updateShift);
+router.delete('/shift/:id', strictLimiter, requireEntitlement('delete_shift'), shiftIdValidation, handleValidationErrors, ScheduleController.deleteShift);
 
 // AI Recommendations
 router.get('/recommendations', scheduleLimiter, recommendationValidation, handleValidationErrors, ScheduleController.getRecommendations);
 router.post('/check-conflicts', scheduleLimiter, conflictValidation, handleValidationErrors, ScheduleController.checkConflicts);
 
 // Roster Template
-router.post('/deploy-template', strictLimiter, deployValidation, handleValidationErrors, ScheduleController.deployTemplate);
+router.post('/deploy-template', strictLimiter, requireEntitlement('create_shift'), deployValidation, handleValidationErrors, ScheduleController.deployTemplate);
 
 module.exports = router;

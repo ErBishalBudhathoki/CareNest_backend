@@ -5,10 +5,17 @@ const logger = require('../../config/logger');
  * Gate to block paid features when the organization subscription has expired
  * or is revoked. The check reads the `subscription.status` field that the
  * backend sets after receipt verification; it never trusts client input.
+ *
+ * BYPASS: set ENTITLEMENT_GATE=true in the environment to enable the gate.
+ * When unset or false the gate passes every request, which is the safe
+ * default for development and CI.
  */
 function requireEntitlement(_featureName) {
   return async (req, res, next) => {
     try {
+      if (process.env.ENTITLEMENT_GATE !== 'true') {
+        return next();
+      }
       const orgId = req.organizationContext?.organizationId || req.body?.organizationId;
       if (!orgId) {
         return res.status(400).json({
