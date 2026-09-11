@@ -11,6 +11,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { body, param, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth');
+const { requireEntitlement } = require('../../middleware/billing/requireEntitlement');
 
 // Validation error handler
 const handleValidationErrors = (req, res, next) => {
@@ -48,13 +49,11 @@ const stopValidation = [
 // Protected routes
 router.use(authenticateUser);
 
-// Start a timer
-// POST /active-timers/start
-router.post('/start', timerLimiter, startValidation, handleValidationErrors, ActiveTimerController.startTimer);
+// Start a timer (clock in)
+router.post('/start', timerLimiter, requireEntitlement('clock_in'), startValidation, handleValidationErrors, ActiveTimerController.startTimer);
 
-// Stop a timer
-// POST /active-timers/stop
-router.post('/stop', timerLimiter, stopValidation, handleValidationErrors, ActiveTimerController.stopTimer);
+// Stop a timer (clock out)
+router.post('/stop', timerLimiter, requireEntitlement('clock_out'), stopValidation, handleValidationErrors, ActiveTimerController.stopTimer);
 
 // Get active timers for an organization
 // GET /active-timers/:organizationId

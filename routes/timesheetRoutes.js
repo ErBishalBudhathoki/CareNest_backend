@@ -5,6 +5,7 @@ const { body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const timesheetController = require('../controllers/timesheetController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 const { 
   organizationContextMiddleware, 
   requireOrganizationMatch 
@@ -64,6 +65,7 @@ router.post(
 router.post(
   '/export-payroll', 
   requireRoles(['admin']), 
+  requireEntitlement('export_payroll'),
   exportLimiter, 
   requireOrganizationMatch('organizationId'),
   exportValidation, 
