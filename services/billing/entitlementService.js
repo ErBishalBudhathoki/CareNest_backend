@@ -101,15 +101,23 @@ async function refreshOrganizationStatus(organizationId) {
     return { status: 'grace', expiresAt: grace.expiresAt };
   }
 
-  await Organization.updateOne(
-    { _id: organizationId },
-    {
-      $set: {
-        'subscription.status': 'expired',
-      },
-    }
-  );
-  return { status: 'expired' };
+  // No active or grace entitlement. Only set to 'expired' if the
+  // organisation previously had at least one entitlement (i.e., a purchase
+  // was made and it lapsed).  New organisations with no purchase history
+  // remain 'none' so the entitlement gate knows there is nothing to enforce.
+  const anyHistoric = await Entitlement.findOne({ organizationId })
+    .sort({ expiresAt: -1 })
+    .lean();
+  if (anyHistoric) {
+    await Organization.updateOne(
+      { _id: organizationId },
+      { $set: { 'subscription.status': 'expired' } }
+    );
+    return { status: 'expired' };
+  }
+
+  // No purchase has ever been made — leave 'none' so the gate does not block.
+  return { status: 'none' };
 }
 
 const entitlementService = {
