@@ -77,14 +77,15 @@ jest.mock('../services/invoiceManagementService', () => {
   };
 });
 
-// Mock UserOrganization — controls which org memberships organizationContextMiddleware
-// considers valid. The admin test uses org 507f1f77bcf86cd799439012.
+// Mock UserOrganization
 // IMPORTANT: jest.mock() factories are hoisted before variable declarations, so
-// ADMIN_ORG_ID must be hardcoded as a literal inside the factory.
+// all constants must be inlined as literals inside the factory.
 jest.mock('../models/UserOrganization', () => {
-  // Inlined string — cannot reference outer ADMIN_ORG_ID (hoisting).
   const ADMIN_ORG = '507f1f77bcf86cd799439012';
 
+  // Returns a thenable query chain compatible with both:
+  //   await UserOrganization.findOne(q)           (organizationContext.js)
+  //   await UserOrganization.findOne(q).select().lean()  (rbac.js)
   function buildQuery(value) {
     return {
       select: jest.fn().mockReturnThis(),
@@ -96,20 +97,31 @@ jest.mock('../models/UserOrganization', () => {
 
   const findOneMock = jest.fn();
   findOneMock.mockImplementation(function (query) {
-    const isAdminOrg =
-      query &&
-      (
-        query.organizationId === ADMIN_ORG ||
-        (query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG))
-      );
-    const membership = isAdminOrg
-      ? { _id: 'uo-1', role: 'admin', permissions: [], isActive: true }
-      : null;
-    return buildQuery(membership);
+    if (!query) return buildQuery(null);
+
+    // organizationContext.js does a plain membership lookup (no $or).
+    // Return a basic active-member record for ADMIN_ORG so the middleware
+    // can set req.organizationContext. Role is irrelevant for this check.
+    const orgMatchesAdmin =
+      query.organizationId === ADMIN_ORG ||
+      (query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG));
+
+    if (!query.$or && orgMatchesAdmin) {
+      return buildQuery({ _id: 'uo-1', role: 'employee', permissions: [], isActive: true });
+    }
+
+    // rbac.js _hasOrganizationAdminRole queries with $or role conditions.
+    // We intentionally return null here so the DB-based admin check is skipped
+    // and only the JWT role claim (_hasAdminRole) decides access — which is the
+    // correct behavior for unit tests that don't have a real DB.
+    return buildQuery(null);
   });
 
   return {
     findOne: findOneMock,
+    // readyState=1 so organizationContextMiddleware proceeds to call findOne.
+    // rbac._hasOrganizationAdminRole also sees readyState=1 but gets null back
+    // from findOne, so it returns false — falling back to JWT role check only.
     db: { readyState: 1 },
   };
 });
