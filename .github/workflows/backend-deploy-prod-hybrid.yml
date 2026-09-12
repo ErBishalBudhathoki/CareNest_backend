@@ -289,6 +289,18 @@ jobs:
             echo "::notice::Cloud Run service does not exist yet; deploying as first production release"
           fi
 
+      - name: Grant Cloud Run runtime access to secrets
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          for secret in "${CONSOLIDATED_SECRET_NAME}" "temporal-mtls-ca-prod" "temporal-mtls-client-cert-prod" "temporal-mtls-client-key-prod"; do
+            gcloud secrets add-iam-policy-binding "$secret" \
+              --member="serviceAccount:${CLOUD_RUN_SERVICE_ACCOUNT}" \
+              --role="roles/secretmanager.secretAccessor" \
+              --project="${GCP_PROJECT_ID}" || true
+          done
+
       - name: Deploy to Cloud Run
         id: deploy
         run: |
@@ -318,9 +330,7 @@ jobs:
               --set-env-vars "TEMPORAL_TLS_CA=/etc/temporal-certs/ca/ca.crt" \
               --set-env-vars "TEMPORAL_TLS_CERT=/etc/temporal-certs/client/client.crt" \
               --set-env-vars "TEMPORAL_TLS_KEY=/etc/temporal-certs/key/client.key" \
-              --set-secrets "/etc/temporal-certs/ca/ca.crt=temporal-mtls-ca-prod:latest" \
-              --set-secrets "/etc/temporal-certs/client/client.crt=temporal-mtls-client-cert-prod:latest" \
-              --set-secrets "/etc/temporal-certs/key/client.key=temporal-mtls-client-key-prod:latest" \
+              --set-secrets "/etc/temporal-certs/ca/ca.crt=temporal-mtls-ca-prod:latest,/etc/temporal-certs/client/client.crt=temporal-mtls-client-cert-prod:latest,/etc/temporal-certs/key/client.key=temporal-mtls-client-key-prod:latest" \
               --no-traffic \
               --tag "$TRAFFIC_TAG" \
               --quiet
@@ -347,9 +357,7 @@ jobs:
               --set-env-vars "TEMPORAL_TLS_CA=/etc/temporal-certs/ca/ca.crt" \
               --set-env-vars "TEMPORAL_TLS_CERT=/etc/temporal-certs/client/client.crt" \
               --set-env-vars "TEMPORAL_TLS_KEY=/etc/temporal-certs/key/client.key" \
-              --set-secrets "/etc/temporal-certs/ca/ca.crt=temporal-mtls-ca-prod:latest" \
-              --set-secrets "/etc/temporal-certs/client.crt=temporal-mtls-client-cert-prod:latest" \
-              --set-secrets "/etc/temporal-certs/key/client.key=temporal-mtls-client-key-prod:latest" \
+              --set-secrets "/etc/temporal-certs/ca/ca.crt=temporal-mtls-ca-prod:latest,/etc/temporal-certs/client/client.crt=temporal-mtls-client-cert-prod:latest,/etc/temporal-certs/key/client.key=temporal-mtls-client-key-prod:latest" \
               --tag "$TRAFFIC_TAG" \
               --quiet
           fi
