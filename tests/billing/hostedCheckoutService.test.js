@@ -1,5 +1,7 @@
+process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+
 const HostedCheckoutGrant = require('../../models/billing/HostedCheckoutGrant');
-const Invoice = require('../../models/Invoice');
+const { Invoice } = require('../../models/Invoice');
 const Organization = require('../../models/Organization');
 const hostedCheckoutService = require('../../services/billing/hostedCheckoutService');
 
@@ -23,7 +25,12 @@ jest.mock('stripe', () => {
 const stripe = require('stripe')();
 
 describe('HostedCheckoutService', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    if (!Invoice.findOne || !jest.isMockFunction(Invoice.findOne)) {
+      Invoice.findOne = jest.fn();
+    }
+  });
 
   test('creates a grant for a payable invoice', async () => {
     Invoice.findOne.mockResolvedValue({

@@ -10,7 +10,12 @@ jest.mock('../../services/billing/appleReceiptVerifier');
 jest.mock('../../services/billing/googlePlayReceiptVerifier');
 
 describe('EntitlementService', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    if (!Entitlement.findOneAndUpdate || !jest.isMockFunction(Entitlement.findOneAndUpdate)) {
+      Entitlement.findOneAndUpdate = jest.fn();
+    }
+  });
 
   test('verifies Apple receipt and marks organization active', async () => {
     appleVerifier.verify.mockResolvedValue({
