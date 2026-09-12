@@ -41,6 +41,7 @@ const model = jest.fn().mockImplementation((name, schema) => {
         static create(data) { return Promise.resolve(data); }
         static findById() { return { exec: jest.fn().mockResolvedValue(null) }; }
         static findByIdAndUpdate() { return { exec: jest.fn().mockResolvedValue(null) }; }
+        static findOneAndUpdate() { return { exec: jest.fn().mockResolvedValue(null) }; }
         static deleteMany() { return { exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) }; }
         static updateOne() { return { exec: jest.fn().mockResolvedValue({ nModified: 1 }) }; }
         static countDocuments() { return Promise.resolve(0); }

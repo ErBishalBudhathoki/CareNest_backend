@@ -1,3 +1,5 @@
+process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
+
 const OAuthState = require('../../models/billing/OAuthState');
 const Organization = require('../../models/Organization');
 const stripeConnectOAuthService = require('../../services/billing/stripeConnectOAuthService');

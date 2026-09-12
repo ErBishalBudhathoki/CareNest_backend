@@ -1,12 +1,18 @@
 const crypto = require('crypto');
 const HostedCheckoutGrant = require('../../models/billing/HostedCheckoutGrant');
-const Invoice = require('../../models/Invoice');
+const { Invoice } = require('../../models/Invoice');
 const Organization = require('../../models/Organization');
 const logger = require('../../config/logger');
 
 let stripe;
-if (process.env.STRIPE_SECRET_KEY) {
-  stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+function getStripe() {
+  if (stripe) return stripe;
+  const key = process.env.STRIPE_SECRET_KEY || (process.env.NODE_ENV === 'test' ? 'sk_test_mock' : null);
+  if (key) {
+    stripe = require('stripe')(key);
+    return stripe;
+  }
+  return null;
 }
 
 /**
@@ -24,7 +30,8 @@ if (process.env.STRIPE_SECRET_KEY) {
  *      Checkout Session URL scoped to the connected account.
  */
 async function createGrant({ organizationId, invoiceId, createdBy, ttlMinutes = 60 * 24 }) {
-  if (!stripe) {
+  const stripeClient = getStripe();
+  if (!stripeClient) {
     throw new Error('Stripe is not configured on the server');
   }
   const [invoice, org] = await Promise.all([
@@ -35,7 +42,7 @@ async function createGrant({ organizationId, invoiceId, createdBy, ttlMinutes = 
   if (!org?.stripeAccountId) {
     throw new Error('Organization must complete Stripe Connect onboarding');
   }
-  const account = await stripe.accounts.retrieve(org.stripeAccountId);
+  const account = await stripeClient.accounts.retrieve(org.stripeAccountId);
   if (!account.details_submitted || !account.charges_enabled) {
     throw new Error('Organization must complete Stripe Connect onboarding');
   }
@@ -82,7 +89,8 @@ async function resolveGrant(plainToken) {
 }
 
 async function createCheckoutSession({ plainToken, successUrl, cancelUrl }) {
-  if (!stripe) {
+  const stripeClient = getStripe();
+  if (!stripeClient) {
     throw new Error('Stripe is not configured on the server');
   }
   const { grant, error } = await resolveGrant(plainToken);
@@ -105,7 +113,7 @@ async function createCheckoutSession({ plainToken, successUrl, cancelUrl }) {
     throw err;
   }
 
-  const session = await stripe.checkout.sessions.create(
+  const session = await stripeClient.checkout.sessions.create(
     {
       mode: 'payment',
       line_items: [
