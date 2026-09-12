@@ -1,16 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const entitlementController = require('../controllers/billing/entitlementController');
-const hostedCheckoutController = require('../controllers/billing/hostedCheckoutController');
-const recurringAgreementController = require('../controllers/billing/recurringAgreementController');
-const recurringChargeController = require('../controllers/billing/recurringChargeController');
-const stripeConnectOAuthController = require('../controllers/billing/stripeConnectOAuthController');
-const { authenticateUser } = require('../middleware/auth');
+const entitlementController = require('../../controllers/billing/entitlementController');
+const hostedCheckoutController = require('../../controllers/billing/hostedCheckoutController');
+const recurringAgreementController = require('../../controllers/billing/recurringAgreementController');
+const recurringChargeController = require('../../controllers/billing/recurringChargeController');
+const stripeConnectOAuthController = require('../../controllers/billing/stripeConnectOAuthController');
+const { authenticateUser } = require('../../middleware/auth');
 const {
   organizationContextMiddleware,
   requireOrganizationMatch,
-} = require('../middleware/organizationContext');
-const { handleValidationErrors } = require('../middleware/validation');
+} = require('../../middleware/organizationContext');
+const { handleValidationErrors } = require('../../middleware/validation');
 const { body } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 

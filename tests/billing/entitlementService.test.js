@@ -9,12 +9,21 @@ jest.mock('../../models/Organization');
 jest.mock('../../services/billing/appleReceiptVerifier');
 jest.mock('../../services/billing/googlePlayReceiptVerifier');
 
+function mockQuery(val) {
+  const query = {
+    sort: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(val),
+    exec: jest.fn().mockResolvedValue(val),
+  };
+  return query;
+}
+
 describe('EntitlementService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    if (!Entitlement.findOneAndUpdate || !jest.isMockFunction(Entitlement.findOneAndUpdate)) {
-      Entitlement.findOneAndUpdate = jest.fn();
-    }
+    Entitlement.findOneAndUpdate = jest.fn();
+    Entitlement.findOne = jest.fn().mockImplementation(() => mockQuery(null));
+    Organization.updateOne = jest.fn().mockResolvedValue({ nModified: 1 });
   });
 
   test('verifies Apple receipt and marks organization active', async () => {
@@ -31,14 +40,14 @@ describe('EntitlementService', () => {
 
     const entitlement = { _id: 'ent-1' };
     Entitlement.findOneAndUpdate.mockResolvedValue(entitlement);
-    Entitlement.findOne.mockReturnValueOnce({
-      lean: () => Promise.resolve({
+    Entitlement.findOne.mockReturnValueOnce(
+      mockQuery({
         _id: 'ent-1',
         status: 'active',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         graceEndsAt: new Date(Date.now() + 33 * 24 * 60 * 60 * 1000),
-      }),
-    });
+      })
+    );
 
     const result = await entitlementService.verifyApple({
       organizationId: 'org-1',
@@ -71,8 +80,10 @@ describe('EntitlementService', () => {
 
     const entitlement = { _id: 'ent-2' };
     Entitlement.findOneAndUpdate.mockResolvedValue(entitlement);
-    Entitlement.findOne.mockReturnValueOnce({ lean: () => Promise.resolve(null) });
-    Entitlement.findOne.mockReturnValueOnce({ lean: () => Promise.resolve(null) });
+    Entitlement.findOne
+      .mockReturnValueOnce(mockQuery(null))
+      .mockReturnValueOnce(mockQuery(null))
+      .mockReturnValueOnce(mockQuery({ _id: 'ent-2' }));
 
     const result = await entitlementService.verifyApple({
       organizationId: 'org-1',
@@ -96,14 +107,14 @@ describe('EntitlementService', () => {
     });
 
     Entitlement.findOneAndUpdate.mockResolvedValue({ _id: 'ent-3' });
-    Entitlement.findOne.mockReturnValueOnce({
-      lean: () => Promise.resolve({
+    Entitlement.findOne.mockReturnValueOnce(
+      mockQuery({
         _id: 'ent-3',
         status: 'billing_retry',
         expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
         graceEndsAt: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
-      }),
-    });
+      })
+    );
 
     const result = await entitlementService.verifyGoogle({
       organizationId: 'org-1',

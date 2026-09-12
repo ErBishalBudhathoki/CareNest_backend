@@ -32,23 +32,38 @@ Schema.Types = {
   Decimal128: class Decimal128 {},
 };
 
+const createQueryMock = (defaultVal = null) => {
+    const q = {
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        populate: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnValue(Promise.resolve(defaultVal)),
+        exec: jest.fn().mockResolvedValue(defaultVal),
+        then: function(resolve, reject) { return Promise.resolve(defaultVal).then(resolve, reject); },
+    };
+    return q;
+};
+
 const model = jest.fn().mockImplementation((name, schema) => {
-    return class Model {
+    class Model {
         constructor(data) { Object.assign(this, data); }
         save() { return Promise.resolve(this); }
-        static find() { return { sort: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue([]) }; }
-        static findOne() { return { exec: jest.fn().mockResolvedValue(null) }; }
-        static create(data) { return Promise.resolve(data); }
-        static findById() { return { exec: jest.fn().mockResolvedValue(null) }; }
-        static findByIdAndUpdate() { return { exec: jest.fn().mockResolvedValue(null) }; }
-        static findOneAndUpdate() { return { exec: jest.fn().mockResolvedValue(null) }; }
-        static deleteMany() { return { exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) }; }
-        static updateOne() { return { exec: jest.fn().mockResolvedValue({ nModified: 1 }) }; }
-        static countDocuments() { return Promise.resolve(0); }
-        static distinct() { return Promise.resolve([]); }
-        static aggregate() { return Promise.resolve([]); }
-        static insertMany(data) { return Promise.resolve(data); }
-    };
+    }
+    Model.find = jest.fn(() => createQueryMock([]));
+    Model.findOne = jest.fn(() => createQueryMock(null));
+    Model.create = jest.fn((data) => Promise.resolve(data));
+    Model.findById = jest.fn(() => createQueryMock(null));
+    Model.findByIdAndUpdate = jest.fn(() => createQueryMock(null));
+    Model.findOneAndUpdate = jest.fn(() => createQueryMock(null));
+    Model.deleteMany = jest.fn(() => ({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+    Model.updateOne = jest.fn(() => ({ exec: jest.fn().mockResolvedValue({ nModified: 1 }) }));
+    Model.countDocuments = jest.fn(() => Promise.resolve(0));
+    Model.distinct = jest.fn(() => Promise.resolve([]));
+    Model.aggregate = jest.fn(() => Promise.resolve([]));
+    Model.insertMany = jest.fn((data) => Promise.resolve(data));
+    return Model;
 });
 
 module.exports = {
