@@ -7,18 +7,20 @@ const stripeConnectOAuthService = require('../../services/billing/stripeConnectO
 jest.mock('../../models/billing/OAuthState');
 jest.mock('../../models/Organization');
 
+const mockStripe = {
+  oauth: {
+    token: jest.fn(),
+  },
+  accounts: {
+    retrieve: jest.fn(),
+  },
+};
+
 jest.mock('stripe', () => {
-  return jest.fn().mockImplementation(() => ({
-    oauth: {
-      token: jest.fn(),
-    },
-    accounts: {
-      retrieve: jest.fn(),
-    },
-  }));
+  return jest.fn().mockImplementation(() => mockStripe);
 });
 
-const stripe = require('stripe')();
+const stripe = mockStripe;
 
 describe('StripeConnectOAuthService', () => {
   beforeEach(() => jest.clearAllMocks());

@@ -9,20 +9,22 @@ jest.mock('../../models/billing/HostedCheckoutGrant');
 jest.mock('../../models/Invoice');
 jest.mock('../../models/Organization');
 
+const mockStripe = {
+  accounts: {
+    retrieve: jest.fn(),
+  },
+  checkout: {
+    sessions: {
+      create: jest.fn(),
+    },
+  },
+};
+
 jest.mock('stripe', () => {
-  return jest.fn().mockImplementation(() => ({
-    accounts: {
-      retrieve: jest.fn(),
-    },
-    checkout: {
-      sessions: {
-        create: jest.fn(),
-      },
-    },
-  }));
+  return jest.fn().mockImplementation(() => mockStripe);
 });
 
-const stripe = require('stripe')();
+const stripe = mockStripe;
 
 describe('HostedCheckoutService', () => {
   beforeEach(() => {
