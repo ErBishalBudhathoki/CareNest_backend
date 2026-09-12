@@ -77,12 +77,18 @@ TEMPORAL_ADDRESS=172.17.0.1:7236
 TEMPORAL_TLS=false
 ```
 
-### API Environment Variables (GCP)
-To connect securely from the external internet:
+### API Environment Variables (GCP Cloud Run)
+To connect securely from external internet (GCP Cloud Run) to the Oracle VPS mTLS gateway:
 ```env
-TEMPORAL_ADDRESS=temporal.bishalbudhathoki.com:443
+TEMPORAL_ADDRESS=temporal-direct.bishalbudhathoki.com:7236
 TEMPORAL_TLS=true
+TEMPORAL_TLS_SERVER_NAME=temporal.bishalbudhathoki.com
+TEMPORAL_TLS_CA=/etc/temporal-certs/ca/ca.crt
+TEMPORAL_TLS_CERT=/etc/temporal-certs/client/client.crt
+TEMPORAL_TLS_KEY=/etc/temporal-certs/key/client.key
 ```
+> **Note on `TEMPORAL_TLS_SERVER_NAME`:** This override is mandatory because the server certificate presented by Nginx has SANs for `temporal.bishalbudhathoki.com` (and localhost/internal names), but does NOT include `temporal-direct.bishalbudhathoki.com`.
+> **Note on Certificates:** The CA certificate, client certificate, and private key are stored in GCP Secret Manager and mounted into the Cloud Run container at distinct subdirectories (`/etc/temporal-certs/ca/ca.crt`, `/etc/temporal-certs/client/client.crt`, `/etc/temporal-certs/key/client.key`) using `--set-secrets`.
 
 ## Maintenance & Monitoring
 - **Web UI:** [https://temporal.bishalbudhathoki.com](https://temporal.bishalbudhathoki.com) (Protected by Nginx Basic Auth).

@@ -119,3 +119,8 @@ scripts/check_user_role.js
 security_issues.json
 to_dismiss.txt
 trivy_fail.txt
+
+# Local test & scratch scripts (contains credentials/test data)
+scripts/test-valkey.js
+check_worked_time.js
+test_generate_invoice.js
