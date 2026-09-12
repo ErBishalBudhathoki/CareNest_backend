@@ -83,14 +83,14 @@ jest.mock('../services/invoiceManagementService', () => {
 const ADMIN_ORG_ID = '507f1f77bcf86cd799439012';
 
 // Helper: build a thenable query chain that also supports .select().lean()
-function makeUOMembershipQuery(value) {
-  const q = {
+// Must be prefixed 'mock' so babel-jest hoisting allows reference inside jest.mock()
+function mockUOMembershipQuery(value) {
+  return {
     select: jest.fn().mockReturnThis(),
     lean: jest.fn().mockResolvedValue(value),
     then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
-    catch: (reject) => Promise.resolve(value).catch(reject),
+    catch: (fn) => Promise.resolve(value).catch(fn),
   };
-  return q;
 }
 
 jest.mock('../models/UserOrganization', () => {
@@ -109,7 +109,7 @@ jest.mock('../models/UserOrganization', () => {
       );
 
     const membership = isAdminOrg ? { _id: 'uo-1', role: 'admin', permissions: [], isActive: true } : null;
-    return makeUOMembershipQuery(membership);
+    return mockUOMembershipQuery(membership);
   });
   return {
     findOne: findOneMock,
