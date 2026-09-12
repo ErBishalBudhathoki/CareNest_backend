@@ -78,39 +78,36 @@ jest.mock('../services/invoiceManagementService', () => {
 });
 
 // Mock UserOrganization — controls which org memberships organizationContextMiddleware
-// considers valid. The admin test uses org 507f1f77bcf86cd799439012; the mismatch test
-// sends a different org via the header so findOne returns null → 403.
-const ADMIN_ORG_ID = '507f1f77bcf86cd799439012';
-
-// Helper: build a thenable query chain that also supports .select().lean()
-// Must be prefixed 'mock' so babel-jest hoisting allows reference inside jest.mock()
-function mockUOMembershipQuery(value) {
-  return {
-    select: jest.fn().mockReturnThis(),
-    lean: jest.fn().mockResolvedValue(value),
-    then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
-    catch: (fn) => Promise.resolve(value).catch(fn),
-  };
-}
-
+// considers valid. The admin test uses org 507f1f77bcf86cd799439012.
+// IMPORTANT: jest.mock() factories are hoisted before variable declarations, so
+// ADMIN_ORG_ID must be hardcoded as a literal inside the factory.
 jest.mock('../models/UserOrganization', () => {
+  // Inlined string — cannot reference outer ADMIN_ORG_ID (hoisting).
+  const ADMIN_ORG = '507f1f77bcf86cd799439012';
+
+  function buildQuery(value) {
+    return {
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(value),
+      then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
+      catch: (fn) => Promise.resolve(value).catch(fn),
+    };
+  }
+
   const findOneMock = jest.fn();
   findOneMock.mockImplementation(function (query) {
-    // Return an admin membership only for the canonical test org
-    const orgId =
-      (query && query.organizationId) ||
-      (query && query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG_ID) ? ADMIN_ORG_ID : null);
-
     const isAdminOrg =
       query &&
       (
-        query.organizationId === ADMIN_ORG_ID ||
-        (query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG_ID))
+        query.organizationId === ADMIN_ORG ||
+        (query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG))
       );
-
-    const membership = isAdminOrg ? { _id: 'uo-1', role: 'admin', permissions: [], isActive: true } : null;
-    return mockUOMembershipQuery(membership);
+    const membership = isAdminOrg
+      ? { _id: 'uo-1', role: 'admin', permissions: [], isActive: true }
+      : null;
+    return buildQuery(membership);
   });
+
   return {
     findOne: findOneMock,
     db: { readyState: 1 },
