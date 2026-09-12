@@ -10,6 +10,7 @@ const {
   requireOrganizationOwnership,
   requireOrganizationMatch 
 } = require('../middleware/organizationContext');
+const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 const { Invoice } = require('../models/Invoice');
 
 // Rate limiting

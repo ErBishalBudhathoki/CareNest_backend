@@ -6,8 +6,14 @@ const logger = require('../../config/logger');
 const STATE_TTL_MS = 10 * 60 * 1000;
 
 let stripe;
-if (process.env.STRIPE_SECRET_KEY) {
-  stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+function getStripe() {
+  if (stripe) return stripe;
+  const key = process.env.STRIPE_SECRET_KEY || (process.env.NODE_ENV === 'test' ? 'sk_test_mock' : null);
+  if (key) {
+    stripe = require('stripe')(key);
+    return stripe;
+  }
+  return null;
 }
 
 function isAllowlistedRedirect(uri) {
@@ -27,7 +33,8 @@ function isAllowlistedRedirect(uri) {
 }
 
 async function createAuthorizationUrl({ organizationId, userId }) {
-  if (!stripe) throw new Error('Stripe is not configured on the server');
+  const stripeClient = getStripe();
+  if (!stripeClient) throw new Error('Stripe is not configured on the server');
   if (!isAllowlistedRedirect(process.env.STRIPE_CONNECT_REDIRECT_URI)) {
     throw new Error('STRIPE_CONNECT_REDIRECT_URI must be a valid HTTPS URL');
   }
@@ -58,7 +65,8 @@ async function createAuthorizationUrl({ organizationId, userId }) {
 }
 
 async function consumeStateAndExchange({ code, state, organizationId }) {
-  if (!stripe) throw new Error('Stripe is not configured on the server');
+  const stripeClient = getStripe();
+  if (!stripeClient) throw new Error('Stripe is not configured on the server');
   if (typeof code !== 'string' || typeof state !== 'string') {
     throw new Error('Missing OAuth code or state');
   }
@@ -81,7 +89,7 @@ async function consumeStateAndExchange({ code, state, organizationId }) {
   stateDoc.consumedAt = new Date();
   await stateDoc.save();
 
-  const response = await stripe.oauth.token({
+  const response = await stripeClient.oauth.token({
     grant_type: 'authorization_code',
     code,
   });
@@ -90,7 +98,7 @@ async function consumeStateAndExchange({ code, state, organizationId }) {
     throw new Error('Stripe did not return a connected account identifier');
   }
 
-  const account = await stripe.accounts.retrieve(response.stripe_user_id);
+  const account = await stripeClient.accounts.retrieve(response.stripe_user_id);
   if (account.charges_enabled === false || account.details_submitted === false) {
     logger.warn('Linked Stripe account is not fully onboarded', {
       stripeAccountId: account.id,
