@@ -312,6 +312,15 @@ jobs:
               --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
               --set-env-vars "GCP_PROJECT_ID=carenest-prods,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
               --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+              --set-env-vars "TEMPORAL_ADDRESS=temporal-direct.bishalbudhathoki.com:7236" \
+              --set-env-vars "TEMPORAL_TLS=true" \
+              --set-env-vars "TEMPORAL_TLS_SERVER_NAME=temporal.bishalbudhathoki.com" \
+              --set-env-vars "TEMPORAL_TLS_CA=/etc/temporal-certs/ca/ca.crt" \
+              --set-env-vars "TEMPORAL_TLS_CERT=/etc/temporal-certs/client/client.crt" \
+              --set-env-vars "TEMPORAL_TLS_KEY=/etc/temporal-certs/key/client.key" \
+              --set-secrets "/etc/temporal-certs/ca/ca.crt=temporal-mtls-ca-prod:latest" \
+              --set-secrets "/etc/temporal-certs/client/client.crt=temporal-mtls-client-cert-prod:latest" \
+              --set-secrets "/etc/temporal-certs/key/client.key=temporal-mtls-client-key-prod:latest" \
               --no-traffic \
               --tag "$TRAFFIC_TAG" \
               --quiet
@@ -332,6 +341,15 @@ jobs:
               --set-env-vars "NODE_ENV=production,APP_CHECK_ENFORCEMENT=true" \
               --set-env-vars "GCP_PROJECT_ID=carenest-prods,REGION=${{ env.REGION }},VOICE_AGENT_MODEL=gemini-2.5-flash" \
               --set-env-vars "CONSOLIDATED_SECRET_NAME=${{ env.CONSOLIDATED_SECRET_NAME }}" \
+              --set-env-vars "TEMPORAL_ADDRESS=temporal-direct.bishalbudhathoki.com:7236" \
+              --set-env-vars "TEMPORAL_TLS=true" \
+              --set-env-vars "TEMPORAL_TLS_SERVER_NAME=temporal.bishalbudhathoki.com" \
+              --set-env-vars "TEMPORAL_TLS_CA=/etc/temporal-certs/ca/ca.crt" \
+              --set-env-vars "TEMPORAL_TLS_CERT=/etc/temporal-certs/client/client.crt" \
+              --set-env-vars "TEMPORAL_TLS_KEY=/etc/temporal-certs/key/client.key" \
+              --set-secrets "/etc/temporal-certs/ca/ca.crt=temporal-mtls-ca-prod:latest" \
+              --set-secrets "/etc/temporal-certs/client.crt=temporal-mtls-client-cert-prod:latest" \
+              --set-secrets "/etc/temporal-certs/key/client.key=temporal-mtls-client-key-prod:latest" \
               --tag "$TRAFFIC_TAG" \
               --quiet
           fi
