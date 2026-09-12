@@ -77,6 +77,46 @@ jest.mock('../services/invoiceManagementService', () => {
   };
 });
 
+// Mock UserOrganization — controls which org memberships organizationContextMiddleware
+// considers valid. The admin test uses org 507f1f77bcf86cd799439012; the mismatch test
+// sends a different org via the header so findOne returns null → 403.
+const ADMIN_ORG_ID = '507f1f77bcf86cd799439012';
+
+// Helper: build a thenable query chain that also supports .select().lean()
+function makeUOMembershipQuery(value) {
+  const q = {
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(value),
+    then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
+    catch: (reject) => Promise.resolve(value).catch(reject),
+  };
+  return q;
+}
+
+jest.mock('../models/UserOrganization', () => {
+  const findOneMock = jest.fn();
+  findOneMock.mockImplementation(function (query) {
+    // Return an admin membership only for the canonical test org
+    const orgId =
+      (query && query.organizationId) ||
+      (query && query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG_ID) ? ADMIN_ORG_ID : null);
+
+    const isAdminOrg =
+      query &&
+      (
+        query.organizationId === ADMIN_ORG_ID ||
+        (query.organizationId && query.organizationId.$in && query.organizationId.$in.includes(ADMIN_ORG_ID))
+      );
+
+    const membership = isAdminOrg ? { _id: 'uo-1', role: 'admin', permissions: [], isActive: true } : null;
+    return makeUOMembershipQuery(membership);
+  });
+  return {
+    findOne: findOneMock,
+    db: { readyState: 1 },
+  };
+});
+
 // Import app.js to avoid server startup during tests
 const app = require('../app');
 
