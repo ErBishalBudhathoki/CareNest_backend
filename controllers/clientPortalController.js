@@ -299,6 +299,28 @@ class ClientPortalController {
   }
 
   /**
+   * Get (or create) a hosted payment link for an invoice
+   * POST /api/client-portal/invoices/:id/payment-link
+   */
+  async getInvoicePaymentLink(req, res) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invoice ID is required',
+        });
+      }
+
+      const result = await clientPortalService.getInvoicePaymentLink(id, req.user);
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error('Error in getInvoicePaymentLink controller:', error);
+      return handleError(res, error, 'Internal server error');
+    }
+  }
+
+  /**
    * Request appointment
    * POST /api/client-portal/appointments/request
    */

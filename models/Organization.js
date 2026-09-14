@@ -296,6 +296,9 @@ const organizationSchema = new mongoose.Schema({
   isMultiOrgEnabled: { type: Boolean, default: false },
   allowedDomains: [String],
   stripeAccountId: { type: String },
+  // Reusable Stripe Product on the connected account used to create a Price
+  // per invoice for Payment Links.
+  stripeInvoiceProductId: { type: String },
   subscription: {
     plan: { type: String, enum: ['basic', 'professional', 'enterprise'], default: 'basic' },
     maxUsers: { type: Number, default: 10 },
