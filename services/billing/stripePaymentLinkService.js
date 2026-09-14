@@ -115,7 +115,34 @@ async function createInvoicePaymentLink({ organizationId, invoiceId }) {
     organization.stripeAccountId
   );
   if (!account.charges_enabled || !account.details_submitted) {
-    return { skipped: true, reason: 'charges_not_enabled' };
+    const disabledReason = account.requirements?.disabled_reason || null;
+    const currentlyDue = account.requirements?.currently_due || [];
+    const allowInactive =
+      String(
+        process.env.STRIPE_PAYMENT_LINK_ALLOW_INACTIVE_ACCOUNT || ''
+      ).toLowerCase() === 'true';
+    logger.warn('Stripe connected account cannot charge yet', {
+      organizationId,
+      stripeAccountId: organization.stripeAccountId,
+      chargesEnabled: account.charges_enabled === true,
+      detailsSubmitted: account.details_submitted === true,
+      disabledReason,
+      currentlyDue,
+      overrideAllowed: allowInactive,
+    });
+    if (!allowInactive) {
+      return {
+        skipped: true,
+        reason: 'charges_not_enabled',
+        disabledReason,
+        currentlyDue,
+        stripeAccountId: organization.stripeAccountId,
+      };
+    }
+    logger.warn(
+      'Creating payment link for a non-charge-enabled account because STRIPE_PAYMENT_LINK_ALLOW_INACTIVE_ACCOUNT=true',
+      { organizationId, stripeAccountId: organization.stripeAccountId }
+    );
   }
 
   const amountCents = balanceDueCents(invoice);

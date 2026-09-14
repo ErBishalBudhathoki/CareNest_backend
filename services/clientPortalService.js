@@ -1091,6 +1091,7 @@ class ClientPortalService {
         data: {
           paymentLinkUrl: null,
           reason: result.reason,
+          detail: result.disabledReason || null,
         },
       };
     }

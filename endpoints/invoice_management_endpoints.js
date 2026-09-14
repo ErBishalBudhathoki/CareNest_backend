@@ -850,6 +850,8 @@ async function createInvoice(req, res) {
       // invoices are not paid by the client, so they are skipped. Best-effort:
       // a failure here must not fail invoice creation.
       let paymentLinkUrl = null;
+      let paymentLinkReason = null;
+      let paymentLinkDetail = null;
       const isClientInvoice =
         String(invoiceType || '').toLowerCase() === 'client';
       if (isClientInvoice) {
@@ -861,19 +863,27 @@ async function createInvoice(req, res) {
           if (linkResult && !linkResult.skipped) {
             paymentLinkUrl = linkResult.url || null;
           } else if (linkResult?.skipped) {
+            paymentLinkReason = linkResult.reason || 'unknown';
+            paymentLinkDetail = linkResult.disabledReason || null;
             logger.info('Invoice payment link skipped', {
               invoiceId: result.data._id,
               organizationId,
               reason: linkResult.reason,
+              disabledReason: linkResult.disabledReason,
+              currentlyDue: linkResult.currentlyDue,
             });
           }
         } catch (paymentLinkError) {
+          paymentLinkReason = 'error';
+          paymentLinkDetail = paymentLinkError.message;
           logger.warn('Invoice created but payment link creation failed', {
             invoiceId: result.data._id,
             organizationId,
             error: paymentLinkError.message,
           });
         }
+      } else {
+        paymentLinkReason = 'not_a_client_invoice';
       }
 
       logger.info('Invoice created successfully', {
@@ -894,7 +904,9 @@ async function createInvoice(req, res) {
           totalAmount: result.data.financialSummary.totalAmount,
           status: result.data.workflow.status,
           createdAt: result.data.auditTrail.createdAt,
-          paymentLinkUrl
+          paymentLinkUrl,
+          paymentLinkReason,
+          paymentLinkDetail
         }
       });
     } else {
