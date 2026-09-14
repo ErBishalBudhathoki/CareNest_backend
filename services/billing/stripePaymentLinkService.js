@@ -1,4 +1,4 @@
-const Invoice = require('../../models/Invoice');
+const { Invoice } = require('../../models/Invoice');
 const Organization = require('../../models/Organization');
 const logger = require('../../config/logger');
 
