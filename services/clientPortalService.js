@@ -7,6 +7,7 @@ const GeofenceLocation = require('../models/GeofenceLocation');
 const ServiceFeedback = require('../models/ServiceFeedback');
 const { Invoice } = require('../models/Invoice');
 const NotificationPreference = require('../models/NotificationPreference');
+const stripePaymentLinkService = require('./billing/stripePaymentLinkService');
 const realtimeTrackingService = require('./realtimeTrackingService');
 const messagingService = require('./messagingService');
 const {
@@ -1043,6 +1044,64 @@ class ClientPortalService {
     return {
       success: true,
       data: invoice,
+    };
+  }
+
+  /**
+   * Returns a Stripe payment link (hosted checkout URL) for one of the
+   * authenticated client's own invoices, creating one if needed.
+   */
+  async getInvoicePaymentLink(invoiceId, authUser) {
+    const clientContext = await this.resolveClientContext({ authUser });
+
+    const invoice = await Invoice.findOne({
+      _id: toObjectId(invoiceId),
+      'deletion.isDeleted': { $ne: true },
+      $or: [
+        { clientId: clientContext.client._id.toString() },
+        { clientEmail: normalizeEmail(clientContext.client.clientEmail) },
+      ],
+    }).lean();
+
+    if (!invoice) {
+      throw createHttpError(404, 'Invoice not found');
+    }
+
+    const total = Number(invoice.financialSummary?.totalAmount || 0);
+    const paid = Number(invoice.payment?.paidAmount || 0);
+    if (total - paid <= 0.01) {
+      return {
+        success: true,
+        data: { paymentLinkUrl: null, alreadyPaid: true },
+      };
+    }
+
+    if (!invoice.organizationId) {
+      throw createHttpError(400, 'Invoice is missing an organization');
+    }
+
+    const result = await stripePaymentLinkService.ensureInvoicePaymentLink({
+      organizationId: invoice.organizationId,
+      invoiceId: invoice._id.toString(),
+    });
+
+    if (result?.skipped) {
+      return {
+        success: true,
+        data: {
+          paymentLinkUrl: null,
+          reason: result.reason,
+        },
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        paymentLinkUrl: result.url || null,
+        amountCents: result.amountCents,
+        currency: result.currency,
+      },
     };
   }
 

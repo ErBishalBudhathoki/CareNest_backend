@@ -18,7 +18,8 @@ const {
   deleteInvoice,
   createInvoice,
   updatePaymentStatus,
-  getInvoiceStats
+  getInvoiceStats,
+  attachInvoicePdf
 } = require('../endpoints/invoice_management_endpoints');
 const { Invoice } = require('../models/Invoice');
 
@@ -197,6 +198,18 @@ router.post('/invoices/:invoiceId/share/pdf',
   shareInvoiceValidation, 
   handleValidationErrors, 
   shareInvoice
+);
+
+// Replace the stored PDF for an invoice (e.g. to embed the payment link)
+router.post('/invoices/:invoiceId/pdf',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationOwnership('invoiceId', () => Invoice),
+  standardLimiter,
+  body('organizationId').trim().notEmpty().withMessage('Organization ID is required'),
+  body('pdfBase64').isString().notEmpty().withMessage('pdfBase64 is required'),
+  handleValidationErrors,
+  attachInvoicePdf
 );
 
 // Delete an invoice

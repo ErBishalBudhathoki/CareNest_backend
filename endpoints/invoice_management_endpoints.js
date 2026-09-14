@@ -6,6 +6,8 @@
 
 const { InvoiceManagementService: invoiceManagementService } = require('../services/invoiceManagementService');
 const { invoiceArtifactService } = require('../services/invoiceArtifactService');
+const stripePaymentLinkService = require('../services/billing/stripePaymentLinkService');
+const { Invoice } = require('../models/Invoice');
 const logger = require('../config/logger');
 
 // Service is already instantiated in the module export
@@ -843,6 +845,37 @@ async function createInvoice(req, res) {
         }
       }
 
+      // Create an online payment link on the organization's connected Stripe
+      // account so the generated client invoice can be paid by link. Employee
+      // invoices are not paid by the client, so they are skipped. Best-effort:
+      // a failure here must not fail invoice creation.
+      let paymentLinkUrl = null;
+      const isClientInvoice =
+        String(invoiceType || '').toLowerCase() === 'client';
+      if (isClientInvoice) {
+        try {
+          const linkResult = await stripePaymentLinkService.createInvoicePaymentLink({
+            organizationId,
+            invoiceId: result.data._id,
+          });
+          if (linkResult && !linkResult.skipped) {
+            paymentLinkUrl = linkResult.url || null;
+          } else if (linkResult?.skipped) {
+            logger.info('Invoice payment link skipped', {
+              invoiceId: result.data._id,
+              organizationId,
+              reason: linkResult.reason,
+            });
+          }
+        } catch (paymentLinkError) {
+          logger.warn('Invoice created but payment link creation failed', {
+            invoiceId: result.data._id,
+            organizationId,
+            error: paymentLinkError.message,
+          });
+        }
+      }
+
       logger.info('Invoice created successfully', {
         invoiceId: result.data._id,
         invoiceNumber: result.data.invoiceNumber,
@@ -860,7 +893,8 @@ async function createInvoice(req, res) {
           invoiceNumber: result.data.invoiceNumber,
           totalAmount: result.data.financialSummary.totalAmount,
           status: result.data.workflow.status,
-          createdAt: result.data.auditTrail.createdAt
+          createdAt: result.data.auditTrail.createdAt,
+          paymentLinkUrl
         }
       });
     } else {
@@ -967,6 +1001,89 @@ async function updatePaymentStatus(req, res) {
   }
 }
 
+/**
+ * Replace an invoice's stored PDF artifact.
+ * Used after the app regenerates a PDF that embeds the online payment link.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+async function attachInvoicePdf(req, res) {
+  try {
+    const { invoiceId } = req.params;
+    const { organizationId, pdfBase64 } = req.body || {};
+
+    if (!invoiceId || !organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'invoiceId and organizationId are required'
+      });
+    }
+
+    if (typeof pdfBase64 !== 'string' || !pdfBase64.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'pdfBase64 is required'
+      });
+    }
+
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      organizationId,
+      'deletion.isDeleted': { $ne: true }
+    }).select('clientEmail invoiceNumber');
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    const artifact = await invoiceArtifactService.uploadPdfBase64({
+      pdfBase64,
+      organizationId,
+      clientEmail: invoice.clientEmail,
+      invoiceNumber: invoice.invoiceNumber
+    });
+
+    if (!artifact) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to upload invoice PDF'
+      });
+    }
+
+    const attachResult = await invoiceManagementService.attachPdfArtifact(
+      invoiceId,
+      organizationId,
+      artifact
+    );
+
+    if (!attachResult.success) {
+      return res.status(500).json(attachResult);
+    }
+
+    logger.info('Invoice PDF artifact replaced', {
+      invoiceId,
+      organizationId,
+      invoiceNumber: invoice.invoiceNumber
+    });
+
+    res.json({
+      success: true,
+      message: 'Invoice PDF updated',
+      data: { invoiceId }
+    });
+  } catch (error) {
+    logger.error('Error attaching invoice PDF:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to attach invoice PDF',
+      details: error.message
+    });
+  }
+}
+
 module.exports = {
   getInvoicesList,
   getInvoiceDetails,
@@ -974,5 +1091,6 @@ module.exports = {
   deleteInvoice,
   getInvoiceStats,
   createInvoice,
-  updatePaymentStatus
+  updatePaymentStatus,
+  attachInvoicePdf
 };

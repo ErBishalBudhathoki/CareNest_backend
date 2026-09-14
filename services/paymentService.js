@@ -3,6 +3,7 @@ const { CreditNote, CreditNoteStatus } = require('../models/CreditNote');
 const Organization = require('../models/Organization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
+const stripePaymentLinkService = require('./billing/stripePaymentLinkService');
 
 // Conditionally load Stripe
 let stripe;
@@ -213,6 +214,16 @@ class PaymentService {
       invoice.payment.transactions.push(transaction);
 
       await invoice.save();
+
+      // Once an invoice is fully paid, deactivate its Stripe Payment Link so
+      // the bearer URL cannot be charged a second time.
+      if (newStatus === PaymentStatus.PAID) {
+        try {
+          await stripePaymentLinkService.deactivateInvoicePaymentLink(invoice);
+        } catch (deactivateError) {
+          console.warn('Failed to deactivate invoice payment link:', deactivateError.message);
+        }
+      }
 
       if (userEmail) {
         await auditService.logAction({
