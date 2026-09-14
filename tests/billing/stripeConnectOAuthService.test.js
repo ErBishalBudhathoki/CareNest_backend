@@ -80,6 +80,41 @@ describe('StripeConnectOAuthService', () => {
     expect(stateDoc.consumedAt).toBeTruthy();
   });
 
+  test('resolves the organization from state when no organizationId is passed', async () => {
+    process.env.STRIPE_CONNECT_REDIRECT_URI = 'https://api.example.com/public/connect/oauth/callback';
+
+    const stateDoc = {
+      _id: 'state-1',
+      organizationId: 'org-1',
+      initiatingUserId: 'user-1',
+      expiresAt: new Date(Date.now() + 60 * 1000),
+      consumedAt: null,
+      save: jest.fn().mockResolvedValue(true),
+    };
+    OAuthState.findOne.mockResolvedValue(stateDoc);
+
+    stripe.oauth.token.mockResolvedValue({ stripe_user_id: 'acct_1' });
+    stripe.accounts.retrieve.mockResolvedValue({
+      id: 'acct_1',
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
+
+    const result = await stripeConnectOAuthService.consumeStateAndExchange({
+      code: 'code-1',
+      state: 'state-1',
+    });
+
+    expect(result.organizationId).toBe('org-1');
+    expect(Organization.updateOne).toHaveBeenCalledWith(
+      { _id: 'org-1' },
+      expect.objectContaining({
+        $set: expect.objectContaining({ stripeAccountId: 'acct_1' }),
+      })
+    );
+  });
+
   test('rejects a reused state', async () => {
     OAuthState.findOne.mockResolvedValue({
       consumedAt: new Date(),
