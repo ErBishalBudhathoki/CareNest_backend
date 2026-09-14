@@ -40,15 +40,15 @@ class StripeConnectOAuthController {
   });
 
   /**
-   * Public GET /api/public/connect/oauth/callback
+   * Public GET /public/connect/oauth/callback
    * Stripe redirects the admin's browser back here after consent.
    */
   callback = catchAsync(async (req, res) => {
-    const { code, state, error, organizationId } = req.query;
+    const { code, state, error } = req.query;
     if (error) {
       return res.status(400).send(this._renderErrorPage(error));
     }
-    if (!code || !state || !organizationId) {
+    if (!code || !state) {
       return res.status(400).send(
         this._renderErrorPage('Missing required callback parameters')
       );
@@ -57,11 +57,10 @@ class StripeConnectOAuthController {
       const result = await stripeConnectOAuthService.consumeStateAndExchange({
         code,
         state,
-        organizationId,
       });
       res.send(
         this._renderSuccessPage({
-          organizationId,
+          organizationId: result.organizationId,
           detailsSubmitted: result.detailsSubmitted,
           chargesEnabled: result.chargesEnabled,
         })
