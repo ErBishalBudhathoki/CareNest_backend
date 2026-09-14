@@ -1,4 +1,4 @@
-const { Invoice, PaymentStatus } = require('../models/Invoice');
+const { Invoice, InvoiceStatus, PaymentStatus } = require('../models/Invoice');
 const { CreditNote, CreditNoteStatus } = require('../models/CreditNote');
 const Organization = require('../models/Organization');
 const auditService = require('./auditService');
@@ -212,6 +212,12 @@ class PaymentService {
       invoice.payment.paidDate = newStatus === PaymentStatus.PAID ? new Date() : null;
       invoice.payment.lastReminderDate = null; // Reset reminder
       invoice.payment.transactions.push(transaction);
+
+      // Keep the workflow status in sync so list views that read
+      // workflow.status also reflect a paid invoice.
+      if (newStatus === PaymentStatus.PAID) {
+        invoice.workflow.status = InvoiceStatus.PAID;
+      }
 
       await invoice.save();
 
