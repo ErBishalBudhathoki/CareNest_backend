@@ -1041,6 +1041,19 @@ class ClientPortalService {
       throw createHttpError(404, 'Invoice not found');
     }
 
+    console.log(
+      '[clientInvoiceDetail]',
+      JSON.stringify({
+        invoiceId,
+        invoiceNumber: invoice.invoiceNumber,
+        hasPayment: Boolean(invoice.payment),
+        paymentStatus: invoice.payment?.status || null,
+        paidAmount: invoice.payment?.paidAmount ?? null,
+        workflowStatus: invoice.workflow?.status || null,
+        totalAmount: invoice.financialSummary?.totalAmount ?? null,
+      })
+    );
+
     return {
       success: true,
       data: invoice,
