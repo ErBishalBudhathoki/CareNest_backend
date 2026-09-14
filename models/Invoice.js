@@ -147,6 +147,17 @@ const invoiceSchema = new mongoose.Schema({
     lastReminderDate: Date,
     writeOffAmount: Number,
     writeOffReason: String,
+    // Stripe Payment Link created automatically when the invoice is generated.
+    // The link is a bearer URL; it is deactivated once the invoice is paid.
+    paymentLinkId: String,
+    paymentLinkUrl: String,
+    paymentLinkStatus: {
+      type: String,
+      enum: ['active', 'deactivated'],
+    },
+    paymentLinkAmountCents: Number,
+    paymentLinkStripeAccountId: String,
+    paymentLinkCreatedAt: Date,
     transactions: [transactionSchema]
   },
   

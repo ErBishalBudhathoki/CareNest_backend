@@ -18,12 +18,14 @@ router.get('/invoices', clientPortalController.getInvoices);
 router.get('/invoices/:id', clientPortalController.getInvoiceDetail);
 router.post('/invoices/:id/approve', clientPortalController.approveInvoice);
 router.post('/invoices/:id/dispute', clientPortalController.disputeInvoice);
+router.post('/invoices/:id/payment-link', clientPortalController.getInvoicePaymentLink);
 
 // Backward-compatible singular aliases
 router.get('/appointment/:assignmentId/:scheduleId', clientPortalController.getAppointmentDetail);
 router.get('/invoice/:id', clientPortalController.getInvoiceDetail);
 router.post('/invoice/:id/approve', clientPortalController.approveInvoice);
 router.post('/invoice/:id/dispute', clientPortalController.disputeInvoice);
+router.post('/invoice/:id/payment-link', clientPortalController.getInvoicePaymentLink);
 router.post('/appointment/request', clientPortalController.requestAppointment);
 
 // Get client dashboard
