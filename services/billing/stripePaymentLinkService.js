@@ -50,24 +50,6 @@ function balanceDueCents(invoice) {
   return Math.round(Math.max(0, total - paid) * 100);
 }
 
-async function ensureInvoiceProduct(stripeClient, organization) {
-  if (organization.stripeInvoiceProductId) {
-    return organization.stripeInvoiceProductId;
-  }
-  const product = await stripeClient.products.create(
-    {
-      name: 'CareNest invoice payment',
-      metadata: { organizationId: String(organization._id) },
-    },
-    { stripeAccount: organization.stripeAccountId }
-  );
-  await Organization.updateOne(
-    { _id: organization._id },
-    { $set: { stripeInvoiceProductId: product.id } }
-  );
-  return product.id;
-}
-
 async function deactivateStripeLink(paymentLinkId, stripeAccountId) {
   const stripeClient = getStripe();
   if (!stripeClient || !paymentLinkId) return false;
@@ -180,29 +162,47 @@ async function createInvoicePaymentLink({ organizationId, invoiceId }) {
     );
   }
 
-  const productId = await ensureInvoiceProduct(stripeClient, organization);
-  const price = await stripeClient.prices.create(
-    {
-      currency,
-      unit_amount: amountCents,
-      product: productId,
-      metadata: {
-        invoiceId: String(invoice._id),
-        organizationId: String(organizationId),
-      },
-    },
-    { stripeAccount: organization.stripeAccountId }
-  );
-
   const metadata = {
     invoiceId: String(invoice._id),
     organizationId: String(organizationId),
   };
 
+  // Human-readable context shown on Stripe's hosted payment page.
+  const orgName =
+    organization.name || organization.tradingName || 'CareNest provider';
+  const invoiceNumber = invoice.invoiceNumber || String(invoice._id);
+  const clientName = (invoice.clientName || '').toString().trim();
+  const clientEmail = (invoice.clientEmail || '').toString().trim();
+
+  const productName = `Invoice ${invoiceNumber} - ${orgName}`;
+  const productDescription = clientName
+    ? `Payment for ${clientName}`
+    : 'Invoice payment';
+
   const params = {
-    line_items: [{ price: price.id, quantity: 1 }],
+    line_items: [
+      {
+        price_data: {
+          currency,
+          unit_amount: amountCents,
+          product_data: {
+            name: productName,
+            description: productDescription,
+          },
+        },
+        quantity: 1,
+      },
+    ],
     metadata,
-    payment_intent_data: { metadata },
+    // Description shows on the payer's bank/receipt and in the Stripe dashboard.
+    payment_intent_data: { metadata, description: productName },
+    custom_text: {
+      submit: {
+        message: clientName
+          ? `Paying invoice ${invoiceNumber} from ${orgName} on behalf of ${clientName}.`
+          : `Paying invoice ${invoiceNumber} from ${orgName}.`,
+      },
+    },
   };
 
   const returnUrl = resolveReturnUrl();
@@ -217,9 +217,18 @@ async function createInvoicePaymentLink({ organizationId, invoiceId }) {
     stripeAccount: organization.stripeAccountId,
   });
 
+  // Prefill the payer's email on the hosted page when we know it.
+  let linkUrl = link.url;
+  if (clientEmail) {
+    const separator = linkUrl.includes('?') ? '&' : '?';
+    linkUrl = `${linkUrl}${separator}prefilled_email=${encodeURIComponent(
+      clientEmail
+    )}`;
+  }
+
   invoice.payment = invoice.payment || {};
   invoice.payment.paymentLinkId = link.id;
-  invoice.payment.paymentLinkUrl = link.url;
+  invoice.payment.paymentLinkUrl = linkUrl;
   invoice.payment.paymentLinkStatus = 'active';
   invoice.payment.paymentLinkAmountCents = amountCents;
   invoice.payment.paymentLinkStripeAccountId = organization.stripeAccountId;
@@ -235,7 +244,7 @@ async function createInvoicePaymentLink({ organizationId, invoiceId }) {
   });
 
   return {
-    url: link.url,
+    url: linkUrl,
     paymentLinkId: link.id,
     amountCents,
     currency,
