@@ -74,6 +74,15 @@ class OrganizationService {
     await cacheService.del(this._buildOrganizationCacheKey(organizationId));
   }
 
+  /**
+   * Public cache invalidation so callers that mutate the organization
+   * out-of-band (e.g. the Stripe Connect OAuth callback) can drop the cached
+   * `getOrganizationById` payload and avoid serving stale data.
+   */
+  async invalidateOrganizationCache(organizationId) {
+    await this._clearOrganizationCache(organizationId);
+  }
+
   _buildNonDeletedClientQuery(organizationId) {
     const { toSafeString } = require('../utils/security');
     return {
@@ -267,6 +276,7 @@ class OrganizationService {
         contactDetails: verificationMeta.safeContactDetails,
         bankDetails: organization.bankDetails,
         ndisRegistration: organization.ndisRegistration,
+        stripeAccountId: organization.stripeAccountId || null,
         logoUrl: organization.logoUrl,
         isActive: organization.isActive,
         isVerified: verificationMeta.isVerified,

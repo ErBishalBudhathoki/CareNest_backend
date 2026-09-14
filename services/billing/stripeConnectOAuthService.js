@@ -75,7 +75,12 @@ async function consumeStateAndExchange({ code, state, organizationId }) {
   if (!stateDoc || stateDoc.consumedAt) {
     throw new Error('Invalid or already-used OAuth state');
   }
-  if (String(stateDoc.organizationId) !== String(organizationId)) {
+  // Stripe only appends `code` and `state` to the registered redirect URI, so
+  // the organization is resolved from the single-use state document rather
+  // than from a callback query parameter. If a caller does pass an
+  // organizationId, it must still match the bound state.
+  const boundOrganizationId = stateDoc.organizationId;
+  if (organizationId && String(boundOrganizationId) !== String(organizationId)) {
     throw new Error('OAuth state does not match the requesting organization');
   }
   // Note: the callback is a public browser redirect with no bearer auth.
@@ -106,7 +111,7 @@ async function consumeStateAndExchange({ code, state, organizationId }) {
   }
 
   await Organization.updateOne(
-    { _id: organizationId },
+    { _id: boundOrganizationId },
     {
       $set: {
         stripeAccountId: account.id,
@@ -116,7 +121,20 @@ async function consumeStateAndExchange({ code, state, organizationId }) {
     }
   );
 
+  // Drop the cached organization payload so the app sees the new
+  // stripeAccountId (and renders the "Connected" state) immediately.
+  try {
+    const organizationService = require('../organizationService');
+    await organizationService.invalidateOrganizationCache(boundOrganizationId);
+  } catch (cacheError) {
+    logger.warn('Failed to invalidate organization cache after Stripe link', {
+      organizationId: String(boundOrganizationId),
+      error: cacheError.message,
+    });
+  }
+
   return {
+    organizationId: String(boundOrganizationId),
     stripeAccountId: account.id,
     detailsSubmitted: account.details_submitted === true,
     chargesEnabled: account.charges_enabled === true,
