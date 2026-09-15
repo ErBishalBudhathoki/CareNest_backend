@@ -48,6 +48,16 @@ const BLOCKED_PREFIXES = [
 
 const ENTITLED_STATUSES = ['active', 'billing_retry', 'grace'];
 
+// Management actions that must work even without an active subscription.
+const ALLOWED_EXCEPTIONS = ['/api/payments/disconnect'];
+
+function isAllowedException(requestPath) {
+  return ALLOWED_EXCEPTIONS.some(
+    (prefix) =>
+      requestPath === prefix || requestPath.startsWith(`${prefix}/`)
+  );
+}
+
 function isBlockedPath(requestPath) {
   return BLOCKED_PREFIXES.some(
     (prefix) =>
@@ -71,6 +81,11 @@ function subscriptionGate(req, res, next) {
   }
 
   const requestPath = req.originalUrl || req.path;
+
+  // Explicit management exceptions always pass.
+  if (isAllowedException(requestPath)) {
+    return next();
+  }
 
   // Only paid feature groups are gated. Setup/read/subscription routes pass.
   if (!isBlockedPath(requestPath)) {

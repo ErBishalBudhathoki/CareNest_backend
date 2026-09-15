@@ -87,6 +87,18 @@ router.get('/connect-status',
   paymentController.getConnectStatus
 );
 
+// Disconnecting a Stripe account is a management action and is intentionally
+// NOT behind the subscription entitlement gate.
+router.post('/disconnect',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  paymentLimiter,
+  body('organizationId').notEmpty().withMessage('Organization ID is required'),
+  handleValidationErrors,
+  paymentController.disconnectStripe
+);
+
 router.post('/record', 
   authenticateUser,
   organizationContextMiddleware,

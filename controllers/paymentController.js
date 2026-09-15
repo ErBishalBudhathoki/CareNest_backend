@@ -82,6 +82,44 @@ class PaymentController {
     });
   });
 
+  disconnectStripe = catchAsync(async (req, res) => {
+    const { organizationId } = req.body;
+    const userEmail = req.user ? req.user.email : 'system';
+
+    if (!req.organizationContext?.permissions?.includes('manage_billing')) {
+      return res.status(403).json({
+        success: false,
+        code: 'BILLING_PERMISSION_REQUIRED',
+        message: 'Organization billing permission is required',
+      });
+    }
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'organizationId is required',
+      });
+    }
+
+    const result = await paymentService.disconnectStripeAccount(
+      organizationId,
+      userEmail
+    );
+
+    logger.business('Stripe account disconnected', {
+      action: 'payment_stripe_disconnect',
+      organizationId,
+      userEmail,
+    });
+
+    res.status(200).json({
+      success: true,
+      code: 'STRIPE_DISCONNECTED',
+      ...result,
+    });
+  });
+
   recordPayment = catchAsync(async (req, res) => {
     const { invoiceId, paymentData } = req.body;
     const userEmail = req.user ? req.user.email : 'system';
