@@ -110,6 +110,37 @@ class EntitlementController {
       expiresAt: result?.expiresAt ?? null,
     });
   });
+
+  /**
+   * DEV ONLY - POST /api/billing/entitlements/reset
+   * Clears the organisation's entitlement so the subscription gate can be
+   * re-tested. Returns 404 in production.
+   */
+  reset = catchAsync(async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ success: false, message: 'Not found' });
+    }
+    const { organizationId } = req.body;
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'organizationId is required',
+      });
+    }
+    const result = await entitlementService.resetOrganizationEntitlements(
+      organizationId
+    );
+    logger.warn('Entitlement reset requested (dev only)', {
+      organizationId,
+    });
+    res.json({
+      success: true,
+      code: 'ENTITLEMENT_RESET',
+      status: 'none',
+      deleted: result.deleted,
+    });
+  });
 }
 
 module.exports = new EntitlementController();
