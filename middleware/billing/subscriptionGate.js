@@ -21,7 +21,9 @@ const logger = require('../../config/logger');
 const BLOCKED_PREFIXES = [
   '/api/payments',
   '/api/invoices',
-  '/api/invoice', // invoice generation + management + /invoice-ai
+  '/api/invoice', // invoice generation + management
+  '/api/invoice-ai',
+  '/api/sendInvoiceEmail',
   '/api/client-portal/invoices',
   '/api/client-portal/invoice',
   '/api/client-portal-enhanced/invoices',
@@ -30,6 +32,7 @@ const BLOCKED_PREFIXES = [
   '/api/billing/hosted-checkout',
   '/api/billing/recurring',
   '/api/payroll',
+  '/api/payroll-advanced',
   '/api/earnings',
   '/api/timesheets',
   '/api/active-timers',
