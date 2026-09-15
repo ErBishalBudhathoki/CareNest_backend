@@ -153,6 +153,39 @@ const entitlementService = {
     return { entitlement, status };
   },
 
+  /**
+   * DEV ONLY: remove all entitlements for an organisation and reset its cached
+   * subscription status so the paywall can be re-tested from scratch.
+   */
+  async resetOrganizationEntitlements(organizationId) {
+    const result = await Entitlement.deleteMany({ organizationId });
+    await Organization.updateOne(
+      { _id: organizationId },
+      {
+        $set: { 'subscription.status': 'none' },
+        $unset: {
+          'subscription.entitlementId': '',
+          'subscription.expiresAt': '',
+          'subscription.graceEndsAt': '',
+          'subscription.lastVerifiedAt': '',
+          'subscription.source': '',
+        },
+      }
+    );
+
+    try {
+      const organizationService = require('../organizationService');
+      await organizationService.invalidateOrganizationCache(organizationId);
+    } catch (_) {}
+
+    logger.warn('Organization entitlements reset (dev only)', {
+      organizationId: String(organizationId),
+      deleted: result.deletedCount,
+    });
+
+    return { deleted: result.deletedCount, status: 'none' };
+  },
+
   refreshOrganizationStatus,
   appleConfigured: () => appleVerifier.isConfigured(),
   googleConfigured: () => googleVerifier.isConfigured(),

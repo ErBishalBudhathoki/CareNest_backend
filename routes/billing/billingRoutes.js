@@ -61,6 +61,19 @@ router.get(
   entitlementController.getStatus
 );
 
+// DEV ONLY: clears the organisation's entitlement so the subscription gate can
+// be re-tested. Disabled in production.
+router.post(
+  '/entitlements/reset',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  body('organizationId').notEmpty(),
+  handleValidationErrors,
+  entitlementController.reset
+);
+
 router.post(
   '/hosted-checkout/grant',
   authenticateUser,
