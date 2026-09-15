@@ -1,38 +1,72 @@
 /**
  * Google Play purchase verification. Uses the Google Play Developer API
- * (publisher subscriber purchases endpoint) to fetch a verified
- * subscription state. The service account credentials are configuration
- * only; the private key never appears in this file.
+ * (publisher subscriptionsv2 endpoint) to fetch a verified subscription state.
+ *
+ * Credentials are resolved in this order:
+ *   1. Explicit service-account key (GOOGLE_PLAY_CLIENT_EMAIL +
+ *      GOOGLE_PLAY_PRIVATE_KEY) if provided.
+ *   2. Application Default Credentials (ADC) — on Cloud Run this is the
+ *      runtime service account. Grant that account access in Play Console
+ *      (Setup → API access). No private key is stored when using ADC.
+ *
+ * Secrets never appear in this file.
  */
-const axios = require('axios');
+
+const ANDROID_PUBLISHER_SCOPE =
+  'https://www.googleapis.com/auth/androidpublisher';
 
 class GooglePlayReceiptVerifier {
-  isConfigured() {
+  hasServiceAccountKey() {
     return Boolean(
-      process.env.GOOGLE_PLAY_PACKAGE_NAME &&
-        process.env.GOOGLE_PLAY_CLIENT_EMAIL &&
-        process.env.GOOGLE_PLAY_PRIVATE_KEY
+      process.env.GOOGLE_PLAY_CLIENT_EMAIL && process.env.GOOGLE_PLAY_PRIVATE_KEY
     );
   }
 
-  getAuthClient() {
+  isConfigured() {
+    // Package name is always required. Credentials may come from a key file or
+    // from Application Default Credentials (runtime service account).
+    return Boolean(process.env.GOOGLE_PLAY_PACKAGE_NAME);
+  }
+
+  async getAuthClient() {
     // Lazy import: googleapis is only needed when Google verification is
     // actually used, keeping the module loadable in every environment.
     const { google } = require('googleapis');
-    const jwtClient = new google.auth.JWT({
-      email: process.env.GOOGLE_PLAY_CLIENT_EMAIL,
-      key: process.env.GOOGLE_PLAY_PRIVATE_KEY,
-      scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+
+    if (this.hasServiceAccountKey()) {
+      const jwtClient = new google.auth.JWT({
+        email: process.env.GOOGLE_PLAY_CLIENT_EMAIL,
+        key: process.env.GOOGLE_PLAY_PRIVATE_KEY,
+        scopes: [ANDROID_PUBLISHER_SCOPE],
+      });
+      await jwtClient.authorize();
+      return jwtClient;
+    }
+
+    // Application Default Credentials (Cloud Run runtime service account).
+    const googleAuth = new google.auth.GoogleAuth({
+      scopes: [ANDROID_PUBLISHER_SCOPE],
     });
-    return jwtClient;
+    return googleAuth.getClient();
+  }
+
+  _latestExpiryMs(lineItems) {
+    const items = Array.isArray(lineItems) ? lineItems : [];
+    let latest = 0;
+    for (const item of items) {
+      const ms = Number(item?.expiryTime || 0);
+      if (Number.isFinite(ms) && ms > latest) latest = ms;
+    }
+    return latest;
   }
 
   async verify({ purchaseToken, productId, subscriptionId }) {
     if (!this.isConfigured()) {
       throw new Error('Google Play verification is not configured');
     }
-    const auth = this.getAuthClient();
-    await auth.authorize();
+
+    const { google } = require('googleapis');
+    const auth = await this.getAuthClient();
     const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME;
     const androidpublisher = google.androidpublisher({ version: 'v3', auth });
 
@@ -50,21 +84,27 @@ class GooglePlayReceiptVerifier {
     const { data } = await endpoint;
 
     if (subscriptionId) {
-      const subscription = data.subscriptionState || 'unknown';
-      const lineItem = (data.lineItems || [])[0] || {};
-      const expiryMs = Number(
-        lineItem.expiryTime || data.lineItems?.[0]?.expiryTime || 0
+      const state = String(
+        data.subscriptionState || 'SUBSCRIPTION_STATE_UNSPECIFIED'
       );
+      const lineItem = (data.lineItems || [])[0] || {};
+      const expiryMs = this._latestExpiryMs(data.lineItems);
+      // If Stripe-like "expired" state, mark revoked so the gate blocks it.
+      // CANCELED still grants access until expiryTime passes (expiry handles
+      // that), so it is not treated as revoked here.
+      const isExpired = state === 'SUBSCRIPTION_STATE_EXPIRED';
+      const isInBillingRetry =
+        state === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD' ||
+        state === 'SUBSCRIPTION_STATE_ON_HOLD';
+
       return {
         source: 'google_play_store',
         environment: 'production',
         storeIdentifier: String(purchaseToken),
-        productId: String(subscriptionId),
-        expiresAt: new Date(expiryMs),
-        isRevoked:
-          subscription === 'SUBSCRIPTION_STATE_EXPIRED' ||
-          subscription === 'SUBSCRIPTION_STATE_CANCELED',
-        isInBillingRetry: subscription === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',
+        productId: String(lineItem.productId || subscriptionId),
+        expiresAt: new Date(expiryMs || 0),
+        isRevoked: isExpired,
+        isInBillingRetry,
         raw: data,
       };
     }
