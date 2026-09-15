@@ -52,9 +52,15 @@ class OrganizationService {
     const safeContactDetails = this._buildSafeContactDetails(organization);
     const organizationEmail = this._normalizeEmail(safeContactDetails.email);
     const organizationEmailVerified = Boolean(safeContactDetails.emailVerified);
-    const isVerified = organizationEmailVerified;
+    // An organisation is considered verified when either its dedicated contact
+    // email is verified, or its owner/admin account email is verified. This
+    // avoids showing a verified owner as "unverified" when no separate
+    // organisation contact email has been confirmed.
+    const isVerified = organizationEmailVerified || ownerEmailVerified;
     const verificationSource = organizationEmailVerified
       ? 'organization_email'
+      : ownerEmailVerified
+      ? 'owner_email'
       : 'pending';
     const verificationEmail = organizationEmail || null;
 
@@ -228,18 +234,21 @@ class OrganizationService {
     }
   }
 
-  async getOrganizationById(organizationId) {
+  async getOrganizationById(organizationId, options = {}) {
     try {
       console.log('🔍 [GET ORG BY ID] Called with:', organizationId);
       console.log('🔍 [GET ORG BY ID] Mongoose connection state:', Organization.db?.readyState);
       console.log('🔍 [GET ORG BY ID] Database name:', Organization.db?.name);
       console.log('🔍 [GET ORG BY ID] Collection name:', Organization.collection?.name);
 
+      const skipCache = Boolean(options?.skipCache);
       const cacheKey = this._buildOrganizationCacheKey(organizationId);
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        console.log('🔍 [GET ORG BY ID] Returning cached result');
-        return cached;
+      if (!skipCache) {
+        const cached = await cacheService.get(cacheKey);
+        if (cached) {
+          console.log('🔍 [GET ORG BY ID] Returning cached result');
+          return cached;
+        }
       }
 
       console.log('🔍 [GET ORG BY ID] Querying database...');
@@ -285,7 +294,9 @@ class OrganizationService {
         verificationEmail: verificationMeta.verificationEmail,
       };
 
-      await cacheService.set(cacheKey, result, 900); // 15 minutes
+      if (!skipCache) {
+        await cacheService.set(cacheKey, result, 900); // 15 minutes
+      }
       return result;
     } catch (error) {
       throw error;
