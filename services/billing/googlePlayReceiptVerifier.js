@@ -54,7 +54,16 @@ class GooglePlayReceiptVerifier {
     const items = Array.isArray(lineItems) ? lineItems : [];
     let latest = 0;
     for (const item of items) {
-      const ms = Number(item?.expiryTime || 0);
+      const raw = item?.expiryTime;
+      if (raw === undefined || raw === null || raw === '') continue;
+
+      // Play returns an RFC3339 string (e.g. "2026-10-14T08:00:00Z"); some
+      // responses use an epoch-millis number/string. Handle both.
+      let ms = typeof raw === 'number' ? raw : Number(raw);
+      if (!Number.isFinite(ms) || ms === 0) {
+        const parsed = Date.parse(String(raw));
+        if (!Number.isNaN(parsed)) ms = parsed;
+      }
       if (Number.isFinite(ms) && ms > latest) latest = ms;
     }
     return latest;

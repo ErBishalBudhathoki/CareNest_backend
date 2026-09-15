@@ -99,11 +99,15 @@ class EntitlementController {
    */
   getStatus = catchAsync(async (req, res) => {
     const { organizationId } = req.query;
-    const status = await entitlementService.refreshOrganizationStatus(organizationId);
+    const result = await entitlementService.refreshOrganizationStatus(
+      organizationId
+    );
+    // Return a flat status string (the service returns { status, expiresAt }).
     res.json({
       success: true,
       code: 'ENTITLEMENT_STATUS',
-      status,
+      status: result?.status ?? 'none',
+      expiresAt: result?.expiresAt ?? null,
     });
   });
 }
