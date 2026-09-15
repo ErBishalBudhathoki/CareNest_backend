@@ -165,6 +165,68 @@ class PaymentService {
   }
 
   /**
+   * Disconnect the organisation's Stripe account: revoke platform access at
+   * Stripe (best effort) and clear the local link + cached connect flags.
+   */
+  async disconnectStripeAccount(organizationId, userEmail) {
+    const { toSafeString } = require('../utils/security');
+    const org = await Organization.findById(toSafeString(organizationId));
+    if (!org) throw new Error('Organization not found');
+
+    const previousAccountId = org.stripeAccountId || null;
+    let deauthorized = false;
+
+    if (previousAccountId && stripe) {
+      const clientId = process.env.STRIPE_CONNECT_CLIENT_ID;
+      if (clientId) {
+        try {
+          await stripe.oauth.deauthorize({
+            client_id: clientId,
+            stripe_user_id: previousAccountId,
+          });
+          deauthorized = true;
+        } catch (error) {
+          console.warn(
+            'Stripe deauthorize failed (continuing with local unlink):',
+            error.message
+          );
+        }
+      }
+    }
+
+    org.stripeAccountId = undefined;
+    org.stripeInvoiceProductId = undefined;
+    if (org.subscription) {
+      org.subscription.chargesEnabled = false;
+      org.subscription.detailsSubmitted = false;
+      org.subscription.payoutsEnabled = false;
+      org.subscription.connectedAt = undefined;
+      org.subscription.connectedAccountSource = 'none';
+    }
+    await org.save();
+
+    try {
+      const organizationService = require('./organizationService');
+      await organizationService.invalidateOrganizationCache(organizationId);
+    } catch (_) {}
+
+    if (userEmail) {
+      await auditService.logAction({
+        userEmail,
+        action: 'STRIPE_ACCOUNT_DISCONNECTED',
+        details: { organizationId, previousAccountId, deauthorized },
+        timestamp: new Date(),
+      });
+    }
+
+    return {
+      disconnected: Boolean(previousAccountId),
+      deauthorized,
+      previousAccountId,
+    };
+  }
+
+  /**
    * Record a payment (manual or Stripe success)
    */
   async recordPayment(invoiceId, paymentData, userEmail) {
