@@ -139,7 +139,10 @@ class OrganizationController {
       });
     }
 
-    const organization = await organizationService.getOrganizationById(organizationId);
+    const organization = await organizationService.getOrganizationById(
+      organizationId,
+      { skipCache: Boolean(req.query._ts) }
+    );
 
     if (organization) {
       if (organization.logoUrl && !organization.logoUrl.startsWith('http')) {
