@@ -26,9 +26,9 @@ function requireEntitlement(_featureName) {
       }
       const org = await Organization.findById(orgId).select('subscription');
       const status = org?.subscription?.status || 'none';
-      // Active, retry, grace and 'none' (no purchase history) are all OK.
-      // Only explicitly expired / revoked / refunded subscriptions block.
-      if (['active', 'billing_retry', 'grace', 'none'].includes(status)) {
+      // Hard paywall: only active/retry/grace are entitled. Organisations with
+      // no purchase (none) or lapsed/revoked/refunded subscriptions block.
+      if (['active', 'billing_retry', 'grace'].includes(status)) {
         return next();
       }
       logger.warn('Blocked unpaid access', {
