@@ -20,6 +20,7 @@ const { errorTrackingMiddleware } = require('./middleware/errorTracking');
 const { systemHealthMiddleware } = require('./middleware/systemHealth');
 const { requestLogger, securityLogger } = require('./middleware/requestLogger');
 const { apiSecurityGate } = require('./middleware/apiSecurityGate');
+const { subscriptionGate } = require('./middleware/billing/subscriptionGate');
 const { apiUsageMonitor } = require('./utils/apiUsageMonitor');
 const { renderClientSetPasswordPage } = require('./utils/clientSetPasswordPage');
 
@@ -223,7 +224,7 @@ const apiLimiter = rateLimit({
 
 app.use('/api', apiLimiter);
 app.use('/admin-dev', require('./routes/adminDevRoutes'));
-app.use('/api', apiSecurityGate, require('./routes'));
+app.use('/api', apiSecurityGate, subscriptionGate, require('./routes'));
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
