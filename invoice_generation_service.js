@@ -1048,8 +1048,8 @@ class InvoiceGenerationService {
         };
       }
 
-      // 3. Fall back to $30.00 base rate as specified in requirements
-      const baseRate = 30.00;
+      // 3. Fall back to $50.00 base rate (updated 2026-27 NDIS schedule)
+      const baseRate = 50.00;
       const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
       
       // Get price cap for validation if NDIS item exists
