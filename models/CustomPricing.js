@@ -26,6 +26,11 @@ const customPricingSchema = new mongoose.Schema({
   },
   customPrice: Number,
   multiplier: Number,
+  region: {
+    type: String,
+    enum: ['national', 'remote', 'veryRemote', null],
+    default: null
+  },
   clientSpecific: {
     type: Boolean,
     default: false
