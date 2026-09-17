@@ -9,9 +9,21 @@ const supportItemSchema = new mongoose.Schema({
   },
   supportItemName: String,
   price: Number,
-  priceCaps: mongoose.Schema.Types.Mixed, // Stores regional price caps (e.g. { standard: { NSW: 100 } })
+  priceCaps: mongoose.Schema.Types.Mixed, // Stores price caps: { national, remote, veryRemote, standard: { ... }, ... }
   description: String,
   unit: String,
+  // True when the item comes from the NDIS legacy catalogue (has a real
+  // expiry date instead of 9999-12-31). Surfaced in the app with an
+  // "expires <date>" badge; expired items are blocked at invoice time.
+  isLegacy: {
+    type: Boolean,
+    default: false
+  },
+  supportCategoryNumberPACE: String,
+  supportCategoryNamePACE: String,
+  supportType: String,
+  startDate: Date,
+  endDate: Date,
   isActive: {
     type: Boolean,
     default: true
