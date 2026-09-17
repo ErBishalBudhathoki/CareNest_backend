@@ -307,6 +307,8 @@ class InvoiceGenerationService {
             item.totalPrice = item.quantity * pricing.price;
             item.pricingSource = pricing.source;
             item.pricingApplied = true;
+            item.region = pricing.region ?? null;
+            item.pricingMetadata = { ...(item.pricingMetadata || {}), region: pricing.region ?? null, basePrice: pricing.basePrice, capRatio: pricing.capRatio, priceCapApplied: pricing.priceCap };
           }
         } catch (error) {
           logger.warn('Failed to apply pricing for item', {
@@ -668,6 +670,7 @@ class InvoiceGenerationService {
             organizationId: client.organizationId,
             clientId: client._id
           },
+          region: pricing.region ?? null,
           pricingMetadata: {
             pricingSource: pricing.source,
             isCustomPricing: pricing.isCustom,
@@ -678,7 +681,8 @@ class InvoiceGenerationService {
             priceCapApplied: pricing.priceCap,
             priceCapBase: pricing.validationDetails?.priceCapBase,
             mmmRating: pricing.validationDetails?.mmmRating,
-            mmmMultiplier: pricing.validationDetails?.mmmMultiplier
+            mmmMultiplier: pricing.validationDetails?.mmmMultiplier,
+            region: pricing.region ?? null
           }
         };
       }
@@ -730,6 +734,7 @@ class InvoiceGenerationService {
         assignmentId: assignment._id,
         providerType: providerTypeUsed,
         serviceLocationPostcode: serviceLocationPostcode,
+        region: pricing.region ?? null,
         pricingMetadata: {
           pricingSource: pricing.source,
           isCustomPricing: pricing.isCustom,
@@ -741,7 +746,8 @@ class InvoiceGenerationService {
           priceCapApplied: pricing.priceCap,
           priceCapBase: pricing.validationDetails?.priceCapBase,
           mmmRating: pricing.validationDetails?.mmmRating,
-          mmmMultiplier: pricing.validationDetails?.mmmMultiplier
+          mmmMultiplier: pricing.validationDetails?.mmmMultiplier,
+          region: pricing.region ?? null
         }
       };
 
@@ -886,6 +892,7 @@ class InvoiceGenerationService {
             clientId: client._id,
             organizationId: client.organizationId
           },
+          region: pricing.region ?? null,
           pricingMetadata: {
             pricingSource: pricing.source,
             isCustomPricing: pricing.isCustom,
@@ -916,6 +923,7 @@ class InvoiceGenerationService {
         assignmentId: assignment._id,
         providerType: providerTypeUsed,
         serviceLocationPostcode: serviceLocationPostcode,
+        region: pricing.region ?? null,
         pricingMetadata: {
           pricingSource: pricing.source,
           isCustomPricing: pricing.isCustom,
@@ -925,7 +933,8 @@ class InvoiceGenerationService {
           priceCapApplied: pricing.priceCap,
           priceCapBase: pricing.validationDetails?.priceCapBase,
           mmmRating: pricing.validationDetails?.mmmRating,
-          mmmMultiplier: pricing.validationDetails?.mmmMultiplier
+          mmmMultiplier: pricing.validationDetails?.mmmMultiplier,
+          region: pricing.region ?? null
         }
       };
 
@@ -1224,10 +1233,11 @@ class InvoiceGenerationService {
           state,
           providerType,
           new Date(),
-          { servicePostcode }
+          { servicePostcode, region: clientPricing.region }
         );
 
         return {
+          region: derivedValidation.validationDetails?.region ?? null,
           price: clientPricing.customPrice,
           source: 'client-specific',
           isCustom: true,
@@ -1245,7 +1255,8 @@ class InvoiceGenerationService {
       const orgPricing = await CustomPricing.findOne({
         supportItemNumber: ndisItemNumber,
         organizationId: new mongoose.Types.ObjectId(organizationId),
-        clientId: { $exists: false },
+        clientId: null,
+        clientSpecific: { $ne: true },
         isActive: true,
         approvalStatus: 'approved'
       });
@@ -1257,10 +1268,11 @@ class InvoiceGenerationService {
           state,
           providerType,
           new Date(),
-          { servicePostcode }
+          { servicePostcode, region: orgPricing.region }
         );
 
         return {
+          region: derivedValidation.validationDetails?.region ?? null,
           price: orgPricing.customPrice,
           source: 'organization',
           isCustom: true,
@@ -1719,6 +1731,7 @@ class InvoiceGenerationService {
                   if (priceCapBase !== undefined) li.pricingMetadata.priceCapBase = priceCapBase;
                   if (mmmRating !== undefined) li.pricingMetadata.mmmRating = mmmRating;
                   if (mmmMultiplier !== undefined) li.pricingMetadata.mmmMultiplier = mmmMultiplier;
+                  if (priceResult.validationDetails.region) li.pricingMetadata.region = priceResult.validationDetails.region;
                 }
                 if (priceResult.priceCap !== undefined) {
                   li.pricingMetadata.priceCapApplied = priceResult.priceCap;
@@ -1776,7 +1789,8 @@ class InvoiceGenerationService {
         serviceDate: item.serviceDate || new Date(),
         quantity: item.quantity || 1,
         description: item.description || item.itemName,
-        servicePostcode: item.serviceLocationPostcode || item.servicePostcode || null
+        servicePostcode: item.serviceLocationPostcode || item.servicePostcode || null,
+        region: item.region ?? item.pricingMetadata?.region ?? null
       }));
 
       // Use the price validation service directly

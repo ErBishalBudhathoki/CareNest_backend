@@ -11,6 +11,35 @@ const ndisCatalogSyncService = require('./ndisCatalogSyncService');
 const PricingSettings = require('../models/PricingSettings');
 
 class PricingService {
+  resolveRegion(region, existingRegion = null) {
+    if (region !== undefined && region !== null && !['national', 'remote', 'veryRemote'].includes(region)) {
+      const error = new Error('Region must be national, remote or veryRemote');
+      error.statusCode = 400;
+      throw error;
+    }
+    return region ?? existingRegion;
+  }
+
+  async validateExplicitPricing(pricing) {
+    const region = this.resolveRegion(pricing.region);
+    if (region === null || pricing.pricingType !== 'fixed') return;
+    const context = await this.resolveClientContext(pricing.clientSpecific ? pricing.clientId : null);
+    const validation = await priceValidationService.validatePrice(
+      pricing.supportItemNumber,
+      pricing.customPrice,
+      context.stateUsed,
+      'standard',
+      pricing.effectiveDate || new Date(),
+      { region }
+    );
+    if (!validation.isValid) {
+      const error = new Error(validation.message);
+      error.statusCode = 400;
+      error.validation = validation;
+      throw error;
+    }
+  }
+
   /**
    * Resolve client identifier variants (Mongo _id and email) to avoid
    * mismatches between screens that pass different identifier types.
@@ -116,20 +145,33 @@ class PricingService {
       // console.log(`Checking for duplicate custom pricing with query:`, JSON.stringify(duplicateCheckQuery, null, 2));
 
       const existingCustomPricing = await CustomPricing.findOne(duplicateCheckQuery);
+      const region = this.resolveRegion(customPricing.region, existingCustomPricing?.region);
+      const pricingType = customPricing.pricingType === 'custom' ? 'fixed' :
+        (customPricing.pricingType || existingCustomPricing?.pricingType || 'fixed');
+      const price = customPricing.price ?? customPricing.customPrice ?? existingCustomPricing?.customPrice;
+      await this.validateExplicitPricing({
+        supportItemNumber: ndisItem.itemNumber,
+        pricingType,
+        customPrice: price,
+        region,
+        clientSpecific: isClientSpecific,
+        clientId: targetClientId
+      });
 
       if (existingCustomPricing) {
         // Check if the price is different before updating
-        const newPrice = customPricing.price || customPricing.customPrice;
+        const newPrice = price;
         const existingPrice = existingCustomPricing.customPrice;
 
-        if (newPrice !== existingPrice) {
+        if (newPrice !== existingPrice || region !== existingCustomPricing.region || pricingType !== existingCustomPricing.pricingType) {
           // Update existing custom pricing with new price
           await CustomPricing.updateOne(
             { _id: existingCustomPricing._id },
             {
               $set: {
                 customPrice: newPrice,
-                pricingType: customPricing.pricingType === 'custom' ? 'fixed' : (customPricing.pricingType || 'fixed'),
+                pricingType,
+                region,
                 updatedBy: userEmail,
                 updatedAt: new Date(),
                 version: (existingCustomPricing.version || 1) + 1
@@ -156,10 +198,11 @@ class PricingService {
           supportItemNumber: ndisItem.itemNumber,
           supportItemName: ndisItem.itemName || ndisItem.description,
           pricingType: customPricing.pricingType === 'custom' ? 'fixed' : (customPricing.pricingType || 'fixed'),
-          customPrice: (customPricing.pricingType === 'custom' || customPricing.pricingType === 'fixed' || !customPricing.pricingType) ? (customPricing.price || customPricing.customPrice) : null,
-          multiplier: customPricing.pricingType === 'multiplier' ? (customPricing.price || customPricing.customPrice) : null,
+          customPrice: (customPricing.pricingType === 'custom' || customPricing.pricingType === 'fixed' || !customPricing.pricingType) ? price : null,
+          multiplier: customPricing.pricingType === 'multiplier' ? price : null,
           clientId: targetClientId,
           clientSpecific: isClientSpecific,
+          region,
           ndisCompliant: true,
           exceedsNdisCap: false,
           approvalStatus: 'approved',
@@ -185,7 +228,7 @@ class PricingService {
       }
     } catch (error) {
       console.error(`Error processing custom pricing for NDIS item ${ndisItem.itemNumber}:`, error);
-      // Don't throw, just log error to allow assignment to proceed
+      throw error;
     }
   }
 
@@ -203,11 +246,14 @@ class PricingService {
         multiplier,
         clientId,
         clientSpecific,
+        region,
         ndisCompliant,
         exceedsNdisCap,
         effectiveDate,
         expiryDate
       } = pricingData;
+
+      this.resolveRegion(region);
 
       let resolvedClientId = null;
       if (clientSpecific) {
@@ -249,6 +295,7 @@ class PricingService {
         multiplier: pricingType === 'multiplier' ? multiplier : null,
         clientId: clientSpecific ? resolvedClientId : null,
         clientSpecific: clientSpecific || false,
+        region: region || null,
         ndisCompliant: ndisCompliant !== undefined ? ndisCompliant : true,
         exceedsNdisCap: exceedsNdisCap || false,
         approvalStatus: exceedsNdisCap ? 'pending' : 'approved',
@@ -267,7 +314,9 @@ class PricingService {
         }]
       };
 
+      await this.validateExplicitPricing(pricingDoc);
       const result = await CustomPricing.create(pricingDoc);
+      await cacheService.clearPattern(`pricing:${organizationId}:*`);
       
       // Create audit log
       await auditService.createAuditLog({
@@ -393,6 +442,7 @@ class PricingService {
         multiplier,
         clientId,
         clientSpecific,
+        region,
         ndisCompliant,
         exceedsNdisCap,
         effectiveDate,
@@ -447,6 +497,12 @@ class PricingService {
         changes.push(`clientSpecific: ${existingPricing.clientSpecific} → ${clientSpecific}`);
       }
 
+      const resolvedRegion = this.resolveRegion(region, existingPricing.region);
+      if (resolvedRegion !== existingPricing.region) {
+        updateObj.region = resolvedRegion;
+        changes.push(`region: ${existingPricing.region || 'none'} → ${resolvedRegion || 'none'}`);
+      }
+
       if (ndisCompliant !== undefined && ndisCompliant !== existingPricing.ndisCompliant) {
         updateObj.ndisCompliant = ndisCompliant;
         changes.push(`ndisCompliant: ${existingPricing.ndisCompliant} → ${ndisCompliant}`);
@@ -474,16 +530,17 @@ class PricingService {
         }
       }
 
+      await this.validateExplicitPricing({ ...existingPricing.toObject(), ...updateObj });
       if (changes.length > 0) {
         auditTrailEntry.changes = changes.join(', ');
-        updateObj.$push = { auditTrail: auditTrailEntry };
       }
 
       const result = await CustomPricing.findOneAndUpdate(
         { _id: pricingId },
-        { $set: updateObj, ...(updateObj.$push && { $push: updateObj.$push }) },
-        { new: true }
+        { $set: updateObj, ...(changes.length > 0 && { $push: { auditTrail: auditTrailEntry } }) },
+        { new: true, runValidators: true }
       );
+      await cacheService.clearPattern(`pricing:${existingPricing.organizationId}:*`);
 
       if (!result) {
         throw new Error('No changes were made to the pricing record');
@@ -683,7 +740,9 @@ class PricingService {
             supportItemNumber,
             originalPrice,
             stateUsed,
-            providerTypeUsed
+            providerTypeUsed,
+            new Date(),
+            { region: clientSpecificPricing.region }
           );
 
           return {
@@ -728,7 +787,9 @@ class PricingService {
           supportItemNumber,
           originalPrice,
           stateUsed,
-          providerTypeUsed
+          providerTypeUsed,
+          new Date(),
+          { region: organizationPricing.region }
         );
 
         return {
@@ -989,7 +1050,9 @@ class PricingService {
             itemNumber,
             originalPrice,
             stateUsed,
-            providerTypeUsed
+            providerTypeUsed,
+            new Date(),
+            { region: cp.region }
           );
 
           results[itemNumber] = {
