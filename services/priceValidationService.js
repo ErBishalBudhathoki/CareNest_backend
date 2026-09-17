@@ -50,7 +50,7 @@ class PriceValidationService {
       });
 
       // Input validation
-      if (!supportItemNumber || typeof proposedPrice !== 'number' || proposedPrice < 0) {
+      if (!supportItemNumber || !Number.isFinite(proposedPrice) || proposedPrice < 0) {
         return {
           isValid: false,
           status: 'invalid_input',
@@ -61,6 +61,20 @@ class PriceValidationService {
           validationDetails: {
             error: 'Invalid support item number or proposed price'
           }
+        };
+      }
+
+      const region = options?.region;
+      const explicitRegion = region !== undefined && region !== null;
+      if (explicitRegion && !['national', 'remote', 'veryRemote'].includes(region)) {
+        return {
+          isValid: false,
+          status: 'invalid_region',
+          priceCap: null,
+          proposedPrice,
+          message: 'Region must be national, remote or veryRemote',
+          supportItem: null,
+          validationDetails: { region }
         };
       }
 
@@ -121,7 +135,7 @@ class PriceValidationService {
       }
 
       // Check if item requires quotes (no price caps)
-      if (supportItem.quoteRequired || supportItem.supportType === 'Quotable Supports') {
+      if (!explicitRegion && (supportItem.quoteRequired || supportItem.supportType === 'Quotable Supports')) {
         return {
           isValid: true,
           status: 'quotable_support',
@@ -144,7 +158,7 @@ class PriceValidationService {
       }
 
       // Get base price cap for provider type and state
-      const basePriceCap = this.getPriceCap(supportItem, normalizedState, providerTypeUsed);
+      const basePriceCap = this.getPriceCap(supportItem, normalizedState, providerTypeUsed, region);
 
       if (basePriceCap === null) {
         return {
@@ -157,6 +171,7 @@ class PriceValidationService {
           validationDetails: {
             state: normalizedState,
             providerType: providerTypeUsed,
+            region: region ?? null,
             availableCaps: supportItem.priceCaps
           }
         };
@@ -167,7 +182,7 @@ class PriceValidationService {
       let mmmMultiplier = 1.0;
       const servicePostcode = options?.servicePostcode;
 
-      if (servicePostcode) {
+      if (!explicitRegion && servicePostcode) {
         try {
           const mmmInfo = await mmmService.getMmmByPostcode(servicePostcode);
           if (mmmInfo && typeof mmmInfo.mmm === 'number') {
@@ -183,7 +198,9 @@ class PriceValidationService {
         }
       }
 
-      const { adjustedCap } = mmmService.applyMultiplierToCap(basePriceCap, mmmRating);
+      const { adjustedCap } = explicitRegion
+        ? { adjustedCap: basePriceCap }
+        : mmmService.applyMultiplierToCap(basePriceCap, mmmRating);
       const priceCap = adjustedCap ?? basePriceCap;
 
       // Validate price against cap
@@ -203,6 +220,7 @@ class PriceValidationService {
         validationDetails: {
           state: normalizedState,
           providerType: providerTypeUsed,
+          region: region ?? null,
           priceCapBase: basePriceCap,
           mmmRating,
           mmmMultiplier,
@@ -243,7 +261,8 @@ class PriceValidationService {
         validation.providerType,
         validation.serviceDate,
         {
-          servicePostcode: validation.servicePostcode
+          servicePostcode: validation.servicePostcode,
+          region: validation.region
         }
       );
       results.push({
@@ -262,7 +281,12 @@ class PriceValidationService {
    * @param {string} providerType - Provider type
    * @returns {number|null} Price cap or null if not found
    */
-  getPriceCap(supportItem, state, providerType) {
+  getPriceCap(supportItem, state, providerType, region) {
+    if (region !== undefined && region !== null) {
+      if (!['national', 'remote', 'veryRemote'].includes(region)) return null;
+      const cap = supportItem?.priceCaps?.[region];
+      return Number.isFinite(cap) && cap > 0 ? cap : null;
+    }
     // New NDIS format (2026-27) publishes National / Remote / Very Remote
     // caps instead of state-by-state caps. Prefer the direct national cap;
     // fall back to the legacy per-state lookup for old catalogue documents.
