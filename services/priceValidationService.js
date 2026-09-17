@@ -263,10 +263,17 @@ class PriceValidationService {
    * @returns {number|null} Price cap or null if not found
    */
   getPriceCap(supportItem, state, providerType) {
+    // New NDIS format (2026-27) publishes National / Remote / Very Remote
+    // caps instead of state-by-state caps. Prefer the direct national cap;
+    // fall back to the legacy per-state lookup for old catalogue documents.
+    const national = supportItem?.priceCaps?.national;
+    if (typeof national === 'number' && Number.isFinite(national)) {
+      return national;
+    }
     if (!supportItem.priceCaps || !supportItem.priceCaps[providerType]) {
       return null;
     }
-    
+
     return supportItem.priceCaps[providerType][state] || null;
   }
 

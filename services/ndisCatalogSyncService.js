@@ -352,11 +352,30 @@ class NdisCatalogSyncService {
       ) ?? '',
     ).trim();
 
+    // New NDIS format (2026-27): National / Remote / Very Remote columns
+    // replace the old state-by-state + P01/P02 columns. When the state
+    // columns are absent, every state falls back to the National cap so
+    // existing readers (priceCaps.standard.<STATE>) keep working.
+    const nationalCap = parsePrice(
+      firstNonNull(rawItem.National, rawItem.national, rawItem.NATIONAL),
+    );
+    const remoteCap = parsePrice(
+      firstNonNull(rawItem.Remote, rawItem.remote, rawItem.REMOTE),
+    );
+    const veryRemoteCap = parsePrice(
+      firstNonNull(
+        rawItem['Very Remote'],
+        rawItem.veryRemote,
+        rawItem['VERY REMOTE'],
+      ),
+    );
+
     const standardCaps = {};
     for (const state of AU_STATES) {
-      standardCaps[state] = parsePrice(
-        firstNonNull(rawItem[` ${state} `], rawItem[state], rawItem[state.toLowerCase()]),
-      );
+      standardCaps[state] =
+        parsePrice(
+          firstNonNull(rawItem[` ${state} `], rawItem[state], rawItem[state.toLowerCase()]),
+        ) ?? nationalCap;
     }
 
     const p01 = parsePrice(firstNonNull(rawItem.P01, rawItem.p01));
@@ -376,7 +395,7 @@ class NdisCatalogSyncService {
       }
     }
 
-    const fallbackHighIntensity = p02 ?? p01;
+    const fallbackHighIntensity = p02 ?? p01 ?? remoteCap ?? veryRemoteCap;
     const highIntensityCaps = {};
     for (const state of AU_STATES) {
       highIntensityCaps[state] = parsePrice(
@@ -401,6 +420,7 @@ class NdisCatalogSyncService {
     }
 
     const defaultPrice = firstNonNull(
+      nationalCap,
       standardCaps.NSW,
       standardCaps.VIC,
       standardCaps.QLD,
@@ -409,6 +429,8 @@ class NdisCatalogSyncService {
       standardCaps.WA,
       standardCaps.TAS,
       standardCaps.NT,
+      remoteCap,
+      veryRemoteCap,
       parsePrice(rawItem.price),
     );
 
@@ -438,10 +460,25 @@ class NdisCatalogSyncService {
       },
       supportCategoryNumber,
       supportCategoryName,
+      supportCategoryNumberPACE: String(
+        firstNonNull(
+          rawItem['Support Category Number (PACE)'],
+          rawItem.supportCategoryNumberPACE,
+        ) ?? '',
+      ).trim(),
+      supportCategoryNamePACE: String(
+        firstNonNull(
+          rawItem['Support Category Name (PACE)'],
+          rawItem.supportCategoryNamePACE,
+        ) ?? '',
+      ).trim(),
       registrationGroupNumber,
       registrationGroupName,
       unit,
       supportType,
+      isLegacy: parseBoolean(
+        firstNonNull(rawItem.isLegacy, rawItem.IsLegacy, rawItem.islegacy),
+      ),
       startDate,
       endDate,
       quoteRequired: parseBoolean(
@@ -453,6 +490,9 @@ class NdisCatalogSyncService {
         highIntensity: highIntensityCaps,
         labelled: labelledCaps,
         maxByState,
+        national: nationalCap,
+        remote: remoteCap,
+        veryRemote: veryRemoteCap,
       },
       rules: {
         allowNonFaceToFace: parseBoolean(
