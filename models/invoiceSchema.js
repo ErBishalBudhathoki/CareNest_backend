@@ -107,7 +107,14 @@ const invoiceSchema = {
       reference: 'String',
       status: 'String', // 'success', 'failed', 'pending'
       notes: 'String'
-    }]
+    }],
+    // Stripe Payment Link (hosted payment page for the remaining balance)
+    paymentLinkId: 'String', // Stripe payment link id (plink_...)
+    paymentLinkUrl: 'String', // Bearer URL sent to the client (email prefilled)
+    paymentLinkStatus: 'String', // 'active', 'deactivated'
+    paymentLinkAmountCents: 'Number', // Balance the link was created for
+    paymentLinkStripeAccountId: 'String', // Connected account the link lives on
+    paymentLinkCreatedAt: 'Date'
   },
   
   // Recurring Billing Configuration
