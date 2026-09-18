@@ -446,12 +446,16 @@ function getRetentionStrategies(riskScore, employee) {
  */
 async function analyzeScenario(organizationId, scenario) {
   // Simplified scenario analysis
+  const projectedCost = scenario.parameters.staffIncrease * 35000;
+  const netBenefit = scenario.parameters.staffIncrease * 15000;
   return {
     name: scenario.name,
     parameters: scenario.parameters,
     projectedRevenue: scenario.parameters.staffIncrease * 50000,
-    projectedCost: scenario.parameters.staffIncrease * 35000,
-    netBenefit: scenario.parameters.staffIncrease * 15000,
+    projectedCost,
+    netBenefit,
+    // Required by the Flutter ScenarioAnalysis model; guard divide-by-zero.
+    roi: projectedCost > 0 ? netBenefit / projectedCost : 0,
     feasibility: scenario.parameters.staffIncrease <= 10 ? 'high' : 'medium'
   };
 }
