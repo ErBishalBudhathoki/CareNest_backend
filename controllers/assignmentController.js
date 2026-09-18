@@ -193,7 +193,7 @@ class AssignmentController {
      * GET /api/assignments?organizationId=...
      */
     getOrganizationAssignments = catchAsync(async (req, res) => {
-        const { organizationId } = req.query; // Changed from params to query to match frontend call
+        const { organizationId, status } = req.query; // Changed from params to query to match frontend call
 
         if (!organizationId) {
             return res.status(400).json({ success: false, message: 'Organization ID is required' });
@@ -201,12 +201,18 @@ class AssignmentController {
 
         // logger.info(`Getting assignments for organization: ${organizationId}`);
 
+        // Optional status filter (validated as active|completed|cancelled by route).
+        const matchStage = {
+            organizationId: organizationId,
+            isActive: true
+        };
+        if (status) {
+            matchStage.status = status;
+        }
+
         const assignments = await ClientAssignment.aggregate([
             {
-                $match: {
-                    organizationId: organizationId,
-                    isActive: true
-                }
+                $match: matchStage
             },
             {
                 $lookup: {
@@ -239,6 +245,8 @@ class AssignmentController {
                     userEmail: 1,
                     clientEmail: 1,
                     organizationId: 1,
+                    status: 1,
+                    invoiced: 1,
                     schedule: 1,
                     createdAt: 1,
                     isActive: 1,
