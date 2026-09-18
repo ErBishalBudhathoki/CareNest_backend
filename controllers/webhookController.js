@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../config/logger');
 const paymentService = require('../services/paymentService');
+const billingNotificationService = require('../services/billing/billingNotificationService');
+const { Invoice } = require('../models/Invoice');
 const ndisCatalogSyncService = require('../services/ndisCatalogSyncService');
 const HostedCheckoutGrant = require('../models/billing/HostedCheckoutGrant');
 const Organization = require('../models/Organization');
@@ -238,6 +240,22 @@ class WebhookController {
         await this.handleConnectAccountUpdated(account);
         break;
       }
+      case 'charge.dispute.created': {
+        await this.handleDisputeOpened(event.data.object, event.account);
+        break;
+      }
+      case 'charge.dispute.closed': {
+        await this.handleDisputeClosed(event.data.object, event.account);
+        break;
+      }
+      case 'payout.paid': {
+        await this.handlePayoutEvent(event.data.object, 'paid', event.account);
+        break;
+      }
+      case 'payout.failed': {
+        await this.handlePayoutEvent(event.data.object, 'failed', event.account);
+        break;
+      }
       default:
         logger.business('Unhandled webhook event type', {
           action: 'UNHANDLED_WEBHOOK_EVENT',
@@ -356,6 +374,142 @@ class WebhookController {
       organizationId: String(org._id),
       chargesEnabled: account.charges_enabled === true,
     });
+  };
+
+  /**
+   * Resolve the organisation owning a connected-account webhook event.
+   * Events from connected accounts carry `event.account` (the acct_... id).
+   * Returns null when the account is not linked to any organisation —
+   * such events are logged and ignored, never fanned out.
+   */
+  _findOrgByStripeAccount = async (stripeAccountId) => {
+    if (!stripeAccountId) return null;
+    return Organization.findOne({ stripeAccountId }).lean();
+  };
+
+  _unixToDateString = (unixSeconds) => {
+    if (!unixSeconds) return null;
+    try {
+      return new Date(Number(unixSeconds) * 1000).toLocaleDateString('en-AU');
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * charge.dispute.created — a payer's bank reversed a charge. Resolve the
+   * invoice via the PaymentIntent metadata our services always attach, then
+   * alert the organisation's billing staff (high priority).
+   */
+  handleDisputeOpened = async (dispute, connectedAccountId) => {
+    try {
+      const org = await this._findOrgByStripeAccount(connectedAccountId);
+      if (!org) {
+        logger.business('Dispute for unlinked Stripe account ignored', {
+          action: 'DISPUTE_UNLINKED_ACCOUNT',
+          stripeAccountId: connectedAccountId,
+        });
+        return;
+      }
+      let invoiceId = dispute?.metadata?.invoice_id || null;
+      if (!invoiceId && dispute?.payment_intent && stripe) {
+        const piId =
+          typeof dispute.payment_intent === 'string'
+            ? dispute.payment_intent
+            : dispute.payment_intent.id;
+        try {
+          const paymentIntent = await stripe.paymentIntents.retrieve(piId, {
+            stripeAccount: connectedAccountId,
+          });
+          // Only trust the invoice id when the intent belongs to this org.
+          const metaInvoiceId = paymentIntent?.metadata?.invoiceId || null;
+          const metaOrgId = paymentIntent?.metadata?.organizationId || null;
+          if (metaInvoiceId && (!metaOrgId || metaOrgId === String(org._id))) {
+            invoiceId = metaInvoiceId;
+          }
+        } catch (retrieveError) {
+          logger.warn('Could not retrieve disputed payment intent', {
+            paymentIntentId: piId,
+            error: retrieveError.message,
+          });
+        }
+      }
+      const invoice = invoiceId
+        ? await Invoice.findById(invoiceId).lean()
+        : null;
+      await billingNotificationService.notifyStripeDisputeOpened({
+        organizationId: org._id,
+        invoiceId: invoice?._id || invoiceId,
+        invoiceNumber: invoice?.invoiceNumber,
+        amount: (Number(dispute?.amount) || 0) / 100,
+        reason: dispute?.reason || null,
+        dueBy: this._unixToDateString(dispute?.evidence_details?.due_by),
+      });
+      logger.business('Stripe dispute opened notification sent', {
+        action: 'DISPUTE_OPENED',
+        organizationId: String(org._id),
+        disputeId: dispute?.id,
+      });
+    } catch (error) {
+      logger.warn('Failed to handle dispute.created webhook', {
+        error: error.message,
+        disputeId: dispute?.id,
+      });
+    }
+  };
+
+  /**
+   * charge.dispute.closed — inform billing staff of the outcome.
+   */
+  handleDisputeClosed = async (dispute, connectedAccountId) => {
+    try {
+      const org = await this._findOrgByStripeAccount(connectedAccountId);
+      if (!org) return;
+      const won = dispute?.status === 'won';
+      await billingNotificationService.fanOut({
+        organizationId: org._id,
+        kind: 'stripe_dispute_closed',
+        title: won ? 'Dispute won' : 'Dispute lost',
+        message: won
+          ? `The ${((Number(dispute?.amount) || 0) / 100).toFixed(2)} dispute was decided in your favour.`
+          : `The ${((Number(dispute?.amount) || 0) / 100).toFixed(2)} dispute was lost. The amount stays with the payer.`,
+        priority: won ? 'medium' : 'high',
+      });
+    } catch (error) {
+      logger.warn('Failed to handle dispute.closed webhook', {
+        error: error.message,
+        disputeId: dispute?.id,
+      });
+    }
+  };
+
+  /**
+   * payout.paid / payout.failed — keep billing staff aware of money movement.
+   */
+  handlePayoutEvent = async (payout, status, connectedAccountId) => {
+    try {
+      const org = await this._findOrgByStripeAccount(connectedAccountId);
+      if (!org) {
+        logger.business('Payout for unlinked Stripe account ignored', {
+          action: 'PAYOUT_UNLINKED_ACCOUNT',
+          stripeAccountId: connectedAccountId,
+        });
+        return;
+      }
+      await billingNotificationService.notifyPayout({
+        organizationId: org._id,
+        amount: (Number(payout?.amount) || 0) / 100,
+        arrivalDate: this._unixToDateString(payout?.arrival_date),
+        status,
+        failureMessage: payout?.failure_message || payout?.failure_code || null,
+      });
+    } catch (error) {
+      logger.warn('Failed to handle payout webhook', {
+        error: error.message,
+        payoutId: payout?.id,
+        status,
+      });
+    }
   };
 
   handleNdisCatalogWebhook = catchAsync(async (req, res) => {

@@ -7,6 +7,7 @@ const GeofenceLocation = require('../models/GeofenceLocation');
 const ServiceFeedback = require('../models/ServiceFeedback');
 const { Invoice } = require('../models/Invoice');
 const NotificationPreference = require('../models/NotificationPreference');
+const billingNotificationService = require('./billing/billingNotificationService');
 const stripePaymentLinkService = require('./billing/stripePaymentLinkService');
 const realtimeTrackingService = require('./realtimeTrackingService');
 const messagingService = require('./messagingService');
@@ -1145,6 +1146,21 @@ class ClientPortalService {
       throw createHttpError(404, 'Invoice not found');
     }
 
+    // Best-effort: tell the organisation's billing staff the client approved.
+    // Never fails the approval itself.
+    try {
+      await billingNotificationService.notifyInvoiceApproved({
+        organizationId: clientContext.client.organizationId,
+        invoice,
+        approvedBy: clientContext.authEmail,
+      });
+    } catch (notifyError) {
+      console.warn(
+        'Failed to send invoice-approved notification:',
+        notifyError.message
+      );
+    }
+
     return {
       success: true,
       data: invoice,
@@ -1180,6 +1196,21 @@ class ClientPortalService {
 
     if (!invoice) {
       throw createHttpError(404, 'Invoice not found');
+    }
+
+    // Best-effort: the client disagrees with this invoice — the organisation
+    // must know. Never fails the dispute itself.
+    try {
+      await billingNotificationService.notifyInvoiceDisputed({
+        organizationId: clientContext.client.organizationId,
+        invoice,
+        reason: cleanedReason,
+      });
+    } catch (notifyError) {
+      console.warn(
+        'Failed to send invoice-disputed notification:',
+        notifyError.message
+      );
     }
 
     return {
