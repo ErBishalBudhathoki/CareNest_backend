@@ -4,6 +4,7 @@ const Organization = require('../models/Organization');
 const auditService = require('./auditService');
 const emailService = require('./emailService');
 const stripePaymentLinkService = require('./billing/stripePaymentLinkService');
+const billingNotificationService = require('./billing/billingNotificationService');
 
 // Conditionally load Stripe
 let stripe;
@@ -290,6 +291,17 @@ class PaymentService {
           await stripePaymentLinkService.deactivateInvoicePaymentLink(invoice);
         } catch (deactivateError) {
           console.warn('Failed to deactivate invoice payment link:', deactivateError.message);
+        }
+        // Best-effort: tell the organisation's billing staff money arrived.
+        try {
+          await billingNotificationService.notifyPaymentReceived({
+            organizationId: invoice.organizationId,
+            invoice,
+            amount,
+            method: paymentData.method,
+          });
+        } catch (notifyError) {
+          console.warn('Failed to send payment-received notification:', notifyError.message);
         }
       }
 

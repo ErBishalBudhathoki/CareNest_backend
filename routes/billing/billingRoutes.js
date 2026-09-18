@@ -5,13 +5,14 @@ const hostedCheckoutController = require('../../controllers/billing/hostedChecko
 const recurringAgreementController = require('../../controllers/billing/recurringAgreementController');
 const recurringChargeController = require('../../controllers/billing/recurringChargeController');
 const stripeConnectOAuthController = require('../../controllers/billing/stripeConnectOAuthController');
+const stripeDashboardController = require('../../controllers/billing/stripeDashboardController');
 const { authenticateUser } = require('../../middleware/auth');
 const {
   organizationContextMiddleware,
   requireOrganizationMatch,
 } = require('../../middleware/organizationContext');
 const { handleValidationErrors } = require('../../middleware/validation');
-const { body } = require('express-validator');
+const { body, query } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 
 const billingLimiter = rateLimit({
@@ -134,6 +135,87 @@ router.post(
   body('organizationId').notEmpty(),
   handleValidationErrors,
   stripeConnectOAuthController.start
+);
+
+// ===== In-app Stripe revenue dashboard (manage_billing, org-scoped) =====
+
+router.get(
+  '/dashboard/overview',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  query('organizationId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.overview
+);
+
+router.get(
+  '/dashboard/balance',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  query('organizationId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.balance
+);
+
+router.get(
+  '/dashboard/payouts',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  query('organizationId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.payouts
+);
+
+router.get(
+  '/dashboard/revenue',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  query('organizationId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.revenue
+);
+
+router.get(
+  '/dashboard/payments',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  query('organizationId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.payments
+);
+
+router.get(
+  '/dashboard/risk',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  query('organizationId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.risk
+);
+
+// DEV ONLY: disabled in production unless ENABLE_INAPP_REFUNDS=true.
+router.post(
+  '/dashboard/refund',
+  authenticateUser,
+  organizationContextMiddleware,
+  requireOrganizationMatch('organizationId'),
+  billingLimiter,
+  body('organizationId').notEmpty(),
+  body('invoiceId').notEmpty(),
+  handleValidationErrors,
+  stripeDashboardController.refund
 );
 
 // ===== Public routes (no auth) =====
