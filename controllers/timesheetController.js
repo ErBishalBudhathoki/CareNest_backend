@@ -12,31 +12,35 @@ class TimesheetController {
         const { email, startDate, endDate, status } = req.body;
         const organizationId = req.body.organizationId || req.organizationContext?.organizationId;
 
-        if (!email || !startDate || !endDate || !organizationId) {
-            return res.status(400).json({ success: false, message: 'Email, organizationId, startDate, and endDate are required' });
+        if (!startDate || !endDate || !organizationId) {
+            return res.status(400).json({ success: false, message: 'organizationId, startDate, and endDate are required' });
         }
 
         const start = new Date(startDate);
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
 
-        // Security check: Users can only fetch their own timesheets unless admin
+        // Security check: Users can only fetch their own timesheets unless admin.
+        // Admins may omit email to list the whole organization (bulk approval).
         const requestingUserEmail = (req.user.email || '').toLowerCase();
-        const normalizedEmail = email.toLowerCase();
         const isAdmin = req.organizationContext?.isAdmin === true || req.user.role === 'admin';
-        
-        if (normalizedEmail !== requestingUserEmail && !isAdmin) {
-            return res.status(403).json({ success: false, message: 'Unauthorized access to timesheets' });
-        }
 
         // Query using Mongoose
         // We prioritize workDate as it's the standard Date field
         const query = {
-            userEmail: normalizedEmail,
             organizationId,
             workDate: { $gte: start, $lte: end },
             isActive: true
         };
+        if (email) {
+            const normalizedEmail = email.toLowerCase();
+            if (normalizedEmail !== requestingUserEmail && !isAdmin) {
+                return res.status(403).json({ success: false, message: 'Unauthorized access to timesheets' });
+            }
+            query.userEmail = normalizedEmail;
+        } else if (!isAdmin) {
+            return res.status(403).json({ success: false, message: 'Organization-wide listing requires admin role' });
+        }
         if (status) {
             query.status = status;
         }
