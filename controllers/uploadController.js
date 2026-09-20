@@ -1,4 +1,5 @@
 const catchAsync = require('../utils/catchAsync');
+const { buildPublicLogoUrl } = require('./fileController');
 
 class UploadController {
   uploadLogo = catchAsync(async (req, res) => {
@@ -16,8 +17,9 @@ class UploadController {
     let fileUrl;
     
     if (req.file.location) {
-      // S3/R2 direct URL
-      fileUrl = req.file.location;
+      // S3/R2 direct URL — re-expose through the public logo endpoint so
+      // logos keep working with the bucket private (logos/ keys only).
+      fileUrl = buildPublicLogoUrl(req, req.file.location);
     } else if (req.file.key) {
       // S3/R2 key - construct URL if location is missing (depends on multer-s3 version/config)
       // But storage.js logs key, so let's assume standard behavior or fallback
