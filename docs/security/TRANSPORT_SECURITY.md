@@ -173,14 +173,21 @@ domains cannot carry auth — anyone holding a URL downloads the file).
   bearer token (5 tests). Flutter sends Firebase headers via the new
   `AuthedNetworkImage` / `AuthedCacheManager` (backend hosts only).
 - R2 emitters (profile photos, certifications) now return **authenticated
-  proxy URLs** (`/api/files/download`), never raw R2 URLs. Logos stay
-  direct (public branding); invoice emails attach PDFs (no external
-  images), so privatization is email-safe.
-- The proxy allowlists the custom domain, so legacy custom-domain rows
-  keep working *through auth*. Migration script
+  proxy URLs** (`/api/files/download`), never raw R2 URLs.
+- **Logos stay public by design** (login screens, pre-login views): new
+  endpoint `GET /api/files/public?url=` streams only `logos/`-prefixed
+  keys (anything else → 400, rate-limited), and logo uploads now return
+  that form. Invoice emails attach PDFs (no external images) and
+  training content URLs are external links — both unaffected.
+- The proxy allowlists the custom domain and normalizes virtual-hosted /
+  path-style / custom-domain key forms, so legacy rows keep working
+  *through auth*. Migration script
   `scripts/migrateR2UrlsToApiHost.js` rewrites them to the API-host form;
   dry-run on dev: **0 legacy rows** (dev's single receipt is already
   API-host form).
+- Verified 2026-09-21 after owner disabled public access: custom domain
+  returns **401 anonymous**; credentialed S3 API unaffected (`HeadObject`
+  on bogus key → `NotFound`, proving keys + bucket work).
 
 ### 8.5 Mobile hardening (no new packages)
 Android `FLAG_SECURE` + root detection channel; iOS app-switcher blur +
@@ -190,17 +197,19 @@ in both flavors.
 ## 9. Operator runbook (human steps, not code)
 
 ### 9.1 R2 privatization (Cloudflare dashboard → R2 → bucket)
-Current state: public dev URL off, but `assets.bishalbudhathoki.com`
-serves the bucket publicly with no auth.
+Was: public dev URL off, but `assets.bishalbudhathoki.com` served the
+bucket publicly with no auth. **Done by owner 2026-09-21** — verified:
+custom domain returns 401 anonymous; credentialed S3 API unaffected.
 1. (Prod only, if needed) Dry-run `scripts/migrateR2UrlsToApiHost.js`
    against prod; apply with `APPLY=true` to convert any remaining
    custom-domain rows to API-host form (dev needed nothing).
-2. Disable public access on the bucket (this also stops custom-domain
-   serving — custom domains cannot be authenticated).
+2. Disable public access on the prod bucket when it goes live (same
+   dashboard toggle; custom-domain serving stops with it).
 3. Verify: unauthenticated `curl` to a former
    `assets.bishalbudhathoki.com/<key>` URL must fail; in-app
    images/receipts/photos still load (authed proxy); org logos still
-   load (public `/uploads/logos` + new R2 logo uploads stay direct).
+   load (public `/api/files/public` for R2 logos, `/uploads/logos`
+   for local).
 4. Later cleanup (optional): remove the custom-domain binding/DNS once
    step 3 has baked in with no 404 reports.
 
