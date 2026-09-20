@@ -63,23 +63,25 @@ describe('Integration: Shift Completion Flow', () => {
     // We need to wait a tick
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Verify DB update (Timesheet)
+    // The subscriber is a thin adapter: DB work moved into the
+    // ShiftLifecycleWorkflow activities (unit-tested separately), so no
+    // direct collection access happens here anymore.
     const { getDatabase } = require('../../config/database');
     const db = await getDatabase();
-    expect(db.collection).toHaveBeenCalledWith('workedTime');
-    expect(db.collection('workedTime').updateOne).toHaveBeenCalled();
+    expect(db.collection).not.toHaveBeenCalledWith('workedTime');
 
-    // Verify Temporal Workflow (Invoice)
+    // Verify saga dispatch: stable idempotent ID, duplicate protection,
+    // env-aware queue (never hardcoded 'default').
     const TemporalManager = require('../../core/TemporalManager');
     expect(TemporalManager.startWorkflow).toHaveBeenCalledWith(
-      'InvoiceProcessingWorkflow',
+      'ShiftLifecycleWorkflow',
       expect.objectContaining({
-        taskQueue: 'default',
-        args: [expect.objectContaining({
-          shiftId: 'shift-123',
-          organizationId: 'org-1'
-        })]
+        workflowId: 'shift-lifecycle-shift-123',
+        workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',
+        args: [expect.objectContaining({ shift: expect.objectContaining({ id: 'shift-123' }) })],
       })
     );
+    const [, opts] = mockStartWorkflow.mock.calls[0];
+    expect(opts).not.toHaveProperty('taskQueue', 'default');
   });
 });
