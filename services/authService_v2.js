@@ -14,12 +14,11 @@ const ACCESS_TOKEN_EXPIRE = process.env.JWT_EXPIRES_IN || '24h';
 const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 /**
- * Task queue helper
+ * Task queue helper — centralized in TemporalManager (single source of
+ * truth for the default-dev/prod queue mapping).
  */
 function getTaskQueue() {
-    const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
-    const isProd = projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
-    return `default-${isProd ? 'prod' : 'dev'}`;
+    return TemporalManager.getTaskQueue();
 }
 
 class AuthServiceV2 {

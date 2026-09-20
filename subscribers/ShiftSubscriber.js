@@ -1,7 +1,6 @@
 const EventBus = require('../core/EventBus');
-const QueueManager = require('../core/QueueManager');
-const { getDatabase } = require('../config/database');
 const logger = require('../config/logger');
+const TemporalManager = require('../core/TemporalManager');
 
 class ShiftSubscriber {
   constructor() {
@@ -14,69 +13,57 @@ class ShiftSubscriber {
   }
 
   /**
-   * Handle Shift Completed Event
-   * 1. Create WorkedTime record
-   * 2. Trigger Invoice Generation
+   * Thin adapter: hand the completed shift to the durable saga workflow.
+   * All DB work + retries live in ShiftLifecycleWorkflow activities;
+   * workflowId is stable per shift with REJECT_DUPLICATE so duplicate
+   * events collapse instead of double-creating records.
    */
   async handleShiftCompleted(shift) {
+    const shiftId = shift.id || shift._id;
     try {
-      logger.info(`Processing Shift Completed: ${shift.id || shift._id}`);
-      
-      const db = await getDatabase();
-
-      // 1. Create/Update WorkedTime record
-      // This mimics the "Timesheet Update" requirement
-      const workedTimeEntry = {
-        shiftId: shift.id || shift._id,
-        userEmail: shift.employeeEmail,
-        clientEmail: shift.clientEmail,
-        date: new Date(shift.startTime),
-        startTime: new Date(shift.startTime),
-        endTime: new Date(shift.endTime),
-        timeWorked: this.calculateHours(shift.startTime, shift.endTime, shift.breakDuration),
-        providerType: 'standard', // default, logic can be enhanced
-        organizationId: shift.organizationId,
-        createdAt: new Date(),
-        status: 'verified'
-      };
-
-      await db.collection('workedTime').updateOne(
-        { shiftId: workedTimeEntry.shiftId },
-        { $set: workedTimeEntry },
-        { upsert: true }
-      );
-
-      logger.info(`WorkedTime record created/updated for shift ${shift.id || shift._id}`);
-
-      // 2. Queue Invoice Generation via Temporal
-      await require('../core/TemporalManager').startWorkflow('InvoiceProcessingWorkflow', {
-        taskQueue: 'default',
-        workflowId: `invoice-generation-${shift.id || shift._id}-${Date.now()}`,
-        args: [{
-          shiftId: shift.id || shift._id,
-          clientEmail: shift.clientEmail,
-          organizationId: shift.organizationId
-        }]
+      logger.info(`Dispatching shift lifecycle workflow for ${shiftId}`);
+      await TemporalManager.startWorkflow('ShiftLifecycleWorkflow', {
+        workflowId: `shift-lifecycle-${shiftId}`,
+        args: [{ shift }],
+        workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',
       });
-
-      logger.info(`Invoice generation workflow started for shift ${shift.id || shift._id}`);
-
     } catch (error) {
-      logger.error('Error handling shift.completed event', { error: error.message, shift });
+      if (String(error && error.message).includes('AlreadyStarted')) {
+        logger.info(`Shift lifecycle already running for ${shiftId}`);
+        return;
+      }
+      logger.error('Error dispatching shift lifecycle workflow', {
+        error: error.message,
+        shift,
+      });
     }
   }
 
+  /**
+   * Thin adapter: cancelled shifts run compensation (void auto-created
+   * WorkedTime + audit trail). Previously a no-op stub.
+   */
   async handleShiftCancelled(payload) {
-    // Logic to remove workedTime or update invoice status
-    logger.info(`Shift Cancelled: ${payload.shiftId}`);
-  }
-
-  calculateHours(start, end, breakMins = 0) {
-    const s = new Date(start);
-    const e = new Date(end);
-    const diff = (e - s) / (1000 * 60 * 60);
-    const breakHours = breakMins / 60;
-    return Math.max(0, diff - breakHours);
+    const shiftId = payload.shiftId || (payload.shift && (payload.shift.id || payload.shift._id));
+    const organizationId =
+      payload.organizationId || (payload.shift && payload.shift.organizationId);
+    try {
+      logger.info(`Dispatching shift cancel workflow for ${shiftId}`);
+      await TemporalManager.startWorkflow('ShiftCancelWorkflow', {
+        workflowId: `shift-cancel-${shiftId}`,
+        args: [{ shiftId, organizationId }],
+        workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',
+      });
+    } catch (error) {
+      if (String(error && error.message).includes('AlreadyStarted')) {
+        logger.info(`Shift cancel already running for ${shiftId}`);
+        return;
+      }
+      logger.error('Error dispatching shift cancel workflow', {
+        error: error.message,
+        payload,
+      });
+    }
   }
 }
 

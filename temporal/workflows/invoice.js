@@ -1,6 +1,6 @@
 const { proxyActivities } = require('@temporalio/workflow');
 
-const { processInvoiceActivity } = proxyActivities({
+const { processInvoiceActivity, sendInvoiceEmailActivity } = proxyActivities({
   startToCloseTimeout: '5 minutes',
   retry: {
     initialInterval: '15 seconds',
@@ -21,6 +21,17 @@ async function InvoiceProcessingWorkflow(params) {
   return result;
 }
 
+/**
+ * Invoice email delivery (PDF attachment via server SMTP).
+ * workflowId: invoice-email-<recipient-hash>-<invoice?> — callers pass a
+ * stable idempotency key; duplicates collapse via REJECT_DUPLICATE.
+ */
+async function SendInvoiceEmailWorkflow(params) {
+  const result = await sendInvoiceEmailActivity(params);
+  return result;
+}
+
 module.exports = {
-  InvoiceProcessingWorkflow
+  InvoiceProcessingWorkflow,
+  SendInvoiceEmailWorkflow
 };

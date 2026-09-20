@@ -1,12 +1,9 @@
 const WorkedTime = require('../models/WorkedTime');
 const ClientAssignment = require('../models/ClientAssignment');
-const Invoice = require('../models/Invoice');
-const InvoiceLineItem = require('../models/InvoiceLineItem');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const catchAsync = require('../utils/catchAsync');
 const logger = require('../utils/logger');
-const crypto = require('crypto');
 
 /**
  * Bulk approve timesheets
@@ -243,7 +240,13 @@ exports.previewInvoices = catchAsync(async (req, res) => {
 
 /**
  * Generate invoices in bulk
- * POST /api/bulk/generate-invoices
+ * POST /api/bulk/generate-invoices[?async=true]
+ *
+ * Sync (default, legacy clients): generates inline and returns the summary.
+ * Async (?async=true): starts BulkInvoicesWorkflow and returns its
+ * workflowId immediately; poll GET /api/bulk/jobs/:workflowId for status.
+ * Workflow IDs are deterministic per input set with REJECT_DUPLICATE so
+ * double-submits cannot double-invoice.
  */
 exports.generateInvoices = catchAsync(async (req, res) => {
   const { appointmentIds, organizationId, groupByClient, dueDate } = req.body;
@@ -255,125 +258,48 @@ exports.generateInvoices = catchAsync(async (req, res) => {
     });
   }
 
-  // Get appointments
-  const appointments = await ClientAssignment.find({
-    _id: { $in: appointmentIds },
-    organizationId,
-    status: 'completed',
-    invoiced: { $ne: true },
-  })
-    .populate('clientId', 'firstName lastName email')
-    .populate('serviceId', 'name rate');
-
-  if (appointments.length === 0) {
-    return res.status(404).json({
-      success: false,
-      message: 'No eligible appointments found for invoicing',
-    });
-  }
-
-  const invoices = [];
-  const lineItems = [];
-
-  // Group by client if requested
-  if (groupByClient) {
-    const clientGroups = {};
-    appointments.forEach((apt) => {
-      const clientId = apt.clientId._id.toString();
-      if (!clientGroups[clientId]) {
-        clientGroups[clientId] = [];
+  if (req.query.async === 'true') {
+    const TemporalManager = require('../core/TemporalManager');
+    const {
+      bulkInvoicesWorkflowId,
+    } = require('../services/bulkInvoiceService');
+    const workflowId = bulkInvoicesWorkflowId(organizationId, appointmentIds);
+    try {
+      await TemporalManager.startWorkflow('BulkInvoicesWorkflow', {
+        workflowId,
+        args: [{ appointmentIds, organizationId, groupByClient, dueDate }],
+        workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',
+      });
+    } catch (error) {
+      // Duplicate submit while a run is active → report the live job.
+      if (String(error && error.message).includes('AlreadyStarted')) {
+        return res.json({ success: true, data: { workflowId, status: 'already-running' } });
       }
-      clientGroups[clientId].push(apt);
-    });
-
-    // Create one invoice per client
-    for (const [clientId, apts] of Object.entries(clientGroups)) {
-      const invoice = new Invoice({
-        organizationId,
-        clientId,
-        invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
-        issueDate: new Date(),
-        dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        status: 'pending',
-        subtotal: 0,
-        tax: 0,
-        total: 0,
-      });
-
-      let subtotal = 0;
-      apts.forEach((apt) => {
-        const amount = apt.serviceId.rate * apt.duration;
-        subtotal += amount;
-
-        lineItems.push({
-          invoiceId: invoice._id,
-          appointmentId: apt._id,
-          description: `${apt.serviceId.name} - ${apt.date.toLocaleDateString()}`,
-          quantity: apt.duration,
-          unitPrice: apt.serviceId.rate,
-          amount,
-        });
-      });
-
-      invoice.subtotal = subtotal;
-      invoice.tax = subtotal * 0.1; // 10% tax
-      invoice.total = subtotal + invoice.tax;
-      invoices.push(invoice);
+      throw error;
     }
-  } else {
-    // Create individual invoices
-    appointments.forEach((apt) => {
-      const amount = apt.serviceId.rate * apt.duration;
-      const invoice = new Invoice({
-        organizationId,
-        clientId: apt.clientId._id,
-        invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
-        issueDate: new Date(),
-        dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        status: 'pending',
-        subtotal: amount,
-        tax: amount * 0.1,
-        total: amount * 1.1,
-      });
-
-      lineItems.push({
-        invoiceId: invoice._id,
-        appointmentId: apt._id,
-        description: `${apt.serviceId.name} - ${apt.date.toLocaleDateString()}`,
-        quantity: apt.duration,
-        unitPrice: apt.serviceId.rate,
-        amount,
-      });
-
-      invoices.push(invoice);
+    return res.status(202).json({
+      success: true,
+      data: { workflowId, status: 'started' },
     });
   }
 
-  // Save invoices and line items
-  await Invoice.insertMany(invoices);
-  await InvoiceLineItem.insertMany(lineItems);
-
-  // Mark appointments as invoiced
-  await ClientAssignment.updateMany(
-    { _id: { $in: appointmentIds } },
-    { $set: { invoiced: true } }
-  );
-
-  logger.info(`Bulk generated ${invoices.length} invoices`, {
-    organizationId,
-    invoiceCount: invoices.length,
-    appointmentCount: appointments.length,
-    groupByClient,
-  });
-
-  res.json({
-    success: true,
-    data: {
-      invoiceCount: invoices.length,
-      appointmentCount: appointments.length,
-      totalAmount: invoices.reduce((sum, inv) => sum + inv.total, 0),
-    },
-  });
+  const {
+    generateInvoicesFromAppointments,
+  } = require('../services/bulkInvoiceService');
+  try {
+    const summary = await generateInvoicesFromAppointments({
+      appointmentIds,
+      organizationId,
+      groupByClient,
+      dueDate,
+    });
+    return res.json({ success: true, data: summary });
+  } catch (error) {
+    if (error && error.statusCode === 404) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+    throw error;
+  }
 });
 
 /**

@@ -1,6 +1,9 @@
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const { InvoiceStatus, PaymentStatus } = require('../../models/invoiceSchema');
 const logger = require('../../config/logger');
+const {
+  processRecurringExpenses,
+} = require('../../services/recurringExpenseService');
 
 // Note: Ensure MONGODB_URI is available in the worker environment
 const uri = process.env.MONGODB_URI;
@@ -152,7 +155,33 @@ async function processOverdueRemindersActivity() {
   }
 }
 
+/**
+ * Activity to generate due recurring expenses (all organizations).
+ * Replaces the legacy in-process node-cron scheduler
+ * (recurring_expense_scheduler.js), which misses runs at Cloud Run
+ * scale-to-zero and double-fires with multiple instances.
+ */
+async function processRecurringExpensesActivity() {
+  try {
+    const results = await processRecurringExpenses(null);
+    logger.info('[Temporal] Recurring expenses processed', {
+      processed: results.processed,
+      created: results.created,
+      errors: (results.errors || []).length,
+    });
+    return {
+      processed: results.processed || 0,
+      created: results.created || 0,
+      errorCount: (results.errors || []).length,
+    };
+  } catch (error) {
+    logger.error('[Temporal] Error processing recurring expenses:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   processRecurringInvoicesActivity,
-  processOverdueRemindersActivity
+  processOverdueRemindersActivity,
+  processRecurringExpensesActivity,
 };

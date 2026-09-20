@@ -1,6 +1,12 @@
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 
+// DEPRECATED PATH: BullMQ queues are disabled on Cloud Run (Redis limits)
+// and all former producers (cron_backup/*, workers/*, ShiftSubscriber)
+// have been migrated to Temporal or removed (2026-09). This module is kept
+// for local/non-Cloud-Run use and existing tests only — do NOT add new
+// producers here; use TemporalManager.startWorkflow instead.
+
 // Check if we should enable BullMQ at all
 // In CloudRun, BullMQ creates multiple connections which can exhaust Redis limits
 const isCloudRun = Boolean(process.env.K_SERVICE);
