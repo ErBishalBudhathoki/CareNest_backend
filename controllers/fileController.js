@@ -32,6 +32,35 @@ function isR2ApiHost(hostname) {
   return /\.r2\.cloudflarestorage\.com$/i.test(hostname);
 }
 
+// Legacy rows may store the bucket's custom public domain instead of the
+// R2 API host. Both address the same object key, so the proxy accepts
+// either — this keeps old records working after the bucket goes private.
+function r2CustomDomain() {
+  const raw = String(process.env.R2_PUBLIC_DOMAIN || '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  return raw || null;
+}
+
+function isAllowedR2Host(hostname) {
+  if (isR2ApiHost(hostname)) return true;
+  const custom = r2CustomDomain();
+  return !!custom && String(hostname || '').toLowerCase() === custom;
+}
+
+/**
+ * Build the authenticated backend URL for an R2/local file URL.
+ * Emitters must return THIS (never raw public URLs) so files stay behind
+ * auth after the bucket is made private. Works with absolute backend
+ * requests (uses req.protocol/host, proxy-aware via trust proxy).
+ */
+function buildFileProxyUrl(req, sourceUrl) {
+  const protocol = req.protocol || 'https';
+  const host = req.get('host');
+  return `${protocol}://${host}/api/files/download?url=${encodeURIComponent(sourceUrl)}`;
+}
+
 function parseDownloadUrl(rawUrl) {
   try {
     return new URL(rawUrl);
@@ -88,8 +117,9 @@ exports.downloadFile = catchAsync(async (req, res) => {
     return res.sendFile(localPath);
   }
 
-  // Private R2 API endpoint support (requires server-side credentials).
-  if (isR2ApiHost(parsed.hostname)) {
+  // Private R2 endpoint support (requires server-side credentials).
+  // Accepts both the R2 API host and the legacy custom public domain.
+  if (isAllowedR2Host(parsed.hostname)) {
     const client = getR2Client();
     if (!client) {
       return res.status(500).json({
@@ -153,4 +183,11 @@ exports.downloadFile = catchAsync(async (req, res) => {
     message: 'Unsupported file host for download proxy'
   });
 });
+
+module.exports = {
+  downloadFile: exports.downloadFile,
+  buildFileProxyUrl,
+  isAllowedR2Host,
+  isR2ApiHost,
+};
 

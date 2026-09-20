@@ -3,6 +3,9 @@ const nodemailer = require('nodemailer');
 const logger = require('../config/logger');
 const { securityMonitor } = require('../utils/securityMonitor');
 const catchAsync = require('../utils/catchAsync');
+const { buildFileProxyUrl } = require('./fileController');
+const User = require('../models/User');
+const UserOrganization = require('../models/UserOrganization');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 // Lazy-init R2 client (reused across requests)
@@ -213,6 +216,41 @@ class AuthController {
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
+
+    // IDOR guard: photos are PII. Serve when the caller IS the subject,
+    // holds an admin/owner role, or shares an organization with the photo
+    // owner (teammates) — never cross-org. Keeps avatar lists working
+    // while killing anonymous/cross-org enumeration.
+    const callerEmail = req.user && req.user.email;
+    const roles = (req.user && (req.user.roles || [req.user.role]) || []).map(
+      (r) => String(r || '').toLowerCase(),
+    );
+    const isSelf =
+      callerEmail &&
+      String(callerEmail).toLowerCase() === String(email).toLowerCase();
+    const isPrivileged = roles.includes('admin') || roles.includes('owner');
+    if (!isSelf && !isPrivileged) {
+      const owner = await User.findOne({ email: email.toLowerCase() }).select(
+        'organizationId',
+      );
+      const callerOrg = req.user && req.user.organizationId;
+      const ownerOrg = owner && owner.organizationId;
+      let sameOrg =
+        !!callerOrg &&
+        !!ownerOrg &&
+        String(callerOrg) === String(ownerOrg);
+      if (!sameOrg && callerOrg && owner) {
+        const membership = await UserOrganization.findOne({
+          userId: req.user.userId,
+          organizationId: ownerOrg,
+          isActive: true,
+        }).lean();
+        sameOrg = !!membership;
+      }
+      if (!sameOrg) {
+        return res.status(403).json({ error: 'Access denied to this photo' });
+      }
+    }
     
     const photoResult = await authService.getUserPhoto(email);
     
@@ -327,6 +365,18 @@ class AuthController {
       return res
         .status(500)
         .json({ error: 'File upload failed: No resolvable URL returned' });
+    }
+
+    // Profile photos are private: serve them through the authenticated
+    // files proxy instead of a directly-accessible R2 URL (covers both
+    // the R2 API host and any legacy custom-domain form). Local-dev
+    // fallback and already-proxied URLs keep their shape.
+    if (
+      /^https?:\/\//i.test(photoUrl) &&
+      !photoUrl.includes('/api/files/download?') &&
+      !/\/uploads\//i.test(photoUrl)
+    ) {
+      photoUrl = buildFileProxyUrl(req, photoUrl);
     }
 
     await authService.uploadUserPhoto(

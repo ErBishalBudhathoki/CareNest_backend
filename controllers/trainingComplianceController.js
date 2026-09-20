@@ -6,6 +6,7 @@ const ComplianceChecklist = require('../models/ComplianceChecklist');
 const UserChecklistStatus = require('../models/UserChecklistStatus');
 const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
+const { buildFileProxyUrl } = require('./fileController');
 const logger = require('../utils/logger');
 const fs = require('fs');
 
@@ -106,16 +107,14 @@ class TrainingComplianceController {
       });
     }
 
-    // Construct file URL
+    // Construct file URL. Certifications are private: R2 uploads go
+    // through the authenticated files proxy (never raw public URLs).
     let fileUrl;
     if (req.file.location || req.file.key) {
-      if (process.env.R2_PUBLIC_DOMAIN && req.file.key) {
-         const domain = process.env.R2_PUBLIC_DOMAIN.replace(/\/$/, '');
-         const key = req.file.key.replace(/^\//, '');
-         fileUrl = `${domain}/${key}`;
-      } else {
-         fileUrl = req.file.location;
-      }
+      const sourceUrl =
+        req.file.location ||
+        `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${String(req.file.key).replace(/^\//, '')}`;
+      fileUrl = buildFileProxyUrl(req, sourceUrl);
     } else {
       fileUrl = `${req.protocol}://${req.get('host')}/uploads/certifications/${req.file.filename}`;
     }

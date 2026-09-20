@@ -23,6 +23,7 @@ const BLOCKED_PREFIXES = [
   '/api/invoices',
   '/api/invoice', // invoice generation + management
   '/api/invoice-ai',
+  '/api/care-intelligence', // AI inference cost + premium feature
   '/api/sendInvoiceEmail',
   '/api/client-portal/invoices',
   '/api/client-portal/invoice',

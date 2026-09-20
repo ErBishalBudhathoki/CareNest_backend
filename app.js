@@ -239,7 +239,15 @@ app.use('/admin-dev', require('./routes/adminDevRoutes'));
 app.use('/api', apiSecurityGate, subscriptionGate, require('./routes'));
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Organization logos are public branding; everything else (receipts,
+// certifications, profile photos, IDs) requires authentication because
+// local filenames are predictable and must not be anonymously enumerable.
+app.use('/uploads/logos', express.static(path.join(__dirname, 'uploads/logos')));
+app.use(
+  '/uploads',
+  require('./middleware/auth').authenticateUser,
+  express.static(path.join(__dirname, 'uploads'))
+);
 
 
 
