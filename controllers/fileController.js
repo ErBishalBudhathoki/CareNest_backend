@@ -50,9 +50,22 @@ function isAllowedR2Host(hostname) {
 }
 
 /**
+ * Normalize an R2 object key from a URL pathname.
+ * Handles virtual-hosted form (`/key…`), path-style form
+ * (`/<bucket>/key…`) and custom-domain form (`/key…`).
+ */
+function extractR2Key(pathname, bucket) {
+  let key = String(pathname || '').replace(/^\/+/, '');
+  if (bucket && key.toLowerCase().startsWith(`${String(bucket).toLowerCase()}/`)) {
+    key = key.slice(String(bucket).length + 1);
+  }
+  return key;
+}
+
+/**
  * Build the authenticated backend URL for an R2/local file URL.
  * Emitters must return THIS (never raw public URLs) so files stay behind
- * auth after the bucket is made private. Works with absolute backend
+ * auth after the bucket goes private. Works with absolute backend
  * requests (uses req.protocol/host, proxy-aware via trust proxy).
  */
 function buildFileProxyUrl(req, sourceUrl) {
@@ -60,6 +73,58 @@ function buildFileProxyUrl(req, sourceUrl) {
   const host = req.get('host');
   return `${protocol}://${host}/api/files/download?url=${encodeURIComponent(sourceUrl)}`;
 }
+
+/**
+ * Build the PUBLIC backend URL for an organization logo.
+ * Logos are branding by design (login screens, emails, pre-login views)
+ * and stay reachable without credentials — but ONLY keys under logos/.
+ */
+function buildPublicLogoUrl(req, sourceUrl) {
+  const protocol = req.protocol || 'https';
+  const host = req.get('host');
+  return `${protocol}://${host}/api/files/public?url=${encodeURIComponent(sourceUrl)}`;
+}
+
+/**
+ * Public logo handler (NO auth). Streams only objects whose key starts
+ * with `logos/` — anything else is rejected so this cannot be abused as
+ * an open proxy for private files. Long cache: logo uploads mint fresh
+ * timestamped keys, so objects are effectively immutable.
+ */
+const downloadPublicLogo = catchAsync(async (req, res) => {
+  const sourceUrl = String(req.query.url || '').trim();
+  const parsed = parseDownloadUrl(sourceUrl);
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return res.status(400).json({ success: false, message: 'Invalid file URL' });
+  }
+  if (!isAllowedR2Host(parsed.hostname)) {
+    return res.status(400).json({ success: false, message: 'Unsupported file host' });
+  }
+  const key = extractR2Key(parsed.pathname, process.env.R2_BUCKET_NAME);
+  if (!key.toLowerCase().startsWith('logos/')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Only organization logos are publicly accessible',
+    });
+  }
+  const bucket = process.env.R2_BUCKET_NAME;
+  const client = getR2Client();
+  if (!client || !bucket) {
+    return res.status(500).json({ success: false, message: 'Storage not configured' });
+  }
+  try {
+    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    setDownloadHeaders(res, key.split('/').pop() || 'logo', object.ContentType, object.ContentLength);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    if (!object.Body || typeof object.Body.pipe !== 'function') {
+      return res.status(500).json({ success: false, message: 'Unexpected storage response' });
+    }
+    object.Body.pipe(res);
+  } catch (error) {
+    logger.error('Public logo fetch failed', { error: error.message, bucket, key });
+    return res.status(404).json({ success: false, message: 'Logo not found' });
+  }
+});
 
 function parseDownloadUrl(rawUrl) {
   try {
@@ -128,7 +193,7 @@ exports.downloadFile = catchAsync(async (req, res) => {
       });
     }
 
-    const key = parsed.pathname.replace(/^\/+/, '');
+    const key = extractR2Key(parsed.pathname, process.env.R2_BUCKET_NAME);
     if (!key) {
       return res.status(400).json({ success: false, message: 'Invalid R2 object key' });
     }
@@ -186,7 +251,10 @@ exports.downloadFile = catchAsync(async (req, res) => {
 
 module.exports = {
   downloadFile: exports.downloadFile,
+  downloadPublicLogo,
   buildFileProxyUrl,
+  buildPublicLogoUrl,
+  extractR2Key,
   isAllowedR2Host,
   isR2ApiHost,
 };
