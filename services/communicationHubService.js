@@ -75,19 +75,35 @@ class CommunicationHubService {
   /**
    * Get all hub conversations for the authenticated user.
    * Uses hub_conversations collection ONLY (never messageConversations).
+   *
+   * IDOR guard: the query is built from the CALLER's identity only. A
+   * mismatched :userId param returns nothing unless the caller is an
+   * admin/owner (support flows) — never another user's thread list.
    */
   async getConversations(userId, authUser) {
     try {
-      const userTokens = [
-        normalizeToken(userId),
+      const selfTokens = [
         normalizeToken(authUser?.email),
         normalizeToken(authUser?.userId),
         normalizeToken(authUser?.id),
       ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
 
-      if (!userTokens.length) {
+      const requestedToken = normalizeToken(userId);
+      const roles = (authUser && (authUser.roles || [authUser.role]) || []).map(
+        (r) => String(r || '').toLowerCase(),
+      );
+      const isPrivileged = roles.includes('admin') || roles.includes('owner');
+      const matchesSelf =
+        requestedToken && selfTokens.includes(requestedToken);
+
+      if (!selfTokens.length) {
         return { success: true, data: [] };
       }
+      if (requestedToken && !matchesSelf && !isPrivileged) {
+        return { success: true, data: [] };
+      }
+
+      const userTokens = selfTokens;
 
       const conversations = await HubConversation.find({
         participants: { $in: userTokens },

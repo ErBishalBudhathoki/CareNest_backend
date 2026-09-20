@@ -5,6 +5,10 @@ const rateLimit = require('express-rate-limit');
 const { param, body, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const {
+  organizationContextMiddleware,
+  requireOrganizationMatch,
+} = require('../middleware/organizationContext');
 
 // Rate limiting
 const appointmentLimiter = rateLimit({
@@ -74,7 +78,7 @@ router.get('/loadAppointmentDetails/:userEmail/:clientEmail', appointmentLimiter
  * Get all assignments for an organization
  * GET /getOrganizationAssignments/:organizationId
  */
-router.get('/getOrganizationAssignments/:organizationId', appointmentLimiter, orgParam, handleValidationErrors, AppointmentController.getOrganizationAssignments);
+router.get('/getOrganizationAssignments/:organizationId', appointmentLimiter, orgParam, handleValidationErrors, organizationContextMiddleware, requireOrganizationMatch('organizationId'), AppointmentController.getOrganizationAssignments);
 
 /**
  * Remove client assignment
