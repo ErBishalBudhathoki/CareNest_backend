@@ -8,10 +8,14 @@ const path = require('path');
 const { registerSchedules } = require('./scripts/register-temporal-schedules');
 const { sendPushNotification } = require('./temporal/activities/notifications');
 const { sendEmergencyPush } = require('./temporal/activities/emergency');
-const { processInvoiceActivity } = require('./temporal/activities/invoice');
+const {
+  processInvoiceActivity,
+  sendInvoiceEmailActivity,
+} = require('./temporal/activities/invoice');
 const { 
   processRecurringInvoicesActivity, 
-  processOverdueRemindersActivity 
+  processOverdueRemindersActivity,
+  processRecurringExpensesActivity,
 } = require('./temporal/activities/cron');
 const {
   processDunningActivity,
@@ -34,6 +38,15 @@ const {
   sendPasswordChangeNotificationActivity,
   sendGenericEmailActivity
 } = require('./temporal/activities/auth');
+const { generateBulkInvoicesActivity } = require('./temporal/activities/bulk');
+const {
+  upsertWorkedTimeActivity,
+  voidShiftArtifactsActivity,
+} = require('./temporal/activities/shift');
+const {
+  jwtRotationCheckActivity,
+  ndisCatalogSyncActivity,
+} = require('./temporal/activities/maintenance');
 
 async function run() {
   logger.info('Starting Temporal Worker...', { env: process.env.NODE_ENV });
@@ -100,7 +113,9 @@ async function run() {
       sendPushNotification,
       sendEmergencyPush,
       processInvoiceActivity,
+      sendInvoiceEmailActivity,
       processRecurringInvoicesActivity,
+      processRecurringExpensesActivity,
       processOverdueRemindersActivity,
       processDunningActivity,
       processExpenseRemindersActivity,
@@ -118,6 +133,11 @@ async function run() {
       sendPasswordResetEmailActivity,
       sendPasswordChangeNotificationActivity,
       sendGenericEmailActivity,
+      generateBulkInvoicesActivity,
+      upsertWorkedTimeActivity,
+      voidShiftArtifactsActivity,
+      jwtRotationCheckActivity,
+      ndisCatalogSyncActivity,
     },
   });
 

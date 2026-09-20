@@ -126,7 +126,8 @@ class EmergencyService {
               data: dataPayload
             }
           }],
-          taskQueue: 'default'
+          // No taskQueue: TemporalManager resolves default-dev/prod per
+          // environment. Never 'default' — no worker polls it.
         }).catch(err => logger.error('Failed to start Emergency Temporal workflow', { 
           userId: entry.userId, 
           error: err.message 

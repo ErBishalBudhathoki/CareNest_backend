@@ -14,6 +14,11 @@ const schedules = [
     workflow: 'RecurringInvoiceCronWorkflow'
   },
   {
+    scheduleId: 'recurring-expenses-schedule',
+    cron: '0 6 * * *',
+    workflow: 'RecurringExpenseCronWorkflow'
+  },
+  {
     scheduleId: 'overdue-reminders-schedule',
     cron: '0 0 * * *',
     workflow: 'OverdueRemindersCronWorkflow'
@@ -52,6 +57,16 @@ const schedules = [
     scheduleId: 'invoice-ai-weekly-schedule',
     cron: '0 0 * * 0', // Weekly on Sundays
     workflow: 'InvoiceAICronWorkflow'
+  },
+  {
+    scheduleId: 'jwt-rotation-check-schedule',
+    cron: '0 3 * * 1', // Weekly on Mondays
+    workflow: 'JwtRotationCheckWorkflow'
+  },
+  {
+    scheduleId: 'ndis-catalog-sync-schedule',
+    cron: '0 4 * * *', // Daily (no-op when unchanged)
+    workflow: 'NdisCatalogSyncWorkflow'
   }
 ];
 

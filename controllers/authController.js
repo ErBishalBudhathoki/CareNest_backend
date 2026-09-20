@@ -1,5 +1,4 @@
 const authService = require('../services/authService');
-const nodemailer = require('nodemailer');
 const logger = require('../config/logger');
 const { securityMonitor } = require('../utils/securityMonitor');
 const catchAsync = require('../utils/catchAsync');
@@ -423,38 +422,18 @@ class AuthController {
       return res.status(400).json({ error: 'Email is required' });
     }
     
-    const otp = await authService.generateOTP(email);
-    
-    // Configure email transporter (you may want to move this to a config file)
-    const transporter = nodemailer.createTransport({
-      service: 'gmail', // or your email service
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-    
-    // Send OTP email
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Password Reset OTP',
-      html: `
-        <h2>Password Reset Request</h2>
-        <p>Your OTP for password reset is: <strong>${otp}</strong></p>
-        <p>This OTP will expire in 10 minutes.</p>
-        <p>If you didn't request this, please ignore this email.</p>
-      `
-    };
-    
-    await transporter.sendMail(mailOptions);
-    
-    logger.business('OTP Sent', {
-      event: 'otp_sent',
+    // generateOTP persists the OTP row and queues delivery via
+    // authNotificationWorkflow (retried). Do NOT send inline here:
+    // SMTP latency/failures must not fail the request, and a second send
+    // would deliver a duplicate OTP email.
+    await authService.generateOTP(email);
+
+    logger.business('OTP Queued', {
+      event: 'otp_queued',
       email,
       timestamp: new Date().toISOString()
     });
-    
+
     res.json({ message: 'OTP sent successfully' });
   });
 

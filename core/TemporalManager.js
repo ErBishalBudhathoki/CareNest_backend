@@ -7,6 +7,20 @@ let connectionInstance = null;
 
 class TemporalManager {
   /**
+   * Environment-aware task queue. Workers poll `default-dev` /
+   * `default-prod` (see temporal-worker.js) — NEVER the bare `default`
+   * queue, which has no workers and would leave workflows stuck.
+   * Single source of truth: all starters must resolve through here.
+   */
+  static getTaskQueue() {
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'invoice-660f3';
+    const isProd =
+      projectId === 'carenest-prods' || process.env.NODE_ENV === 'production';
+    return `default-${isProd ? 'prod' : 'dev'}`;
+  }
+
+  /**
+  /**
    * Initializes and returns the Temporal Client connection.
    *
    * Supports three connection modes based on environment:
@@ -98,22 +112,52 @@ class TemporalManager {
   /**
    * Starts a Temporal workflow.
    * @param {string} workflowName Name of the workflow to start.
-   * @param {Object} options Options including workflowId, taskQueue, and args.
+   * @param {Object} options Options including workflowId, taskQueue, args,
+   *   and optional workflowIdReusePolicy (e.g. REJECT_DUPLICATE for
+   *   idempotent financial jobs).
    */
-  static async startWorkflow(workflowName, { workflowId, taskQueue, args }) {
+  static async startWorkflow(workflowName, { workflowId, taskQueue, args, workflowIdReusePolicy }) {
     const client = await this.getClient();
     try {
-      const handle = await client.workflow.start(workflowName, {
-        taskQueue: taskQueue || 'default',
+      const startOpts = {
+        taskQueue: taskQueue || this.getTaskQueue(),
         workflowId,
         args: args || [],
-      });
+      };
+      if (workflowIdReusePolicy) {
+        startOpts.workflowIdReusePolicy = workflowIdReusePolicy;
+      }
+      const handle = await client.workflow.start(workflowName, startOpts);
       logger.info(`Started Temporal workflow: ${workflowName}`, { workflowId: handle.workflowId });
       return handle;
     } catch (error) {
       logger.error(`Failed to start Temporal workflow: ${workflowName}`, { error: error.message, workflowId });
       throw error;
     }
+  }
+
+  /**
+   * Describes a workflow execution for job-status polling.
+   * Returns a stable shape: { workflowId, status, result?, error? } where
+   * status is one of running|completed|failed.
+   */
+  static async describeWorkflow(workflowId) {
+    const client = await this.getClient();
+    const handle = client.workflow.getHandle(workflowId);
+    const desc = await handle.describe();
+    const statusName = String(desc.status && desc.status.name || desc.status || '');
+    if (statusName === 'COMPLETED') {
+      try {
+        const result = await handle.result();
+        return { workflowId, status: 'completed', result };
+      } catch (error) {
+        return { workflowId, status: 'failed', error: error.message };
+      }
+    }
+    if (['FAILED', 'TIMED_OUT', 'TERMINATED', 'CANCELED', 'CANCELLED'].includes(statusName)) {
+      return { workflowId, status: 'failed', error: `Workflow ${statusName}` };
+    }
+    return { workflowId, status: 'running' };
   }
 
   /**
