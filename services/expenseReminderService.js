@@ -141,8 +141,11 @@ async function sendReceiptReminder(expense) {
             return { success: false, reason: 'no_fcm_token' };
         }
 
-        // Import Firebase Admin
-        const admin = require('../config/firebase');
+        // Send via the shared sender (firebase-admin v12 removed the
+        // admin.messaging() namespace API — calling it throws
+        // "admin.messaging is not a function" and silently kills every
+        // receipt reminder). Message is constructed below.
+        const firebase = require('../config/firebase');
 
         // Calculate hours since creation
         const hoursSinceCreation = Math.floor(
@@ -192,8 +195,9 @@ async function sendReceiptReminder(expense) {
             token: tokenDoc.fcmToken
         };
 
-        // Send the notification
-        const response = await admin.messaging().send(message);
+        // Send the notification via the shared sender (see note above
+        // about the removed admin.messaging() namespace API).
+        const response = await firebase.getMessaging().send(message);
 
         console.log(`Receipt reminder sent for expense ${expense._id} to ${userEmail}: ${response}`);
 

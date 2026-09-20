@@ -176,9 +176,11 @@ domains cannot carry auth — anyone holding a URL downloads the file).
   proxy URLs** (`/api/files/download`), never raw R2 URLs.
 - **Logos stay public by design** (login screens, pre-login views): new
   endpoint `GET /api/files/public?url=` streams only `logos/`-prefixed
-  keys (anything else → 400, rate-limited), and logo uploads now return
-  that form. Invoice emails attach PDFs (no external images) and
-  training content URLs are external links — both unaffected.
+  keys (anything else → 400, rate-limited). No *user* auth needed, but
+  the global App Check gate still applies, so only genuine app installs
+  can fetch (verified live: no token → `MISSING_APP_CHECK_TOKEN`). Logo
+  uploads now return that form. Invoice emails attach PDFs (no external
+  images) and training content URLs are external links — both unaffected.
 - The proxy allowlists the custom domain and normalizes virtual-hosted /
   path-style / custom-domain key forms, so legacy rows keep working
   *through auth*. Migration script

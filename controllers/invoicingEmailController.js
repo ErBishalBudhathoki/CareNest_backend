@@ -1,5 +1,6 @@
 const InvoicingEmailDetail = require('../models/InvoicingEmailDetail');
 const InvoicingEmailKey = require('../models/InvoicingEmailKey');
+const TemporalManager = require('../core/TemporalManager');
 
 class InvoicingEmailController {
   constructor() {
@@ -345,30 +346,39 @@ class InvoicingEmailController {
         });
       }
 
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'mail.smtp2go.com',
-        port: Number(process.env.SMTP_PORT || '587'),
-        auth: { user: smtpUser, pass: smtpPass },
-      });
-
-      const info = await transporter.sendMail({
-        from: `"CareNest" <${smtpUser}>`,
-        to: recipientEmail,
-        subject,
-        text: invoiceText || 'Please find the attached invoice.',
-        attachments: [
-          {
-            filename: fileName,
-            content: pdfBuffer,
-            contentType: 'application/pdf',
-          },
-        ],
-      });
+      // Deliver asynchronously via Temporal (retried). SMTP latency or
+      // outages must not fail the request. Idempotency key makes
+      // double-taps collapse instead of double-sending.
+      const idempotencyKey = crypto
+        .createHash('sha256')
+        .update(`${recipientEmail}|${subject}|${fileName}|${pdfBuffer.length}`)
+        .digest('hex')
+        .slice(0, 16);
+      const workflowId = `invoice-email-${idempotencyKey}`;
+      try {
+        await TemporalManager.startWorkflow('SendInvoiceEmailWorkflow', {
+          workflowId,
+          args: [
+            {
+              to: recipientEmail,
+              subject,
+              text: invoiceText,
+              pdfBase64,
+              fileName,
+            },
+          ],
+          workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',
+        });
+      } catch (error) {
+        if (!String(error && error.message).includes('AlreadyStarted')) {
+          throw error;
+        }
+      }
 
       return res.status(200).json({
         success: true,
         message: 'Invoice email sent',
-        messageId: info?.messageId || null,
+        messageId: null,
       });
     } catch (error) {
       return res.status(500).json({

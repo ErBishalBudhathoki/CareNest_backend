@@ -215,8 +215,12 @@ async function sendTimesheetReminder(userEmail, organizationId, details) {
             token: tokenDoc.fcmToken
         };
 
-        // Send the notification
-        const response = await admin.messaging().send(message);
+        // Send via the shared sender (firebase-admin v12 removed the
+        // admin.messaging() namespace API — calling it throws
+        // "admin.messaging is not a function" and silently kills every
+        // timesheet reminder).
+        const firebase = require('../config/firebase');
+        const response = await firebase.getMessaging().send(message);
 
         console.log(`Timesheet reminder sent to ${userEmail}: ${response}`);
 

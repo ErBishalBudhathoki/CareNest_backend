@@ -1,9 +1,10 @@
 const { NotificationWorkflow } = require('./notifications');
 const { EmergencyNotificationWorkflow } = require('./emergency');
-const { InvoiceProcessingWorkflow } = require('./invoice');
+const { InvoiceProcessingWorkflow, SendInvoiceEmailWorkflow } = require('./invoice');
 const { 
   RecurringInvoiceCronWorkflow,
-  OverdueRemindersCronWorkflow
+  OverdueRemindersCronWorkflow,
+  RecurringExpenseCronWorkflow,
 } = require('./cron');
 const {
   DunningCronWorkflow,
@@ -16,13 +17,18 @@ const {
 } = require('./system_cron');
 const { EmployeeOnboardingWorkflow } = require('./employeeOnboarding');
 const { authNotificationWorkflow } = require('./auth');
+const { BulkInvoicesWorkflow } = require('./bulk');
+const { ShiftLifecycleWorkflow, ShiftCancelWorkflow } = require('./shift');
+const { JwtRotationCheckWorkflow, NdisCatalogSyncWorkflow } = require('./maintenance');
 
 module.exports = {
   NotificationWorkflow,
   EmergencyNotificationWorkflow,
   InvoiceProcessingWorkflow,
+  SendInvoiceEmailWorkflow,
   RecurringInvoiceCronWorkflow,
   OverdueRemindersCronWorkflow,
+  RecurringExpenseCronWorkflow,
   DunningCronWorkflow,
   ExpenseRemindersCronWorkflow,
   TimesheetRemindersCronWorkflow,
@@ -31,5 +37,10 @@ module.exports = {
   EmployeeOnboardingWorkflow,
   CleanupArtifactRegistryWorkflow,
   authNotificationWorkflow,
-  InvoiceAICronWorkflow
+  InvoiceAICronWorkflow,
+  BulkInvoicesWorkflow,
+  ShiftLifecycleWorkflow,
+  ShiftCancelWorkflow,
+  JwtRotationCheckWorkflow,
+  NdisCatalogSyncWorkflow
 };
