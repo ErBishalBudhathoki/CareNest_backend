@@ -105,12 +105,10 @@ jest.mock('../core/TemporalManager', () => ({
   getClient: jest.fn().mockResolvedValue({})
 }));
 
-// Mock Job Workers
+// Mock Job Workers (legacy workers/ removed — Temporal owns scheduling now)
 jest.mock('../core/QueueManager', () => ({
   registerWorker: jest.fn()
 }));
-
-jest.mock('../workers/InvoiceWorker', () => jest.fn());
 
 // Mock Environment Config
 jest.mock('../config/environment', () => ({
