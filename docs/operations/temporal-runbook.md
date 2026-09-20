@@ -65,11 +65,65 @@ Job status: `GET /bulk/jobs/:workflowId` (org-scoped by embedded org).
 5. Unit tests (activity logic + registration + route behavior).
 6. Observe first run in Temporal UI before retiring any legacy path.
 
+## Parallel smoke test (`scripts/temporal-smoke.js`)
+
+Fires every worker workflow concurrently and reports pass/fail. Must run
+where Temporal is reachable (VPS/Dokploy host or tunnelled laptop).
+
+```bash
+node scripts/temporal-smoke.js --dry-run            # print plan only
+node scripts/temporal-smoke.js --confirm             # 12 cron workflows
+node scripts/temporal-smoke.js --confirm --only=cron,saga --org-id=<dev-org>
+node scripts/temporal-smoke.js --confirm --only=bulk --org-id=<o> --appointment-ids=<a,b>
+node scripts/temporal-smoke.js --confirm --only=email --email-to=<controlled-inbox>
+```
+
+Safety: `--confirm` required for live runs; cron acts on real (dev) data.
+Saga runs lifecycle + cancel as a net-zero pair. Bulk/email are opt-in
+(real invoices/emails). Push/auth/onboarding notifications are never
+fired here (would spam real devices) — trigger those individually.
+
 ## Retired (2026-09)
 
 `cron_backup/*`, `backend/workers/*`, root `recurring_expense_scheduler.js`
 deleted (no launch points; superseded above). BullMQ path in
 `core/QueueManager.js` deprecated (disabled on Cloud Run).
+
+## Deployment (Dokploy, Oracle VPS)
+
+- The dev and prod workers are separate Dokploy applications building the
+  backend repo (`dev` branch → dev worker). **Auto-deploy on push is ON** —
+  pushing `dev` rebuilds and recreates the worker container automatically.
+- A rebuild (not a restart) is required for code changes; restarts reuse
+  the old image. Manual path: app → Deployments → Redeploy with rebuild.
+- After redeploy, expect in the worker log: all 12
+  `Successfully updated schedule …-dev` lines (including
+  `recurring-expenses`, `jwt-rotation-check`, `ndis-catalog-sync`),
+  workflow bundle growth, and `state: 'RUNNING'` on the env queue.
+- Rollout order for backend changes: worker first (new activities must
+  exist before API starters invoke them), then Cloud Run API.
+- Verified live 2026-09-20: clean startup, all schedules registered,
+  executions firing on cadence (shift reminders every 15 min, expense +
+  timesheet ticks at :00).
+
+## Incident log
+
+- **2026-09-20 — expense/timesheet reminders silently sending nothing.**
+  Symptom in worker log: `TypeError: admin.messaging is not a function`,
+  `Reminders sent: 0`. Root cause: firebase-admin v12 removed the
+  `admin.messaging()` namespace API; both reminder services called it.
+  Fix: route through the shared `config/firebase.getMessaging()` sender
+  (same as notification activities). Regression test:
+  `tests/middleware/expenseReminderDelivery.test.js`.
+- **2026-09-20 — external gRPC unreachable.** TCP/TLS to the VPS succeed
+  but handshakes stall from outside (firewall allowlists worker hosts).
+  Not an outage: verify from the VPS (worker logs, Temporal UI,
+  `temporal-ping.js` run on a host with access).
+- **2026-09 — stuck-workflow risk.** Starters hardcoded task queue
+  `'default'`, which no worker polls. Fixed centrally:
+  `TemporalManager.getTaskQueue()` is the only allowed resolution;
+  `temporalManager.test.js` pins dev/prod mapping. Stuck runs found on
+  `default` should be terminated after fixing the starter.
 
 ## Deferred (sized, not started)
 
