@@ -3,6 +3,30 @@ const logger = require('../config/logger');
 const catchAsync = require('../utils/catchAsync');
 
 /**
+ * IDOR guard: appointment lookups are keyed by email, so the caller must
+ * be the subject or hold an admin/owner role. Prevents any authenticated
+ * user from pulling another user's roster by email.
+ */
+function canAccessUserEmail(req, email) {
+  const callerEmail = req.user && req.user.email;
+  if (callerEmail && email && String(callerEmail).toLowerCase() === String(email).toLowerCase()) {
+    return true;
+  }
+  const roles = (req.user && (req.user.roles || [req.user.role]) || []).map((r) =>
+    String(r || '').toLowerCase(),
+  );
+  return roles.includes('admin') || roles.includes('owner');
+}
+
+function forbiddenEmail(res) {
+  return res.status(403).json({
+    success: false,
+    error: 'Access denied to this user\u2019s appointments',
+    data: []
+  });
+}
+
+/**
  * Controller for handling appointment-related HTTP requests
  */
 class AppointmentController {
@@ -19,6 +43,10 @@ class AppointmentController {
         error: 'Email parameter is required',
         data: []
       });
+    }
+
+    if (!canAccessUserEmail(req, email)) {
+      return forbiddenEmail(res);
     }
     
     const appointments = await appointmentService.loadAppointments(email);
@@ -41,6 +69,10 @@ class AppointmentController {
         success: false,
         error: 'Both userEmail and clientEmail parameters are required'
       });
+    }
+
+    if (!canAccessUserEmail(req, userEmail)) {
+      return forbiddenEmail(res);
     }
     
     const appointmentDetails = await appointmentService.loadAppointmentDetails(userEmail, clientEmail);

@@ -1,0 +1,476 @@
+[
+ {
+  "time": "23:34:43",
+  "method": "POST",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/firebase-auth/sync",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "content-length": "125",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:50",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/user/photo/deverbishal331%40gmail.com",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "x-firebase-appcheck": "<REDACTED 941 chars>",
+   "accept-encoding": "gzip",
+   "authorization": "<REDACTED 972 chars>",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:50",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/initData/<user-email>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:50",
+  "method": "POST",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/firebase-auth/sync",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "content-length": "81",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:51",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/checkInvoicingEmailKey?email=<user-email>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/x-www-form-urlencoded",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:51",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/invoices/stats/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept": "application/json",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:51",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/businesses/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:52",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/organization/<mongo-id>/clients",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:34:59",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/invoices?organizationId=<mongo-id>&page=1&limit=20&invoiceType=client",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:05",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/invoices/<mongo-id>?organizationId=<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:10",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/invoices/stats/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept": "application/json",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:11",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/businesses/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:12",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/organization/<mongo-id>/clients",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:12",
+  "method": "POST",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/firebase-auth/verify-email",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "content-length": "46",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:14",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/organization/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:35:15",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/payments/connect-status?organizationId=<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:32",
+  "method": "POST",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/firebase-auth/sync",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "content-length": "125",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:32",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/initData/<user-email>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:32",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/user/photo/deverbishal331%40gmail.com",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "x-firebase-appcheck": "<REDACTED 941 chars>",
+   "accept-encoding": "gzip",
+   "authorization": "<REDACTED 972 chars>",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:32",
+  "method": "POST",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/firebase-auth/sync",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "content-length": "81",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:33",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/checkInvoicingEmailKey?email=<user-email>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/x-www-form-urlencoded",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:33",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/invoices/stats/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept": "application/json",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:33",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/businesses/<mongo-id>",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:34",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/organization/<mongo-id>/clients",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:39",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/user/getUsers/",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ },
+ {
+  "time": "23:36:43",
+  "method": "GET",
+  "host": "backend-dev-406509736623.australia-southeast1.run.app",
+  "path": "/api/invoices?organizationId=<mongo-id>&page=1&limit=20&invoiceType=client",
+  "req_headers": {
+   "user-agent": "Dart/3.11 (dart:io)",
+   "accept-encoding": "gzip",
+   "host": "backend-dev-406509736623.australia-southeast1.run.app",
+   "authorization": "<REDACTED 972 chars>",
+   "content-type": "application/json",
+   "x-firebase-appcheck": "<REDACTED 941 chars>"
+  },
+  "req_body": "",
+  "status": 200,
+  "resp_keys": "",
+  "error": null
+ }
+]
