@@ -32,6 +32,14 @@ app.set('trust proxy', 1);
 
 // Security middleware - must be first
 app.use(helmet({
+  // Explicit HSTS: force HTTPS for 1 year, all subdomains, preload-ready.
+  // (TLS itself is terminated at the Cloud Run / Render edge; this header
+  // tells compliant clients to never attempt plaintext HTTP.)
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -48,6 +56,10 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false
 }));
+
+// Reject plaintext HTTP in production (no-op locally; health probes exempt).
+// Must run before CORS/routes so insecure requests fail fast.
+app.use(require('./middleware/requireHttps').requireHttps);
 
 // CORS Configuration
 const corsOptions = {
