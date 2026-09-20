@@ -113,8 +113,6 @@ jest.mock('../core/QueueManager', () => ({
   registerWorker: jest.fn()
 }));
 
-jest.mock('../workers/InvoiceWorker', () => jest.fn());
-
 // Mock Environment Config to allow testing security gates
 jest.mock('../config/environment', () => ({
   environmentConfig: {
