@@ -1,27 +1,74 @@
 /**
  * Financial Analytics Service
- * Real-time financial performance analytics and profitability intelligence
+ * Real-data financial performance analytics computed from Invoice,
+ * Expense, Client and User collections. No randomness: identical data
+ * yields identical numbers. Fields without a data source are omitted
+ * (never synthesized) — callers use defensive reads with fallbacks.
  */
+
+const {
+  parsePeriod,
+  changeRatio,
+  trendOf,
+  round2,
+  sumPaidInvoices,
+  sumExpenses,
+  topClientsByRevenue,
+  monthlyRevenue,
+} = require('./financialDataService');
+const Expense = require('../models/Expense');
+const User = require('../models/User');
 
 class FinancialAnalyticsService {
   async getDashboard(organizationId, period = '30d') {
     try {
+      const { start, end, prevStart, prevEnd } = parsePeriod(period);
+      const [rev, revPrev, exp, expPrev] = await Promise.all([
+        sumPaidInvoices(organizationId, start, end),
+        sumPaidInvoices(organizationId, prevStart, prevEnd),
+        sumExpenses(organizationId, start, end),
+        sumExpenses(organizationId, prevStart, prevEnd),
+      ]);
+
+      const profit = round2(rev.total - exp.total);
+      const profitPrev = round2(revPrev.total - expPrev.total);
+      const margin = rev.total > 0 ? round2(profit / rev.total) : 0;
+      const marginPrev = revPrev.total > 0 ? round2(profitPrev / revPrev.total) : 0;
+      const cash = round2(rev.total - exp.total);
+      const cashPrev = round2(revPrev.total - expPrev.total);
+
+      const revenueChange = round2(changeRatio(rev.total, revPrev.total));
+      const profitChange = round2(changeRatio(profit, profitPrev));
+      const marginChange = round2(changeRatio(margin, marginPrev));
+      const cashChange = round2(changeRatio(cash, cashPrev));
+
+      const [topClients, monthly, costBreakdown] = await Promise.all([
+        topClientsByRevenue(organizationId, start, end, 5),
+        monthlyRevenue(organizationId, 12),
+        this._costByCategory(organizationId, start, end),
+      ]);
+
       const dashboard = {
         organizationId,
         period,
         generatedAt: new Date().toISOString(),
-        
+
         kpis: {
-          revenue: { value: Math.random() * 100000 + 150000, change: Math.random() * 0.3 - 0.1, trend: 'up' },
-          profit: { value: Math.random() * 30000 + 40000, change: Math.random() * 0.25 - 0.05, trend: 'up' },
-          margin: { value: Math.random() * 0.15 + 0.25, change: Math.random() * 0.1 - 0.05, trend: 'stable' },
-          cashFlow: { value: Math.random() * 20000 + 30000, change: Math.random() * 0.2 - 0.1, trend: 'up' },
+          revenue: { value: rev.total, change: revenueChange, trend: trendOf(revenueChange) },
+          profit: { value: profit, change: profitChange, trend: trendOf(profitChange) },
+          margin: { value: margin, change: marginChange, trend: trendOf(marginChange) },
+          cashFlow: { value: cash, change: cashChange, trend: trendOf(cashChange) },
         },
-        
-        revenueByService: this._generateRevenueByService(),
-        profitabilityByClient: this._generateProfitabilityByClient(),
-        costAnalysis: this._generateCostAnalysis(),
-        trends: this._generateTrends(),
+
+        revenueByService: [],
+        profitabilityByClient: topClients.map((c) => ({
+          clientId: c.clientId,
+          clientName: c.clientName,
+          revenue: c.revenue,
+          share: c.share,
+        })),
+        costAnalysis: costBreakdown,
+        trends: monthly,
       };
 
       return { success: true, dashboard, message: 'Dashboard generated successfully' };
@@ -91,30 +138,54 @@ class FinancialAnalyticsService {
 
   async getKPIs(organizationId) {
     try {
+      const now = new Date();
+      const { start, end, prevStart, prevEnd } = parsePeriod('30d', now);
+      const [rev, revPrev, exp, expPrev, clients, staff] = await Promise.all([
+        sumPaidInvoices(organizationId, start, end),
+        sumPaidInvoices(organizationId, prevStart, prevEnd),
+        sumExpenses(organizationId, start, end),
+        sumExpenses(organizationId, prevStart, prevEnd),
+        this._countByRole(organizationId, ['client']),
+        this._countByRole(organizationId, ['employee', 'admin', 'manager']),
+      ]);
+
+      const netProfit = round2(rev.total - exp.total);
+      const netProfitPrev = round2(revPrev.total - expPrev.total);
+      // Single profit line: the models carry no COGS/tax split, so gross,
+      // net and EBITDA coincide by definition here (not estimates).
+      const netMargin = rev.total > 0 ? round2(netProfit / rev.total) : 0;
+      const netMarginPrev =
+        revPrev.total > 0 ? round2(netProfitPrev / revPrev.total) : 0;
+      const revenueGrowth = round2(changeRatio(rev.total, revPrev.total));
+      const clientGrowth = round2(
+        changeRatio(clients.current, clients.previous),
+      );
+
       const kpis = {
         organizationId,
-        asOf: new Date().toISOString(),
-        
+        asOf: now.toISOString(),
+
         financial: {
-          revenue: Math.random() * 100000 + 150000,
-          grossProfit: Math.random() * 50000 + 60000,
-          netProfit: Math.random() * 30000 + 40000,
-          ebitda: Math.random() * 40000 + 50000,
-          grossMargin: Math.random() * 0.15 + 0.35,
-          netMargin: Math.random() * 0.1 + 0.25,
+          revenue: rev.total,
+          grossProfit: netProfit,
+          netProfit,
+          ebitda: netProfit,
+          grossMargin: netMargin,
+          netMargin,
         },
-        
+
         operational: {
-          revenuePerEmployee: Math.random() * 20000 + 50000,
-          utilizationRate: Math.random() * 0.2 + 0.75,
-          clientRetention: Math.random() * 0.1 + 0.85,
-          averageRevenuePerClient: Math.random() * 5000 + 8000,
+          revenuePerEmployee: staff.current > 0 ? round2(rev.total / staff.current) : 0,
+          utilizationRate: null,
+          clientRetention: null,
+          averageRevenuePerClient:
+            clients.current > 0 ? round2(rev.total / clients.current) : 0,
         },
-        
+
         growth: {
-          revenueGrowth: Math.random() * 0.3 + 0.1,
-          clientGrowth: Math.random() * 0.25 + 0.08,
-          marketShare: Math.random() * 0.05 + 0.12,
+          revenueGrowth,
+          clientGrowth,
+          marketShare: null,
         },
       };
 
@@ -122,6 +193,53 @@ class FinancialAnalyticsService {
     } catch (error) {
       return { success: false, message: 'Failed to get KPIs', error: error.message };
     }
+  }
+
+  /** Active user counts (current vs 30d-ago snapshot proxy) by role. */
+  async _countByRole(organizationId, roles) {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const [current, previous] = await Promise.all([
+      User.countDocuments({
+        organizationId: String(organizationId),
+        isActive: { $ne: false },
+        $or: [{ roles: { $in: roles } }, { role: { $in: roles } }],
+      }),
+      User.countDocuments({
+        organizationId: String(organizationId),
+        isActive: { $ne: false },
+        $or: [{ roles: { $in: roles } }, { role: { $in: roles } }],
+        createdAt: { $lt: cutoff },
+      }),
+    ]);
+    return { current, previous };
+  }
+
+  /** Approved-expense spend grouped by category with shares. */
+  async _costByCategory(organizationId, start, end) {
+    const rows = await Expense.aggregate([
+      {
+        $match: {
+          organizationId: String(organizationId),
+          isActive: true,
+          deletedAt: null,
+          status: { $nin: ['rejected', 'cancelled'] },
+          expenseDate: { $gte: start, $lt: end },
+        },
+      },
+      { $group: { _id: '$category', amount: { $sum: '$amount' } } },
+      { $sort: { amount: -1 } },
+    ]);
+    const total = rows.reduce((s, r) => s + (r.amount || 0), 0) || 1;
+    const out = {};
+    for (const r of rows.slice(0, 8)) {
+      const key = String(r._id || 'uncategorized').toLowerCase().replace(/[^a-z]+/g, '');
+      out[key || 'other'] = {
+        amount: round2(r.amount),
+        percentage: round2(r.amount / total),
+      };
+    }
+    return out;
   }
 
   async analyzeTrends(organizationId, metrics, period = 365) {
