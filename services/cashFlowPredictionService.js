@@ -6,40 +6,89 @@
 
 class CashFlowPredictionService {
   /**
-   * Generate 60-day cash flow forecast
+   * Deterministic cash-flow forecast: trailing-30d average daily net,
+   * straight-lined over the horizon. Same data => same forecast.
+   * Confidence decays linearly with horizon day (floor 0.5).
    */
   async forecastCashFlow(organizationId, horizon = 60) {
     try {
+      const dataService = require('./financialDataService');
+      const horizonDays = Math.max(1, Math.min(365, parseInt(horizon, 10) || 60));
+      const now = new Date();
+      const positionRes = await this.getCurrentPosition(organizationId);
+      if (!positionRes.success) throw new Error(positionRes.message);
+      const currentPosition = positionRes.position;
+
+      const series = await dataService.dailyNetSeries(organizationId, 30, now);
+      const avgInflow = series.reduce((s, d) => s + d.inflows, 0) / Math.max(1, series.length);
+      const avgOutflow = series.reduce((s, d) => s + d.outflows, 0) / Math.max(1, series.length);
+      const avgNet = avgInflow - avgOutflow;
+
+      let balance = currentPosition.netPosition;
+      const dailyForecast = [];
+      let projectedInflows = 0;
+      let projectedOutflows = 0;
+      let minimumBalance = balance;
+      let maximumBalance = balance;
+      const today = new Date(now);
+      today.setUTCHours(0, 0, 0, 0);
+      for (let i = 0; i < horizonDays; i++) {
+        const date = new Date(today.getTime() + i * 24 * 60 * 60 * 1000);
+        const openingBalance = dataService.round2(balance);
+        const inflows = dataService.round2(avgInflow);
+        const outflows = dataService.round2(avgOutflow);
+        const netFlow = dataService.round2(inflows - outflows);
+        balance = dataService.round2(balance + netFlow);
+        projectedInflows = dataService.round2(projectedInflows + inflows);
+        projectedOutflows = dataService.round2(projectedOutflows + outflows);
+        minimumBalance = Math.min(minimumBalance, balance);
+        maximumBalance = Math.max(maximumBalance, balance);
+        dailyForecast.push({
+          date: date.toISOString().slice(0, 10),
+          openingBalance,
+          inflows,
+          outflows,
+          netFlow,
+          closingBalance: balance,
+          confidence: Math.round(Math.max(0.5, 0.95 - 0.004 * i) * 1000) / 1000,
+        });
+      }
+
+      const risks = [];
+      if (minimumBalance < 0) {
+        risks.push({
+          risk: 'Negative projected balance',
+          level: 'high',
+          description: `Projected balance falls to ${minimumBalance} within ${horizonDays} days at current run-rate`,
+          probability: 0.8,
+        });
+      } else if (minimumBalance < avgOutflow * 7) {
+        risks.push({
+          risk: 'Thin cash buffer',
+          level: 'medium',
+          description: 'Minimum projected balance covers less than 7 days of average outflows',
+          probability: 0.5,
+        });
+      }
       const forecast = {
         organizationId,
-        horizon,
+        horizon: horizonDays,
         generatedAt: new Date().toISOString(),
-        
-        // Current position
-        currentPosition: {
-          cash: Math.random() * 50000 + 30000,
-          receivables: Math.random() * 80000 + 40000,
-          payables: Math.random() * 60000 + 30000,
-          netPosition: Math.random() * 20000 + 10000,
-        },
-        
-        // Daily predictions
-        dailyForecast: this._generateDailyForecast(horizon),
-        
-        // Summary metrics
+        currentPosition,
+        dailyForecast,
         summary: {
-          projectedInflows: Math.random() * 200000 + 150000,
-          projectedOutflows: Math.random() * 180000 + 140000,
-          netCashFlow: Math.random() * 30000 + 10000,
-          minimumBalance: Math.random() * 15000 + 5000,
-          maximumBalance: Math.random() * 60000 + 40000,
+          projectedInflows,
+          projectedOutflows,
+          netCashFlow: dataService.round2(projectedInflows - projectedOutflows),
+          minimumBalance: dataService.round2(minimumBalance),
+          maximumBalance: dataService.round2(maximumBalance),
         },
-        
-        // Risk assessment
-        risks: this._assessCashFlowRisks(),
-        
-        // Recommendations
-        recommendations: this._generateCashFlowRecommendations(),
+        risks,
+        recommendations: [
+          'Accelerate collection of overdue receivables',
+          'Schedule major payables after expected inflow peaks',
+          'Review forecast weekly — projections follow trailing actuals',
+        ],
       };
 
       return {
@@ -179,49 +228,30 @@ class CashFlowPredictionService {
   }
 
   /**
-   * Get current cash position
+   * Current cash position from ledger data (deterministic).
+   * cash = lifetime received minus lifetime paid expenses (computed
+   * position — not a bank feed); receivables/payables from open items.
    */
   async getCurrentPosition(organizationId) {
     try {
+      const dataService = require('./financialDataService');
+      const now = new Date();
+      const epoch = new Date(0);
+      const [received, paidOut, receivables, payables] = await Promise.all([
+        dataService.sumPaidInvoices(organizationId, epoch, now),
+        dataService.sumExpenses(organizationId, epoch, now),
+        dataService.receivables(organizationId, now),
+        dataService.payables(organizationId),
+      ]);
+
+      const cash = dataService.round2(received.total - paidOut.total);
       const position = {
         organizationId,
-        asOf: new Date().toISOString(),
-        
-        // Cash accounts
-        cash: {
-          operating: Math.random() * 30000 + 20000,
-          reserve: Math.random() * 20000 + 10000,
-          total: Math.random() * 50000 + 30000,
-        },
-        
-        // Receivables
-        receivables: {
-          current: Math.random() * 40000 + 20000,
-          overdue: Math.random() * 20000 + 5000,
-          total: Math.random() * 60000 + 25000,
-          aging: this._generateAgingAnalysis(),
-        },
-        
-        // Payables
-        payables: {
-          current: Math.random() * 30000 + 15000,
-          overdue: Math.random() * 10000 + 2000,
-          total: Math.random() * 40000 + 17000,
-        },
-        
-        // Working capital
-        workingCapital: {
-          current: Math.random() * 30000 + 15000,
-          target: Math.random() * 40000 + 20000,
-          gap: Math.random() * 10000 - 5000,
-        },
-        
-        // Liquidity ratios
-        ratios: {
-          currentRatio: Math.random() * 0.5 + 1.5, // 1.5-2.0
-          quickRatio: Math.random() * 0.4 + 1.2, // 1.2-1.6
-          cashRatio: Math.random() * 0.3 + 0.8, // 0.8-1.1
-        },
+        asOf: now.toISOString(),
+        cash,
+        receivables: receivables.total,
+        payables: payables.total,
+        netPosition: dataService.round2(cash + receivables.total - payables.total),
       };
 
       return {
@@ -288,42 +318,59 @@ class CashFlowPredictionService {
   }
 
   /**
-   * Get cash flow alerts
+   * Rule-based cash alerts computed from live ledger state (deterministic).
    */
   async getAlerts(organizationId) {
     try {
+      const dataService = require('./financialDataService');
+      const now = new Date();
+      const [receivables, position] = await Promise.all([
+        dataService.receivables(organizationId, now),
+        this.getCurrentPosition(organizationId),
+      ]);
+      if (!position.success) throw new Error(position.message);
+
       const alerts = [];
 
-      // Low cash alert
-      if (Math.random() > 0.7) {
+      // Overdue receivables alert
+      if (receivables.overdueCount > 0) {
+        const share = receivables.total > 0 ? receivables.overdueTotal / receivables.total : 0;
+        alerts.push({
+          type: 'overdue_receivables',
+          severity: share >= 0.2 ? 'high' : 'medium',
+          message: `${receivables.overdueCount} overdue invoice(s) totalling ${receivables.overdueTotal}`,
+          action: 'Intensify collection efforts',
+          amount: receivables.overdueTotal,
+        });
+      }
+
+      // Low cash alert (net position below 7-day average outflow proxy)
+      const series = await dataService.dailyNetSeries(organizationId, 7, now);
+      const avgOutflow = series.reduce((s, d) => s + d.outflows, 0) / Math.max(1, series.length);
+      if (position.position.netPosition < avgOutflow * 7) {
         alerts.push({
           type: 'low_cash',
           severity: 'high',
-          message: 'Cash balance projected to fall below minimum in 15 days',
+          message: `Net position ${position.position.netPosition} covers less than 7 days of average outflows`,
           action: 'Accelerate collections or arrange credit line',
-          dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
+          dueDate: new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString(),
         });
       }
 
-      // Overdue receivables alert
-      if (Math.random() > 0.6) {
-        alerts.push({
-          type: 'overdue_receivables',
-          severity: 'medium',
-          message: 'Overdue receivables exceed 20% of total',
-          action: 'Intensify collection efforts',
-          amount: Math.random() * 20000 + 10000,
-        });
-      }
-
-      // Payment concentration alert
-      if (Math.random() > 0.8) {
+      // Concentration risk: top client share of trailing-90d revenue
+      const trailing = await dataService.topClientsByRevenue(
+        organizationId,
+        new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
+        now,
+        5,
+      );
+      if (trailing.length > 0 && trailing[0].share >= 0.5) {
         alerts.push({
           type: 'concentration_risk',
           severity: 'medium',
-          message: 'Large payment due from single client',
+          message: `Top client ${trailing[0].clientName} represents ${Math.round(trailing[0].share * 100)}% of trailing revenue`,
           action: 'Monitor closely and have contingency plan',
-          amount: Math.random() * 30000 + 15000,
+          amount: trailing[0].revenue,
         });
       }
 

@@ -146,17 +146,24 @@ class RevenueForecastingService {
    */
   async generateScenarios(organizationId, horizon = 90) {
     try {
-      const baseRevenue = Math.random() * 50000 + 100000; // $100k-$150k base
+      const dataService = require('./financialDataService');
+      const horizonDays = Math.max(1, Math.min(730, parseInt(horizon, 10) || 90));
+      const now = new Date();
+      // Trailing-90d paid revenue, scaled to the horizon. Same data =>
+      // same base, every load.
+      const trailingStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const trailing = await dataService.sumPaidInvoices(organizationId, trailingStart, now);
+      const baseRevenue = dataService.round2((trailing.total * horizonDays) / 90);
 
       const scenarios = {
         organizationId,
-        horizon,
+        horizon: horizonDays,
         generatedAt: new Date().toISOString(),
-        
+
         bestCase: {
           scenario: 'Best Case',
           probability: 0.15,
-          totalRevenue: baseRevenue * 1.35,
+          totalRevenue: dataService.round2(baseRevenue * 1.35),
           growth: 0.35,
           assumptions: [
             'High client acquisition (20% above forecast)',
@@ -166,7 +173,7 @@ class RevenueForecastingService {
           ],
           keyDrivers: ['Client growth', 'Service expansion', 'Rate increases'],
         },
-        
+
         mostLikely: {
           scenario: 'Most Likely',
           probability: 0.70,
@@ -180,11 +187,11 @@ class RevenueForecastingService {
           ],
           keyDrivers: ['Organic growth', 'Client retention', 'Efficiency gains'],
         },
-        
+
         worstCase: {
           scenario: 'Worst Case',
           probability: 0.15,
-          totalRevenue: baseRevenue * 0.75,
+          totalRevenue: dataService.round2(baseRevenue * 0.75),
           growth: -0.08,
           assumptions: [
             'Client churn increases',
@@ -194,7 +201,7 @@ class RevenueForecastingService {
           ],
           keyDrivers: ['Client loss', 'Market contraction', 'Cost pressures'],
         },
-        
+
         // Sensitivity analysis
         sensitivity: {
           clientAcquisition: { impact: 0.35, range: [-0.2, 0.3] },
