@@ -622,66 +622,124 @@ const getPricingAnalytics = catchAsync(async (req, res) => {
         $gte: new Date(startDate),
         $lte: new Date(endDate)
       };
+    } else {
+      // Both dates are optional in the route schema, which made this an
+      // unbounded read of every line item for the organisation. Default to the
+      // last 90 days so the endpoint has a bounded cost, and say so in the
+      // response so the caller is not silently handed a truncated window.
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      dateFilter.createdAt = { $gte: ninetyDaysAgo, $lte: new Date() };
     }
-    
+    const appliedDefaultWindow = !(startDate && endDate);
+
     // Build organization filter
     const orgFilter = { organizationId, ...dateFilter };
     if (clientId) {
       orgFilter.clientId = clientId;
     }
-    
+
     // Get custom pricing data
     const customPricing = await mongoose.connection.db.collection('customPricing').find(orgFilter).toArray();
-    
-    // Get invoice line items for pricing analysis
-    const invoiceItems = await InvoiceLineItem.find(orgFilter);
-    
-    // Calculate pricing metrics
-    const totalItems = invoiceItems.length;
-    const customPricedItems = invoiceItems.filter(item => item.pricingSource === 'custom');
-    const standardPricedItems = invoiceItems.filter(item => item.pricingSource === 'standard');
-    const ndisPricedItems = invoiceItems.filter(item => item.pricingSource === 'ndis');
-    
-    const totalRevenue = invoiceItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    const customRevenue = customPricedItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    const standardRevenue = standardPricedItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    const ndisRevenue = ndisPricedItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-    
-    // Calculate compliance metrics
-    const compliantItems = invoiceItems.filter(item => item.isCompliant !== false);
-    const complianceRate = totalItems > 0 ? (compliantItems.length / totalItems) * 100 : 0;
-    
+
+    // Aggregate in Mongo instead of loading every line item into the process and
+    // making eight passes over it. These are all counts and sums, so one $group
+    // returns the same numbers without materialising a document per line item —
+    // which is what made this the most memory-hungry endpoint in the file.
+    const [pricingRollup] = await InvoiceLineItem.aggregate([
+      { $match: orgFilter },
+      {
+        $group: {
+          _id: null,
+          totalItems: { $sum: 1 },
+          totalRevenue: { $sum: { $ifNull: ['$totalPrice', 0] } },
+          customPricedItems: {
+            $sum: { $cond: [{ $eq: ['$pricingSource', 'custom'] }, 1, 0] }
+          },
+          standardPricedItems: {
+            $sum: { $cond: [{ $eq: ['$pricingSource', 'standard'] }, 1, 0] }
+          },
+          ndisPricedItems: {
+            $sum: { $cond: [{ $eq: ['$pricingSource', 'ndis'] }, 1, 0] }
+          },
+          customRevenue: {
+            $sum: {
+              $cond: [
+                { $eq: ['$pricingSource', 'custom'] },
+                { $ifNull: ['$totalPrice', 0] },
+                0
+              ]
+            }
+          },
+          standardRevenue: {
+            $sum: {
+              $cond: [
+                { $eq: ['$pricingSource', 'standard'] },
+                { $ifNull: ['$totalPrice', 0] },
+                0
+              ]
+            }
+          },
+          ndisRevenue: {
+            $sum: {
+              $cond: [
+                { $eq: ['$pricingSource', 'ndis'] },
+                { $ifNull: ['$totalPrice', 0] },
+                0
+              ]
+            }
+          },
+          // Mirrors `item.isCompliant !== false` in JS: anything not explicitly
+          // false counts as compliant, including a missing field.
+          compliantItems: {
+            $sum: { $cond: [{ $eq: ['$isCompliant', false] }, 0, 1] }
+          }
+        }
+      }
+    ]);
+
+    const invoiceItemCount = pricingRollup ? pricingRollup.totalItems : 0;
+
     const metrics = {
-      totalItems,
-      customPricedItems: customPricedItems.length,
-      standardPricedItems: standardPricedItems.length,
-      ndisPricedItems: ndisPricedItems.length,
-      customPricingPercentage: totalItems > 0 ? (customPricedItems.length / totalItems) * 100 : 0,
-      totalRevenue,
-      customRevenue,
-      standardRevenue,
-      ndisRevenue,
-      complianceRate,
-      compliantItems: compliantItems.length,
-      nonCompliantItems: totalItems - compliantItems.length
+      totalItems: invoiceItemCount,
+      customPricedItems: pricingRollup ? pricingRollup.customPricedItems : 0,
+      standardPricedItems: pricingRollup ? pricingRollup.standardPricedItems : 0,
+      ndisPricedItems: pricingRollup ? pricingRollup.ndisPricedItems : 0,
+      customPricingPercentage:
+        invoiceItemCount > 0
+          ? ((pricingRollup ? pricingRollup.customPricedItems : 0) / invoiceItemCount) * 100
+          : 0,
+      totalRevenue: pricingRollup ? pricingRollup.totalRevenue : 0,
+      customRevenue: pricingRollup ? pricingRollup.customRevenue : 0,
+      standardRevenue: pricingRollup ? pricingRollup.standardRevenue : 0,
+      ndisRevenue: pricingRollup ? pricingRollup.ndisRevenue : 0,
+      complianceRate:
+        invoiceItemCount > 0
+          ? ((pricingRollup ? pricingRollup.compliantItems : 0) / invoiceItemCount) * 100
+          : 0,
+      compliantItems: pricingRollup ? pricingRollup.compliantItems : 0,
+      nonCompliantItems:
+        invoiceItemCount - (pricingRollup ? pricingRollup.compliantItems : 0)
     };
-    
+
     // Log analytics access
     logger.business('Pricing Analytics Accessed', {
       event: 'pricing_analytics_accessed',
       organizationId,
       userEmail: req.user?.email || 'system',
-      dateRange: { startDate, endDate },
+      dateRange: appliedDefaultWindow
+        ? { startDate: ninetyDaysAgo.toISOString(), endDate: new Date().toISOString(), defaulted: true }
+        : { startDate, endDate },
       filters: { clientId },
       metrics: {
         customPricingCount: customPricing.length,
-        invoiceItemsCount: invoiceItems.length,
-        totalRevenue,
-        complianceRate
+        invoiceItemsCount: invoiceItemCount,
+        totalRevenue: metrics.totalRevenue,
+        complianceRate: metrics.complianceRate
       },
       timestamp: new Date().toISOString()
     });
-    
+
     res.status(200).json({
       success: true,
       message: 'Pricing analytics retrieved successfully',
@@ -689,8 +747,10 @@ const getPricingAnalytics = catchAsync(async (req, res) => {
         metrics,
         summary: {
           totalCustomPricing: customPricing.length,
-          totalInvoiceItems: invoiceItems.length,
-          dateRange: { startDate, endDate },
+          totalInvoiceItems: invoiceItemCount,
+          dateRange: appliedDefaultWindow
+            ? { startDate: ninetyDaysAgo.toISOString(), endDate: new Date().toISOString(), defaultedTo90Days: true }
+            : { startDate, endDate },
           organizationId,
           generatedAt: new Date().toISOString()
         }
@@ -718,15 +778,43 @@ const getPricingComplianceReport = catchAsync(async (req, res) => {
         $lte: new Date(endDate)
       };
     }
-    
-    // Get compliance data
-    const invoiceItems = await InvoiceLineItem.find(filter);
-    const totalItems = invoiceItems.length;
-    const compliantItems = invoiceItems.filter(item => item.isCompliant !== false);
-    const nonCompliantItems = invoiceItems.filter(item => item.isCompliant === false);
-    
-    const overallCompliance = totalItems > 0 ? (compliantItems.length / totalItems) * 100 : 0;
-    
+
+    // Counts come from an aggregation; only the violating rows are fetched.
+    //
+    // This used to `InvoiceLineItem.find(filter)` with no date bound, hydrate
+    // every line item in the organisation into a Mongoose document, and then
+    // derive the counts in JS. Now the counts are computed in Mongo and the only
+    // documents crossing the wire are the violations themselves, capped so a
+    // report cannot return an unbounded list.
+    const VIOLATION_LIMIT = 500;
+
+    const [complianceRollup] = await InvoiceLineItem.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalItems: { $sum: 1 },
+          // Mirrors `isCompliant !== false`: only an explicit false is a failure.
+          nonCompliantItems: { $sum: { $cond: [{ $eq: ['$isCompliant', false] }, 1, 0] } }
+        }
+      }
+    ]);
+
+    const totalItems = complianceRollup ? complianceRollup.totalItems : 0;
+    const nonCompliantCount = complianceRollup ? complianceRollup.nonCompliantItems : 0;
+    const compliantCount = totalItems - nonCompliantCount;
+
+    const nonCompliantItems = await InvoiceLineItem.find({
+      ...filter,
+      isCompliant: false
+    })
+      .select('_id clientId supportItemNumber unitPrice violationType totalPrice createdAt')
+      .lean()
+      .sort({ createdAt: -1 })
+      .limit(VIOLATION_LIMIT);
+
+    const overallCompliance = totalItems > 0 ? (compliantCount / totalItems) * 100 : 0;
+
     // Identify violations
     const violations = nonCompliantItems.map(item => ({
       itemId: item._id,
@@ -738,6 +826,16 @@ const getPricingComplianceReport = catchAsync(async (req, res) => {
       amount: item.totalPrice,
       date: item.createdAt
     }));
+
+    const violationsTruncated = nonCompliantCount > violations.length;
+    if (violationsTruncated) {
+      logger.warn('Pricing compliance violations truncated', {
+        organizationId,
+        totalViolations: nonCompliantCount,
+        returned: violations.length,
+        limit: VIOLATION_LIMIT
+      });
+    }
     
     // Generate recommendations
     const recommendations = [];
@@ -763,11 +861,11 @@ const getPricingComplianceReport = catchAsync(async (req, res) => {
     logger.business('Pricing Compliance Report Generated', {
       event: 'pricing_compliance_report',
       organizationId,
-      complianceData: {
-        overallCompliance,
-        totalViolations: violations.length,
-        criticalViolations: criticalViolations.length
-      },
+complianceData: {
+          overallCompliance,
+          totalViolations: nonCompliantCount,
+          criticalViolations: criticalViolations.length
+        },
       timestamp: new Date().toISOString()
     });
     
@@ -777,17 +875,18 @@ const getPricingComplianceReport = catchAsync(async (req, res) => {
       data: {
         compliance: {
           totalItems,
-          compliantItems: compliantItems.length,
-          nonCompliantItems: nonCompliantItems.length,
+          compliantItems: compliantCount,
+          nonCompliantItems: nonCompliantCount,
           overallCompliance,
           complianceGrade: overallCompliance >= 95 ? 'A' : overallCompliance >= 85 ? 'B' : overallCompliance >= 70 ? 'C' : 'D'
         },
         violations,
+        violationsTruncated,
         recommendations,
         summary: {
           overallCompliance,
           meetsThreshold: overallCompliance >= threshold * 100,
-          totalViolations: violations.length,
+          totalViolations: nonCompliantCount,
           generatedAt: new Date().toISOString()
         }
       }
