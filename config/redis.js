@@ -19,13 +19,102 @@ function getIsCloudRun() {
   return Boolean(process.env.K_SERVICE);
 }
 
+/**
+ * Redact credentials from a Redis connection target so it is safe to log.
+ *
+ * Handles both shapes we accept: a rediss://redis:// URL string and a
+ * host/port object. Only the password is replaced — the username and host are
+ * kept, because "which account failed to authenticate" is exactly what you need
+ * when diagnosing a WRONGPASS, and neither is a secret on its own.
+ */
+function maskRedisUrl(redisConfig) {
+  if (!redisConfig) return null;
+
+  if (typeof redisConfig === 'object') {
+    const host = redisConfig.host || 'unknown';
+    const port = redisConfig.port || 6379;
+    return `${host}:${port}${redisConfig.password ? ' (auth)' : ''}`;
+  }
+
+  const raw = String(redisConfig);
+  const at = raw.lastIndexOf('@');
+  if (at === -1) return raw;
+
+  const schemeEnd = raw.indexOf('://');
+  const credStart = schemeEnd === -1 ? 0 : schemeEnd + 3;
+  const credentials = raw.slice(credStart, at);
+  const remainder = raw.slice(at + 1);
+
+  if (!credentials) return `${raw.slice(0, credStart)}****@${remainder}`;
+
+  const colon = credentials.indexOf(':');
+  if (colon === -1) {
+    // Token-style credentials (no username/password split) — mask entirely.
+    return `${raw.slice(0, credStart)}****@${remainder}`;
+  }
+
+  const user = credentials.slice(0, colon);
+  return `${raw.slice(0, credStart)}${user}:****@${remainder}`;
+}
+
+/**
+ * Whether the resolved config points at a real client rather than the
+ * DisabledRedisClient fallback. Cheap and synchronous — safe to call per
+ * request from /health.
+ */
+function isRealClient(client) {
+  return Boolean(client) && client.isConfigured !== false && client.status !== 'disabled';
+}
+
+/**
+ * Boot/health self-check describing the resolved Redis posture.
+ *
+ * Returns booleans and an enum only. No host, no URL, no password — this is
+ * surfaced from an unauthenticated /health endpoint, so it must stay inert as
+ * far as identifying information goes.
+ */
+function assertRedisConfigured() {
+  const config = resolveRedisRuntimeConfig();
+  const target = config.redisConfig;
+  const url = typeof target === 'string' ? target : '';
+  const enabled = Boolean(config.enableRedisInCloudRun);
+  const hasConfig = Boolean(target);
+
+  return {
+    enabled,
+    hasConfig,
+    // 'ready' means we have a real target AND it was not explicitly disabled.
+    mode: !enabled ? 'disabled-by-env' : hasConfig ? 'configured' : 'unconfigured',
+    isCloudRun: config.isCloudRun,
+    tls: url.startsWith('rediss://'),
+    client: hasConfig ? 'real' : 'disabled'
+  };
+}
+
+function logRedisStatus(reason = 'startup') {
+  const status = assertRedisConfigured();
+  logger.info('[Redis] resolved', {
+    reason,
+    mode: status.mode,
+    isCloudRun: status.isCloudRun,
+    tls: status.tls,
+    client: status.client
+  });
+  return status;
+}
+
 function getMaxConnections() {
   return getIsCloudRun() ? 2 : 10;
 }
 
 function resolveRedisRuntimeConfig() {
   const isCloudRun = getIsCloudRun();
-  const enableRedisInCloudRun = process.env.ENABLE_REDIS_IN_CLOUDRUN === 'true';
+  // Opt-OUT, not opt-in. Valkey is provisioned for this app and is expected to
+  // be used, so requiring an extra flag to enable it meant the entire cache and
+  // shared rate-limit layer silently stayed inert on Cloud Run (get() returned
+  // null, set() reported success while writing nothing). Set
+  // ENABLE_REDIS_IN_CLOUDRUN=false to disable it deliberately.
+  const enableRedisInCloudRun = process.env.ENABLE_REDIS_IN_CLOUDRUN !== 'false';
   const hasRedisUrl = Boolean(process.env.REDIS_URL);
   const hasRedisHostConfig = Boolean(
     process.env.REDIS_HOST || process.env.REDIS_PORT || process.env.REDIS_PASSWORD
@@ -36,9 +125,10 @@ function resolveRedisRuntimeConfig() {
   const redisPort = Number.isNaN(parsedRedisPort) ? 6379 : parsedRedisPort;
 
   let redisConfig = null;
-  if (isCloudRun && !enableRedisInCloudRun) {
-    logger.info(
-      'Redis disabled in Cloud Run by default; set ENABLE_REDIS_IN_CLOUDRUN=true to opt in.'
+  if (!enableRedisInCloudRun) {
+    logger.warn(
+      'Redis/Valkey DISABLED by ENABLE_REDIS_IN_CLOUDRUN=false. ' +
+        'Caching and shared rate limits are OFF.'
     );
   } else if (hasRedisUrl) {
     redisConfig = process.env.REDIS_URL;
@@ -50,6 +140,21 @@ function resolveRedisRuntimeConfig() {
       maxRetriesPerRequest: null,
       retryStrategy: (times) => Math.min(times * 50, 2000)
     };
+  }
+
+  // A missing configuration is indistinguishable from a deliberate opt-out
+  // unless we say so out loud. Before this flip, a Cloud Run deploy with no
+  // REDIS_URL produced a DisabledRedisClient and logged nothing at all.
+  if (enableRedisInCloudRun && !redisConfig) {
+    logger.warn(
+      'No Redis/Valkey configuration resolved — set REDIS_URL (or REDIS_HOST). ' +
+        'Caching and shared rate limits are DISABLED.',
+      {
+        isCloudRun,
+        hasRedisUrl,
+        hasRedisHostConfig
+      }
+    );
   }
 
   return {
@@ -196,8 +301,7 @@ function createRedisClient(url, options) {
 
   client.on('connect', () => {
     connectionFailures = 0;
-    const maskedUrl = typeof url === 'string' ? url.replace(/:([^@]+)@/, ':****@') : 'config-object';
-    logger.info('Redis connection established', { config: maskedUrl });
+    logger.info('Redis connection established', { config: maskRedisUrl(url) });
   });
 
   client.on('ready', () => {
@@ -205,17 +309,18 @@ function createRedisClient(url, options) {
   });
 
   client.on('error', (err) => {
-    if (err.message.includes('ETIMEDOUT') || 
+    logger.error('Redis client error', { error: err.message });
+
+    if (err.message.includes('ETIMEDOUT') ||
         err.message.includes('ECONNRESET') ||
         err.message.includes('WRONGPASS') ||
         err.message.includes('Command timed out')) {
       connectionFailures++;
-      logger.error('Redis connection error', { error: err.message, failures: connectionFailures });
-      
+
       if (connectionFailures >= CIRCUIT_BREAK_THRESHOLD) {
         circuitOpen = true;
         circuitOpenTime = Date.now();
-        logger.error('Redis circuit breaker opened');
+        logger.error('Redis circuit breaker opened', { failures: connectionFailures });
       }
     }
   });
@@ -378,6 +483,13 @@ function getRedisClient() {
 
 const redisProxy = new Proxy(new EventEmitter(), {
   get(_target, property) {
+    // Diagnostics are served off the proxy itself so callers can require the
+    // module and reach them without triggering a client build.
+    if (property === 'maskRedisUrl') return maskRedisUrl;
+    if (property === 'assertRedisConfigured') return assertRedisConfigured;
+    if (property === 'logRedisStatus') return logRedisStatus;
+    if (property === 'isRealClient') return isRealClient;
+
     const client = getRedisClient();
     const value = client[property];
     return typeof value === 'function' ? value.bind(client) : value;

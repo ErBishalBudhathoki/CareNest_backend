@@ -379,6 +379,16 @@ async function updateOrganizationReminderSettings(organizationId, settings) {
             }
         );
 
+        // The cached organization projection includes timesheetReminders, so a
+        // settings change has to drop it or the UI shows the old config for the
+        // full 15 minute cache TTL.
+        try {
+            const organizationService = require('./organizationService');
+            await organizationService.invalidateOrganizationCache(organizationId);
+        } catch (invalidationError) {
+            console.warn('Failed to invalidate organization cache after reminder settings update:', invalidationError.message);
+        }
+
         return { success: true, modifiedCount: result.modifiedCount };
 
     } catch (error) {
