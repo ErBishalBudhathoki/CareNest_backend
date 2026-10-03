@@ -171,6 +171,44 @@ class ListmonkService {
     }
   }
 
+  // --- Onboarding Email Methods ---
+
+  /**
+   * Welcome email sent after an employee completes onboarding.
+   *
+   * This method was referenced by services/onboardingService.js but did not
+   * exist, so every onboarding completion logged
+   * "emailService.sendOnboardingWelcomeEmail is not a function" and silently sent
+   * nothing. The throw was swallowed by the caller's try/catch, which is why it
+   * went unnoticed.
+   *
+   * @param {string} email  Recipient address.
+   * @param {string} name   Recipient's full name.
+   * @param {string} [organizationName]  Organisation they joined, if known.
+   */
+  async sendOnboardingWelcomeEmail(email, name, organizationName) {
+    const subject = 'Welcome to CareNest';
+    const orgLine = organizationName
+      ? `<p>You have been onboarded to <strong>${organizationName}</strong>.</p>`
+      : '';
+
+    const content = `
+      <p>Hi ${name || 'there'},</p>
+      <p>Welcome to CareNest. Your account is set up and ready to go.</p>
+      ${orgLine}
+      <p>Here is what you can do from the app:</p>
+      <ul style="padding-left: 20px; color: #333333;">
+        <li style="margin-bottom: 8px;">View and confirm your shifts and timesheets.</li>
+        <li style="margin-bottom: 8px;">Track your earnings and download payslips.</li>
+        <li style="margin-bottom: 8px;">Keep your qualifications and documents up to date.</li>
+      </ul>
+      <p>If anything looks wrong with your profile, reply to this email and we will help.</p>
+    `;
+
+    const html = this._wrapCareNestEmail('Welcome aboard', content);
+    return this.sendEmail(email, subject, html);
+  }
+
   // --- Auth Specific Email Methods ---
 
   async sendVerificationEmail(email, firstName, otp) {

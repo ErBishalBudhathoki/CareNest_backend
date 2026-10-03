@@ -4,20 +4,35 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const analyticsController = require('../controllers/analyticsController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireAdmin } = require('../middleware/auth');
+const { withSharedStore } = require('../middleware/rateLimitStore');
 
 // Rate limiting
-const analyticsLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { success: false, message: 'Too many analytics requests.' }
-});
+//
+// Valkey-backed so these ceilings are enforced across all Cloud Run instances.
+// Analytics is the most expensive area of the API, so per-instance counters would
+// defeat the control entirely at maxScale > 1.
+const analyticsLimiter = rateLimit(
+  withSharedStore(
+    {
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+      message: { success: false, message: 'Too many analytics requests.' }
+    },
+    'rl:analytics:'
+  )
+);
 
-const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 50,
-  message: { success: false, message: 'Too many requests.' }
-});
+const strictLimiter = rateLimit(
+  withSharedStore(
+    {
+      windowMs: 15 * 60 * 1000,
+      max: 50,
+      message: { success: false, message: 'Too many requests.' }
+    },
+    'rl:analytics:strict:'
+  )
+);
 
 // Common validation chains
 const dateRangeValidation = [
@@ -94,12 +109,18 @@ router.get(
 /**
  * @route GET /api/analytics/cross-org/revenue
  * @desc Get Cross-Organization Revenue
- * @access Private (Owner/Cross-Org permission)
+ * @access Admin only
+ *
+ * This endpoint aggregates revenue across every organisation, so it must be
+ * admin-gated. It previously required only `authenticateUser`, which meant any
+ * authenticated employee could read consolidated revenue for all tenants — a
+ * cross-tenant data leak, bounded only by the 50/15min strictLimiter.
  */
 router.get(
   '/cross-org/revenue',
   strictLimiter,
   authenticateUser,
+  requireAdmin,
   [
     query('startDate').isISO8601().toDate().withMessage('Valid startDate required'),
     query('endDate').isISO8601().toDate().withMessage('Valid endDate required')

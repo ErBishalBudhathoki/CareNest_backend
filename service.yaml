@@ -1,26 +1,57 @@
+# Cloud Run service definition — REFERENCE ONLY, not consumed by any deploy.
+#
+# The deployed configuration lives in
+# .github/workflows/backend-deploy-dev-hybrid.yml (dev) and
+# .github/workflows/backend-deploy-prod-hybrid.yml (prod), which run
+# `gcloud run deploy`. Those workflows are the source of truth; this file was
+# previously a stale template pointing at a non-existent service in the wrong
+# region with a placeholder project id, which made it actively misleading.
+#
+# It is kept in sync with the workflow so it can be read as documentation and
+# applied by hand if ever needed (e.g. `gcloud run services replace`).
+#
+# Real deployed values:
+#   dev : service backend-dev,  project invoice-660f3
+#   prod: service backend-prod, project carenest-prods
+#   both: region australia-southeast1
+#
+# ⚠  Scaling note: the workflows currently pass `--min-instances 0` and no
+# `--concurrency`, which leaves Cloud Run at the default containerConcurrency of
+# 80 on a 1-vCPU instance. That is deliberately still reflected below rather than
+# aspirationally changed, so this file matches what is actually running. Raising
+# min-instances to 1 also means one instance is billed continuously.
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: carenest-backend
+  name: backend-dev
   labels:
-    cloud.googleapis.com/location: us-central1
+    cloud.googleapis.com/location: australia-southeast1
 spec:
   template:
     metadata:
       annotations:
+        # Scale to zero when idle. This is what the workflow deploys today; it
+        # means a cold start can land in the middle of a dashboard fan-out.
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "10"
     spec:
-      serviceAccountName: carenest-backend-sa # Ensure this SA has roles/aiplatform.user
+      serviceAccountName: invoice-660f3@appspot.gserviceaccount.com
+      # Cloud Run's default, because the workflow does not pass --concurrency.
+      containerConcurrency: 80
       containers:
-        - image: gcr.io/YOUR_PROJECT_ID/carenest-backend:latest
+        - image: australia-southeast1-docker.pkg.dev/invoice-660f3/backend/backend-dev:latest
           env:
             - name: NODE_ENV
-              value: "production"
+              value: "development"
+            # Not a secret. Valkey/Redis is expected to be used; the code default
+            # is opt-OUT (config/redis.js), so this only needs to change if you
+            # deliberately want caching and shared rate limits disabled.
+            - name: ENABLE_REDIS_IN_CLOUDRUN
+              value: "true"
             - name: GCP_PROJECT_ID
-              value: "YOUR_PROJECT_ID" # Replace with actual Project ID
-            - name: GCP_LOCATION
-              value: "us-central1"
+              value: "invoice-660f3"
+            - name: REGION
+              value: "australia-southeast1"
           resources:
             limits:
               memory: "512Mi"
