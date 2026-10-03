@@ -83,7 +83,9 @@ class EarningsService {
       };
     }
 
-    const workedRecords = await WorkedTime.find(query);
+    // .lean() skips Mongoose document hydration: these records are only read
+    // and summed in JS below, and a period can cover thousands of rows.
+    const workedRecords = await WorkedTime.find(query).lean();
 
     // 4. Get Mileage Records
     let mileageRecords = [];
@@ -171,10 +173,13 @@ class EarningsService {
     }
 
     // 2. Get Client Assignments (Schedule)
+    // .lean() avoids hydrating full documents; the nested schedule loop below
+    // only reads plain fields, and this drives an O(assignments x shifts x dates)
+    // iteration.
     const assignments = await ClientAssignment.find({
       userEmail: userEmail,
       isActive: true
-    });
+    }).lean();
 
     let projectedHours = 0;
     let breakdown = [];
@@ -284,7 +289,7 @@ class EarningsService {
       },
     };
 
-    const workedRecords = await WorkedTime.find(query);
+    const workedRecords = await WorkedTime.find(query).lean();
 
     const byPeriod = {};
     for (const record of workedRecords) {
@@ -398,7 +403,7 @@ class EarningsService {
       }
     };
 
-    const workedRecords = await WorkedTime.find(query);
+    const workedRecords = await WorkedTime.find(query).lean();
 
     // Get user pay details for rate calculation if historical rates aren't stored on the record
     // Note: ideally workedRecords should store the rate snapshot. If not, we estimate with current rate

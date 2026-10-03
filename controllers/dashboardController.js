@@ -313,23 +313,60 @@ const getRevenueComparison = catchAsync(async (req, res) => {
   const lastMonthStart = new Date(monthStart);
   lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
 
+  // One aggregation over the widest window needed (last month start -> now)
+  // instead of 13 sequential aggregations. Each `_getRevenue` call used to run
+  // its own $match+$group, so this endpoint issued 13 round trips against
+  // InvoiceLineItem for a single HTTP request — and each blocked the event loop
+  // while it waited.
+  const revenueByDay = await _getRevenueByDay(
+    organizationId,
+    lastMonthStart,
+    now
+  );
+
+  // Bucket keys are UTC day strings ($dateToString defaults to UTC), so range
+  // bounds must be reduced the same way. Comparing a 'YYYY-MM-DD' string to a
+  // Date object would coerce via Date.prototype.toString() and match nothing.
+  //
+  // The original query used `$gte: from, $lt: to` on exact timestamps. Day
+  // bucketing cannot express sub-day precision, so the exclusive/inclusive
+  // distinction is recovered from the bound itself: a midnight-aligned upper
+  // bound is a real exclusive boundary (e.g. `yesterday -> today`), whereas a
+  // mid-day bound is "up to now" and must include that day.
+  const utcDayKey = (d) => d.toISOString().split('T')[0];
+  const isMidnight = (d) => d.getTime() % 86400000 === 0;
+
+  const sumRange = (from, to) => {
+    const fromKey = utcDayKey(from);
+    const toKey = utcDayKey(to);
+    const endKey = isMidnight(to) ? previousUtcDayKey(toKey) : toKey;
+
+    let total = 0;
+    for (const [day, amount] of revenueByDay.entries()) {
+      if (day >= fromKey && day <= endKey) {
+        total += amount;
+      }
+    }
+    return total;
+  };
+
   // Get today's revenue
-  const todayRevenue = await _getRevenue(organizationId, today, now);
+  const todayRevenue = sumRange(today, now);
 
   // Get yesterday's revenue
-  const yesterdayRevenue = await _getRevenue(organizationId, yesterday, today);
+  const yesterdayRevenue = sumRange(yesterday, today);
 
   // Get week to date revenue
-  const weekToDateRevenue = await _getRevenue(organizationId, weekStart, now);
+  const weekToDateRevenue = sumRange(weekStart, now);
 
   // Get last week revenue
-  const lastWeekRevenue = await _getRevenue(organizationId, lastWeekStart, weekStart);
+  const lastWeekRevenue = sumRange(lastWeekStart, weekStart);
 
   // Get month to date revenue
-  const monthToDateRevenue = await _getRevenue(organizationId, monthStart, now);
+  const monthToDateRevenue = sumRange(monthStart, now);
 
   // Get last month revenue
-  const lastMonthRevenue = await _getRevenue(organizationId, lastMonthStart, monthStart);
+  const lastMonthRevenue = sumRange(lastMonthStart, monthStart);
 
   // Calculate percentages
   const todayVsYesterdayPercent = _calculatePercentChange(todayRevenue, yesterdayRevenue);
@@ -343,9 +380,9 @@ const getRevenueComparison = catchAsync(async (req, res) => {
     date.setDate(date.getDate() - i);
     const nextDate = new Date(date);
     nextDate.setDate(nextDate.getDate() + 1);
-    
-    const revenue = await _getRevenue(organizationId, date, nextDate);
-    
+
+    const revenue = sumRange(date, nextDate);
+
     last7Days.push({
       date: date.toISOString(),
       revenue,
@@ -399,7 +436,17 @@ function _determineWorkerStatus(shift) {
   }
 }
 
-async function _getRevenue(organizationId, startDate, endDate) {
+/**
+ * Sum revenue per calendar day over a single window, in one round trip.
+ *
+ * Returns a Map of 'YYYY-MM-DD' -> revenue for every day that had line items.
+ * Callers derive any sub-range they need from this instead of issuing another
+ * query per range.
+ *
+ * `createdAt` is the field every revenue query actually filters on, and
+ * { organizationId, createdAt } is indexed on the model.
+ */
+async function _getRevenueByDay(organizationId, startDate, endDate) {
   const result = await InvoiceLineItem.aggregate([
     {
       $match: {
@@ -412,13 +459,28 @@ async function _getRevenue(organizationId, startDate, endDate) {
     },
     {
       $group: {
-        _id: null,
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
         total: { $sum: '$totalPrice' }
       }
     }
   ]);
 
-  return result[0]?.total || 0;
+  const byDay = new Map();
+  for (const row of result) {
+    if (row._id && typeof row.total === 'number') {
+      byDay.set(row._id, row.total);
+    }
+  }
+  return byDay;
+}
+
+/**
+ * The day before a 'YYYY-MM-DD' key. Used to turn an exclusive midnight boundary
+ * into an inclusive day key, since the day-bucketed map only has whole days.
+ */
+function previousUtcDayKey(dayKey) {
+  const at = new Date(`${dayKey}T00:00:00.000Z`).getTime() - 86400000;
+  return new Date(at).toISOString().split('T')[0];
 }
 
 function _calculatePercentChange(current, previous) {
