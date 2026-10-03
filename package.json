@@ -73,6 +73,7 @@
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.2",
     "bullmq": "^5.71.0",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.5.0",

@@ -5,23 +5,37 @@ const { param, query, body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const earningsController = require('../controllers/earningsController');
 const { authenticateUser } = require('../middleware/auth');
+const { withSharedStore } = require('../middleware/rateLimitStore');
 const {
   requireAdmin,
   requireSelfOrAdmin,
 } = require('../middleware/rbac');
 
 // Rate limiting
-const earningsLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { success: false, message: 'Too many earnings requests.' }
-});
+//
+// Valkey-backed so the ceiling is enforced across all Cloud Run instances rather
+// than per replica. See middleware/rateLimitStore.js.
+const earningsLimiter = rateLimit(
+  withSharedStore(
+    {
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+      message: { success: false, message: 'Too many earnings requests.' }
+    },
+    'rl:earnings:'
+  )
+);
 
-const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 50,
-  message: { success: false, message: 'Too many requests.' }
-});
+const strictLimiter = rateLimit(
+  withSharedStore(
+    {
+      windowMs: 15 * 60 * 1000,
+      max: 50,
+      message: { success: false, message: 'Too many requests.' }
+    },
+    'rl:earnings:strict:'
+  )
+);
 
 // Validation
 const emailParamValidation = [
