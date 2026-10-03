@@ -5,13 +5,22 @@ const { query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const dashboardController = require('../controllers/dashboardController');
 const { authenticateUser } = require('../middleware/auth');
+const { withSharedStore } = require('../middleware/rateLimitStore');
 
 // Rate limiting
-const dashboardLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window
-  message: { success: false, message: 'Too many dashboard requests.' }
-});
+//
+// Valkey-backed so the ceiling holds across Cloud Run replicas. With the default
+// in-memory store the real limit was 10x this value at maxScale 10.
+const dashboardLimiter = rateLimit(
+  withSharedStore(
+    {
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 100, // 100 requests per window
+      message: { success: false, message: 'Too many dashboard requests.' }
+    },
+    'rl:dashboard:'
+  )
+);
 
 // Common validation
 const organizationIdValidation = [

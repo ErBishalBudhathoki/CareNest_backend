@@ -23,6 +23,8 @@ const ndisCatalogSyncService = require('./services/ndisCatalogSyncService');
 let appInstance = null;
 let bootstrapPromise = null;
 let serverlessHandler = null;
+// The bound HTTP server, captured so shutdown can drain before exiting.
+let httpServer = null;
 
 const initializeApplication = async () => {
   if (appInstance) {
@@ -58,8 +60,16 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 process.on('uncaughtException', (error) => {
+  // An uncaught exception leaves the process in an unknown state. Continuing to
+  // serve traffic on top of that risks returning corrupt data, so log and exit
+  // non-zero and let the platform restart the instance. This handler used to be
+  // empty, which meant a corrupted instance stayed alive and kept serving.
   console.error('Uncaught Exception:', error);
-  
+  logger.error('Uncaught exception, exiting', {
+    error: error.message,
+    stack: error.stack,
+  });
+  process.exit(1);
 });
 
 // Schedulers have been migrated to Temporal. See temporal-worker.js and temporal/activities/system_cron.js
@@ -103,9 +113,22 @@ else if (require.main === module) {
       }
 
       const app = await initializeApplication();
-      
+
+      // Emit the resolved Redis/Valkey posture once per boot. This is the line
+      // to grep in Cloud Run logs to confirm caching and shared rate limits are
+      // actually live — booleans and an enum only, no host or credentials.
+      try {
+        require('./config/redis').logRedisStatus('server-boot');
+      } catch (redisStatusError) {
+        logger.warn('Failed to report Redis status at boot', {
+          error: redisStatusError.message
+        });
+      }
+
       console.log(`⏳ Attempting to bind to port ${PORT}...`);
-      app.listen(PORT, '0.0.0.0', async () => {
+      // Keep the handle so shutdown can drain in-flight requests. It used to be
+      // discarded, which made a graceful stop impossible.
+      httpServer = app.listen(PORT, '0.0.0.0', async () => {
         console.log('✅ Server bound to port');
         logger.info(`🚀 ${environmentConfig.getConfig().app.name} running on port ${PORT}`);
         logger.info(`🌍 Environment: ${environmentConfig.getEnvironment()}`);
@@ -201,9 +224,20 @@ else if (require.main === module) {
   startServer();
 
   // Graceful Shutdown
+  //
+  // Cloud Run sends SIGTERM and then allows roughly 10 seconds before SIGKILL.
+  // Without draining, every rolling deploy drops the requests that were in
+  // flight at that moment — on an API where clients retry dashboard loads, that
+  // shows up as a spike of errors on each release.
+  const SHUTDOWN_DRAIN_MS = 8000;
+  let shuttingDown = false;
+
   const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
     logger.info(`🛑 Received ${signal}, shutting down...`);
-    
+
     // Stop key rotation
     try {
       keyRotationService.stopAutomaticRotation();
@@ -211,9 +245,33 @@ else if (require.main === module) {
     } catch (e) {
       logger.warn('Failed to stop key rotation', { error: e.message });
     }
-    
+
     if (keepAliveService) keepAliveService.stop();
-    process.exit(0);
+
+    const exit = () => process.exit(0);
+
+    if (!httpServer) {
+      exit();
+      return;
+    }
+
+    // Stop accepting new connections, let existing requests finish.
+    logger.info('Draining in-flight requests...');
+    let forced = false;
+    const forceTimer = setTimeout(() => {
+      forced = true;
+      logger.warn('Drain timed out, forcing exit');
+      exit();
+    }, SHUTDOWN_DRAIN_MS);
+    // Do not hold the event loop open purely for the drain timer.
+    if (typeof forceTimer.unref === 'function') forceTimer.unref();
+
+    httpServer.close(() => {
+      if (forced) return;
+      clearTimeout(forceTimer);
+      logger.info('✅ In-flight requests drained');
+      exit();
+    });
   };
   
   process.on('SIGINT', () => shutdown('SIGINT'));
