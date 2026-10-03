@@ -49,6 +49,10 @@ service-account.json
 secrets.json
 scripts/secrets.json
 
+# Prometheus bearer token for /metrics. Contains the real scrape credential;
+# commit only metrics_token.example.
+docker/prometheus/metrics_token
+
 scripts/restore-individual-secrets.js
 
 # Uploads and user content

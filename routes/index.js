@@ -8,7 +8,9 @@ const pricePromptRoutesV1 = require('./v1/pricePrompt');
 const pricingRoutesV1 = require('./v1/pricing');
 const invoiceRoutesV1 = require('./v1/invoice');
 const organizationRoutesV1 = require('./v1/organization');
-const metricsRoutes = require('./metrics');
+// NOTE: metricsRoutes is intentionally not mounted here. Prometheus cannot
+// satisfy the App Check gate applied to /api, so it is mounted in app.js before
+// that gate and protected by its own scrape token.
 const invoiceManagementRoutes = require('./invoiceManagement');
 const authRoutes = require('./auth');
 const authRoutesV2 = require('./auth_v2');
@@ -95,7 +97,8 @@ router.use('/organisation', organizationRoutesV1);
 
 // Core Feature Routes
 router.use('/webhooks', webhookRoutes);
-router.use('/', metricsRoutes);
+// Metrics are mounted directly on the app in app.js, before the security gate,
+// so Prometheus can reach them. See routes/metrics.js for why.
 router.use('/', invoiceManagementRoutes);
 router.use('/auth', authRoutes);
 router.use('/auth/v2', authRoutesV2);
