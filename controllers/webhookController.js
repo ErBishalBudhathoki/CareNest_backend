@@ -369,6 +369,18 @@ class WebhookController {
         },
       }
     );
+    // getOrganizationById caches the organization for 15 minutes. Stripe
+    // capability changes must be visible immediately, otherwise the app keeps
+    // reporting the pre-webhook chargesEnabled/payoutsEnabled state.
+    try {
+      const organizationService = require('../services/organizationService');
+      await organizationService.invalidateOrganizationCache(org._id.toString());
+    } catch (error) {
+      logger.warn('Failed to invalidate organization cache after Connect account update', {
+        organizationId: String(org._id),
+        error: error.message,
+      });
+    }
     logger.business('Connected account status updated', {
       action: 'CONNECT_ACCOUNT_UPDATED',
       organizationId: String(org._id),

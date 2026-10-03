@@ -920,8 +920,12 @@ class OrganizationService {
         { new: true, runValidators: true }
       );
 
-      // Clear cache
-      await cacheService.del(`organization:${organizationId}`);
+      // Clear cache.
+      // Must go through _clearOrganizationCache so the key matches the one
+      // getOrganizationById reads (org:v2:*). Deleting `organization:*` here
+      // left the cached payload in place for the full 15 minute TTL, so every
+      // settings update served stale data once the cache was actually live.
+      await this._clearOrganizationCache(organizationId);
 
       return updatedOrganization;
     } catch (error) {

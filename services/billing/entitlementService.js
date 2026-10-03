@@ -4,6 +4,32 @@ const appleVerifier = require('./appleReceiptVerifier');
 const googleVerifier = require('./googlePlayReceiptVerifier');
 const logger = require('../../config/logger');
 
+/**
+ * Write to the Organization document and drop its cached projection.
+ *
+ * getOrganizationById() caches the whole organization for 15 minutes, so any
+ * write that is not followed by an invalidation will serve the pre-write
+ * subscription status for that window. Every `subscription.*` write must go
+ * through here.
+ *
+ * organizationService is required lazily to avoid a circular dependency
+ * (organizationService pulls in the billing stack that depends on this file).
+ */
+async function updateOrganizationSubscription(organizationId, update) {
+  await Organization.updateOne({ _id: organizationId }, update);
+  try {
+    const organizationService = require('../organizationService');
+    await organizationService.invalidateOrganizationCache(organizationId);
+  } catch (error) {
+    // Never fail the purchase because a cache drop failed. Worst case the
+    // caller reads a stale subscription status until the TTL expires.
+    logger.warn('Failed to invalidate organization cache after subscription update', {
+      organizationId: String(organizationId),
+      error: error.message,
+    });
+  }
+}
+
 const RECONCILE_GRACE_DAYS = 3;
 
 /**
@@ -41,15 +67,12 @@ async function persistEntitlement(organizationId, verified) {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  await Organization.updateOne(
-    { _id: organizationId },
-    {
-      $set: {
-        'subscription.entitlementId': entitlement._id,
-        'subscription.lastVerifiedAt': now,
-      },
-    }
-  );
+  await updateOrganizationSubscription(organizationId, {
+    $set: {
+      'subscription.entitlementId': entitlement._id,
+      'subscription.lastVerifiedAt': now,
+    },
+  });
   return entitlement;
 }
 
@@ -63,18 +86,15 @@ async function refreshOrganizationStatus(organizationId) {
     .lean();
 
   if (active) {
-    await Organization.updateOne(
-      { _id: organizationId },
-      {
-        $set: {
-          'subscription.entitlementId': active._id,
-          'subscription.status': 'active',
-          'subscription.expiresAt': active.expiresAt,
-          'subscription.graceEndsAt': active.graceEndsAt,
-          'subscription.source': active.source,
-        },
-      }
-    );
+    await updateOrganizationSubscription(organizationId, {
+      $set: {
+        'subscription.entitlementId': active._id,
+        'subscription.status': 'active',
+        'subscription.expiresAt': active.expiresAt,
+        'subscription.graceEndsAt': active.graceEndsAt,
+        'subscription.source': active.source,
+      },
+    });
     return { status: 'active', expiresAt: active.expiresAt };
   }
 
@@ -87,17 +107,14 @@ async function refreshOrganizationStatus(organizationId) {
     .lean();
 
   if (grace) {
-    await Organization.updateOne(
-      { _id: organizationId },
-      {
-        $set: {
-          'subscription.entitlementId': grace._id,
-          'subscription.status': 'grace',
-          'subscription.expiresAt': grace.expiresAt,
-          'subscription.graceEndsAt': grace.graceEndsAt,
-        },
-      }
-    );
+    await updateOrganizationSubscription(organizationId, {
+      $set: {
+        'subscription.entitlementId': grace._id,
+        'subscription.status': 'grace',
+        'subscription.expiresAt': grace.expiresAt,
+        'subscription.graceEndsAt': grace.graceEndsAt,
+      },
+    });
     return { status: 'grace', expiresAt: grace.expiresAt };
   }
 
@@ -113,10 +130,9 @@ async function refreshOrganizationStatus(organizationId) {
     if (latest.status === 'revoked') status = 'revoked';
     else if (latest.status === 'refunded') status = 'refunded';
 
-    await Organization.updateOne(
-      { _id: organizationId },
-      { $set: { 'subscription.status': status } }
-    );
+    await updateOrganizationSubscription(organizationId, {
+      $set: { 'subscription.status': status },
+    });
     return { status };
   }
 
@@ -159,24 +175,16 @@ const entitlementService = {
    */
   async resetOrganizationEntitlements(organizationId) {
     const result = await Entitlement.deleteMany({ organizationId });
-    await Organization.updateOne(
-      { _id: organizationId },
-      {
-        $set: { 'subscription.status': 'none' },
-        $unset: {
-          'subscription.entitlementId': '',
-          'subscription.expiresAt': '',
-          'subscription.graceEndsAt': '',
-          'subscription.lastVerifiedAt': '',
-          'subscription.source': '',
-        },
-      }
-    );
-
-    try {
-      const organizationService = require('../organizationService');
-      await organizationService.invalidateOrganizationCache(organizationId);
-    } catch (_) {}
+    await updateOrganizationSubscription(organizationId, {
+      $set: { 'subscription.status': 'none' },
+      $unset: {
+        'subscription.entitlementId': '',
+        'subscription.expiresAt': '',
+        'subscription.graceEndsAt': '',
+        'subscription.lastVerifiedAt': '',
+        'subscription.source': '',
+      },
+    });
 
     logger.warn('Organization entitlements reset (dev only)', {
       organizationId: String(organizationId),
