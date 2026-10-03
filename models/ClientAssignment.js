@@ -83,4 +83,13 @@ const clientAssignmentSchema = new mongoose.Schema({
 // Indexes
 clientAssignmentSchema.index({ userEmail: 1, clientEmail: 1, isActive: 1 });
 
+// Projection and utilisation endpoints join this collection to users by email
+// after a $lookup. Named to match scripts/migrate_dashboard_indexes.js — see the
+// note in models/InvoiceLineItem.js about Mongo error 85 on duplicate key
+// patterns.
+clientAssignmentSchema.index(
+  { organizationId: 1, userEmail: 1 },
+  { name: 'org_userEmail_idx' }
+);
+
 module.exports = mongoose.model('ClientAssignment', clientAssignmentSchema);

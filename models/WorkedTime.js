@@ -95,4 +95,20 @@ workedTimeSchema.index({ userEmail: 1, clientEmail: 1, workDate: 1 });
 workedTimeSchema.index({ userEmail: 1, workDate: 1 });
 workedTimeSchema.index({ organizationId: 1, workDate: 1 });
 
+// The analytics pipelines in controllers/analyticsController.js do NOT filter on
+// workDate. They match the legacy `shiftDate` string (YYYY-MM-DD) with a
+// lexicographic range, because it is cheaper to compare than converting a Date.
+// Every analytics endpoint was therefore collection-scanning WorkedTime, then
+// running $lookup + $sort over the matched set. Index the field it actually
+// filters on.
+//
+// Explicit names keep these in lockstep with scripts/migrate_dashboard_indexes.js;
+// see the note in models/InvoiceLineItem.js about Mongo error 85.
+workedTimeSchema.index(
+  { organizationId: 1, shiftDate: 1 },
+  { name: 'org_shiftDate_idx' }
+);
+// Cross-tenant reporting scans by date only.
+workedTimeSchema.index({ shiftDate: 1 }, { name: 'shiftDate_idx' });
+
 module.exports = mongoose.model('WorkedTime', workedTimeSchema);
