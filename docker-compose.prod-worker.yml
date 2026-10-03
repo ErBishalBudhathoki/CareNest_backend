@@ -83,6 +83,20 @@ services:
       - REDIS_URL=${REDIS_URL}
       - REDIS_REJECT_UNAUTHORIZED=false
 
+      # ── Listmonk (transactional email) ───────────────────────────────────
+      # The worker's email activities (temporal/activities/auth.js,
+      # employeeOnboardingActivities.js) go through services/emailService.js ->
+      # listmonkService.js, which throws 'listmonk_api_key env var is not set'
+      # when these are absent. Without them the worker's auth and onboarding
+      # emails fail while the API process (which does receive them) succeeds, so
+      # the breakage is invisible from the API side.
+      - LISTMONK_BASE_URL=${LISTMONK_BASE_URL}
+      - LISTMONK_USERNAME=${LISTMONK_USERNAME}
+      - listmonk_api_key=${listmonk_api_key}
+      - LISTMONK_ONBOARDING_LIST_ID=${LISTMONK_ONBOARDING_LIST_ID}
+      # Not defined in secrets.json; listmonkService falls back to 1 when unset.
+      - LISTMONK_TEMPLATE_ID=${LISTMONK_TEMPLATE_ID:-1}
+
       # ── Misc ─────────────────────────────────────────────────────────────
       - HOLIDAY_CSV=${HOLIDAY_CSV}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}

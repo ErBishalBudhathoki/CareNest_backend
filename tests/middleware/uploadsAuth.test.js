@@ -25,15 +25,25 @@ jest.mock('../../services/jwtKeyRotationService', () => ({
   getValidKeys: jest.fn().mockReturnValue([]),
 }));
 
-jest.mock('../../utils/logger', () => ({
-  createLogger: () => ({
+// Mirror the real shape of utils/logger, which is the default logger object with
+// `Logger` and `createLogger` attached. Mocking only `createLogger` leaves
+// consumers that import the module as a logger (e.g.
+// services/assignmentVoiceAgentService.js) calling `.warn` on undefined, which
+// fires at import time because that module instantiates itself on require.
+jest.mock('../../utils/logger', () => {
+  const logger = {
     info: jest.fn(),
     error: jest.fn(),
     warn: jest.fn(),
     debug: jest.fn(),
     security: jest.fn(),
-  }),
-}));
+  };
+  return {
+    ...logger,
+    Logger: jest.fn(),
+    createLogger: () => ({ ...logger }),
+  };
+});
 
 // The app module has no side effects beyond route registration (DB connects
 // in server.js), so requiring it in tests is safe.
