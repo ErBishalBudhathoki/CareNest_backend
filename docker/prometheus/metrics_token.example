@@ -1,0 +1,10 @@
+# Copy to docker/prometheus/metrics_token and replace with the same value as
+# METRICS_SCRAPE_TOKEN in the backend environment.
+#
+#   cp metrics_token.example metrics_token
+#   # generate a real one:  openssl rand -hex 32
+#
+# Must match METRICS_SCRAPE_TOKEN exactly. The file is mounted read-only into the
+# prometheus container and referenced by `bearer_token_file` in prometheus.yml.
+# Without a matching value the app returns 503 on every scrape.
+PLACEHOLDER_REPLACE_ME
