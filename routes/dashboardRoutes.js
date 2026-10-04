@@ -5,6 +5,7 @@ const { query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const dashboardController = require('../controllers/dashboardController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { withSharedStore } = require('../middleware/rateLimitStore');
 
 // Rate limiting
@@ -29,6 +30,7 @@ const organizationIdValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * @route GET /api/dashboard/today-summary

@@ -5,6 +5,7 @@ const { query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const workerController = require('../controllers/workerController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting for worker endpoints
 // Workers check their dashboard frequently, so allow more requests than auth endpoints
@@ -56,6 +57,7 @@ router.get(
   '/dashboard',
   workerDashboardLimiter,
   authenticateUser,
+  requireOrgMembership,
   getDashboardValidation,
   handleValidationErrors,
   workerController.getDashboard
@@ -71,6 +73,7 @@ router.get(
   '/shift-history',
   workerDashboardLimiter,
   authenticateUser,
+  requireOrgMembership,
   getShiftHistoryValidation,
   handleValidationErrors,
   workerController.getShiftHistory

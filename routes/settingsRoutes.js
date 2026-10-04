@@ -5,6 +5,7 @@ const { body, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const settingsController = require('../controllers/settingsController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 const settingsLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -19,6 +20,7 @@ const strictLimiter = rateLimit({
 });
 
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 const settingsValidation = [
     body('organizationId').optional().isString().trim(),

@@ -7,6 +7,7 @@ const recurringChargeController = require('../../controllers/billing/recurringCh
 const stripeConnectOAuthController = require('../../controllers/billing/stripeConnectOAuthController');
 const stripeDashboardController = require('../../controllers/billing/stripeDashboardController');
 const { authenticateUser } = require('../../middleware/auth');
+const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
 const {
   organizationContextMiddleware,
   requireOrganizationMatch,
@@ -32,7 +33,7 @@ const publicCheckoutLimiter = rateLimit({
 router.post(
   '/entitlements/verify/apple',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -44,7 +45,7 @@ router.post(
 router.post(
   '/entitlements/verify/google',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -56,7 +57,7 @@ router.post(
 router.get(
   '/entitlements',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   entitlementController.getStatus
@@ -67,7 +68,7 @@ router.get(
 router.post(
   '/entitlements/reset',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -78,7 +79,7 @@ router.post(
 router.post(
   '/hosted-checkout/grant',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -90,7 +91,7 @@ router.post(
 router.post(
   '/recurring-agreements',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -104,7 +105,7 @@ router.post(
 router.get(
   '/recurring-agreements',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   recurringAgreementController.list
@@ -113,7 +114,7 @@ router.get(
 router.delete(
   '/recurring-agreements/:agreementId',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   billingLimiter,
   recurringAgreementController.cancel
 );
@@ -121,7 +122,7 @@ router.delete(
 router.post(
   '/recurring/run',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   billingLimiter,
   recurringChargeController.run
 );
@@ -129,7 +130,7 @@ router.post(
 router.post(
   '/connect/oauth/start',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -142,7 +143,7 @@ router.post(
 router.get(
   '/dashboard/overview',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -153,7 +154,7 @@ router.get(
 router.get(
   '/dashboard/balance',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -164,7 +165,7 @@ router.get(
 router.get(
   '/dashboard/payouts',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -175,7 +176,7 @@ router.get(
 router.get(
   '/dashboard/revenue',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -186,7 +187,7 @@ router.get(
 router.get(
   '/dashboard/payments',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -197,7 +198,7 @@ router.get(
 router.get(
   '/dashboard/risk',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -209,7 +210,7 @@ router.get(
 router.post(
   '/dashboard/refund',
   authenticateUser,
-  organizationContextMiddleware,
+  requireOrgMembership,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),

@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const complianceController = require('../controllers/complianceController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const complianceLimiter = rateLimit({
@@ -29,6 +30,7 @@ const summaryValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * Get compliance summary

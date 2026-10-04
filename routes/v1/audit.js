@@ -7,7 +7,12 @@
 
 const express = require('express');
 const AuditController = require('../../controllers/auditController');
+const { authenticateUser } = require('../../middleware/auth');
+const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
 const router = express.Router();
+
+router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Get audit history for a specific entity
 // GET /audit/entity/:entityType/:entityId
