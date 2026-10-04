@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const GeofenceController = require('../controllers/geofenceController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const geofenceLimiter = rateLimit({
@@ -47,6 +48,7 @@ const geofenceIdValidation = [
 
 // Apply authentication middleware to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 router.post('/locations', strictLimiter, createGeofenceValidation, handleValidationErrors, GeofenceController.createGeofence);
 router.get('/locations', geofenceLimiter, GeofenceController.getGeofences);

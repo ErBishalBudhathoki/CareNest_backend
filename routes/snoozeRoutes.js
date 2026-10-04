@@ -5,6 +5,7 @@ const { body, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const SnoozeController = require('../controllers/snoozeController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const snoozeLimiter = rateLimit({
@@ -40,6 +41,7 @@ const checkSnoozeValidation = [
 ];
 
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 router.post('/rules', strictLimiter, createRuleValidation, handleValidationErrors, SnoozeController.createRule);
 router.get('/rules', snoozeLimiter, getRulesValidation, handleValidationErrors, SnoozeController.getRules);

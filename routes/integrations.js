@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const integrationController = require('../controllers/integrationController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // All routes require authentication
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Get all integrations for an organization
 router.get('/:organizationId', integrationController.getIntegrations);

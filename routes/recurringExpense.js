@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const {
   processRecurringExpenses,
   createRecurringExpense,
@@ -80,6 +81,7 @@ const statsValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Process due recurring expenses (admin only)
 router.post('/recurring-expenses/process', requireRoles(['admin']), processLimiter, processValidation, handleValidationErrors, async (req, res) => {

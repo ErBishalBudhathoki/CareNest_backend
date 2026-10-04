@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const TeamController = require('../controllers/teamController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const teamLimiter = rateLimit({
@@ -57,6 +58,7 @@ const broadcastIdValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Teams
 router.get('/my-teams', teamLimiter, TeamController.getMyTeams);

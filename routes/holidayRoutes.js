@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { validationResult } = require('express-validator');
 const holidayController = require('../controllers/holidayController');
 const { authenticateUser, requireAdmin } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const holidayReadLimiter = rateLimit({
@@ -100,6 +101,7 @@ router.post(
 router.post(
   '/upload-csv',
   authenticateUser,
+  requireOrgMembership,
   requireAdmin,
   holidayWriteLimiter,
   holidayController.uploadCSV
@@ -108,6 +110,7 @@ router.post(
 router.post(
   '/',
   authenticateUser,
+  requireOrgMembership,
   requireAdmin,
   holidayWriteLimiter,
   addHolidayValidation,
@@ -118,6 +121,7 @@ router.post(
 router.delete(
   '/:id',
   authenticateUser,
+  requireOrgMembership,
   requireAdmin,
   holidayWriteLimiter,
   deleteHolidayValidation,

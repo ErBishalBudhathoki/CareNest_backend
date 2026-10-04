@@ -5,6 +5,7 @@ const { query, body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const assignmentController = require('../controllers/assignmentController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const assignmentLimiter = rateLimit({
@@ -46,6 +47,7 @@ const deleteAssignmentValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * Create or Update Assignment

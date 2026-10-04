@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { validationResult } = require('express-validator');
 const invoiceController = require('../../controllers/v1/invoiceController');
 const { authenticateUser } = require('../../middleware/auth');
+const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
 
 // Rate limiting
 const invoiceReadLimiter = rateLimit({
@@ -214,6 +215,7 @@ const validationReportValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Invoice Generation Routes
 router.post(

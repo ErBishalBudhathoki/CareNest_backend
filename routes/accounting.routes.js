@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const accountingService = require('../services/accountingService');
 const logger = require('../config/logger');
 
@@ -40,6 +41,7 @@ const syncValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * @route POST /api/accounting/connect

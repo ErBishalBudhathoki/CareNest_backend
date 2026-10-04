@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const AiTimingController = require('../controllers/aiTimingController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting configurations
 const standardLimiter = rateLimit({
@@ -39,6 +40,7 @@ const feedbackValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 router.post('/optimal-time', standardLimiter, optimalTimeValidation, handleValidationErrors, AiTimingController.getOptimalTime);
 router.post('/feedback', feedbackLimiter, feedbackValidation, handleValidationErrors, AiTimingController.recordFeedback);

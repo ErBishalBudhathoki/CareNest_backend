@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const advancedPayrollController = require('../controllers/advancedPayrollController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 router.post('/calculate', authenticateUser, advancedPayrollController.calculatePayroll);
 router.get('/payslip/:userId/:period', authenticateUser, advancedPayrollController.getPayslip);

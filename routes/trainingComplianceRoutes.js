@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const controller = require('../controllers/trainingComplianceController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { upload } = require('../config/storage');
 
 // Rate limiting
@@ -158,6 +159,7 @@ router.put(
 router.put(
   '/certifications/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   certificationUpdateValidation,
   handleValidationErrors,
@@ -167,6 +169,7 @@ router.put(
 router.delete(
   '/certifications/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   param('id').isMongoId().withMessage('Invalid certification ID'),
   handleValidationErrors,
@@ -177,6 +180,7 @@ router.delete(
 router.post(
   '/certification-requirements',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   certificationRequirementValidation,
   handleValidationErrors,
@@ -186,6 +190,7 @@ router.post(
 router.get(
   '/certification-requirements',
   authenticateUser,
+  requireOrgMembership,
   readLimiter,
   controller.getCertificationRequirements
 );
@@ -193,6 +198,7 @@ router.get(
 router.put(
   '/certification-requirements/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   certificationRequirementUpdateValidation,
   handleValidationErrors,
@@ -202,6 +208,7 @@ router.put(
 router.delete(
   '/certification-requirements/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   param('id').isMongoId().withMessage('Invalid requirement ID'),
   handleValidationErrors,
@@ -228,6 +235,7 @@ router.get(
 router.get(
   '/training/:id/progress',
   authenticateUser,
+  requireOrgMembership,
   readLimiter,
   param('id').isMongoId().withMessage('Invalid training ID'),
   handleValidationErrors,
@@ -237,6 +245,7 @@ router.get(
 router.put(
   '/training/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   trainingModuleUpdateValidation,
   handleValidationErrors,
@@ -246,6 +255,7 @@ router.put(
 router.delete(
   '/training/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   param('id').isMongoId().withMessage('Invalid training ID'),
   handleValidationErrors,
@@ -281,6 +291,7 @@ router.get(
 router.put(
   '/compliance/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   checklistUpdateValidation,
   handleValidationErrors,
@@ -290,6 +301,7 @@ router.put(
 router.delete(
   '/compliance/:id',
   authenticateUser,
+  requireOrgMembership,
   writeLimiter,
   param('id').isMongoId().withMessage('Invalid checklist ID'),
   handleValidationErrors,
