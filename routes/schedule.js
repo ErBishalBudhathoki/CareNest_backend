@@ -12,6 +12,7 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const ScheduleController = require('../controllers/scheduleController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 
 // Rate limiting
@@ -74,6 +75,7 @@ const orgIdValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Shift Management
 router.post('/shift', strictLimiter, requireEntitlement('create_shift'), shiftValidation, handleValidationErrors, ScheduleController.createShift);

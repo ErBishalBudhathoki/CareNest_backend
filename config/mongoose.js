@@ -1,6 +1,16 @@
 const mongoose = require('mongoose');
 const logger = require('../utils/logger').createLogger('MongooseConfig');
 
+// Aggregation timeout: analytics pipelines previously ran with no maxTimeMS, so
+// a bad pipeline could pin a Cloud Run instance at the 300s request timeout.
+// Default 15s, override per call as today; this is the ceiling for every call
+// that forgot to set one.
+const AGGREGATE_MAX_TIME_MS = Number(process.env.AGGREGATE_MAX_TIME_MS || 15000);
+const originalAggregate = mongoose.Model.aggregate;
+mongoose.Model.aggregate = function aggregateWithTimeout(pipeline, options) {
+  return originalAggregate.call(this, pipeline, { maxTimeMS: AGGREGATE_MAX_TIME_MS, ...options });
+};
+
 const connectMongoose = async () => {
   try {
     const uri = process.env.MONGODB_URI;

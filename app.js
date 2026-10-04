@@ -83,7 +83,8 @@ app.use(helmet({
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"],
-      workerSrc: ["'self'", "blob:"]
+      workerSrc: ["'self'", "blob:"],
+      upgradeInsecureRequests: []
     }
   },
   crossOriginEmbedderPolicy: false

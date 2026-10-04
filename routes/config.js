@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const configController = require('../controllers/configController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const configLimiter = rateLimit({
@@ -40,6 +41,7 @@ const organizationIdValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Job Roles
 router.get('/job-roles/:organizationId', configLimiter, organizationIdValidation, handleValidationErrors, configController.getJobRoles);

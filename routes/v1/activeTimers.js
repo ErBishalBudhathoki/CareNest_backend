@@ -11,6 +11,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { body, param, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth');
+const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
 const { requireEntitlement } = require('../../middleware/billing/requireEntitlement');
 
 // Validation error handler
@@ -48,6 +49,7 @@ const stopValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Start a timer (clock in)
 router.post('/start', timerLimiter, requireEntitlement('clock_in'), startValidation, handleValidationErrors, ActiveTimerController.startTimer);

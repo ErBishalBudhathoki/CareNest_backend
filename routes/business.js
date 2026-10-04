@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const businessController = require('../controllers/businessController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const businessLimiter = rateLimit({
@@ -60,6 +61,7 @@ const deleteBusinessValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * Add business with organization context

@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const requestController = require('../controllers/requestController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const requestLimiter = rateLimit({
@@ -60,6 +61,7 @@ const organizationIdValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 router.post('/create', strictLimiter, createValidation, handleValidationErrors, requestController.createRequest);
 router.get('/organization/:organizationId', requestLimiter, organizationIdValidation, handleValidationErrors, requestController.getRequests);

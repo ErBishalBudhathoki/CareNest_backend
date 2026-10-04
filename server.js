@@ -125,6 +125,19 @@ else if (require.main === module) {
         });
       }
 
+      // Prove the Valkey path end-to-end at boot. A silently-degraded cache
+      // (disabled config, TLS mismatch, unreachable host) must show up in the
+      // logs here rather than as unexplained slow reads later.
+      try {
+        const started = Date.now();
+        const pong = await require('./config/redis').ping();
+        logger.info('Valkey boot check', { pong: Boolean(pong), latencyMs: Date.now() - started });
+      } catch (pingError) {
+        logger.error('Valkey boot check FAILED — cache and shared rate limits are degraded', {
+          error: pingError.message
+        });
+      }
+
       console.log(`⏳ Attempting to bind to port ${PORT}...`);
       // Keep the handle so shutdown can drain in-flight requests. It used to be
       // discarded, which made a graceful stop impossible.

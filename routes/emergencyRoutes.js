@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const EmergencyController = require('../controllers/emergencyController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const emergencyLimiter = rateLimit({
@@ -46,6 +47,7 @@ const acknowledgeValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // GET /api/emergency/active — active broadcasts for the current user's teams
 router.get('/active', viewLimiter, EmergencyController.getActive);

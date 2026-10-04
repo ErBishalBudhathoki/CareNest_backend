@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
@@ -50,6 +51,7 @@ router.use(apiUsageRateLimit);
 
 // Require authentication and admin role for all API usage routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 router.use(requireRoles(['admin']));
 
 /**

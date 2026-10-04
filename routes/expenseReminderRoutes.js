@@ -9,6 +9,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 const {
     getExpensesMissingReceipts,
@@ -62,6 +63,7 @@ const settingsValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * GET /api/reminders/expense/status

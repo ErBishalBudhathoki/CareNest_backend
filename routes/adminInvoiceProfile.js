@@ -5,6 +5,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const adminInvoiceProfileController = require('../controllers/adminInvoiceProfileController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const adminLimiter = rateLimit({
@@ -54,6 +55,7 @@ const profileIdValidation = [
 
 // Protected routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 /**
  * Create admin invoice profile
