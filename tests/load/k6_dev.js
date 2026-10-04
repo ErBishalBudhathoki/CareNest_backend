@@ -29,7 +29,7 @@ export default function () {
 
   const r2 = http.post(
     `${BASE}/api/auth/login`,
-    JSON.stringify({ email: 'probe@example.com', password: 'wrong' }),
+    JSON.stringify({ email: 'REDACTED_EMAIL', password: 'REDACTED_PASSWORD' }),
     { headers: { 'Content-Type': 'application/json' } }
   );
   check(r2, { 'login gated (401/400)': (r) => r.status === 401 || r.status === 400 });
