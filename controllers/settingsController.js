@@ -9,7 +9,7 @@ class SettingsController {
    * GET /api/settings/general
    */
   getGeneralSettings = catchAsync(async (req, res) => {
-    const organizationId = req.user.organizationId || req.query.organizationId;
+    const organizationId = (req.organizationContext && req.organizationContext.organizationId) || req.user.organizationId || req.query.organizationId;
 
     if (!organizationId) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });

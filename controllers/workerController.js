@@ -5,6 +5,7 @@ const logger = require('../config/logger');
 class WorkerController {
   _resolveRequestContext(req) {
     const orgId = req.headers['x-organization-id'] ||
+      (req.organizationContext && req.organizationContext.organizationId) ||
       req.query.organizationId ||
       req.user?.organizationId;
     const userEmail = req.user?.email;

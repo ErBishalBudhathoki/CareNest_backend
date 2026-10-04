@@ -59,7 +59,7 @@ const parseDurationExpression = {
  * GET /api/analytics/financials
  */
 const getFinancialMetrics = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
     const { startDate, endDate } = req.query;
 
     if (!orgId) {
@@ -208,7 +208,7 @@ const getFinancialMetrics = catchAsync(async (req, res) => {
  * GET /api/analytics/utilization
  */
 const getUtilizationMetrics = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
     const { startDate, endDate } = req.query;
 
     if (!orgId) {
@@ -291,7 +291,7 @@ const getUtilizationMetrics = catchAsync(async (req, res) => {
  * GET /api/analytics/overtime
  */
 const getOvertimeMetrics = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
     const { weekStart } = req.query; // YYYY-MM-DD of Monday
 
     if (!orgId || !weekStart) {
@@ -426,7 +426,7 @@ const getOvertimeMetrics = catchAsync(async (req, res) => {
  * GET /api/analytics/reliability
  */
 const getReliabilityMetrics = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
     const { startDate, endDate } = req.query;
 
     if (!orgId) {
@@ -590,7 +590,7 @@ const getCrossOrgMetrics = catchAsync(async (req, res) => {
 const getRevenueForecast = catchAsync(async (req, res) => {
     // Placeholder implementation for forecast
     // In a real scenario, this would likely use historical data to project future revenue
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
 
     if (!orgId) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });
@@ -898,7 +898,7 @@ complianceData: {
  * GET /api/analytics/churn-prediction
  */
 const getChurnPrediction = catchAsync(async (req, res) => {
-    const orgId = req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.query.organizationId;
 
     if (!orgId) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });
@@ -1048,7 +1048,7 @@ const getChurnPrediction = catchAsync(async (req, res) => {
  * GET /api/analytics/demand-forecast
  */
 const getDemandForecast = catchAsync(async (req, res) => {
-    const orgId = req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.query.organizationId;
     const daysAhead = parseInt(req.query.daysAhead) || 7;
 
     if (!orgId) {
@@ -1144,7 +1144,7 @@ const getDemandForecast = catchAsync(async (req, res) => {
  * GET /api/analytics/compliance-risk
  */
 const getComplianceRisk = catchAsync(async (req, res) => {
-    const orgId = req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.query.organizationId;
 
     if (!orgId) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });
@@ -1217,7 +1217,7 @@ const getComplianceRisk = catchAsync(async (req, res) => {
  * GET /api/analytics/client-risk
  */
 const getClientRisk = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
 
     if (!orgId) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });
@@ -1292,7 +1292,7 @@ const getClientRisk = catchAsync(async (req, res) => {
  * GET /api/analytics/service-demand
  */
 const getServiceDemand = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
     const daysAhead = parseInt(req.query.daysAhead) || 30;
 
     if (!orgId) {
@@ -1398,7 +1398,7 @@ const runScenarioModel = catchAsync(async (req, res) => {
  * GET /api/analytics/recommendations
  */
 const getRecommendations = catchAsync(async (req, res) => {
-    const orgId = req.params.organizationId || req.query.organizationId;
+    const orgId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
 
     if (!orgId) {
       return res.status(400).json({ success: false, message: 'Organization ID is required' });

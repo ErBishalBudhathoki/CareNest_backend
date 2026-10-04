@@ -270,7 +270,7 @@ class PricingController {
    */
   getPricingLookup = catchAsync(async (req, res) => {
     // Support both query params and path params for backward compatibility
-    const organizationId = req.params.organizationId || req.query.organizationId;
+    const organizationId = (req.organizationContext && req.organizationContext.organizationId) || req.params.organizationId || req.query.organizationId;
     const supportItemNumber = req.params.supportItemNumber || req.query.supportItemNumber;
     const { clientId } = req.query;
 

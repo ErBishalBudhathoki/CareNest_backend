@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bulkActionsController = require('../controllers/bulkActionsController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const {
   organizationContextMiddleware,
   requireOrganizationMatch,
@@ -17,6 +18,7 @@ const bulkActionsLimiter = rateLimit({
 
 // Apply authentication and rate limiting to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 router.use(bulkActionsLimiter);
 
 // Bulk Timesheet Approval

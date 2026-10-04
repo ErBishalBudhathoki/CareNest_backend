@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const analyticsController = require('../controllers/analyticsController');
 const { authenticateUser, requireAdmin } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { withSharedStore } = require('../middleware/rateLimitStore');
 
 // Rate limiting
@@ -59,6 +60,7 @@ router.get(
   '/financials',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   dateRangeValidation,
   handleValidationErrors,
   analyticsController.getFinancialMetrics
@@ -73,6 +75,7 @@ router.get(
   '/utilization',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   dateRangeValidation,
   handleValidationErrors,
   analyticsController.getUtilizationMetrics
@@ -87,6 +90,7 @@ router.get(
   '/overtime',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   weekStartValidation,
   handleValidationErrors,
   analyticsController.getOvertimeMetrics
@@ -101,6 +105,7 @@ router.get(
   '/reliability',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   dateRangeValidation,
   handleValidationErrors,
   analyticsController.getReliabilityMetrics
@@ -120,6 +125,7 @@ router.get(
   '/cross-org/revenue',
   strictLimiter,
   authenticateUser,
+  requireOrgMembership,
   requireAdmin,
   [
     query('startDate').isISO8601().toDate().withMessage('Valid startDate required'),
@@ -138,6 +144,7 @@ router.get(
   '/forecast',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [query('organizationId').isString().withMessage('Organization ID required')],
   handleValidationErrors,
   analyticsController.getRevenueForecast
@@ -152,6 +159,7 @@ router.get(
   '/pricing/:organizationId',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   organizationIdValidation,
   [
     query('startDate').optional().isISO8601().withMessage('Valid startDate required'),
@@ -171,6 +179,7 @@ router.get(
   '/pricing/compliance/:organizationId',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   organizationIdValidation,
   [
     query('startDate').optional().isISO8601().withMessage('Valid startDate required'),
@@ -190,6 +199,7 @@ router.get(
   '/churn-prediction',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [query('organizationId').isString().withMessage('Organization ID required')],
   handleValidationErrors,
   analyticsController.getChurnPrediction
@@ -204,6 +214,7 @@ router.get(
   '/demand-forecast',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [
     query('organizationId').isString().withMessage('Organization ID required'),
     query('daysAhead').optional().isInt({ min: 1, max: 90 }).withMessage('Days ahead must be between 1 and 90')
@@ -221,6 +232,7 @@ router.get(
   '/compliance-risk',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [query('organizationId').isString().withMessage('Organization ID required')],
   handleValidationErrors,
   analyticsController.getComplianceRisk
@@ -235,6 +247,7 @@ router.get(
   '/client-risk',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [query('organizationId').isString().withMessage('Organization ID required')],
   handleValidationErrors,
   analyticsController.getClientRisk
@@ -249,6 +262,7 @@ router.get(
   '/service-demand',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [
     query('organizationId').isString().withMessage('Organization ID required'),
     query('daysAhead').optional().isInt({ min: 1, max: 90 }).withMessage('Days ahead must be between 1 and 90')
@@ -266,6 +280,7 @@ router.post(
   '/scenario-model',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [
     body('organizationId').isString().withMessage('Organization ID required'),
     body('scenario').isObject().withMessage('Scenario parameters required')
@@ -283,6 +298,7 @@ router.get(
   '/recommendations',
   analyticsLimiter,
   authenticateUser,
+  requireOrgMembership,
   [query('organizationId').isString().withMessage('Organization ID required')],
   handleValidationErrors,
   analyticsController.getRecommendations

@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const { validationResult } = require('express-validator');
 const leaveController = require('../controllers/leaveController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
 const leaveReadLimiter = rateLimit({
@@ -99,6 +100,7 @@ const getHolidaysValidation = [
 router.get(
   '/balances/:userEmail',
   authenticateUser,
+  requireOrgMembership,
   leaveReadLimiter,
   getBalancesValidation,
   handleValidationErrors,
@@ -113,6 +115,7 @@ router.get(
 router.post(
   '/request',
   authenticateUser,
+  requireOrgMembership,
   leaveWriteLimiter,
   submitRequestValidation,
   handleValidationErrors,
@@ -127,6 +130,7 @@ router.post(
 router.get(
   '/requests/:userEmail',
   authenticateUser,
+  requireOrgMembership,
   leaveReadLimiter,
   getRequestsValidation,
   handleValidationErrors,
@@ -141,6 +145,7 @@ router.get(
 router.get(
   '/forecast/:userEmail',
   authenticateUser,
+  requireOrgMembership,
   leaveReadLimiter,
   getForecastValidation,
   handleValidationErrors,
@@ -155,6 +160,7 @@ router.get(
 router.get(
   '/public-holidays',
   authenticateUser,
+  requireOrgMembership,
   leaveReadLimiter,
   getHolidaysValidation,
   handleValidationErrors,
@@ -169,6 +175,7 @@ router.get(
 router.put(
   '/request/:requestId/status',
   authenticateUser,
+  requireOrgMembership,
   requireRoles(['admin', 'superadmin']),
   leaveWriteLimiter,
   param('requestId').isMongoId().withMessage('Invalid request ID format'),
@@ -187,6 +194,7 @@ router.put(
 router.put(
   '/balances/:userEmail',
   authenticateUser,
+  requireOrgMembership,
   requireRoles(['admin', 'superadmin']),
   leaveWriteLimiter,
   getBalancesValidation,

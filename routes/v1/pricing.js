@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pricingController = require('../../controllers/pricingController');
 const { authenticateUser } = require('../../middleware/auth');
+const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
 const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { validationResult } = require('express-validator');
@@ -49,6 +50,7 @@ const handleValidationErrors = (req, res, next) => {
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Create custom pricing
 router.post(

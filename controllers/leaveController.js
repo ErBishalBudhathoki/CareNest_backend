@@ -112,7 +112,7 @@ class LeaveController {
    * GET /api/leave/public-holidays
    */
   getPublicHolidays = catchAsync(async (req, res) => {
-    const organizationId = req.query.organizationId || null;
+    const organizationId = (req.organizationContext && req.organizationContext.organizationId) || req.query.organizationId || null;
     const year = req.query.year || new Date().getFullYear();
 
     const holidays = await leaveService.getPublicHolidays(organizationId, year);

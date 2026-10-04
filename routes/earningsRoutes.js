@@ -5,6 +5,7 @@ const { param, query, body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const earningsController = require('../controllers/earningsController');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { withSharedStore } = require('../middleware/rateLimitStore');
 const {
   requireAdmin,
@@ -61,6 +62,7 @@ router.get(
   '/summary/:userEmail',
   earningsLimiter,
   authenticateUser,
+  requireOrgMembership,
   requireSelfOrAdmin('userEmail'),
   emailParamValidation,
   handleValidationErrors,
@@ -72,6 +74,7 @@ router.get(
   '/projected/:userEmail',
   earningsLimiter,
   authenticateUser,
+  requireOrgMembership,
   requireSelfOrAdmin('userEmail'),
   emailParamValidation,
   handleValidationErrors,
@@ -83,6 +86,7 @@ router.get(
   '/history/:userEmail',
   earningsLimiter,
   authenticateUser,
+  requireOrgMembership,
   requireSelfOrAdmin('userEmail'),
   historyValidation,
   handleValidationErrors,
@@ -94,6 +98,7 @@ router.post(
   '/rate/:userEmail',
   strictLimiter,
   authenticateUser,
+  requireOrgMembership,
   requireAdmin,
   payRateValidation,
   handleValidationErrors,
@@ -105,6 +110,7 @@ router.get(
   '/quarterly-ote/:userEmail',
   earningsLimiter,
   authenticateUser,
+  requireOrgMembership,
   requireSelfOrAdmin('userEmail'),
   emailParamValidation,
   handleValidationErrors,

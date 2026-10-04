@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { 
   organizationContextMiddleware, 
   requireOrganizationMatch 
@@ -76,6 +77,7 @@ const statsValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 router.use(organizationContextMiddleware);
 
 // Validate a single price

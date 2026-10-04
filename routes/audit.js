@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const {
   getEntityAuditHistory,
   getOrganizationAuditLogs,
@@ -72,6 +73,7 @@ const exportValidation = [
 
 // Apply authentication to all routes
 router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // Get audit history for a specific entity
 router.get('/api/audit/entity/:entityType/:entityId', auditLimiter, entityAuditValidation, handleValidationErrors, async (req, res) => {
