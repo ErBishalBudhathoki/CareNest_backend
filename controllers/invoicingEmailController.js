@@ -211,15 +211,12 @@ class InvoicingEmailController {
         });
       }
 
-      let keyDoc = await InvoicingEmailKey.findOne({
+      // Tenant-scoped only. The previous unscoped fallback ({ userEmail })
+      // leaked key existence across organizations.
+      const keyDoc = await InvoicingEmailKey.findOne({
         userEmail,
         organizationId: String(organizationId),
       }).lean();
-
-      // Backward compatibility for legacy records that might not have org scoped data.
-      if (!keyDoc) {
-        keyDoc = await InvoicingEmailKey.findOne({ userEmail }).lean();
-      }
 
       if (!keyDoc || !keyDoc.invoicingBusinessKey) {
         return res.status(200).json({
@@ -228,10 +225,13 @@ class InvoicingEmailController {
         });
       }
 
+      // Never return the raw key. The client only needs to know one exists;
+      // handing the encryption key to any authenticated org member defeats
+      // the encryption at rest it is protecting.
       return res.status(200).json({
         success: true,
         message: 'Invoicing email key found',
-        key: keyDoc.invoicingBusinessKey,
+        hasKey: true,
       });
     } catch (error) {
       return res.status(500).json({
