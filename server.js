@@ -130,8 +130,14 @@ else if (require.main === module) {
       // logs here rather than as unexplained slow reads later.
       try {
         const started = Date.now();
-        const pong = await require('./config/redis').ping();
+        // Hard cap: a hanging Valkey must never stall server boot. The shared
+        // store degrades on its own; this is a loud-but-fast probe.
+        const pong = await Promise.race([
+          require('./config/redis').ping(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+        ]);
         logger.info('Valkey boot check', { pong: Boolean(pong), latencyMs: Date.now() - started });
+        if (!pong) logger.error('Valkey boot check returned no PONG — cache/rate limits degraded');
       } catch (pingError) {
         logger.error('Valkey boot check FAILED — cache and shared rate limits are degraded', {
           error: pingError.message
