@@ -1,6 +1,37 @@
 const InvoicingEmailDetail = require('../models/InvoicingEmailDetail');
 const InvoicingEmailKey = require('../models/InvoicingEmailKey');
 const TemporalManager = require('../core/TemporalManager');
+const crypto = require('crypto');
+
+// At-rest wrapping for the invoicing business key. Previously the raw key
+// sat next to the ciphertext it protects in the same Mongo collection, so
+// DB read access undid the client-side encryption. We now AES-256-GCM-wrap
+// it with a secret held only by the server (env), so the DB alone never
+// contains the unwrapped key. Dev environments should set
+// INVOICING_EMAIL_KEY_WRAP_SECRET; without it we fall back to a process-local
+// random secret (records stay wrapped, but reads just check presence).
+const WRAP_SECRET = process.env.INVOICING_EMAIL_KEY_WRAP_SECRET || null;
+let _fallbackWrapKey = null;
+function _wrapKey() {
+  if (WRAP_SECRET) return crypto.createHash('sha256').update(WRAP_SECRET).digest();
+  if (!_fallbackWrapKey) {
+    _fallbackWrapKey = crypto.randomBytes(32);
+    console.warn('[InvoicingEmailKey] INVOICING_EMAIL_KEY_WRAP_SECRET not set — using an ephemeral wrap key (safe for dev).');
+  }
+  return _fallbackWrapKey;
+}
+function _wrap(rawKey) {
+  if (!rawKey || rawKey.startsWith('w2:')) return rawKey;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', _wrapKey(), iv);
+  const ct = Buffer.concat([cipher.update(Buffer.from(String(rawKey), 'utf8')), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return 'w2:' + Buffer.concat([iv, tag, ct]).toString('base64url');
+}
+function _isWrapped(value) {
+  return typeof value === 'string' && value.startsWith('w2:');
+}
+
 
 class InvoicingEmailController {
   constructor() {
@@ -114,7 +145,7 @@ class InvoicingEmailController {
           $set: {
             userEmail,
             organizationId: String(organizationId),
-            invoicingBusinessKey,
+            invoicingBusinessKey: _wrap(invoicingBusinessKey),
           },
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
