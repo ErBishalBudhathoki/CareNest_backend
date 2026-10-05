@@ -50,7 +50,7 @@ const leaveRequestSchema = new mongoose.Schema({
   status: {
     type: String,
     required: true,
-    enum: ['Pending', 'Approved', 'Rejected', 'Cancelled'], // Matching RequestService status casing
+    enum: ['Pending', 'Approved', 'Rejected', 'Cancelled', 'Escalated'], // Matching RequestService status casing
     default: 'Pending',
     index: true
   },
@@ -60,6 +60,10 @@ const leaveRequestSchema = new mongoose.Schema({
     default: null
   },
   approvedAt: {
+    type: Date,
+    default: null
+  },
+  escalatedAt: {
     type: Date,
     default: null
   },

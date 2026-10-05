@@ -87,6 +87,19 @@ class LeaveService {
     });
 
     await request.save();
+
+    // Start the approval escalation timer for this request.
+    try {
+      await require('../core/TemporalManager').startWorkflow('LeaveApprovalEscalationWorkflow', {
+        workflowId: `leave-escalation-${request._id}`,
+        args: [{ requestId: request._id.toString(), leaveType: request.leaveType }],
+        workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',
+      });
+    } catch (error) {
+      // If Temporal is unreachable, never block leave submission.
+      require('../config/logger').createLogger('LeaveService').error('Failed to start leave escalation workflow', { error: error.message });
+    }
+
     return { requestId: request._id };
   }
 

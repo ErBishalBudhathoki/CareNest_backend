@@ -21,6 +21,7 @@ const { EmployeeOnboardingWorkflow } = require('./employeeOnboarding');
 const { authNotificationWorkflow } = require('./auth');
 const { BulkInvoicesWorkflow } = require('./bulk');
 const { ShiftLifecycleWorkflow, ShiftCancelWorkflow } = require('./shift');
+const { LeaveApprovalEscalationWorkflow } = require('./leave');
 const { JwtRotationCheckWorkflow, NdisCatalogSyncWorkflow } = require('./maintenance');
 
 module.exports = {
@@ -45,6 +46,7 @@ module.exports = {
   BulkInvoicesWorkflow,
   ShiftLifecycleWorkflow,
   ShiftCancelWorkflow,
+  LeaveApprovalEscalationWorkflow,
   JwtRotationCheckWorkflow,
   NdisCatalogSyncWorkflow
 };

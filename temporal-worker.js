@@ -12,6 +12,7 @@ const {
   processInvoiceActivity,
   sendInvoiceEmailActivity,
 } = require('./temporal/activities/invoice');
+const { leaveApprovalEscalationStepActivity } = require('./temporal/activities/leave');
 const { 
   processRecurringInvoicesActivity, 
   processOverdueRemindersActivity,
@@ -142,6 +143,7 @@ async function run() {
       voidShiftArtifactsActivity,
       jwtRotationCheckActivity,
       ndisCatalogSyncActivity,
+      leaveApprovalEscalationStepActivity,
     },
   });
 
