@@ -10,6 +10,7 @@ const NotificationService = require('../../services/notificationService');
 const NotificationHistory = require('../../models/NotificationHistory');
 const Shift = require('../../models/Shift');
 const Certification = require('../../models/Certification');
+const LeaveBalance = require('../../models/LeaveBalance');
 const Expense = require('../../models/Expense');
 const User = require('../../models/User');
 const FcmToken = require('../../models/FcmToken');
@@ -104,6 +105,50 @@ async function processTrainingExpiryRemindersActivity() {
     return result;
   } catch (error) {
     logger.error('[Temporal Activity] Training expiry sweep failed', error);
+    throw error;
+  }
+}
+
+/**
+ * Activity: Holiday balance accrual (monthly).
+ *
+ * For every active LeaveBalance row, add the monthly accrual for its leave
+ * type once per calendar month. Idempotent: if lastAccrualDate is already in
+ * the current month the row is skipped, so re-runs do not double-credit.
+ * Rates default to a conservative AU-style split and can be overridden via
+ * env (HOURS are monthly accrual, not Annual Leave Entitlement):
+ *   HOLIDAY_ANNUAL_ACCRUAL_HOURS (default 7.6)
+ *   HOLIDAY_SICK_ACCRUAL_HOURS   (default 3.8)
+ */
+async function processHolidayBalanceAccrualActivity() {
+  logger.info('[Temporal Activity] Starting holiday balance accrual...');
+  try {
+    const ANNUAL = Number(process.env.HOLIDAY_ANNUAL_ACCRUAL_HOURS || 7.6);
+    const SICK = Number(process.env.HOLIDAY_SICK_ACCRUAL_HOURS || 3.8);
+    const rates = { annual: ANNUAL, sick: SICK, personal: 0, longService: 0 };
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const balances = await LeaveBalance.find({ isActive: true });
+    let credited = 0;
+    for (const balance of balances) {
+      const rate = rates[balance.leaveType] || 0;
+      if (rate === 0) continue;
+      if (balance.lastAccrualDate && new Date(balance.lastAccrualDate) >= monthStart) continue;
+
+      balance.currentBalance += rate;
+      balance.accruedHours += rate;
+      balance.lastAccrualDate = now;
+      await balance.save();
+      credited++;
+    }
+
+    const result = { balancesScanned: balances.length, balancesCredited: credited, monthStart: monthStart.toISOString() };
+    logger.info('[Temporal Activity] Holiday balance accrual completed', result);
+    return result;
+  } catch (error) {
+    logger.error('[Temporal Activity] Holiday balance accrual failed', error);
     throw error;
   }
 }
@@ -633,6 +678,7 @@ async function processInvoiceAIActivity() {
 module.exports = {
   processDunningActivity,
   processTrainingExpiryRemindersActivity,
+  processHolidayBalanceAccrualActivity,
   processExpenseRemindersActivity,
   processTimesheetRemindersActivity,
   processShiftRemindersActivity,
