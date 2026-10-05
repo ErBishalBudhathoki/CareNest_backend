@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CareNest Ops Console (Dev)</title>
+<style>
+  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background:#f4f7f6; color:#333; margin:0; padding:20px; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  section { background:#fff; border-radius:8px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  h2 { margin-top:0; color:#2c3e50; font-size:16px; }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #eee; font-size:13px; }
+  input,select,button { padding:6px 10px; margin:4px 4px 4px 0; border:1px solid #ccc; border-radius:4px; }
+  button { background:#3498db; color:#fff; border:none; cursor:pointer; } button:hover { background:#2980b9; }
+  pre { background:#f8f9fa; padding:10px; border-radius:4px; overflow:auto; font-size:12px; }
+  .alert { padding:10px; border-radius:4px; margin-bottom:12px; display:none; }
+  .alert.success { background:#d4edda; color:#155724; } .alert.error { background:#f8d7da; color:#721c24; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>CareNest Ops Console (Developer Only)</h1>
+  <div id="alert" class="alert"></div>
+
+  <section>
+    <h2>User Lookup</h2>
+    <input id="luEmail" placeholder="user@example.com" style="width:260px">
+    <button onclick="lookupUser()">Lookup</button>
+    <pre id="luResult"></pre>
+  </section>
+
+  <section>
+    <h2>Leave Balance Integrity</h2>
+    <button onclick="loadIntegrity()">Refresh</button>
+    <pre id="integrityResult"></pre>
+  </section>
+
+  <section>
+    <h2>Certifications Expiring (days)</h2>
+    <input id="days" type="number" value="30" style="width:80px">
+    <button onclick="loadCertExpiry()">Load</button>
+    <pre id="certResult"></pre>
+  </section>
+
+  <section>
+    <h2>Valkey Rate-Limit Keys</h2>
+    <button onclick="loadValkey()">Refresh</button>
+    <pre id="valkeyResult"></pre>
+    <button onclick="resetRateLimits()">Clear all rl:* keys</button>
+  </section>
+
+  <section>
+    <h2>Temporal Workflow Lookup</h2>
+    <input id="wfId" placeholder="workflow id" style="width:320px">
+    <button onclick="lookupWf()">Describe</button>
+    <pre id="wfResult"></pre>
+  </section>
+
+  <section>
+    <h2>Recent Admin Actions (audit trail)</h2>
+    <button onclick="loadAudit()">Refresh</button>
+    <pre id="auditResult"></pre>
+  </section>
+
+  <section>
+    <h2>Org Data Reset (DESTRUCTIVE)</h2>
+    <input id="orgId" placeholder="organizationId" style="width:260px">
+    <input id="orgConfirm" placeholder="type orgId to confirm" style="width:260px">
+    <button onclick="resetOrg()">Reset leave balances + notifications for org</button>
+    <pre id="orgResult"></pre>
+  </section>
+</div>
+
+<script>
+function alertBox(msg, type) {
+  const a = document.getElementById('alert');
+  a.textContent = msg; a.className = 'alert ' + (type || 'success'); a.style.display = 'block';
+  setTimeout(() => a.style.display = 'none', 4000);
+}
+async function req(url, opts) {
+  const r = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...opts });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || j.error || r.statusText);
+  return j;
+}
+async function lookupUser() {
+  try { document.getElementById('luResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/users/' + encodeURIComponent(document.getElementById('luEmail').value))).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function loadIntegrity() {
+  try { document.getElementById('integrityResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/leave-integrity')).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function loadCertExpiry() {
+  try { document.getElementById('certResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/cert-expiry?days=' + document.getElementById('days').value)).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function loadValkey() {
+  try { const j = await req('/admin-dev/api/ops/valkey-stats'); document.getElementById('valkeyResult').textContent = JSON.stringify(j.data ?? j, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function resetRateLimits() {
+  if (!confirm('Clear ALL rl:* rate-limit keys?')) return;
+  try { document.getElementById('valkeyResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/reset-rate-limits', { method: 'POST', body: JSON.stringify({ confirm: 'CLEAR_RL' }) }), null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function lookupWf() {
+  try { document.getElementById('wfResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/temporal/' + encodeURIComponent(document.getElementById('wfId').value))).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function loadAudit() {
+  try { document.getElementById('auditResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/audit-recent')).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function resetOrg() {
+  try { const orgId = document.getElementById('orgId').value;
+    document.getElementById('orgResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/org-reset/' + encodeURIComponent(orgId), { method: 'POST', body: JSON.stringify({ confirm: document.getElementById('orgConfirm').value }) }), null, 2);
+  } catch (e) { alertBox(e.message, 'error'); }
+}
+</script>
+</body>
+</html>
