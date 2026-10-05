@@ -9,6 +9,7 @@ const NotificationService = require('../../services/notificationService');
 // Models
 const NotificationHistory = require('../../models/NotificationHistory');
 const Shift = require('../../models/Shift');
+const Certification = require('../../models/Certification');
 const Expense = require('../../models/Expense');
 const User = require('../../models/User');
 const FcmToken = require('../../models/FcmToken');
@@ -48,6 +49,62 @@ async function triggerNotificationWorkflow(userId, notification) {
     logger.info(`Notification workflow started for user ${userId}: ${notification.title}`);
   } catch (error) {
     logger.error(`Failed to trigger notification workflow for user ${userId}`, error);
+  }
+}
+
+/**
+ * Activity: Training/Certification expiry.
+ *
+ * - Flags certifications whose expiryDate has passed but are still 'active' as
+ *   'expired' so compliance checks see the truth.
+ * - Sends the owner a one-time reminder per cert when it is within 30 days of
+ *   expiring (deduplicated via NotificationHistory so re-runs don't spam).
+ */
+async function processTrainingExpiryRemindersActivity() {
+  logger.info('[Temporal Activity] Starting training expiry sweep...');
+  try {
+    const now = new Date();
+    const in30d = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const expired = await Certification.updateMany(
+      { expiryDate: { $lt: now }, status: 'active' },
+      { $set: { status: 'expired' } }
+    );
+
+    const soon = await Certification.find({
+      expiryDate: { $gte: now, $lte: in30d },
+      status: 'active',
+    }).lean();
+
+    let notified = 0;
+    for (const cert of soon) {
+      const user = cert.userId
+        ? await User.findById(cert.userId).lean()
+        : await User.findOne({ email: cert.userEmail }).lean();
+      if (!user) continue;
+
+      const alreadySent = await NotificationHistory.findOne({
+        userId: user._id,
+        type: 'certification_expiry',
+        'data.certificationId': String(cert._id),
+      }).lean();
+      if (alreadySent) continue;
+
+      await triggerNotificationWorkflow(user._id, {
+        type: 'certification_expiry',
+        title: 'Certification expiring soon',
+        body: `Your certification${cert.name ? ' ' + cert.name : ''} expires on ${new Date(cert.expiryDate).toDateString()}.`,
+        data: { certificationId: String(cert._id), expiryDate: cert.expiryDate },
+      });
+      notified++;
+    }
+
+    const result = { expiredMarked: expired.modifiedCount ?? expired.nModified ?? 0, remindersSent: notified };
+    logger.info('[Temporal Activity] Training expiry sweep completed', result);
+    return result;
+  } catch (error) {
+    logger.error('[Temporal Activity] Training expiry sweep failed', error);
+    throw error;
   }
 }
 
@@ -575,6 +632,7 @@ async function processInvoiceAIActivity() {
 
 module.exports = {
   processDunningActivity,
+  processTrainingExpiryRemindersActivity,
   processExpenseRemindersActivity,
   processTimesheetRemindersActivity,
   processShiftRemindersActivity,
