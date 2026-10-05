@@ -77,9 +77,9 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.redoc.ly"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https:", "https://cdn.redoc.ly"],
+      imgSrc: ["'self'", "data:", "https://cdn.redoc.ly", "https://assets.bishalbudhathoki.com"],
       connectSrc: ["'self'", "https://identitytoolkit.googleapis.com"],
-      fontSrc: ["'self'", "https:", "data:", "https://fonts.gstatic.com"],
+      fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"],
@@ -87,8 +87,24 @@ app.use(helmet({
       upgradeInsecureRequests: []
     }
   },
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  permissionsPolicy: {
+    features: {
+      camera: ["'none'"],
+      microphone: ["'none'"],
+      geolocation: ["'none'"],
+      payment: ["'none'"],
+      usb: ["'none'"],
+    },
+  },
 }));
+
+// API responses carry per-user data, so never let any cache (shared proxy or
+// browser) store them.
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 // Reject plaintext HTTP in production (no-op locally; health probes exempt).
 // Must run before CORS/routes so insecure requests fail fast.
