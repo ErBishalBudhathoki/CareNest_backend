@@ -8,7 +8,8 @@ const {
   processEmailVerificationRemindersActivity,
   cleanupArtifactRegistryActivity,
   processInvoiceAIActivity,
-  processTrainingExpiryRemindersActivity
+  processTrainingExpiryRemindersActivity,
+  processHolidayBalanceAccrualActivity
 } = proxyActivities({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -23,6 +24,14 @@ const {
  */
 async function TrainingExpiryCronWorkflow() {
   const result = await processTrainingExpiryRemindersActivity();
+  return result;
+}
+
+/**
+ * Monthly holiday balance accrual posting.
+ */
+async function HolidayBalanceAccrualCronWorkflow() {
+  const result = await processHolidayBalanceAccrualActivity();
   return result;
 }
 
@@ -95,5 +104,6 @@ module.exports = {
   EmailVerificationCronWorkflow,
   CleanupArtifactRegistryWorkflow,
   InvoiceAICronWorkflow,
-  TrainingExpiryCronWorkflow
+  TrainingExpiryCronWorkflow,
+  HolidayBalanceAccrualCronWorkflow
 };

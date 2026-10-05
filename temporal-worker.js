@@ -25,7 +25,8 @@ const {
   processEmailVerificationRemindersActivity,
   cleanupArtifactRegistryActivity,
   processInvoiceAIActivity,
-  processTrainingExpiryRemindersActivity
+  processTrainingExpiryRemindersActivity,
+  processHolidayBalanceAccrualActivity
 } = require('./temporal/activities/system_cron');
 const {
   generateAndSendVerificationEmail,
@@ -126,6 +127,7 @@ async function run() {
       cleanupArtifactRegistryActivity,
       processInvoiceAIActivity,
       processTrainingExpiryRemindersActivity,
+      processHolidayBalanceAccrualActivity,
       // Employee Onboarding
       generateAndSendVerificationEmail,
       sendVerificationReminderEmail,

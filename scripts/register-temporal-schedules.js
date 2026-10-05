@@ -54,6 +54,11 @@ const schedules = [
     workflow: 'CleanupArtifactRegistryWorkflow'
   },
   {
+    scheduleId: 'holiday-balance-accrual-schedule',
+    cron: '0 0 1 * *',
+    workflow: 'HolidayBalanceAccrualCronWorkflow'
+  },
+  {
     scheduleId: 'training-expiry-schedule',
     cron: '0 7 * * *',
     workflow: 'TrainingExpiryCronWorkflow'
