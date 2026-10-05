@@ -233,9 +233,9 @@ router.post('/api/ops/org-reset/:orgId', devAuth, async (req, res) => {
 // Platform-wide stats for the developer dashboard
 router.get('/api/ops/platform-stats', devAuth, async (req, res) => {
   try {
-    const Invoice = require('../models/Invoice');
+    const { Invoice } = require('../models/Invoice');
     const WorkedTime = require('../models/WorkedTime');
-    const Appointment = require('../models/Appointment');
+    const Appointment = require('../models/ClientAssignment');
     const Client = require('../models/Client');
     const LeaveRequest = require('../models/LeaveRequest');
 
