@@ -54,6 +54,11 @@ const schedules = [
     workflow: 'CleanupArtifactRegistryWorkflow'
   },
   {
+    scheduleId: 'training-expiry-schedule',
+    cron: '0 7 * * *',
+    workflow: 'TrainingExpiryCronWorkflow'
+  },
+  {
     scheduleId: 'invoice-ai-weekly-schedule',
     cron: '0 0 * * 0', // Weekly on Sundays
     workflow: 'InvoiceAICronWorkflow'

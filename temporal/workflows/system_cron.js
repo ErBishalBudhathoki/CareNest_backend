@@ -7,7 +7,8 @@ const {
   processShiftRemindersActivity,
   processEmailVerificationRemindersActivity,
   cleanupArtifactRegistryActivity,
-  processInvoiceAIActivity
+  processInvoiceAIActivity,
+  processTrainingExpiryRemindersActivity
 } = proxyActivities({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -16,6 +17,14 @@ const {
     maximumAttempts: 3,
   },
 });
+
+/**
+ * Daily sweep of certification expiry state and 30-day reminders.
+ */
+async function TrainingExpiryCronWorkflow() {
+  const result = await processTrainingExpiryRemindersActivity();
+  return result;
+}
 
 /**
  * Workflow that runs the daily dunning process.
@@ -85,5 +94,6 @@ module.exports = {
   ShiftRemindersCronWorkflow,
   EmailVerificationCronWorkflow,
   CleanupArtifactRegistryWorkflow,
-  InvoiceAICronWorkflow
+  InvoiceAICronWorkflow,
+  TrainingExpiryCronWorkflow
 };
