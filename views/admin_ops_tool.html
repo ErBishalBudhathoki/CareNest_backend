@@ -22,6 +22,12 @@
   <div id="alert" class="alert"></div>
 
   <section>
+    <h2>Platform Stats</h2>
+    <button onclick="loadStats()">Refresh</button>
+    <pre id="statsResult"></pre>
+  </section>
+
+  <section>
     <h2>User Lookup</h2>
     <input id="luEmail" placeholder="user@example.com" style="width:260px">
     <button onclick="lookupUser()">Lookup</button>
@@ -84,6 +90,10 @@ async function req(url, opts) {
 }
 async function lookupUser() {
   try { document.getElementById('luResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/users/' + encodeURIComponent(document.getElementById('luEmail').value))).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error'); }
+}
+async function loadStats() {
+  try { const j = await req('/admin-dev/api/ops/platform-stats'); document.getElementById('statsResult').textContent = JSON.stringify(j, null, 2); }
   catch (e) { alertBox(e.message, 'error'); }
 }
 async function loadIntegrity() {

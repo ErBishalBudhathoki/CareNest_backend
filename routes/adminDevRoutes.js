@@ -229,4 +229,54 @@ router.post('/api/ops/org-reset/:orgId', devAuth, async (req, res) => {
   }
 });
 
+
+// Platform-wide stats for the developer dashboard
+router.get('/api/ops/platform-stats', devAuth, async (req, res) => {
+  try {
+    const Invoice = require('../models/Invoice');
+    const WorkedTime = require('../models/WorkedTime');
+    const Appointment = require('../models/Appointment');
+    const Client = require('../models/Client');
+    const LeaveRequest = require('../models/LeaveRequest');
+
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      totalUsers, activeUsers, newUsers30d,
+      totalOrgs,
+      totalInvoices, invoices30d,
+      totalClients, appointments30d,
+      workedTimeAgg, pendingLeave,
+      orgsWithSettings,
+    ] = await Promise.all([
+      User.countDocuments({}),
+      User.countDocuments({ lastLoginAt: { $gte: since30d } }),
+      User.countDocuments({ createdAt: { $gte: since30d } }),
+      Organization.countDocuments({}),
+      Invoice.countDocuments({}),
+      Invoice.countDocuments({ createdAt: { $gte: since30d } }),
+      Client.countDocuments({}),
+      Appointment.countDocuments({ createdAt: { $gte: since30d } }),
+      WorkedTime.aggregate([{ $group: { _id: null, hours: { $sum: '$totalHours' } } }]),
+      LeaveRequest.countDocuments({ status: 'Pending' }),
+      Organization.countDocuments({ 'settings.aiInvoiceGeneration': { $exists: true } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        users: { total: totalUsers, activeLast30d: activeUsers, newLast30d: newUsers30d },
+        organizations: { total: totalOrgs, withAISettings: orgsWithSettings },
+        invoices: { total: totalInvoices, last30d: invoices30d },
+        clients: { total: totalClients },
+        appointments: { last30d: appointments30d },
+        workedHoursTotal: workedTimeAgg[0]?.hours || 0,
+        leaveRequestsPending: pendingLeave,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
