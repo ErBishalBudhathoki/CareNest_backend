@@ -49,17 +49,43 @@ jobs:
       - name: Get currently deployed image
         id: current
         run: |
+          IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev"
           CURRENT_IMAGE=$(gcloud run services describe backend-dev \
             --region ${{ env.REGION }} \
             --project invoice-660f3 \
             --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
-          
-          if [ -n "$CURRENT_IMAGE" ]; then
-            CURRENT_DIGEST=$(echo "$CURRENT_IMAGE" | cut -d'@' -f2)
-            echo "digest=$CURRENT_DIGEST" >> $GITHUB_OUTPUT
-            echo "::notice::Current image: ${CURRENT_IMAGE##*/}"
+
+          if [ -z "$CURRENT_IMAGE" ]; then
+            echo "::warning::Could not fetch current image; protection falls back to the keep window"
+            echo "digest=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "::notice::Current image: ${CURRENT_IMAGE##*/}"
+
+          if [[ "$CURRENT_IMAGE" == *"@sha256:"* ]]; then
+            # Deployed by digest.
+            echo "digest=${CURRENT_IMAGE##*@}" >> $GITHUB_OUTPUT
           else
-            echo "::warning::Could not fetch current image"
+            # Deployed by TAG (this is what the dev deploy does today).
+            # `cut -d'@' -f2` returns the whole string when there is no '@',
+            # which silently produced a value that never matched any digest
+            # and left the deployed image unprotected.
+            TAG="${CURRENT_IMAGE##*:}"
+            # Exact match on the tag column: -v t=... with $1==t. Grepping
+            # "^${TAG}$" against --format=value(VERSION) does not work because
+            # that column holds the full projects/... version path, and the
+            # --filter= operator is deprecated and unreliable here.
+            RESOLVED=$(gcloud artifacts docker tags list "$IMAGE_PATH" \
+              --project=invoice-660f3 2>/dev/null \
+              | awk -v t="$TAG" '$1==t {print $NF; exit}')
+            if [ -n "$RESOLVED" ]; then
+              echo "::notice::Resolved tag ${TAG} to ${RESOLVED:0:19}"
+              echo "digest=$RESOLVED" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::Could not resolve tag ${TAG}; keeping via keep window only"
+              echo "digest=" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: List images before cleanup
@@ -67,9 +93,9 @@ jobs:
           echo "Images before cleanup:"
           TOTAL=$(gcloud artifacts docker images list \
             ${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev \
-            --project invoice-660f3 \
-            --format="get(version)" 2>/dev/null | wc -l || echo "0")
-          
+            --project=invoice-660f3 \
+            --format="value(VERSION)" 2>/dev/null | grep -c "sha256:" || echo "0")
+
           echo "Total images: $TOTAL"
           echo "total_before=$TOTAL" >> $GITHUB_ENV
 
@@ -77,58 +103,66 @@ jobs:
         run: |
           KEEP_COUNT="${{ github.event.inputs.keep_count_dev || '10' }}"
           CURRENT_DIGEST="${{ steps.current.outputs.digest }}"
-          
+          IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev"
+
           echo "Keeping last $KEEP_COUNT images"
-          
-          # Get all image versions sorted by creation time (newest first)
+          [ -n "$CURRENT_DIGEST" ] && echo "Protecting deployed digest: $CURRENT_DIGEST"
+
+          # Filter to sha256: lines so any header/banner text gcloud writes can
+          # never be counted as an image and shift the keep window.
           IMAGES=$(gcloud artifacts docker images list \
-            ${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev \
-            --format="get(version)" \
-            --sort-by="~CREATE_TIME" \
-            --project=invoice-660f3 2>/dev/null || echo "")
-          
+            "$IMAGE_PATH" \
+            --format="value(VERSION)" \
+            --sort-by="~UPDATE_TIME" \
+            --project=invoice-660f3 2>/dev/null | grep "sha256:" || echo "")
+
           if [ -z "$IMAGES" ]; then
             echo "::notice::No images found to cleanup"
             exit 0
           fi
-          
-          TOTAL=$(echo "$IMAGES" | wc -l)
+
+          TOTAL=$(echo "$IMAGES" | wc -l | tr -d ' ')
           TO_DELETE=$((TOTAL - KEEP_COUNT))
-          
+
           if [ "$TO_DELETE" -le 0 ]; then
             echo "::notice::Nothing to delete - only $TOTAL images exist"
             exit 0
           fi
-          
+
           echo "Deleting $TO_DELETE old images..."
           DELETED=0
           SKIPPED=0
-          
-          # Delete old images (skip first KEEP_COUNT)
+          RETAINED=0
+
           while read -r version; do
             if [ -z "$version" ]; then continue; fi
-            
-            # Skip if it's the current image
+
             if [ -n "$CURRENT_DIGEST" ] && [ "$version" = "$CURRENT_DIGEST" ]; then
-              echo "::notice::Skipping current image: ${version:0:12}"
+              echo "::notice::Skipping deployed image: ${version:0:12}"
               SKIPPED=$((SKIPPED + 1))
               continue
             fi
-            
-            IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev@$version"
-            
-            if gcloud artifacts docker images delete "$IMAGE_URI" \
+
+            OUTPUT=$(gcloud artifacts docker images delete "$IMAGE_PATH@$version" \
               --project=invoice-660f3 \
               --delete-tags \
-              --quiet; then
+              --quiet 2>&1) && RC=0 || RC=$?
+
+            if [ "$RC" -eq 0 ]; then
               echo "Deleted: ${version:0:12}"
               DELETED=$((DELETED + 1))
+            elif echo "$OUTPUT" | grep -q "referenced by parent manifests"; then
+              # Multi-arch child manifest. Artifact Registry refuses these while
+              # their parent index exists, and they can never be deleted on
+              # their own. This is expected, not an error.
+              echo "Retained (child manifest of a kept index): ${version:0:12}"
+              RETAINED=$((RETAINED + 1))
             else
-              echo "::warning::Failed to delete: ${version:0:12}"
+              echo "::warning::Failed to delete ${version:0:12}: $(echo "$OUTPUT" | grep -iE 'ERROR' | head -1)"
             fi
           done < <(echo "$IMAGES" | tail -n "+$((KEEP_COUNT + 1))")
-          
-          echo "::notice::Deleted $DELETED images, skipped $SKIPPED"
+
+          echo "::notice::Deleted $DELETED, skipped $SKIPPED, retained $RETAINED child manifests"
 
       - name: List images after cleanup
         if: always()
@@ -136,9 +170,9 @@ jobs:
           echo "Images after cleanup:"
           TOTAL=$(gcloud artifacts docker images list \
             ${{ env.REGION }}-docker.pkg.dev/invoice-660f3/${{ env.REPO }}/backend-dev \
-            --project invoice-660f3 \
-            --format="get(version)" 2>/dev/null | wc -l || echo "0")
-          
+            --project=invoice-660f3 \
+            --format="value(VERSION)" 2>/dev/null | grep -c "sha256:" || echo "0")
+
           echo "Total images: $TOTAL"
           echo "total_after=$TOTAL" >> $GITHUB_ENV
 
@@ -160,8 +194,9 @@ jobs:
           
           ### Configuration
           - Keep count: ${{ github.event.inputs.keep_count_dev || '10' }}
-          - Current image protected: ✅
-          
+          - Deployed image protected: ✅ (resolved from tag when deployed by tag)
+          - Multi-arch child manifests retained: expected, they belong to a kept index
+
           EOF
 
   cleanup-prod:
@@ -169,66 +204,105 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # The production project is not provisioned yet. Skip rather than fail
+      # every Sunday, so the dev result is not buried in unrelated red.
+      - name: Check production project exists
+        id: prod_exists
+        run: |
+          if gcloud projects describe carenest-prods --format="value(projectId)" >/dev/null 2>&1; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "::notice::Project carenest-prods not provisioned; skipping production cleanup"
+          fi
+
       - name: Checkout code
+        if: steps.prod_exists.outputs.found == 'true'
         uses: actions/checkout@v6
 
       - name: Authenticate to Google Cloud (Prod)
+        if: steps.prod_exists.outputs.found == 'true'
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.PROD_WIF_PROVIDER }}
           service_account: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
+        if: steps.prod_exists.outputs.found == 'true'
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: carenest-prods
 
       - name: Get currently deployed image
         id: current
+        if: steps.prod_exists.outputs.found == 'true'
         run: |
+          IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod"
           CURRENT_IMAGE=$(gcloud run services describe backend-prod \
             --region ${{ env.REGION }} \
             --project carenest-prods \
             --format 'value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
-          
-          if [ -n "$CURRENT_IMAGE" ]; then
-            CURRENT_DIGEST=$(echo "$CURRENT_IMAGE" | cut -d'@' -f2)
-            echo "digest=$CURRENT_DIGEST" >> $GITHUB_OUTPUT
-            echo "::notice::Current image: ${CURRENT_IMAGE##*/}"
-          else
+
+          if [ -z "$CURRENT_IMAGE" ]; then
             echo "::warning::Could not fetch current image"
+            echo "digest=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [[ "$CURRENT_IMAGE" == *"@sha256:"* ]]; then
+            echo "digest=${CURRENT_IMAGE##*@}" >> $GITHUB_OUTPUT
+          else
+            TAG="${CURRENT_IMAGE##*:}"
+            RESOLVED=$(gcloud artifacts docker tags list "$IMAGE_PATH" \
+              --project=carenest-prods 2>/dev/null \
+              | awk -v t="$TAG" '$1==t {print $NF; exit}')
+            if [ -n "$RESOLVED" ]; then
+              echo "digest=$RESOLVED" >> $GITHUB_OUTPUT
+            else
+              echo "::warning::Could not resolve deployed tag ${TAG}"
+              echo "digest=" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: Get recent revisions
         id: revisions
+        if: steps.prod_exists.outputs.found == 'true'
         run: |
-          # Get last 5 revision images to protect them
+          # On a revision the image lives at spec.containers[0].image. The
+          # spec.template.* path returns empty here, so this step used to
+          # protect nothing while still reporting success.
           REVISION_IMAGES=$(gcloud run revisions list \
             --service=backend-prod \
             --region=${{ env.REGION }} \
             --project=carenest-prods \
             --limit=5 \
-            --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || echo "")
-          
-          if [ -n "$REVISION_IMAGES" ]; then
-            # Extract digests
-            PROTECTED_DIGESTS=$(echo "$REVISION_IMAGES" | cut -d'@' -f2 | tr '\n' ',' | sed 's/,$//')
+            --format='value(spec.containers[0].image)' 2>/dev/null || echo "")
+
+          PROTECTED_DIGESTS=$(echo "$REVISION_IMAGES" \
+            | grep "sha256:" | sed 's|.*@||' | tr '\n' ',' | sed 's/,$//')
+
+          if [ -n "$PROTECTED_DIGESTS" ]; then
             echo "digests=$PROTECTED_DIGESTS" >> $GITHUB_OUTPUT
-            echo "::notice::Protected ${REVISION_IMAGES} revision images"
+            echo "::notice::Protecting $(echo "$PROTECTED_DIGESTS" | tr ',' '\n' | grep -c sha256:) revision image(s)"
+          else
+            echo "digests=" >> $GITHUB_OUTPUT
+            echo "::warning::No revision digests resolved; rollback protection is inactive"
           fi
 
       - name: List images before cleanup
+        if: steps.prod_exists.outputs.found == 'true'
         run: |
           echo "Images before cleanup:"
           TOTAL=$(gcloud artifacts docker images list \
             ${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod \
             --project carenest-prods \
-            --format="get(version)" 2>/dev/null | wc -l || echo "0")
+            --format="value(VERSION)" 2>/dev/null | grep -c "sha256:" || echo "0")
           
           echo "Total images: $TOTAL"
           echo "total_before=$TOTAL" >> $GITHUB_ENV
 
       - name: Cleanup old images (keep last 20)
+        if: steps.prod_exists.outputs.found == 'true'
         run: |
           KEEP_COUNT="${{ github.event.inputs.keep_count_prod || '20' }}"
           CURRENT_DIGEST="${{ steps.current.outputs.digest }}"
@@ -240,9 +314,9 @@ jobs:
           # Get all image versions sorted by creation time (newest first)
           IMAGES=$(gcloud artifacts docker images list \
             ${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod \
-            --format="get(version)" \
-            --sort-by="~CREATE_TIME" \
-            --project=carenest-prods 2>/dev/null || echo "")
+            --format="value(VERSION)" \
+            --sort-by="~UPDATE_TIME" \
+            --project=carenest-prods 2>/dev/null | grep "sha256:" || echo "")
           
           if [ -z "$IMAGES" ]; then
             echo "::notice::No images found to cleanup"
@@ -260,6 +334,7 @@ jobs:
           echo "Deleting $TO_DELETE old images..."
           DELETED=0
           SKIPPED=0
+          RETAINED=0
           
           # Delete old images (skip first KEEP_COUNT)
           while read -r version; do
@@ -280,27 +355,34 @@ jobs:
             
             IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod@$version"
             
-            if gcloud artifacts docker images delete "$IMAGE_URI" \
+            OUTPUT=$(gcloud artifacts docker images delete "$IMAGE_URI" \
               --project=carenest-prods \
               --delete-tags \
-              --quiet; then
+              --quiet 2>&1) && RC=0 || RC=$?
+
+            if [ "$RC" -eq 0 ]; then
               echo "Deleted: ${version:0:12}"
               DELETED=$((DELETED + 1))
+            elif echo "$OUTPUT" | grep -q "referenced by parent manifests"; then
+              # Multi-arch child manifest; cannot be deleted while its parent
+              # index is kept. Expected, not a failure.
+              echo "Retained (child manifest of a kept index): ${version:0:12}"
+              RETAINED=$((RETAINED + 1))
             else
-              echo "::warning::Failed to delete: ${version:0:12}"
+              echo "::warning::Failed to delete ${version:0:12}: $(echo "$OUTPUT" | grep -iE 'ERROR' | head -1)"
             fi
           done < <(echo "$IMAGES" | tail -n "+$((KEEP_COUNT + 1))")
           
-          echo "::notice::Deleted $DELETED images, skipped $SKIPPED"
+          echo "::notice::Deleted $DELETED, skipped $SKIPPED, retained $RETAINED child manifests"
 
       - name: List images after cleanup
-        if: always()
+        if: always() && steps.prod_exists.outputs.found == 'true'
         run: |
           echo "Images after cleanup:"
           TOTAL=$(gcloud artifacts docker images list \
             ${{ env.REGION }}-docker.pkg.dev/carenest-prods/${{ env.REPO }}/backend-prod \
             --project carenest-prods \
-            --format="get(version)" 2>/dev/null | wc -l || echo "0")
+            --format="value(VERSION)" 2>/dev/null | grep -c "sha256:" || echo "0")
           
           echo "Total images: $TOTAL"
           echo "total_after=$TOTAL" >> $GITHUB_ENV
