@@ -55,6 +55,18 @@ const AUDIT_ENTITIES = {
 };
 
 /**
+ * Subsystem that produced the entry.
+ *
+ * Defaults to APP so the ~44 existing call sites are unaffected. ADMIN_DEV is
+ * set only by the developer ops console, and lets that console list its own
+ * actions with an indexed equality match instead of an unindexed regex scan.
+ */
+const AUDIT_SOURCES = {
+  APP: 'app',
+  ADMIN_DEV: 'admin-dev'
+};
+
+/**
  * Create an audit log entry
  * @param {Object} auditData - The audit data to log
  * @param {string} auditData.action - The action performed (from AUDIT_ACTIONS)
@@ -79,6 +91,7 @@ async function createAuditLog(auditData) {
       oldValues = null,
       newValues = null,
       reason = null,
+      source = AUDIT_SOURCES.APP,
       metadata = {}
     } = auditData;
 
@@ -97,6 +110,11 @@ async function createAuditLog(auditData) {
       throw new Error(`Invalid entity type: ${entityType}`);
     }
 
+    // Validate source
+    if (!Object.values(AUDIT_SOURCES).includes(source)) {
+      throw new Error(`Invalid audit source: ${source}`);
+    }
+
     // Create audit log entry
     const auditEntry = {
       action,
@@ -104,6 +122,7 @@ async function createAuditLog(auditData) {
       entityId,
       userEmail,
       organizationId,
+      source,
       timestamp: new Date(),
       oldValues: oldValues ? sanitizeData(oldValues) : null,
       newValues: newValues ? sanitizeData(newValues) : null,
@@ -524,5 +543,6 @@ module.exports = {
   sanitizeData,
   getObjectDifferences,
   AUDIT_ACTIONS,
-  AUDIT_ENTITIES
+  AUDIT_ENTITIES,
+  AUDIT_SOURCES
 };

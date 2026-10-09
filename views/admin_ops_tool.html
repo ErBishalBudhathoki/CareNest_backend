@@ -137,14 +137,21 @@ async function loadStats() {
   try {
     const j = await req('/admin-dev/api/ops/platform-stats');
     const d = j.data;
-    document.getElementById('kpis').innerHTML = [
-      kpi('Users', d.users.total), kpi('Active 30d', d.users.activeLast30d), kpi('New 30d', d.users.newLast30d),
-      kpi('Orgs', d.organizations.total), kpi('Invoices', d.invoices.total), kpi('Invoices 30d', d.invoices.last30d),
-      kpi('Clients', d.clients.total), kpi('Appts 30d', d.appointments.last30d), kpi('Hours', fmtNum(d.workedHoursTotal)), kpi('Leave pending', d.leaveRequestsPending),
-    ].join('');
+    const tiles = [
+      ['Users', d.users.total], ['Active 30d', d.users.activeLast30d], ['New 30d', d.users.newLast30d],
+      ['Orgs', d.organizations.total], ['Invoices', d.invoices.total], ['Invoices 30d', d.invoices.last30d],
+      ['Clients', d.clients.total], ['Appts 30d', d.appointments.last30d], ['Hours', d.workedHoursTotal], ['Leave pending', d.leaveRequestsPending],
+    ];
+    const host = document.getElementById('kpis');
+    host.replaceChildren(...tiles.map(([label, value]) => {
+      const box = el('span', undefined, 'kpi');
+      box.appendChild(el('span', fmtNum(value), 'val'));
+      box.appendChild(document.createElement('br'));
+      box.appendChild(el('span', label, 'lab'));
+      return box;
+    }));
   } catch (e) { alertBox(e.message, 'error', true); }
 }
-function kpi(label, value) { return `<span class="kpi"><span class="val">${fmtNum(value)}</span><br><span class="lab">${label}</span></span>`; }
 
 async function loadAnalytics() {
   const days = Number(document.getElementById('daysRange').value) || 30;
@@ -168,6 +175,22 @@ function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete chart
 
 let usersPage = 1;
 let usersSort = 'createdAt', usersOrder = 'desc';
+
+// Format a date defensively. A malformed legacy date used to throw
+// RangeError inside .toISOString(), which killed the whole table render.
+function fmtDate(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
+function el(tag, text, cls) {
+  const n = document.createElement(tag);
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  if (cls) n.className = cls;
+  return n;
+}
+
 async function loadUsers(page) {
   usersPage = page || 1;
   const p = new URLSearchParams({ page: usersPage, limit: 25, sort: usersSort, order: usersOrder });
@@ -178,12 +201,66 @@ async function loadUsers(page) {
   try {
     const j = await req('/admin-dev/api/ops/users?' + p.toString());
     const d = j.data;
-    const head = ['email','name','role','active','lastLogin','created',''];
-    const rows = d.rows.map(r => `<tr><td>${r.email}</td><td>${(r.firstName||'') + ' ' + (r.lastName||'')}</td><td>${r.role||''}</td><td>${r.isActive===false?'<span class="chip" style="background:#fdecea">no</span>':'<span class="chip">yes</span>'}</td><td>${r.lastLoginAt?new Date(r.lastLoginAt).toISOString().slice(0,10):''}</td><td>${r.createdAt?new Date(r.createdAt).toISOString().slice(0,10):''}</td><td><button onclick="lookupUser('${r.email}')">view</button></td></tr>`).join('');
-    document.getElementById('usersTable').innerHTML = `<table><thead><tr><th onclick="toggleSort('email')">email ⇅</th><th>name</th><th onclick="toggleSort('role')">role ⇅</th><th>active</th><th onclick="toggleSort('lastLoginAt')">lastLogin ⇅</th><th onclick="toggleSort('createdAt')">created ⇅</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-    document.getElementById('usersPager').innerHTML = `Page ${d.page}/${d.pages} (${d.total} rows) &nbsp; ${d.page>1?`<button onclick="loadUsers(${d.page-1})">Prev</button>`:''} ${d.page<d.pages?`<button onclick="loadUsers(${d.page+1})">Next</button>`:''}`;
+    const rows = Array.isArray(d.rows) ? d.rows : [];
+
+    // Built with the DOM, never innerHTML: firstName/lastName are user-
+    // controlled and the CSP allows 'unsafe-inline', so templating them into
+    // an HTML string was a stored-XSS path into an authenticated admin
+    // session that could then read the CSRF token and run the destructive
+    // endpoints.
+    const table = el('table');
+    const thead = el('thead');
+    const htr = el('tr');
+    [['email', 'email'], ['name', null], ['role', 'role'], ['active', null], ['lastLoginAt', 'lastLogin'], ['createdAt', 'created'], ['', '']].forEach(([field, label]) => {
+      const th = el('th', label ? label + ' ⇅' : '');
+      if (field) {
+        th.style.cursor = 'pointer';
+        th.addEventListener('click', () => toggleSort(field));
+        th.dataset.sort = field;
+      }
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    table.appendChild(thead);
+
+    const tbody = el('tbody');
+    rows.forEach(r => {
+      const tr = el('tr');
+      tr.appendChild(el('td', r.email));
+      tr.appendChild(el('td', [r.firstName, r.lastName].filter(Boolean).join(' ')));
+      tr.appendChild(el('td', r.role));
+      tr.appendChild(el('td', r.isActive === false ? 'no' : 'yes', 'chip'));
+      tr.appendChild(el('td', fmtDate(r.lastLoginAt)));
+      tr.appendChild(el('td', fmtDate(r.createdAt)));
+      const actions = el('td');
+      const view = el('button', 'view');
+      view.dataset.email = r.email;
+      actions.appendChild(view);
+      tr.appendChild(actions);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    const host = document.getElementById('usersTable');
+    host.replaceChildren(table);
+
+    // `Page 1/0` used to render for an empty result set.
+    const pages = Math.max(d.pages || 0, 1);
+    const pager = document.getElementById('usersPager');
+    pager.replaceChildren();
+    pager.appendChild(document.createTextNode(`Page ${d.page}/${pages} (${d.total} rows)  `));
+    if (d.page > 1) { const b = el('button', 'Prev'); b.addEventListener('click', () => loadUsers(d.page - 1)); pager.appendChild(b); }
+    if (d.page < d.pages) { const b = el('button', 'Next'); b.addEventListener('click', () => loadUsers(d.page + 1)); pager.appendChild(b); }
   } catch (e) { alertBox(e.message, 'error', true); }
 }
+
+// One delegated listener for every "view" button, instead of an inline
+// onclick carrying a raw email into an attribute.
+document.getElementById('usersTable').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-email]');
+  if (btn) lookupUser(btn.dataset.email);
+});
+
 function toggleSort(f) { if (usersSort === f) usersOrder = usersOrder === 'asc' ? 'desc' : 'asc'; else { usersSort = f; usersOrder = 'desc'; } loadUsers(usersPage); }
 function exportUsers(format) {
   const p = new URLSearchParams({ format });

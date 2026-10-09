@@ -3,7 +3,17 @@ const router = express.Router();
 const path = require('path');
 const Organization = require('../models/Organization');
 
-// Simple basic auth middleware for the dev tool
+// Simple basic auth middleware for the dev tool.
+//
+// Comparisons use crypto.timingSafeEqual so a wrong password cannot be
+// narrowed down a character at a time by timing the response.
+const safeEqual = (a, b) => {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+};
+
 const devAuth = (req, res, next) => {
   const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
   const [login, userPass] = Buffer.from(b64auth, 'base64').toString().split(':');
@@ -11,13 +21,23 @@ const devAuth = (req, res, next) => {
   const adminUser = process.env.ADMIN_DEV_USER || 'admin';
   const adminSecret = process.env.ADMIN_DEV_PASSWORD;
 
-  if (login && userPass && login === adminUser && userPass === adminSecret && adminSecret) {
+  // adminSecret must be truthy — that check is what stops the default
+  // account from authenticating when no secret is configured at all.
+  if (
+    adminSecret &&
+    login &&
+    userPass &&
+    safeEqual(login, adminUser) &&
+    safeEqual(userPass, adminSecret)
+  ) {
     req.devUser = login;
     return next();
   }
 
   res.set('WWW-Authenticate', 'Basic realm="401"');
-  res.status(401).send('Authentication required. Missing or incorrect ADMIN_DEV_PASSWORD.');
+  // Deliberately generic: naming the controlling env var hands an
+  // unauthenticated prober the exact knob to look for.
+  res.status(401).send('Authentication required.');
 };
 
 // Stateless CSRF token derived from the admin password. Basic-auth browsers
@@ -31,8 +51,10 @@ function adminDevCsrfToken() {
 
 function requireCsrf(req, res, next) {
   const expected = adminDevCsrfToken();
-  const token = req.get('x-admin-dev-csrf') || (req.body && req.body.csrf);
-  if (!expected || token !== expected) {
+  // Header only. Accepting it in the body let it ride along in
+  // urlencoded/form posts, where it ends up in access logs.
+  const token = req.get('x-admin-dev-csrf');
+  if (!expected || !safeEqual(token || '', expected)) {
     return res.status(403).json({ success: false, message: 'Invalid or missing CSRF token' });
   }
   return next();
@@ -135,7 +157,8 @@ const Client = require('../models/Client');
 const LeaveRequest = require('../models/LeaveRequest');
 const redis = require('../config/redis');
 const TemporalManager = require('../core/TemporalManager');
-const { createAuditLog } = require('../services/auditService');
+const { createAuditLog, AUDIT_SOURCES } = require('../services/auditService');
+const { convertUsersToCSV } = require('../services/csvExport');
 const crypto = require('crypto');
 const fs = require('fs');
 
@@ -165,33 +188,6 @@ function buildUserFilter(query) {
   return filter;
 }
 
-function convertUsersToCSV(rows) {
-  const headers = ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'organizationCode', 'isActive', 'isDeleted', 'lastLoginAt', 'createdAt', 'phone', 'clientId'];
-  const lines = [headers.join(',')];
-  for (const r of rows) {
-    const rec = {
-      id: r._id ? r._id.toString() : (r.id || ''),
-      email: r.email || '',
-      firstName: r.firstName || '',
-      lastName: r.lastName || '',
-      role: r.role || '',
-      organizationId: r.organizationId || '',
-      organizationCode: r.organizationCode || '',
-      isActive: r.isActive === undefined ? '' : String(r.isActive),
-      isDeleted: r.isDeleted === undefined ? '' : String(r.isDeleted),
-      lastLoginAt: r.lastLoginAt ? r.lastLoginAt.toISOString() : '',
-      createdAt: r.createdAt ? r.createdAt.toISOString() : '',
-      phone: r.phone || '',
-      clientId: r.clientId ? r.clientId.toString() : '',
-    };
-    const cells = headers.map((h) => {
-      const v = rec[h] === undefined ? '' : String(rec[h]);
-      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-    });
-    lines.push(cells.join(','));
-  }
-  return lines.join('\n');
-}
 
 // Paginated, sortable, filtered user table
 router.get('/api/ops/users', devAuth, async (req, res) => {
@@ -226,7 +222,7 @@ router.get('/api/ops/users/export', devAuth, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean()
       .limit(10000);
-    await createAuditLog({ action: 'EXPORT', entityType: 'user', entityId: 'bulk', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { format, count: rows.length, query: req.query }, reason: 'manual ops export' });
+    await createAuditLog({ action: 'EXPORT', entityType: 'user', entityId: 'bulk', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { format, count: rows.length, query: req.query }, reason: 'manual ops export', source: AUDIT_SOURCES.ADMIN_DEV });
     const filename = `users_export_${new Date().toISOString().split('T')[0]}.${format}`;
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json');
@@ -245,7 +241,13 @@ router.get('/api/ops/users/export', devAuth, async (req, res) => {
 router.get('/api/ops/users/:email', devAuth, async (req, res) => {
   try {
     const email = String(req.params.email || '').toLowerCase();
-    const user = await User.findOne({ email }).lean();
+    // `password` carries select:false so the driver already projects it out,
+    // but `otp` and `refreshTokens` do not. refreshTokens holds live JWTs for
+    // any user with an active session, so exclude all three explicitly rather
+    // than relying on the schema default alone.
+    const user = await User.findOne({ email })
+      .select('-password -otp -refreshTokens')
+      .lean();
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const [memberships, fcmCount, balanceRows, recentAudits, orgCounts, invoiceAgg, recentInvoices, workedTimeAgg, leaveRequests] = await Promise.all([
@@ -284,7 +286,7 @@ router.post('/api/ops/reset-rate-limits', devAuth, requireCsrf, async (req, res)
       await redis.del(...keys.slice(i, i + 500));
       deleted += Math.min(500, keys.length - i);
     }
-    await createAuditLog({ action: 'UPDATE', entityType: 'organization', entityId: 'global', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { rateLimitKeysCleared: deleted }, reason: 'manual ops reset' });
+    await createAuditLog({ action: 'UPDATE', entityType: 'organization', entityId: 'global', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { rateLimitKeysCleared: deleted }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
     res.json({ success: true, deleted });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -349,16 +351,25 @@ router.get('/api/ops/valkey-stats', devAuth, async (req, res) => {
 
 // Recent admin-dev actions from the audit trail.
 //
-// Filter on the `manual ops` reason rather than entityType: every write this
-// console performs is tagged with that reason, but they do not share an
-// entityType (rate-limit resets and org resets are 'organization', user exports
-// are 'user'). Filtering by entityType hid exports and any future ops action.
+// Match on the indexed `source` field. The previous filter keyed off the
+// `reason` string, but Mongo cannot serve an anchored `^` regex from a B-tree
+// index — that was a collection scan plus sort on every console page load.
+// Rows written before the `source` field existed carry no source value, so a
+// one-off fallback picks those up (and can be dropped once they age out).
 router.get('/api/ops/audit-recent', devAuth, async (req, res) => {
   try {
-    const logs = await AuditLog.find({ reason: /^manual ops/ })
+    let logs = await AuditLog.find({ source: AUDIT_SOURCES.ADMIN_DEV })
       .sort({ timestamp: -1 })
       .limit(50)
       .lean();
+
+    if (logs.length === 0) {
+      logs = await AuditLog.find({ source: { $exists: false }, reason: /^manual ops/ })
+        .sort({ timestamp: -1 })
+        .limit(50)
+        .lean();
+    }
+
     res.json({ success: true, data: logs });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -382,7 +393,7 @@ router.post('/api/ops/org-reset/:orgId', devAuth, requireCsrf, async (req, res) 
       NotificationHistory.deleteMany({ userId: { $in: userIds } }),
     ]);
 
-    await createAuditLog({ action: 'DELETE', entityType: 'organization', entityId: orgId, userEmail: req.devUser || 'admin-dev', organizationId: orgId, oldValues: { leaveBalancesDeleted: lb.deletedCount, notificationsDeleted: nh.deletedCount }, reason: 'manual ops reset' });
+    await createAuditLog({ action: 'DELETE', entityType: 'organization', entityId: orgId, userEmail: req.devUser || 'admin-dev', organizationId: orgId, oldValues: { leaveBalancesDeleted: lb.deletedCount, notificationsDeleted: nh.deletedCount }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
     res.json({ success: true, leaveBalancesDeleted: lb.deletedCount, notificationsDeleted: nh.deletedCount });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
