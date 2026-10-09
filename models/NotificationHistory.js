@@ -65,5 +65,7 @@ const notificationHistorySchema = new mongoose.Schema({
 notificationHistorySchema.index({ userId: 1, status: 1 });
 notificationHistorySchema.index({ userId: 1, type: 1, createdAt: -1 });
 notificationHistorySchema.index({ scheduledAt: 1, status: 1 });
+// Delivery-failure ledger in the ops console.
+notificationHistorySchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('NotificationHistory', notificationHistorySchema);

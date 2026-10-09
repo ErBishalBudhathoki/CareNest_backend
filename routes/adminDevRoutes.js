@@ -67,17 +67,50 @@ function serveHtmlWithCsrf(file, req, res) {
 }
 
 // Iterate Valkey keys without the blocking KEYS command. DisabledRedisClient
-// and the Cloud Run shared-client wrapper expose scan()/scanStream, not keys().
-async function listRlimitKeys() {
+// and the Cloud Run shared-client wrapper expose scan/scanStream, not keys().
+//
+// Bounded on both axes. An earlier version looped until the cursor returned to
+// '0' and accumulated every match into an array, so on a shared instance with
+// a large rate-limit keyspace this walked the whole keyspace on every console
+// page load and grew memory with it. Now it stops at a key ceiling, and reports
+// whether it hit that ceiling so the UI can say the count is a floor.
+const RL_SCAN_MAX_KEYS = 5000;
+const RL_SCAN_MAX_ROUNDS = 50;
+// The destructive reset gets a far higher ceiling than the read-only display,
+// but still a ceiling — and reports when it hits one.
+const RL_RESET_MAX_KEYS = 200000;
+const RL_RESET_MAX_ROUNDS = 2000;
+
+async function listRlimitKeys({ maxKeys = RL_SCAN_MAX_KEYS, maxRounds = RL_SCAN_MAX_ROUNDS } = {}) {
   const keys = [];
   let cursor = '0';
+  let rounds = 0;
+  let truncated = false;
+
   do {
     const result = await redis.scan(cursor, 'MATCH', 'rl:*', 'COUNT', 200);
     cursor = Array.isArray(result) ? String(result[0]) : '0';
     const batch = Array.isArray(result) ? result[1] : [];
-    if (Array.isArray(batch)) keys.push(...batch);
+
+    if (Array.isArray(batch)) {
+      for (const key of batch) {
+        if (keys.length >= maxKeys) {
+          truncated = true;
+          break;
+        }
+        keys.push(key);
+      }
+    }
+
+    rounds += 1;
+    if (truncated || rounds >= maxRounds) {
+      // Stop early if we hit either ceiling; cursor !== '0' means more remain.
+      truncated = truncated || cursor !== '0';
+      break;
+    }
   } while (cursor !== '0');
-  return keys;
+
+  return { keys, truncated, scanned: rounds };
 }
 
 // Serve the Admin Dev Tool HTML page
@@ -291,14 +324,21 @@ router.post('/api/ops/reset-rate-limits', devAuth, requireCsrf, async (req, res)
     if (req.body.confirm !== 'CLEAR_RL') {
       return res.status(400).json({ success: false, message: 'Body must be { confirm: "CLEAR_RL" }' });
     }
-    const keys = await listRlimitKeys();
+    // Deliberately NOT capped at the display ceiling. Silently clearing only
+    // the first 5k keys would leave the operator believing the instance was
+    // reset when it was not. Use a high ceiling and report truncation instead.
+    const { keys, truncated } = await listRlimitKeys({
+      maxKeys: RL_RESET_MAX_KEYS,
+      maxRounds: RL_RESET_MAX_ROUNDS,
+    });
     let deleted = 0;
     for (let i = 0; i < keys.length; i += 500) {
       await redis.del(...keys.slice(i, i + 500));
       deleted += Math.min(500, keys.length - i);
     }
-    await createAuditLog({ action: 'UPDATE', entityType: 'organization', entityId: 'global', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { rateLimitKeysCleared: deleted }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
-    res.json({ success: true, deleted });
+    await createAuditLog({ action: 'UPDATE', entityType: 'organization', entityId: 'global', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { rateLimitKeysCleared: deleted, truncated }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
+    res.json({ success: true, deleted, truncated });
+    return;
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -307,6 +347,16 @@ router.post('/api/ops/reset-rate-limits', devAuth, requireCsrf, async (req, res)
 // Leave balance integrity: users with fewer than 4 active LeaveBalance rows
 router.get('/api/ops/leave-integrity', devAuth, async (req, res) => {
   try {
+    // LeaveBalance has no organizationId — membership is resolved through
+    // UserOrganization — so orgId would have to $lookup the membership
+    // collection. Not attempted here rather than silently matching nothing;
+    // an orgId is accepted and rejected explicitly.
+    if (req.query.orgId) {
+      return res.status(400).json({
+        success: false,
+        message: 'leave-integrity is platform-wide only: LeaveBalance has no organizationId to filter on',
+      });
+    }
     const rows = await LeaveBalance.aggregate([
       { $match: { isActive: true } },
       { $group: { _id: '$userEmail', count: { $sum: 1 }, types: { $addToSet: '$leaveType' } } },
@@ -314,7 +364,15 @@ router.get('/api/ops/leave-integrity', devAuth, async (req, res) => {
       { $sort: { count: 1 } },
       { $limit: 200 },
     ]);
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      scope: 'platform',
+      // Capped at 200; when more rows exist the result is a sample, not a
+      // complete list, and the caller is told so.
+      truncated: rows.length === 200,
+      count: rows.length,
+      data: rows.map((r) => ({ userEmail: r._id, balanceRows: r.count, types: r.types })),
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -348,13 +406,20 @@ router.get('/api/ops/temporal/:workflowId', devAuth, async (req, res) => {
 // Valkey rate-limit key counts by prefix
 router.get('/api/ops/valkey-stats', devAuth, async (req, res) => {
   try {
-    const keys = await listRlimitKeys();
+    const { keys, truncated, scanned } = await listRlimitKeys();
     const byPrefix = {};
-    (keys || []).forEach((k) => {
+    for (const k of keys) {
       const prefix = k.split(':').slice(0, 2).join(':');
       byPrefix[prefix] = (byPrefix[prefix] || 0) + 1;
+    }
+    res.json({
+      success: true,
+      total: keys.length,
+      byPrefix,
+      // When truncated, `total` is a floor, not the true key count.
+      truncated,
+      scannedRounds: scanned,
     });
-    res.json({ success: true, total: (keys || []).length, byPrefix });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -388,6 +453,11 @@ router.get('/api/ops/audit-recent', devAuth, async (req, res) => {
 });
 
 // Destructive org data reset — requires { confirm: '<orgId>' }
+// Batch size for the destructive deletes. An unbounded $in of every member's
+// ObjectId produces a multi-megabyte query document that can exceed the 16MB
+// BSON limit on a large organisation and hard-fails.
+const ORG_RESET_BATCH = 500;
+
 router.post('/api/ops/org-reset/:orgId', devAuth, requireCsrf, async (req, res) => {
   try {
     const { orgId } = req.params;
@@ -399,23 +469,38 @@ router.post('/api/ops/org-reset/:orgId', devAuth, requireCsrf, async (req, res) 
 
     const memberships = await UserOrganization.find({ organizationId: orgId }).select('userId').lean();
     const userIds = memberships.map((m) => m.userId).filter(Boolean);
-    const [lb, nh] = await Promise.all([
-      LeaveBalance.deleteMany({ userId: { $in: userIds } }),
-      NotificationHistory.deleteMany({ userId: { $in: userIds } }),
-    ]);
 
-    await createAuditLog({ action: 'DELETE', entityType: 'organization', entityId: orgId, userEmail: req.devUser || 'admin-dev', organizationId: orgId, oldValues: { leaveBalancesDeleted: lb.deletedCount, notificationsDeleted: nh.deletedCount }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
-    res.json({ success: true, leaveBalancesDeleted: lb.deletedCount, notificationsDeleted: nh.deletedCount });
+    let leaveBalancesDeleted = 0;
+    let notificationsDeleted = 0;
+    for (let i = 0; i < userIds.length; i += ORG_RESET_BATCH) {
+      const batch = userIds.slice(i, i + ORG_RESET_BATCH);
+      const [lb, nh] = await Promise.all([
+        LeaveBalance.deleteMany({ userId: { $in: batch } }),
+        NotificationHistory.deleteMany({ userId: { $in: batch } }),
+      ]);
+      leaveBalancesDeleted += lb.deletedCount || 0;
+      notificationsDeleted += nh.deletedCount || 0;
+    }
+
+    await createAuditLog({ action: 'DELETE', entityType: 'organization', entityId: orgId, userEmail: req.devUser || 'admin-dev', organizationId: orgId, oldValues: { membersProcessed: userIds.length, leaveBalancesDeleted, notificationsDeleted }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
+    res.json({ success: true, membersProcessed: userIds.length, leaveBalancesDeleted, notificationsDeleted });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 
-// Platform-wide stats for the developer dashboard
+// Platform stats for the developer dashboard.
+//
+// orgId is optional. Without it the figures stay platform-wide (the historical
+// behaviour); with it every counter is scoped to that tenant, which is what
+// makes "is org X healthy?" answerable on a multi-tenant NDIS platform.
 router.get('/api/ops/platform-stats', devAuth, async (req, res) => {
   try {
     const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const orgId = req.query.orgId ? String(req.query.orgId) : null;
+    const scope = orgId ? { organizationId: orgId } : {};
+    const withScope = (extra) => (orgId ? { ...scope, ...extra } : extra);
 
     const [
       totalUsers, activeUsers, newUsers30d,
@@ -425,28 +510,39 @@ router.get('/api/ops/platform-stats', devAuth, async (req, res) => {
       workedTimeAgg, pendingLeave,
       orgsWithSettings,
     ] = await Promise.all([
-      User.countDocuments({}),
-      User.countDocuments({ lastLoginAt: { $gte: since30d } }),
-      User.countDocuments({ createdAt: { $gte: since30d } }),
-      Organization.countDocuments({}),
-      Invoice.countDocuments({}),
-      Invoice.countDocuments({ createdAt: { $gte: since30d } }),
-      Client.countDocuments({}),
-      Appointment.countDocuments({ createdAt: { $gte: since30d } }),
-      WorkedTime.aggregate([{ $group: { _id: null, hours: { $sum: '$totalHours' } } }]),
-      LeaveRequest.countDocuments({ status: 'Pending' }),
-      Organization.countDocuments({ 'settings.aiInvoiceGeneration': { $exists: true } }),
+      User.countDocuments(withScope({})),
+      User.countDocuments(withScope({ lastLoginAt: { $gte: since30d } })),
+      User.countDocuments(withScope({ createdAt: { $gte: since30d } })),
+      orgId ? Organization.countDocuments({ _id: orgId }) : Organization.countDocuments({}),
+      Invoice.countDocuments(withScope({})),
+      Invoice.countDocuments(withScope({ createdAt: { $gte: since30d } })),
+      Client.countDocuments(withScope({})),
+      Appointment.countDocuments(withScope({ createdAt: { $gte: since30d } })),
+      // Previously an unfiltered $group over every worked-time record in the
+      // platform, on every page load, with no index usable because there was no
+      // filter at all. Now bounded to the same 30-day window as the other
+      // counters and labelled accordingly rather than silently changing what
+      // "total" means.
+      WorkedTime.aggregate([
+        { $match: { ...scope, workDate: { $gte: since30d } } },
+        { $group: { _id: null, hours: { $sum: '$totalHours' } } },
+      ]),
+      LeaveRequest.countDocuments(withScope({ status: 'Pending' })),
+      orgId
+        ? Organization.countDocuments({ _id: orgId, 'settings.aiInvoiceGeneration': { $exists: true } })
+        : Organization.countDocuments({ 'settings.aiInvoiceGeneration': { $exists: true } }),
     ]);
 
     res.json({
       success: true,
       data: {
+        scope: orgId || 'platform',
         users: { total: totalUsers, activeLast30d: activeUsers, newLast30d: newUsers30d },
         organizations: { total: totalOrgs, withAISettings: orgsWithSettings },
         invoices: { total: totalInvoices, last30d: invoices30d },
         clients: { total: totalClients },
         appointments: { last30d: appointments30d },
-        workedHoursTotal: workedTimeAgg[0]?.hours || 0,
+        workedHoursLast30d: Math.round(workedTimeAgg[0]?.hours || 0),
         leaveRequestsPending: pendingLeave,
       },
     });
@@ -723,30 +819,34 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
     const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
     const since = new Date(Date.now() - days * DAY_MS);
     const dayFmt = '%Y-%m-%d';
+    // Optional tenant scope, applied as a leading $match so the new compound
+    // indexes can actually be used.
+    const orgId = req.query.orgId ? String(req.query.orgId) : null;
+    const scope = orgId ? { organizationId: orgId } : {};
 
     const [newUsers, activeUsers, invoices, revenue, appointments, workedHours] = await Promise.all([
       User.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
       ]),
       User.aggregate([
-        { $match: { lastLoginAt: { $gte: since } } },
+        { $match: { ...scope, lastLoginAt: { $gte: since } } },
         { $group: { _id: { $dateToString: { format: dayFmt, date: '$lastLoginAt' } }, count: { $sum: 1 } } },
       ]),
       Invoice.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
       ]),
       Invoice.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, total: { $sum: '$financialSummary.totalAmount' } } },
       ]),
       Appointment.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
       ]),
       WorkedTime.aggregate([
-        { $match: { workDate: { $gte: since } } },
+        { $match: { ...scope, workDate: { $gte: since } } },
         { $group: { _id: { $dateToString: { format: dayFmt, date: '$workDate' } }, hours: { $sum: '$totalHours' } } },
       ]),
     ]);
@@ -768,12 +868,12 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
         newUsers: newUsersM[key] || 0,
         activeUsers: activeUsersM[key] || 0,
         invoices: invoicesM[key] || 0,
-        revenue: revenueM[key] || 0,
+        revenue: Math.round(revenueM[key] || 0),
         appointments: appointmentsM[key] || 0,
         workedHours: workedHoursM[key] || 0,
       });
     }
-    res.json({ success: true, data: { days, series } });
+    res.json({ success: true, data: { days, scope: orgId || 'platform', series } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -784,28 +884,46 @@ router.get('/api/ops/analytics/breakdown', devAuth, async (req, res) => {
     const entity = String(req.query.entity || 'invoiceStatus');
     const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
     const since = new Date(Date.now() - days * DAY_MS);
+    const orgId = req.query.orgId ? String(req.query.orgId) : null;
+    const scope = orgId ? { organizationId: orgId } : {};
+
     let rows = [];
+    let window = 'days';
+
     if (entity === 'invoiceStatus') {
       rows = await Invoice.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: '$workflow.status', count: { $sum: 1 }, total: { $sum: '$financialSummary.totalAmount' } } },
         { $sort: { count: -1 } },
       ]);
     } else if (entity === 'paymentStatus') {
       rows = await Invoice.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: '$payment.status', count: { $sum: 1 }, total: { $sum: '$financialSummary.totalAmount' } } },
         { $sort: { count: -1 } },
       ]);
     } else if (entity === 'userRole') {
+      // Role distribution is a snapshot of who exists, not a time series — the
+      // previous version computed `since` and then ignored it, so the Days
+      // control silently did nothing here. Filtering by the window would make
+      // this chart empty whenever no one had signed up recently, which is worse
+      // than useless. Scope by tenant and say explicitly that it is all-time.
+      window = 'all-time';
       rows = await User.aggregate([
+        { $match: { ...scope } },
         { $group: { _id: { $ifNull: ['$role', { $arrayElemAt: ['$roles', 0] }] }, count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ]);
     } else {
       return res.status(400).json({ success: false, message: 'entity must be invoiceStatus|paymentStatus|userRole' });
     }
-    res.json({ success: true, data: rows.map((r) => ({ label: r._id || 'unknown', count: r.count, total: r.total || 0 })) });
+
+    res.json({
+      success: true,
+      scope: orgId || 'platform',
+      window: window === 'all-time' ? 'all-time' : `${days}d`,
+      data: rows.map((r) => ({ label: r._id || 'unknown', count: r.count, total: r.total || 0 })),
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -817,24 +935,27 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
     const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
     const since = new Date(Date.now() - days * DAY_MS);
+    const orgId = req.query.orgId ? String(req.query.orgId) : null;
+    const scope = orgId ? { organizationId: orgId } : {};
+
     let rows = [];
     if (entity === 'clients') {
       rows = await Invoice.aggregate([
-        { $match: { createdAt: { $gte: since } } },
+        { $match: { ...scope, createdAt: { $gte: since } } },
         { $group: { _id: '$clientEmail', count: { $sum: 1 }, total: { $sum: '$financialSummary.totalAmount' } } },
         { $sort: { total: -1 } },
         { $limit: limit },
       ]);
-      return res.json({ success: true, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.total || 0 })) });
+      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.total || 0 })) });
     }
     if (entity === 'users') {
       rows = await WorkedTime.aggregate([
-        { $match: { workDate: { $gte: since } } },
+        { $match: { ...scope, workDate: { $gte: since } } },
         { $group: { _id: '$userEmail', count: { $sum: 1 }, hours: { $sum: '$totalHours' } } },
         { $sort: { hours: -1 } },
         { $limit: limit },
       ]);
-      return res.json({ success: true, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.hours || 0 })) });
+      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.hours || 0 })) });
     }
     return res.status(400).json({ success: false, message: 'entity must be clients|users' });
   } catch (error) {

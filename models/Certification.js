@@ -66,4 +66,8 @@ const certificationSchema = new mongoose.Schema({
   }
 });
 
+// The ops console queries active certifications expiring within a window and
+// sorts by expiryDate; without this the sort is in-memory on a full scan.
+certificationSchema.index({ status: 1, expiryDate: 1 });
+
 module.exports = mongoose.model('Certification', certificationSchema);

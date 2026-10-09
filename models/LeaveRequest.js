@@ -93,5 +93,7 @@ const leaveRequestSchema = new mongoose.Schema({
 leaveRequestSchema.index({ userId: 1, status: 1 });
 leaveRequestSchema.index({ startDate: 1, endDate: 1 });
 leaveRequestSchema.index({ createdAt: -1 });
+// Org-scoped pending-approval counter in the console.
+leaveRequestSchema.index({ organizationId: 1, status: 1 });
 
 module.exports = mongoose.model('LeaveRequest', leaveRequestSchema);

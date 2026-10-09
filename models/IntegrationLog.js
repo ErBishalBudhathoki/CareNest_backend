@@ -52,6 +52,9 @@ const integrationLogSchema = new mongoose.Schema({
 integrationLogSchema.index({ organizationId: 1, integrationType: 1, timestamp: -1 });
 
 // TTL index to automatically delete old logs after 90 days
+// The ops console's integration-failure ledger filters on status.
+integrationLogSchema.index({ status: 1, timestamp: -1 });
+
 integrationLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 7776000 }); // 90 days
 
 const IntegrationLog = mongoose.model('IntegrationLog', integrationLogSchema);
