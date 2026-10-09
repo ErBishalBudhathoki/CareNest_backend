@@ -760,6 +760,15 @@ router.get('/api/ops/instance', devAuth, (req, res) => {
       data: {
         capturedAt: new Date().toISOString(),
         scope: 'this-instance',
+        // Which build and which instance is answering. During an incident the
+        // first question is usually "am I even looking at the deployed code?".
+        build: {
+          revision: process.env.K_REVISION || null,
+          service: process.env.K_SERVICE || null,
+          configuration: process.env.K_CONFIGURATION || null,
+          instance: process.env.HOSTNAME || null,
+          uptimeSeconds: Math.round(process.uptime()),
+        },
         caveat: 'In-memory counters. Reset on deploy and on scale-to-zero cold start — not platform history.',
         hasTraffic: traffic.totalRequests > 0 || health.application.totalRequests > 0,
         health: {
