@@ -347,10 +347,15 @@ router.get('/api/ops/valkey-stats', devAuth, async (req, res) => {
   }
 });
 
-// Recent admin-dev actions from the audit trail
+// Recent admin-dev actions from the audit trail.
+//
+// Filter on the `manual ops` reason rather than entityType: every write this
+// console performs is tagged with that reason, but they do not share an
+// entityType (rate-limit resets and org resets are 'organization', user exports
+// are 'user'). Filtering by entityType hid exports and any future ops action.
 router.get('/api/ops/audit-recent', devAuth, async (req, res) => {
   try {
-    const logs = await AuditLog.find({ entityType: 'organization' })
+    const logs = await AuditLog.find({ reason: /^manual ops/ })
       .sort({ timestamp: -1 })
       .limit(50)
       .lean();
