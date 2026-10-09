@@ -104,3 +104,26 @@ Those are the only packages whose advisories represent real production exposure.
 excluded from the default Jest run (`--testPathIgnorePatterns=... seed-data`) and
 never enters the image. Not remediated because the fix is a major-version bump
 (9.x → 10.x) for a test-fixture generator with no production impact.
+
+## Correction, 2026-10-09 (later)
+
+Two claims made in the same conversation were wrong, recorded here so they are
+not inherited as fact:
+
+1. **"Reachable axios / nodemailer / multer issues."** Not reachable. All three
+   are past their advisory ranges; see Finding 1.
+2. **"`logPeriodicHealthMetrics` / `logPeriodicErrorMetrics` are exported but
+   never called, so the periodic health logs have never emitted."** False. Both
+   are called from `setInterval` (`middleware/systemHealth.js:197`,
+   `middleware/errorTracking.js:279`), each `unref()`'d and guarded against the
+   test environment. They *are* emitting. The claim came from grepping for
+   call sites without noticing the `setInterval` on the preceding lines, and
+   from querying Cloud Logging on `textPayload` while the log lines are written
+   as structured `jsonPayload`. A `jsonPayload.message="Business Event"` query
+   shows a `system_health_snapshot` every five minutes with uptime, memory, CPU,
+   error rate and request counts. Both packages stay out of the image regardless
+   (Finding 3), so the dependency conclusion above is unaffected.
+
+The lesson worth carrying: both errors were made while triaging from summaries
+rather than from the code, and both survived because the surrounding claims
+sounded plausible. Re-check the source before repeating either.
