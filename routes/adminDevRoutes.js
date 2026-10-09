@@ -552,8 +552,10 @@ router.get('/api/ops/ledger/failed-workflows', devAuth, async (req, res) => {
     res.json({
       success: true,
       status: String(req.query.status || 'failed').toUpperCase(),
-      total: result.total,
       count: result.workflows.length,
+      // True when the cluster's visibility store rejected the status filter
+      // and the result was filtered client-side instead.
+      degraded: result.degraded === true,
       data: result.workflows,
     });
   } catch (error) {

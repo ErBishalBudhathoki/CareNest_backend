@@ -177,38 +177,66 @@ class TemporalManager {
    */
   static async listWorkflows({ status = null, limit = 50 } = {}) {
     const client = await this.getClient();
-    const query = status ? `ExecutionStatus = "${String(status).toUpperCase()}"` : null;
+    const wanted = status ? String(status).toUpperCase() : null;
     const capped = Math.max(1, Math.min(Number(limit) || 50, 200));
 
-    // list() returns AsyncWorkflowListIterable, which *is* the async iterable
-    // of WorkflowExecutionInfo — it has no .workflows property.
-    const iterable = await client.workflow.list({ query, pageSize: capped });
+    const normalise = (info) => ({
+      workflowId: info.workflowId,
+      type: info.type || null,
+      status: info.status ? (info.status.name || String(info.status.code)) : null,
+      taskQueue: info.taskQueue || null,
+      startTime: info.startTime || null,
+      closeTime: info.closeTime || null,
+    });
 
-    const workflows = [];
-    for await (const info of iterable) {
-      workflows.push({
-        workflowId: info.workflowId,
-        type: info.type || null,
-        status: info.status ? (info.status.name || String(info.status.code)) : null,
-        taskQueue: info.taskQueue || null,
-        startTime: info.startTime || null,
-        closeTime: info.closeTime || null,
-      });
-      if (workflows.length >= capped) break;
-    }
-
-    let total = null;
-    if (query) {
+    // Preferred path: let the visibility store do the filtering.
+    if (wanted) {
       try {
-        const counted = await client.workflow.count(query);
-        total = counted && typeof counted.count === 'number' ? counted.count : null;
+        const iterable = await client.workflow.list({
+          query: `ExecutionStatus = "${wanted}"`,
+          pageSize: capped,
+        });
+        const workflows = [];
+        for await (const info of iterable) {
+          workflows.push(normalise(info));
+          if (workflows.length >= capped) break;
+        }
+        return { workflows, total: null, degraded: false };
       } catch (error) {
-        // Count is a nicety; a failure here must not fail the whole listing.
-        logger.warn('Temporal workflow count failed', { error: error.message });
+        // Temporal's *Standard* visibility store rejects most custom queries,
+        // including an ExecutionStatus filter — the RPC itself fails rather
+        // than returning an empty result. Fall back to an unfiltered scan and
+        // filter here, so the panel works on either visibility backend.
+        logger.warn('Temporal status query rejected, falling back to client-side filter', {
+          status: wanted,
+          error: error.message,
+          details: error.details || null,
+        });
+
+        try {
+          const iterable = await client.workflow.list({ pageSize: capped * 4 });
+          const workflows = [];
+          for await (const info of iterable) {
+            const row = normalise(info);
+            if (row.status === wanted) workflows.push(row);
+            if (workflows.length >= capped) break;
+          }
+          return { workflows, total: null, degraded: true };
+        } catch (fallbackError) {
+          throw new Error(
+            `Temporal list failed (${error.message}; fallback: ${fallbackError.message})`
+          );
+        }
       }
     }
 
-    return { workflows, total };
+    const iterable = await client.workflow.list({ pageSize: capped });
+    const workflows = [];
+    for await (const info of iterable) {
+      workflows.push(normalise(info));
+      if (workflows.length >= capped) break;
+    }
+    return { workflows, total: null, degraded: false };
   }
 
   static async close() {
