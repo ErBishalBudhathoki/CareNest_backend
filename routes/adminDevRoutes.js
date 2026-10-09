@@ -918,11 +918,13 @@ router.get('/api/ops/analytics/breakdown', devAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'entity must be invoiceStatus|paymentStatus|userRole' });
     }
 
+    const data = rows.map((r) => ({ label: r._id || 'unknown', count: r.count, total: r.total || 0 }));
     res.json({
       success: true,
       scope: orgId || 'platform',
       window: window === 'all-time' ? 'all-time' : `${days}d`,
-      data: rows.map((r) => ({ label: r._id || 'unknown', count: r.count, total: r.total || 0 })),
+      count: data.length,
+      data,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -946,7 +948,7 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
         { $sort: { total: -1 } },
         { $limit: limit },
       ]);
-      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.total || 0 })) });
+      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, count: rows.length, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.total || 0 })) });
     }
     if (entity === 'users') {
       rows = await WorkedTime.aggregate([
@@ -955,7 +957,7 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
         { $sort: { hours: -1 } },
         { $limit: limit },
       ]);
-      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.hours || 0 })) });
+      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, count: rows.length, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.hours || 0 })) });
     }
     return res.status(400).json({ success: false, message: 'entity must be clients|users' });
   } catch (error) {
