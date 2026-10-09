@@ -183,4 +183,7 @@ expenseSchema.index({ clientId: 1 });
 expenseSchema.index({ submittedBy: 1 });
 expenseSchema.index({ approvalStatus: 1 });
 
+// Pending-approval queue in the ops console.
+expenseSchema.index({ organizationId: 1, approvalStatus: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Expense', expenseSchema);

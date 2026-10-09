@@ -41,4 +41,7 @@ const activeTimerSchema = new mongoose.Schema({
   }
 });
 
+// The ops console finds orphaned timers by startTime.
+activeTimerSchema.index({ startTime: -1 });
+
 module.exports = mongoose.model('ActiveTimer', activeTimerSchema);

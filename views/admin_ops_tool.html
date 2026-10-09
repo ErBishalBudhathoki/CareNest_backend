@@ -61,14 +61,18 @@
 
   <section>
     <h2>Platform KPIs</h2>
+    <label>Org: <input id="kpiOrgId" placeholder="all orgs (platform-wide)" style="width:220px"></label>
     <button onclick="loadStats()">Refresh</button>
+    <span id="kpiScope" class="muted"></span>
     <div id="kpis"></div>
   </section>
 
   <section>
     <h2>Analytics</h2>
     <label>Days: <input id="daysRange" type="number" value="30" style="width:80px"></label>
+    <label>Org: <input id="orgScope" placeholder="all orgs" style="width:200px"></label>
     <button onclick="loadAnalytics()">Load charts</button>
+    <span id="analyticsScope" class="muted"></span>
     <div class="grid">
       <div><h3>Users (new vs active/day)</h3><canvas id="usersChart" height="160"></canvas></div>
       <div><h3>Invoices &amp; revenue / day</h3><canvas id="revenueChart" height="160"></canvas></div>
@@ -403,12 +407,16 @@ document.getElementById('failureLedgers').addEventListener('toggle', (ev) => {
 
 async function loadStats() {
   try {
-    const j = await req('/admin-dev/api/ops/platform-stats');
+    const orgId = document.getElementById('kpiOrgId').value.trim();
+    const q = orgId ? '?orgId=' + encodeURIComponent(orgId) : '';
+    const j = await req('/admin-dev/api/ops/platform-stats' + q);
     const d = j.data;
+    // Renamed server-side from workedHoursTotal: it is now bounded to the same
+    // 30-day window as the other counters instead of summing every record.
     const tiles = [
       ['Users', d.users.total], ['Active 30d', d.users.activeLast30d], ['New 30d', d.users.newLast30d],
       ['Orgs', d.organizations.total], ['Invoices', d.invoices.total], ['Invoices 30d', d.invoices.last30d],
-      ['Clients', d.clients.total], ['Appts 30d', d.appointments.last30d], ['Hours', d.workedHoursTotal], ['Leave pending', d.leaveRequestsPending],
+      ['Clients', d.clients.total], ['Appts 30d', d.appointments.last30d], ['Hours 30d', d.workedHoursLast30d], ['Leave pending', d.leaveRequestsPending],
     ];
     const host = document.getElementById('kpis');
     host.replaceChildren(...tiles.map(([label, value]) => {
@@ -418,19 +426,25 @@ async function loadStats() {
       box.appendChild(el('span', label, 'lab'));
       return box;
     }));
+    document.getElementById('kpiScope').textContent = d.scope === 'platform'
+      ? 'platform-wide' : 'scoped to org ' + d.scope;
   } catch (e) { alertBox(e.message, 'error', true); }
 }
 
 async function loadAnalytics() {
   const days = Number(document.getElementById('daysRange').value) || 30;
+  const orgId = document.getElementById('orgScope').value.trim();
+  const org = orgId ? '&orgId=' + encodeURIComponent(orgId) : '';
   try {
     const [ts, status, topClients, topUsers] = await Promise.all([
-      req(`/admin-dev/api/ops/analytics/timeseries?days=${days}`),
-      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&days=${days}`),
-      req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${days}&limit=8`),
-      req(`/admin-dev/api/ops/analytics/top?entity=users&days=${days}&limit=8`),
+      req(`/admin-dev/api/ops/analytics/timeseries?days=${days}${org}`),
+      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&days=${days}${org}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${days}&limit=8${org}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=users&days=${days}&limit=8${org}`),
     ]);
     const s = ts.data.series;
+    document.getElementById('analyticsScope').textContent = ts.data.scope === 'platform'
+      ? 'platform-wide' : 'scoped to org ' + ts.data.scope;
     destroyChart('usersChart'); charts.usersChart = new Chart(document.getElementById('usersChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'new', data: s.map(x => x.newUsers), borderColor:'#3498db', fill:false }, { label: 'active', data: s.map(x => x.activeUsers), borderColor:'#2ecc71', fill:false } ] }, options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } } });
     destroyChart('revenueChart'); charts.revenueChart = new Chart(document.getElementById('revenueChart'), { type: 'bar', data: { labels: s.map(x => x.date), datasets: [ { label: 'invoices', data: s.map(x => x.invoices), backgroundColor:'#9b59b6', yAxisID:'y' }, { label: 'revenue', data: s.map(x => x.revenue), type: 'line', borderColor:'#e67e22', yAxisID:'y1' } ] }, options: { scales: { y: { beginAtZero: true }, y1: { position: 'right', beginAtZero: true } } } });
     destroyChart('hoursChart'); charts.hoursChart = new Chart(document.getElementById('hoursChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'hours', data: s.map(x => x.workedHours), borderColor:'#16a085', fill:false } ] }, options: { scales: { y: { beginAtZero: true } } } });

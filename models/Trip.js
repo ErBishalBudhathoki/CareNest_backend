@@ -87,4 +87,8 @@ tripSchema.index({ organizationId: 1, date: -1 });
 tripSchema.index({ status: 1 });
 tripSchema.index({ isReimbursable: 1 });
 
+// Pending-approval queue in the ops console, optionally scoped per tenant.
+tripSchema.index({ adminApprovalStatus: 1, date: -1 });
+tripSchema.index({ organizationId: 1, adminApprovalStatus: 1 });
+
 module.exports = mongoose.model('Trip', tripSchema);

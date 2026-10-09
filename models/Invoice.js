@@ -227,6 +227,11 @@ invoiceSchema.index({ organizationId: 1, 'auditTrail.createdAt': -1 });
 invoiceSchema.index({ organizationId: 1, 'payment.status': 1 });
 invoiceSchema.index({ organizationId: 1, 'financialSummary.dueDate': 1 });
 invoiceSchema.index({ createdAt: -1 });
+// Org-scoped console analytics filter on organizationId + createdAt. Without
+// this a tenant-scoped timeseries still scans every tenant's invoices.
+invoiceSchema.index({ organizationId: 1, createdAt: -1 });
+// Per-tenant top-clients grouping (clientEmail) inside a date window.
+invoiceSchema.index({ organizationId: 1, clientEmail: 1, createdAt: -1 });
 
 const InvoiceStatus = {
   DRAFT: 'draft',

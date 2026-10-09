@@ -83,6 +83,8 @@ const clientAssignmentSchema = new mongoose.Schema({
 // Indexes
 clientAssignmentSchema.index({ userEmail: 1, clientEmail: 1, isActive: 1 });
 clientAssignmentSchema.index({ createdAt: -1 });
+// Org-scoped appointment series in the console.
+clientAssignmentSchema.index({ organizationId: 1, createdAt: -1 });
 
 // Projection and utilisation endpoints join this collection to users by email
 // after a $lookup. Named to match scripts/migrate_dashboard_indexes.js — see the
