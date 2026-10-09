@@ -197,7 +197,6 @@ class InvoiceController {
         message: 'Error generating invoice line items',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -324,7 +323,6 @@ class InvoiceController {
         message: 'Error generating invoice preview',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -429,7 +427,6 @@ class InvoiceController {
         message: 'Error retrieving available assignments',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -618,7 +615,6 @@ class InvoiceController {
         message: 'Error validating invoice generation data',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -787,7 +783,6 @@ class InvoiceController {
         message: 'Internal server error during bulk invoice generation',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -883,7 +878,6 @@ class InvoiceController {
         message: 'Error validating invoice line items',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -967,7 +961,6 @@ class InvoiceController {
         message: 'Error performing real-time price validation',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 
@@ -1135,7 +1128,6 @@ class InvoiceController {
         message: 'Error generating validation report',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
-    } finally {
     }
   });
 }

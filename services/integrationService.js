@@ -785,7 +785,7 @@ async function handleStripeWebhook(payload) {
     logger.info('Stripe webhook received:', payload.type);
 
     switch (payload.type) {
-      case 'payment_intent.succeeded':
+      case 'payment_intent.succeeded': {
         const paymentIntent = payload.data.object;
         if (paymentIntent.metadata?.invoiceId) {
           await Invoice.findByIdAndUpdate(paymentIntent.metadata.invoiceId, {
@@ -797,8 +797,9 @@ async function handleStripeWebhook(payload) {
           logger.info(`Invoice ${paymentIntent.metadata.invoiceId} marked as paid`);
         }
         break;
+      }
 
-      case 'payment_intent.payment_failed':
+      case 'payment_intent.payment_failed': {
         const failedPayment = payload.data.object;
         if (failedPayment.metadata?.invoiceId) {
           await Invoice.findByIdAndUpdate(failedPayment.metadata.invoiceId, {
@@ -808,8 +809,9 @@ async function handleStripeWebhook(payload) {
           logger.warn(`Payment failed for invoice ${failedPayment.metadata.invoiceId}`);
         }
         break;
+      }
 
-      case 'charge.refunded':
+      case 'charge.refunded': {
         const refund = payload.data.object;
         if (refund.metadata?.invoiceId) {
           await Invoice.findByIdAndUpdate(refund.metadata.invoiceId, {
@@ -820,6 +822,7 @@ async function handleStripeWebhook(payload) {
           logger.info(`Invoice ${refund.metadata.invoiceId} refunded`);
         }
         break;
+      }
 
       case 'customer.created':
       case 'customer.updated':
@@ -845,7 +848,7 @@ async function handleSlackWebhook(payload) {
         // Slack sends this to verify the webhook URL
         return { challenge: payload.challenge };
 
-      case 'event_callback':
+      case 'event_callback': {
         const event = payload.event;
         
         switch (event.type) {
@@ -863,6 +866,7 @@ async function handleSlackWebhook(payload) {
             logger.info(`Unhandled Slack event type: ${event.type}`);
         }
         break;
+      }
 
       default:
         logger.info(`Unhandled Slack webhook type: ${payload.type}`);

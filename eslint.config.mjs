@@ -2,6 +2,18 @@ import js from "@eslint/js";
 import globals from "globals";
 
 export default [
+  {
+    ignores: [
+      "node_modules/**",
+      "public/vendor/**",
+      "**/vendor/**",
+      "build/**",
+      "dist/**",
+      "coverage/**",
+      "tests/seed-data/**",
+      "tests/load/**",
+    ],
+  },
   js.configs.recommended,
   {
     files: ["**/*.{js,cjs}"],
@@ -17,6 +29,7 @@ export default [
       "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
       "no-undef": "error",
       "no-useless-catch": "off",
+      "no-empty": ["error", { "allowEmptyCatch": true }],
     },
   },
   {

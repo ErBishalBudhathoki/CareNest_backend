@@ -94,6 +94,7 @@ const workedTimeSchema = new mongoose.Schema({
 workedTimeSchema.index({ userEmail: 1, clientEmail: 1, workDate: 1 });
 workedTimeSchema.index({ userEmail: 1, workDate: 1 });
 workedTimeSchema.index({ organizationId: 1, workDate: 1 });
+workedTimeSchema.index({ workDate: -1 });
 
 // The analytics pipelines in controllers/analyticsController.js do NOT filter on
 // workDate. They match the legacy `shiftDate` string (YYYY-MM-DD) with a

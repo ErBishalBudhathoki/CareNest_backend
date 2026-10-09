@@ -86,7 +86,7 @@ class OcrService {
      */
     _extractDate(rawText) {
         // DD/MM/YYYY or DD-MM-YYYY
-        const dateRegex = /(\d{2})[\/\-](\d{2})[\/\-](\d{4})/;
+        const dateRegex = /(\d{2})[/-](\d{2})[/-](\d{4})/;
         const match = rawText.match(dateRegex);
         if (match) {
             // Convert to ISO if possible or return as found
@@ -114,7 +114,7 @@ class OcrService {
         for (const line of lines) {
             const upperLine = line.toUpperCase();
             if (totalKeywords.some(k => upperLine.includes(k))) {
-                const amountMatch = line.match(/\$?\s?(\d+[\.,]\d{2})/);
+                const amountMatch = line.match(/\$?\s?(\d+[.,]\d{2})/);
                 if (amountMatch) {
                     return parseFloat(amountMatch[1].replace(',', '.'));
                 }
@@ -132,7 +132,7 @@ class OcrService {
                 labelIndices.push({ index: i, text: upperLine });
             }
             
-            const amountMatch = lines[i].match(/^\$?\s?(-?\d+[\.,]\d{2})$/);
+            const amountMatch = lines[i].match(/^\$?\s?(-?\d+[.,]\d{2})$/);
             if (amountMatch) {
                 amountEntries.push({ index: i, value: parseFloat(amountMatch[1].replace(',', '.')) });
             }
@@ -148,7 +148,7 @@ class OcrService {
                 for (let i = label.index + 1; i < lines.length; i++) {
                     const line = lines[i].toUpperCase();
                     if (secondaryKeywords.some(k => line.includes(k))) followers++;
-                    else if (lines[i].match(/\$?\s?\d+[\.,]\d{2}/)) break; // Reached amount block
+                    else if (lines[i].match(/\$?\s?\d+[.,]\d{2}/)) break; // Reached amount block
                 }
 
                 // If we found followers, the total should be the first amount in the block

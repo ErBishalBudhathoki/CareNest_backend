@@ -8,6 +8,7 @@ const WorkedTime = require('../models/WorkedTime');
 const ClientAssignment = require('../models/ClientAssignment');
 const User = require('../models/User');
 const mongoose = require('mongoose');
+const predictionService = require('../services/predictionService');
 
 /**
  * Analytics Controller
@@ -617,6 +618,7 @@ const getPricingAnalytics = catchAsync(async (req, res) => {
     
     // Build date filter
     const dateFilter = {};
+    let ninetyDaysAgo = null;
     if (startDate && endDate) {
       dateFilter.createdAt = {
         $gte: new Date(startDate),
@@ -627,7 +629,7 @@ const getPricingAnalytics = catchAsync(async (req, res) => {
       // unbounded read of every line item for the organisation. Default to the
       // last 90 days so the endpoint has a bounded cost, and say so in the
       // response so the caller is not silently handed a truncated window.
-      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo = new Date();
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
       dateFilter.createdAt = { $gte: ninetyDaysAgo, $lte: new Date() };
     }

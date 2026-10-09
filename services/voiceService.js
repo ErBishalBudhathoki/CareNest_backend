@@ -37,7 +37,6 @@ class VoiceService {
     const normalizedExecution = {
       executionMode: 'fallback_rule',
       agentModel: null,
-      toolCalls: [],
       ...execution,
       toolCalls: Array.isArray(execution?.toolCalls) ? execution.toolCalls : [],
     };
@@ -309,7 +308,7 @@ class VoiceService {
           suggestions: this._defaultSuggestions(),
           resultData: null,
         };
-      default:
+      default: {
         if (detectedIntent.startsWith('navigate_')) {
           return this._buildNavigationResponse(detectedIntent, parameters.targetRoute);
         }
@@ -339,6 +338,7 @@ class VoiceService {
             supportedRoutes: Object.values(SUPPORTED_ROUTE_TARGETS),
           },
         };
+      }
     }
   }
 

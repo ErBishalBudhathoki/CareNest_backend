@@ -350,7 +350,7 @@ async function main() {
       break;
 
     case 'prod':
-    case 'production':
+    case 'production': {
       log('\n⚠️  PRODUCTION CLEANUP - EXTRA CAUTION REQUIRED!', 'red');
       const confirmProd = await askQuestion('Type "DELETE PRODUCTION SECRETS" to confirm: ');
       
@@ -362,8 +362,10 @@ async function main() {
       
       success = await cleanupEnvironment('production', isDryRun);
       break;
+    }
 
-    case 'all':
+    case 'all': {
+
       log('\n⚠️  DELETING SECRETS FROM BOTH ENVIRONMENTS!', 'red');
       const confirmAll = await askQuestion('Type "DELETE ALL SECRETS" to confirm: ');
       
@@ -377,6 +379,7 @@ async function main() {
       const prodSuccess = await cleanupEnvironment('production', isDryRun);
       success = devSuccess && prodSuccess;
       break;
+    }
 
     default:
       log(`Unknown command: ${command}`, 'red');

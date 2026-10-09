@@ -172,6 +172,9 @@ const userSchema = new mongoose.Schema({
 });
 
 // Pre-save hook: Hash password
+userSchema.index({ createdAt: -1 });
+userSchema.index({ lastLoginAt: -1 });
+userSchema.index({ organizationId: 1 });
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
 

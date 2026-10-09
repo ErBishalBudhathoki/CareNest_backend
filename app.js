@@ -28,6 +28,7 @@ const compression = require("compression");
 const mongoSanitize = require("express-mongo-sanitize");
 const rateLimit = require("express-rate-limit");
 const { environmentConfig } = require('./config/environment');
+const logger = require('./config/logger');
 const redisConfig = require('./config/redis');
 const mongoose = require('mongoose');
 
@@ -355,10 +356,22 @@ app.use('/api', apiLimiter);
 // to authenticate when ADMIN_DEV_PASSWORD is unset). Belt and braces: do not
 // mount it in production unless someone has deliberately opted in, because
 // "basic auth left on in prod" is the kind of thing that survives for years.
+app.use('/admin-dev', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+app.use(
+  '/admin-dev',
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message: 'Too many admin-dev requests, try again later' },
+  })
+);
 if (environmentConfig.isProductionEnvironment() && process.env.ENABLE_ADMIN_DEV !== 'true') {
-  logger.warn?.(
-    'Skipping /admin-dev mount in production (set ENABLE_ADMIN_DEV=true to allow it)'
-  );
+  logger.warn('Skipping /admin-dev mount in production (set ENABLE_ADMIN_DEV=true to allow it)');
 } else {
   app.use('/admin-dev', require('./routes/adminDevRoutes'));
 }
