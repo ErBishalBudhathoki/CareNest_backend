@@ -25,6 +25,15 @@
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
   .pager { margin-top:10px; }
   .chip { display:inline-block; padding:2px 8px; border-radius:12px; background:#eef2f7; font-size:11px; margin:0 2px; }
+  details > summary { cursor:pointer; list-style:revert; display:list-item; }
+  details > summary::marker { color:#8898aa; }
+  #instanceBody { margin-top:10px; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:14px; }
+  .kv > div { background:#f8f9fa; border-radius:6px; padding:8px 10px; }
+  .kv .k { font-size:11px; color:#888; text-transform:uppercase; }
+  .kv .v { font-size:15px; font-weight:600; color:#2c3e50; }
+  .warn { color:#b3541e; }
+  .ok { color:#1e7d50; }
   .muted { color:#888; font-size:12px; }
 </style>
 </head>
@@ -33,6 +42,22 @@
   <h1>CareNest Ops Console (Developer Only)</h1>
   <p><a href="/admin-dev">AI Invoice Settings</a> &middot; <a href="/admin-dev/ops">Ops Console</a></p>
   <div id="alert" class="alert"></div>
+
+  <section>
+    <details id="instanceHealth">
+      <summary>
+        <strong>Instance Health</strong>
+        <span class="muted">&mdash; this instance only</span>
+        <span id="instanceSummary" class="chip" style="margin-left:10px">not loaded</span>
+      </summary>
+      <p class="muted" style="margin:8px 0">
+        In-memory counters. Reset on every deploy and on Cloud Run scale-to-zero cold start.
+        Not platform history &mdash; use Grafana / Cloud Monitoring for that.
+      </p>
+      <button onclick="loadInstance()">Refresh</button>
+      <div id="instanceBody"></div>
+    </details>
+  </section>
 
   <section>
     <h2>Platform KPIs</h2>
@@ -132,6 +157,112 @@ async function req(url, opts) {
 }
 function fmtNum(n) { return (n === undefined || n === null) ? 0 : n.toLocaleString(); }
 function fmtMoney(n) { return '$' + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+
+// ---- Instance health -------------------------------------------------------
+// Collapsed and un-fetched by default. On Cloud Run these counters are empty
+// after a cold start, so eagerly loading them either costs 4 round trips or
+// shows a panel that looks like "all zeros" when it really means "no traffic
+// since this instance booted".
+let instanceLoaded = false;
+
+function kv(label, value, cls) {
+  const box = el('div');
+  box.appendChild(el('div', label, 'k'));
+  box.appendChild(el('div', value, 'v' + (cls ? ' ' + cls : '')));
+  return box;
+}
+
+function fmtUptime(seconds) {
+  const s = Number(seconds) || 0;
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
+function simpleTable(headers, rows) {
+  const t = el('table');
+  const tr = el('tr');
+  headers.forEach((h) => tr.appendChild(el('th', h)));
+  const head = el('thead'); head.appendChild(tr); t.appendChild(head);
+  const body = el('tbody');
+  rows.forEach((cells) => {
+    const r = el('tr');
+    cells.forEach((c) => r.appendChild(el('td', c)));
+    body.appendChild(r);
+  });
+  t.appendChild(body);
+  return t;
+}
+
+async function loadInstance() {
+  const body = document.getElementById('instanceBody');
+  const summary = document.getElementById('instanceSummary');
+  body.replaceChildren(el('p', 'Loading instance metrics…', 'muted'));
+  try {
+    const j = await req('/admin-dev/api/ops/instance');
+    const d = j.data;
+
+    // Three genuinely different states — collapse "no data" into a single
+    // zeros panel would read as "healthy" when it may not be.
+    if (!d.hasTraffic && d.errors.totalErrors === 0) {
+      summary.textContent = 'no traffic yet';
+      body.replaceChildren(el('p',
+        'No traffic recorded since this instance started. That is expected right after a deploy or a scale-to-zero cold start — there is no in-process history to show until a request arrives.', 'muted'));
+      return;
+    }
+
+    const app = d.health.application;
+    const errRate = app.errorRate;
+    summary.textContent = `${app.totalRequests} req · ${errRate}% err · ${d.traffic.requestsLast1m}/min · up ${fmtUptime(app.uptimeSeconds)}`;
+
+    const grid = el('div', undefined, 'kv');
+    grid.appendChild(kv('Requests', app.totalRequests));
+    grid.appendChild(kv('Errors', app.totalErrors, app.totalErrors > 0 ? 'warn' : 'ok'));
+    grid.appendChild(kv('Error rate', errRate + '%', errRate > 1 ? 'warn' : 'ok'));
+    grid.appendChild(kv('Avg latency', app.averageResponseTimeMs + ' ms'));
+    grid.appendChild(kv('Heap used', d.health.memory.heapUsed + ' MB'));
+    grid.appendChild(kv('RSS', d.health.memory.rss + ' MB'));
+    grid.appendChild(kv('Host mem', d.health.hostMemoryUsagePercent + '%', d.health.hostMemoryUsagePercent > 85 ? 'warn' : ''));
+    grid.appendChild(kv('Load 1m', (d.health.loadAverage['1m'] || 0).toFixed(2)));
+    grid.appendChild(kv('SSE clients', d.traffic.activeSSEClients));
+    body.appendChild(grid);
+
+    if (d.errors.totalErrors > 0) {
+      body.appendChild(el('h3', 'Errors by type'));
+      body.appendChild(simpleTable(['type', 'count'],
+        d.errors.topErrorTypes.map((t) => [t.name, t.count])));
+      body.appendChild(el('h3', 'Errors by endpoint'));
+      body.appendChild(simpleTable(['endpoint', 'count'],
+        d.errors.topErrorEndpoints.map((t) => [t.endpoint, t.count])));
+    } else {
+      body.appendChild(el('p', 'No errors recorded since this instance started.', 'ok'));
+    }
+
+    if (d.latency.length) {
+      body.appendChild(el('h3', 'Slowest / busiest tracked routes'));
+      body.appendChild(simpleTable(['route', 'requests', 'avg ms'],
+        d.latency.slice(0, 15).map((r) => [r.route, r.count, r.averageMs])));
+    }
+
+    if (d.connections.length) {
+      body.appendChild(el('h3', 'Active SSE connections'));
+      body.appendChild(simpleTable(['ip', 'email', 'requests'],
+        d.connections.map((c) => [c.ip || '—', c.email || '—', c.requests])));
+    }
+
+    body.appendChild(el('p', 'Captured ' + d.capturedAt, 'muted'));
+    instanceLoaded = true;
+  } catch (e) {
+    summary.textContent = 'failed to load';
+    body.replaceChildren(el('p', e.message, 'warn'));
+  }
+}
+
+// Fetch on first expand only, then let the Refresh button drive it.
+document.getElementById('instanceHealth').addEventListener('toggle', (ev) => {
+  if (ev.target.open && !instanceLoaded) loadInstance();
+});
 
 async function loadStats() {
   try {
