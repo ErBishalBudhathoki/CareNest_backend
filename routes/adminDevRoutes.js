@@ -159,6 +159,10 @@ const redis = require('../config/redis');
 const TemporalManager = require('../core/TemporalManager');
 const { createAuditLog, AUDIT_SOURCES } = require('../services/auditService');
 const { convertUsersToCSV } = require('../services/csvExport');
+const { getSystemHealthSnapshot } = require('../middleware/systemHealth');
+const { getErrorMetrics } = require('../middleware/errorTracking');
+const requestTiming = require('../utils/requestTiming');
+const { apiUsageMonitor } = require('../utils/apiUsageMonitor');
 const crypto = require('crypto');
 const fs = require('fs');
 
@@ -437,6 +441,88 @@ router.get('/api/ops/platform-stats', devAuth, async (req, res) => {
         appointments: { last30d: appointments30d },
         workedHoursTotal: workedTimeAgg[0]?.hours || 0,
         leaveRequestsPending: pendingLeave,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Instance health.
+//
+// Every field here is read from process-local memory. Four of these functions
+// (getSystemHealthSnapshot, getErrorMetrics, requestTiming.snapshot and the
+// apiUsageMonitor readers) were already implemented and exported but had no
+// callers at all, so this endpoint adds visibility without new instrumentation
+// and without touching the database.
+//
+// The counters reset on every deploy and every Cloud Run scale-to-zero cold
+// start, so the payload says so explicitly and reports `hasTraffic` so the UI
+// can tell "healthy" apart from "nothing has happened yet".
+// ---------------------------------------------------------------------------
+const LATENCY_ROW_LIMIT = 25;
+
+router.get('/api/ops/instance', devAuth, (req, res) => {
+  try {
+    const health = getSystemHealthSnapshot();
+    const errors = getErrorMetrics();
+    const traffic = apiUsageMonitor.getSummary();
+
+    // requestTiming.snapshot() returns every tracked route (capped at 200 by
+    // the middleware). Trim to the busiest so a long-running instance can't
+    // push a huge payload into the page.
+    const latency = (requestTiming.snapshot() || [])
+      .filter((r) => r.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, LATENCY_ROW_LIMIT);
+
+    res.json({
+      success: true,
+      data: {
+        capturedAt: new Date().toISOString(),
+        scope: 'this-instance',
+        caveat: 'In-memory counters. Reset on deploy and on scale-to-zero cold start — not platform history.',
+        hasTraffic: traffic.totalRequests > 0 || health.application.totalRequests > 0,
+        health: {
+          memory: health.memory,
+          cpu: health.cpu,
+          loadAverage: {
+            '1m': health.system.loadAverage1m,
+            '5m': health.system.loadAverage5m,
+            '15m': health.system.loadAverage15m,
+          },
+          hostMemoryUsagePercent: Number(health.system.memoryUsagePercent),
+          application: {
+            totalRequests: health.application.totalRequests,
+            totalErrors: health.application.totalErrors,
+            errorRate: Number(health.application.errorRate),
+            averageResponseTimeMs: health.application.averageResponseTime,
+            uptimeSeconds: health.application.uptime,
+          },
+        },
+        errors: {
+          totalErrors: errors.totalErrors,
+          validationErrors: errors.validationErrors,
+          serverErrors: errors.serverErrors,
+          clientErrors: errors.clientErrors,
+          errorsByStatusCode: errors.errorsByStatusCode,
+          // Object.entries().sort() yields [name, count] tuples, not objects.
+          topErrorTypes: (errors.topErrorTypes || []).map(([name, count]) => ({ name, count })),
+          topErrorEndpoints: (errors.topErrorEndpoints || []).map(([endpoint, count]) => ({ endpoint, count })),
+        },
+        traffic: {
+          totalRequests: traffic.totalRequests,
+          statusBuckets: traffic.statusBuckets,
+          requestsLast1m: traffic.requestsLast1m,
+          requestsLast5m: traffic.requestsLast5m,
+          uniqueEndpoints: traffic.uniqueEndpoints,
+          avgLatencyMs: traffic.avgLatencyMs,
+          activeSSEClients: traffic.activeSSEClients,
+          topEndpoints: traffic.topEndpoints,
+        },
+        latency,
+        connections: apiUsageMonitor.getActiveConnections(),
       },
     });
   } catch (error) {

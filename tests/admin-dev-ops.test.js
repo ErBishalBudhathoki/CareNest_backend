@@ -158,4 +158,64 @@ describe('admin-dev ops console', () => {
     );
     expect(src).toMatch(/find\(\{ source: AUDIT_SOURCES\.ADMIN_DEV \}\)/);
   });
+
+  // ---- Phase 1: instance health ----------------------------------------
+
+  test('GET /api/ops/instance requires auth', async () => {
+    const res = await request(app).get('/admin-dev/api/ops/instance');
+    expect(res.status).toBe(401);
+  });
+
+  test('instance payload is labelled as per-instance, not platform history', async () => {
+    const res = await request(app)
+      .get('/admin-dev/api/ops/instance')
+      .set('Authorization', authHeader);
+    expect(res.status).toBe(200);
+    const d = res.body.data;
+    // These counters are process-local and reset on deploy / cold start, so
+    // the payload must say so rather than implying durable history.
+    expect(d.scope).toBe('this-instance');
+    expect(d.caveat).toMatch(/reset on deploy/i);
+    expect(typeof d.hasTraffic).toBe('boolean');
+  });
+
+  test('instance payload normalises the [name, count] error tuples', async () => {
+    const res = await request(app)
+      .get('/admin-dev/api/ops/instance')
+      .set('Authorization', authHeader);
+    const d = res.body.data;
+    // getErrorMetrics returns Object.entries(...) tuples. They must be
+    // reshaped to objects, or every renderer downstream breaks.
+    for (const row of [...d.errors.topErrorTypes, ...d.errors.topErrorEndpoints]) {
+      expect(typeof row).toBe('object');
+      expect(Array.isArray(row)).toBe(false);
+    }
+    expect(Array.isArray(d.latency)).toBe(true);
+    expect(Array.isArray(d.connections)).toBe(true);
+  });
+
+  test('instance latency rows are capped so one instance cannot flood the page', async () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../routes/adminDevRoutes.js'),
+      'utf8'
+    );
+    expect(src).toMatch(/LATENCY_ROW_LIMIT = 25/);
+  });
+
+  test('instance health is collapsed and not fetched on first paint', async () => {
+    const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
+    // On Cloud Run these counters are empty after a cold start, so loading
+    // them eagerly either wastes round trips or renders a misleading all-zero
+    // panel. It must be lazy.
+    expect(res.text).toMatch(/<details id="instanceHealth">/);
+    expect(res.text).not.toMatch(/<details id="instanceHealth" open/);
+    const bootstrap = res.text.split('loadStats();')[1] || '';
+    expect(bootstrap).not.toContain('loadInstance()');
+  });
+
+  test('instance health carries the cold-start caveat into the UI', async () => {
+    const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
+    expect(res.text).toMatch(/Reset on every deploy and on Cloud Run scale-to-zero cold start/);
+    expect(res.text).toMatch(/this instance only/i);
+  });
 });
