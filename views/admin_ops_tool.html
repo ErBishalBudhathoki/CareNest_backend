@@ -2,33 +2,73 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="admin-dev-csrf" content="__ADMIN_DEV_CSRF__">
 <title>CareNest Ops Console (Dev)</title>
+<script src="/admin-dev/static/chart.umd.js"></script>
 <style>
   body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background:#f4f7f6; color:#333; margin:0; padding:20px; }
-  .container { max-width: 1000px; margin: 0 auto; }
+  .container { max-width: 1180px; margin: 0 auto; }
   section { background:#fff; border-radius:8px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
   h2 { margin-top:0; color:#2c3e50; font-size:16px; }
+  h3 { margin:12px 0 6px; font-size:13px; color:#555; }
   table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #eee; font-size:13px; }
+  th { cursor:pointer; user-select:none; }
   input,select,button { padding:6px 10px; margin:4px 4px 4px 0; border:1px solid #ccc; border-radius:4px; }
   button { background:#3498db; color:#fff; border:none; cursor:pointer; } button:hover { background:#2980b9; }
-  pre { background:#f8f9fa; padding:10px; border-radius:4px; overflow:auto; font-size:12px; }
+  button.danger { background:#c0392b; } button.danger:hover { background:#a93226; }
+  pre { background:#f8f9fa; padding:10px; border-radius:4px; overflow:auto; font-size:12px; max-height:320px; }
   .alert { padding:10px; border-radius:4px; margin-bottom:12px; display:none; }
   .alert.success { background:#d4edda; color:#155724; } .alert.error { background:#f8d7da; color:#721c24; }
+  .kpi { display:inline-block; min-width:140px; padding:10px 14px; margin:0 8px 8px 0; background:#f8f9fa; border-radius:6px; }
+  .kpi .val { font-size:22px; font-weight:600; color:#2c3e50; }
+  .kpi .lab { font-size:11px; color:#888; text-transform:uppercase; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .pager { margin-top:10px; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:12px; background:#eef2f7; font-size:11px; margin:0 2px; }
+  .muted { color:#888; font-size:12px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>CareNest Ops Console (Developer Only)</h1>
+  <p><a href="/admin-dev">AI Invoice Settings</a> &middot; <a href="/admin-dev/ops">Ops Console</a></p>
   <div id="alert" class="alert"></div>
 
   <section>
-    <h2>Platform Stats</h2>
+    <h2>Platform KPIs</h2>
     <button onclick="loadStats()">Refresh</button>
-    <pre id="statsResult"></pre>
+    <div id="kpis"></div>
   </section>
 
   <section>
-    <h2>User Lookup</h2>
+    <h2>Analytics</h2>
+    <label>Days: <input id="daysRange" type="number" value="30" style="width:80px"></label>
+    <button onclick="loadAnalytics()">Load charts</button>
+    <div class="grid">
+      <div><h3>Users (new vs active/day)</h3><canvas id="usersChart" height="160"></canvas></div>
+      <div><h3>Invoices &amp; revenue / day</h3><canvas id="revenueChart" height="160"></canvas></div>
+      <div><h3>Worked hours / day</h3><canvas id="hoursChart" height="160"></canvas></div>
+      <div><h3>Invoice status</h3><canvas id="statusChart" height="160"></canvas></div>
+      <div><h3>Top clients by value</h3><canvas id="topClientsChart" height="160"></canvas></div>
+      <div><h3>Top users by hours</h3><canvas id="topUsersChart" height="160"></canvas></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>User Records</h2>
+    <input id="q" placeholder="search email/name" style="width:220px">
+    <select id="roleFilter"><option value="">any role</option><option>admin</option><option>superadmin</option><option>employee</option><option>client</option><option>manager</option><option>moderator</option><option>family</option></select>
+    <input id="orgIdFilter" placeholder="orgId" style="width:140px">
+    <select id="activeFilter"><option value="">any status</option><option value="true">active</option><option value="false">inactive</option></select>
+    <button onclick="loadUsers(1)">Search</button>
+    <button class="danger" onclick="exportUsers('csv')">Export CSV</button>
+    <button onclick="exportUsers('json')">Export JSON</button>
+    <div id="usersTable"></div>
+    <div class="pager" id="usersPager"></div>
+  </section>
+
+  <section>
+    <h2>User Drill-down</h2>
     <input id="luEmail" placeholder="user@example.com" style="width:260px">
     <button onclick="lookupUser()">Lookup</button>
     <pre id="luResult"></pre>
@@ -41,8 +81,8 @@
   </section>
 
   <section>
-    <h2>Certifications Expiring (days)</h2>
-    <input id="days" type="number" value="30" style="width:80px">
+    <h2>Certifications Expiring</h2>
+    <input id="certDays" type="number" value="30" style="width:80px"> days
     <button onclick="loadCertExpiry()">Load</button>
     <pre id="certResult"></pre>
   </section>
@@ -51,7 +91,7 @@
     <h2>Valkey Rate-Limit Keys</h2>
     <button onclick="loadValkey()">Refresh</button>
     <pre id="valkeyResult"></pre>
-    <button onclick="resetRateLimits()">Clear all rl:* keys</button>
+    <button class="danger" onclick="resetRateLimits()">Clear all rl:* keys</button>
   </section>
 
   <section>
@@ -62,7 +102,7 @@
   </section>
 
   <section>
-    <h2>Recent Admin Actions (audit trail)</h2>
+    <h2>Recent Admin Actions</h2>
     <button onclick="loadAudit()">Refresh</button>
     <pre id="auditResult"></pre>
   </section>
@@ -71,61 +111,115 @@
     <h2>Org Data Reset (DESTRUCTIVE)</h2>
     <input id="orgId" placeholder="organizationId" style="width:260px">
     <input id="orgConfirm" placeholder="type orgId to confirm" style="width:260px">
-    <button onclick="resetOrg()">Reset leave balances + notifications for org</button>
+    <button class="danger" onclick="resetOrg()">Reset leave balances + notifications for org</button>
     <pre id="orgResult"></pre>
   </section>
 </div>
 
 <script>
-function alertBox(msg, type) {
+const charts = {};
+function csrf() { return document.querySelector('meta[name="admin-dev-csrf"]').content; }
+function alertBox(msg, type, sticky) {
   const a = document.getElementById('alert');
   a.textContent = msg; a.className = 'alert ' + (type || 'success'); a.style.display = 'block';
-  setTimeout(() => a.style.display = 'none', 4000);
+  if (!sticky) setTimeout(() => a.style.display = 'none', 8000);
 }
 async function req(url, opts) {
-  const r = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...opts });
+  const r = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'x-admin-dev-csrf': csrf() }, ...opts });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.message || j.error || r.statusText);
   return j;
 }
-async function lookupUser() {
-  try { document.getElementById('luResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/users/' + encodeURIComponent(document.getElementById('luEmail').value))).data, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
-}
+function fmtNum(n) { return (n === undefined || n === null) ? 0 : n.toLocaleString(); }
+function fmtMoney(n) { return '$' + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+
 async function loadStats() {
-  try { const j = await req('/admin-dev/api/ops/platform-stats'); document.getElementById('statsResult').textContent = JSON.stringify(j, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
+  try {
+    const j = await req('/admin-dev/api/ops/platform-stats');
+    const d = j.data;
+    document.getElementById('kpis').innerHTML = [
+      kpi('Users', d.users.total), kpi('Active 30d', d.users.activeLast30d), kpi('New 30d', d.users.newLast30d),
+      kpi('Orgs', d.organizations.total), kpi('Invoices', d.invoices.total), kpi('Invoices 30d', d.invoices.last30d),
+      kpi('Clients', d.clients.total), kpi('Appts 30d', d.appointments.last30d), kpi('Hours', fmtNum(d.workedHoursTotal)), kpi('Leave pending', d.leaveRequestsPending),
+    ].join('');
+  } catch (e) { alertBox(e.message, 'error', true); }
 }
-async function loadIntegrity() {
-  try { document.getElementById('integrityResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/leave-integrity')).data, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
+function kpi(label, value) { return `<span class="kpi"><span class="val">${fmtNum(value)}</span><br><span class="lab">${label}</span></span>`; }
+
+async function loadAnalytics() {
+  const days = Number(document.getElementById('daysRange').value) || 30;
+  try {
+    const [ts, status, topClients, topUsers] = await Promise.all([
+      req(`/admin-dev/api/ops/analytics/timeseries?days=${days}`),
+      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&days=${days}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${days}&limit=8`),
+      req(`/admin-dev/api/ops/analytics/top?entity=users&days=${days}&limit=8`),
+    ]);
+    const s = ts.data.series;
+    destroyChart('usersChart'); charts.usersChart = new Chart(document.getElementById('usersChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'new', data: s.map(x => x.newUsers), borderColor:'#3498db', fill:false }, { label: 'active', data: s.map(x => x.activeUsers), borderColor:'#2ecc71', fill:false } ] }, options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } } });
+    destroyChart('revenueChart'); charts.revenueChart = new Chart(document.getElementById('revenueChart'), { type: 'bar', data: { labels: s.map(x => x.date), datasets: [ { label: 'invoices', data: s.map(x => x.invoices), backgroundColor:'#9b59b6', yAxisID:'y' }, { label: 'revenue', data: s.map(x => x.revenue), type: 'line', borderColor:'#e67e22', yAxisID:'y1' } ] }, options: { scales: { y: { beginAtZero: true }, y1: { position: 'right', beginAtZero: true } } } });
+    destroyChart('hoursChart'); charts.hoursChart = new Chart(document.getElementById('hoursChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'hours', data: s.map(x => x.workedHours), borderColor:'#16a085', fill:false } ] }, options: { scales: { y: { beginAtZero: true } } } });
+    destroyChart('statusChart'); charts.statusChart = new Chart(document.getElementById('statusChart'), { type: 'doughnut', data: { labels: status.data.map(x => x.label), datasets: [ { data: status.data.map(x => x.count), backgroundColor: ['#3498db','#2ecc71','#e67e22','#9b59b6','#e74c3c','#1abc9c','#f1c40f'] } ] } });
+    destroyChart('topClientsChart'); charts.topClientsChart = new Chart(document.getElementById('topClientsChart'), { type: 'bar', data: { labels: topClients.data.map(x => x.label), datasets: [ { label: 'value', data: topClients.data.map(x => x.total), backgroundColor:'#2980b9' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
+    destroyChart('topUsersChart'); charts.topUsersChart = new Chart(document.getElementById('topUsersChart'), { type: 'bar', data: { labels: topUsers.data.map(x => x.label), datasets: [ { label: 'hours', data: topUsers.data.map(x => x.total), backgroundColor:'#8e44ad' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
+  } catch (e) { alertBox(e.message, 'error', true); }
 }
-async function loadCertExpiry() {
-  try { document.getElementById('certResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/cert-expiry?days=' + document.getElementById('days').value)).data, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+let usersPage = 1;
+let usersSort = 'createdAt', usersOrder = 'desc';
+async function loadUsers(page) {
+  usersPage = page || 1;
+  const p = new URLSearchParams({ page: usersPage, limit: 25, sort: usersSort, order: usersOrder });
+  if (document.getElementById('q').value) p.set('q', document.getElementById('q').value);
+  if (document.getElementById('roleFilter').value) p.set('role', document.getElementById('roleFilter').value);
+  if (document.getElementById('orgIdFilter').value) p.set('orgId', document.getElementById('orgIdFilter').value);
+  if (document.getElementById('activeFilter').value) p.set('isActive', document.getElementById('activeFilter').value);
+  try {
+    const j = await req('/admin-dev/api/ops/users?' + p.toString());
+    const d = j.data;
+    const head = ['email','name','role','active','lastLogin','created',''];
+    const rows = d.rows.map(r => `<tr><td>${r.email}</td><td>${(r.firstName||'') + ' ' + (r.lastName||'')}</td><td>${r.role||''}</td><td>${r.isActive===false?'<span class="chip" style="background:#fdecea">no</span>':'<span class="chip">yes</span>'}</td><td>${r.lastLoginAt?new Date(r.lastLoginAt).toISOString().slice(0,10):''}</td><td>${r.createdAt?new Date(r.createdAt).toISOString().slice(0,10):''}</td><td><button onclick="lookupUser('${r.email}')">view</button></td></tr>`).join('');
+    document.getElementById('usersTable').innerHTML = `<table><thead><tr><th onclick="toggleSort('email')">email ⇅</th><th>name</th><th onclick="toggleSort('role')">role ⇅</th><th>active</th><th onclick="toggleSort('lastLoginAt')">lastLogin ⇅</th><th onclick="toggleSort('createdAt')">created ⇅</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    document.getElementById('usersPager').innerHTML = `Page ${d.page}/${d.pages} (${d.total} rows) &nbsp; ${d.page>1?`<button onclick="loadUsers(${d.page-1})">Prev</button>`:''} ${d.page<d.pages?`<button onclick="loadUsers(${d.page+1})">Next</button>`:''}`;
+  } catch (e) { alertBox(e.message, 'error', true); }
 }
-async function loadValkey() {
-  try { const j = await req('/admin-dev/api/ops/valkey-stats'); document.getElementById('valkeyResult').textContent = JSON.stringify(j.data ?? j, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
+function toggleSort(f) { if (usersSort === f) usersOrder = usersOrder === 'asc' ? 'desc' : 'asc'; else { usersSort = f; usersOrder = 'desc'; } loadUsers(usersPage); }
+function exportUsers(format) {
+  const p = new URLSearchParams({ format });
+  if (document.getElementById('q').value) p.set('q', document.getElementById('q').value);
+  if (document.getElementById('roleFilter').value) p.set('role', document.getElementById('roleFilter').value);
+  if (document.getElementById('orgIdFilter').value) p.set('orgId', document.getElementById('orgIdFilter').value);
+  if (document.getElementById('activeFilter').value) p.set('isActive', document.getElementById('activeFilter').value);
+  window.open('/admin-dev/api/ops/users/export?' + p.toString(), '_blank');
 }
+
+async function lookupUser(emailArg) {
+  const email = emailArg || document.getElementById('luEmail').value;
+  if (!email) return;
+  document.getElementById('luEmail').value = email;
+  try { document.getElementById('luResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/users/' + encodeURIComponent(email))).data, null, 2); }
+  catch (e) { alertBox(e.message, 'error', true); }
+}
+async function loadIntegrity() { try { document.getElementById('integrityResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/leave-integrity')).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
+async function loadCertExpiry() { try { document.getElementById('certResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/cert-expiry?days=' + document.getElementById('certDays').value)).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
+async function loadValkey() { try { const j = await req('/admin-dev/api/ops/valkey-stats'); document.getElementById('valkeyResult').textContent = JSON.stringify(j.data ?? j, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
 async function resetRateLimits() {
   if (!confirm('Clear ALL rl:* rate-limit keys?')) return;
   try { document.getElementById('valkeyResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/reset-rate-limits', { method: 'POST', body: JSON.stringify({ confirm: 'CLEAR_RL' }) }), null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
+  catch (e) { alertBox(e.message, 'error', true); }
 }
-async function lookupWf() {
-  try { document.getElementById('wfResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/temporal/' + encodeURIComponent(document.getElementById('wfId').value))).data, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
-}
-async function loadAudit() {
-  try { document.getElementById('auditResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/audit-recent')).data, null, 2); }
-  catch (e) { alertBox(e.message, 'error'); }
-}
+async function lookupWf() { try { document.getElementById('wfResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/temporal/' + encodeURIComponent(document.getElementById('wfId').value))).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
+async function loadAudit() { try { document.getElementById('auditResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/audit-recent')).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
 async function resetOrg() {
-  try { const orgId = document.getElementById('orgId').value;
-    document.getElementById('orgResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/org-reset/' + encodeURIComponent(orgId), { method: 'POST', body: JSON.stringify({ confirm: document.getElementById('orgConfirm').value }) }), null, 2);
-  } catch (e) { alertBox(e.message, 'error'); }
+  const orgId = document.getElementById('orgId').value;
+  const orgConfirm = document.getElementById('orgConfirm').value;
+  if (!confirm('Really delete leave balances + notifications for org ' + orgId + '?')) return;
+  try { document.getElementById('orgResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/org-reset/' + encodeURIComponent(orgId), { method: 'POST', body: JSON.stringify({ confirm: orgConfirm }) }), null, 2); }
+  catch (e) { alertBox(e.message, 'error', true); }
 }
+
+loadStats(); loadAnalytics(); loadUsers(1); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit();
 </script>
 </body>
 </html>

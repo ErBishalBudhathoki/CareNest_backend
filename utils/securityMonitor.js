@@ -101,23 +101,6 @@ class SecurityMonitor {
       }
     }
   }
-
-  /**
-   * Save metrics to persistent storage
-   */
-  saveMetricsToFile() {
-    try {
-      const metricsToSave = {
-        ...this.metrics,
-        blockedIPs: Array.from(this.metrics.blockedIPs),
-        blockedIPDetails: Array.from(this.metrics.blockedIPDetails.entries())
-      };
-      fs.writeFileSync(this.metricsFile, JSON.stringify(metricsToSave, null, 2));
-    } catch (error) {
-      this.logger.error('Failed to save security metrics', { error: error.message });
-    }
-  }
-
   /**
    * Record a failed login attempt
    * @param {string|Object} details - User details or email

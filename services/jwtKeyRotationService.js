@@ -427,16 +427,13 @@ class JWTKeyRotationService {
             console.error('[JWT Key Rotation] Automatic rotation failed:', error);
           }
         } finally {
-          if (!this.autoRotationEnabled || !this.nextRotationAt || !this.rotationIntervalMs) {
-            return;
+          if (this.autoRotationEnabled && this.nextRotationAt && this.rotationIntervalMs) {
+            const now = Date.now();
+            while (this.nextRotationAt <= now) {
+              this.nextRotationAt += this.rotationIntervalMs;
+            }
+            scheduleNextRotationTick();
           }
-
-          const now = Date.now();
-          while (this.nextRotationAt <= now) {
-            this.nextRotationAt += this.rotationIntervalMs;
-          }
-
-          scheduleNextRotationTick();
         }
       }, delayMs);
 

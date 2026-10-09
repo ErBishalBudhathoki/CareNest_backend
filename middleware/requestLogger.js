@@ -125,7 +125,7 @@ const errorRequestLogger = (err, req, res, next) => {
  */
 const securityLogger = (req, res, next) => {
   const suspiciousPatterns = [
-    { pattern: /[<>\"'`]/, type: 'XSS_ATTEMPT' },
+    { pattern: /[<>"'`]/, type: 'XSS_ATTEMPT' },
     { pattern: /(union|select|insert|update|delete|drop|--|;)/i, type: 'SQL_INJECTION_ATTEMPT' },
     { pattern: /\.\./, type: 'PATH_TRAVERSAL_ATTEMPT' },
     { pattern: /<script/i, type: 'SCRIPT_INJECTION_ATTEMPT' }

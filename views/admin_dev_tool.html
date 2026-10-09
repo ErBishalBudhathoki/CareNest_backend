@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="admin-dev-csrf" content="__ADMIN_DEV_CSRF__">
   <title>CareNest Admin Dev Tool - AI Configuration</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
@@ -23,6 +24,7 @@
 <body>
   <div class="container">
     <h1>CareNest AI Invoice Settings (Dev Tool)</h1>
+    <p><a href="/admin-dev">AI Invoice Settings</a> &middot; <a href="/admin-dev/ops">Ops Console</a></p>
     
     <div id="alertBox" class="alert"></div>
 
@@ -96,7 +98,7 @@
       try {
         const response = await fetch(`/admin-dev/api/organizations/${orgId}/ai-settings`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-admin-dev-csrf': document.querySelector('meta[name="admin-dev-csrf"]').content },
           body: JSON.stringify({ frequency })
         });
         const data = await response.json();
@@ -117,7 +119,7 @@
       try {
         const response = await fetch('/admin-dev/api/organizations/global-ai-settings', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-admin-dev-csrf': document.querySelector('meta[name="admin-dev-csrf"]').content },
           body: JSON.stringify({ frequency })
         });
         const data = await response.json();

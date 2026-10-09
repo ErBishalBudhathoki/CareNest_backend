@@ -338,7 +338,7 @@ async function main() {
       }
       break;
       
-    case 'all':
+    case 'all': {
       const devSuccess = await uploadSecretsForEnvironment('development', secrets);
       if (devSuccess) {
         await grantSecretAccess('development');
@@ -353,6 +353,7 @@ async function main() {
       
       success = devSuccess && prodSuccess;
       break;
+    }
       
     case 'list-dev':
       await listSecretVersions('development');

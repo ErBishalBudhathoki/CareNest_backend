@@ -226,6 +226,7 @@ invoiceSchema.index({ organizationId: 1, clientEmail: 1 });
 invoiceSchema.index({ organizationId: 1, 'auditTrail.createdAt': -1 });
 invoiceSchema.index({ organizationId: 1, 'payment.status': 1 });
 invoiceSchema.index({ organizationId: 1, 'financialSummary.dueDate': 1 });
+invoiceSchema.index({ createdAt: -1 });
 
 const InvoiceStatus = {
   DRAFT: 'draft',

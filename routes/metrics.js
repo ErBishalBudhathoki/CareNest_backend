@@ -123,7 +123,7 @@ async function getBusinessMetrics() {
 
   try {
     const totalOrganizations = await db.collection('organizations').countDocuments();
-    const totalUsers = await db.collection('login').countDocuments();
+    const totalUsers = await db.collection('users').countDocuments();
     const totalClients = await db.collection('clients').countDocuments();
     const totalAssignments = await db.collection('clientAssignments').countDocuments();
 

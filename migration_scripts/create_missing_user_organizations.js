@@ -28,7 +28,7 @@ async function createMissingUserOrganizations() {
 
     // Get all users with organizationId (handle both string and ObjectId)
     const usersWithOrg = await usersCollection.find({
-      organizationId: { $ne: null, $ne: '' }
+      organizationId: { $nin: [null, ''] }
     }).toArray();
 
     console.log(`📊 Found ${usersWithOrg.length} users with organizationId`);
