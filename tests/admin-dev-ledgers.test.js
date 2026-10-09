@@ -100,6 +100,96 @@ describe('ops failure ledgers', () => {
     expect(typeof TemporalManager.listWorkflows).toBe('function');
   });
 
+  describe('TemporalManager.listWorkflows', () => {
+    // The SDK's list() returns AsyncWorkflowListIterable, which *is* the async
+    // iterable — it has no .workflows property. Iterating res.workflows throws
+    // "Cannot read properties of undefined", which shipped as a 500 before this
+    // was pinned by a test.
+    const mockClient = (listImpl) => ({
+      workflow: {
+        list: jest.fn(listImpl),
+        count: jest.fn().mockResolvedValue({ count: 7, groups: [] }),
+      },
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    test('iterates the returned iterable directly and normalises fields', async () => {
+      const TemporalManager = jest.requireActual('../core/TemporalManager');
+      const items = [
+        {
+          workflowId: 'bulk-invoices-org1-abc',
+          type: 'BulkInvoiceGenerationWorkflow',
+          status: { name: 'FAILED', code: 2 },
+          taskQueue: 'default-dev',
+          startTime: new Date('2026-10-01T00:00:00Z'),
+          closeTime: new Date('2026-10-01T00:05:00Z'),
+        },
+      ];
+      const fakeClient = mockClient(() => ({
+        async *[Symbol.asyncIterator]() { yield* items; },
+      }));
+      jest.spyOn(TemporalManager, 'getClient').mockResolvedValue(fakeClient);
+
+      const out = await TemporalManager.listWorkflows({ status: 'failed', limit: 10 });
+
+      expect(fakeClient.workflow.list).toHaveBeenCalledWith({
+        query: 'ExecutionStatus = "FAILED"',
+        pageSize: 10,
+      });
+      expect(out.workflows).toHaveLength(1);
+      expect(out.workflows[0]).toMatchObject({
+        workflowId: 'bulk-invoices-org1-abc',
+        type: 'BulkInvoiceGenerationWorkflow',
+        status: 'FAILED',
+        taskQueue: 'default-dev',
+      });
+      expect(out.total).toBe(7);
+    });
+
+    test('omits the query entirely when no status is given', async () => {
+      const TemporalManager = jest.requireActual('../core/TemporalManager');
+      const fakeClient = mockClient(() => ({ async *[Symbol.asyncIterator]() {} }));
+      jest.spyOn(TemporalManager, 'getClient').mockResolvedValue(fakeClient);
+
+      await TemporalManager.listWorkflows({});
+
+      expect(fakeClient.workflow.list).toHaveBeenCalledWith({ query: null, pageSize: 50 });
+      // No query means there is nothing to count against.
+      expect(fakeClient.workflow.count).not.toHaveBeenCalled();
+    });
+
+    test('limit is clamped to a sane maximum', async () => {
+      const TemporalManager = jest.requireActual('../core/TemporalManager');
+      const fakeClient = mockClient(() => ({ async *[Symbol.asyncIterator]() {} }));
+      jest.spyOn(TemporalManager, 'getClient').mockResolvedValue(fakeClient);
+
+      await TemporalManager.listWorkflows({ limit: 100000 });
+
+      expect(fakeClient.workflow.list).toHaveBeenCalledWith(
+        expect.objectContaining({ pageSize: 200 })
+      );
+    });
+
+    test('a count failure does not fail the listing', async () => {
+      const TemporalManager = jest.requireActual('../core/TemporalManager');
+      const fakeClient = mockClient(() => ({
+        async *[Symbol.asyncIterator]() {
+          yield { workflowId: 'w1', type: 'T', status: { name: 'FAILED' } };
+        },
+      }));
+      fakeClient.workflow.count = jest.fn().mockRejectedValue(new Error('visibility down'));
+      jest.spyOn(TemporalManager, 'getClient').mockResolvedValue(fakeClient);
+
+      const out = await TemporalManager.listWorkflows({ status: 'failed' });
+
+      expect(out.workflows).toHaveLength(1);
+      expect(out.total).toBeNull();
+    });
+  });
+
   test('failure ledger UI is collapsed and lazy', async () => {
     const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
     expect(res.text).toMatch(/<details id="failureLedgers">/);
