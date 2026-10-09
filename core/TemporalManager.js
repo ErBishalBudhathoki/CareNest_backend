@@ -163,6 +163,51 @@ class TemporalManager {
   /**
    * Closes the connection gracefully.
    */
+  /**
+   * Lists recent workflow executions by execution status.
+   *
+   * Until this existed the only way to see a failed job was to already know
+   * its workflowId and call describeWorkflow — so a stuck or failed workflow
+   * was invisible from the app. Workflow ids are deterministic
+   * (see docs/operations/temporal-runbook.md) but enumerating by status is
+   * what an operator actually needs.
+   *
+   * Returns { workflows: [...], total } where each entry is
+   * { workflowId, type, status, startTime, closeTime }.
+   */
+  static async listWorkflows({ status = null, limit = 50 } = {}) {
+    const client = await this.getClient();
+    const query = status ? `ExecutionStatus = "${String(status).toUpperCase()}"` : null;
+    const capped = Math.max(1, Math.min(Number(limit) || 50, 200));
+
+    const res = await client.workflow.list({ query, pageSize: capped });
+
+    const workflows = [];
+    for await (const info of res.workflows) {
+      workflows.push({
+        workflowId: info.workflowId,
+        type: info.workflowType || info.type || null,
+        status: info.status ? (info.status.name || String(info.status)) : null,
+        startTime: info.startTime || info.start || null,
+        closeTime: info.closeTime || info.close || null,
+      });
+      if (workflows.length >= capped) break;
+    }
+
+    let total = null;
+    if (query) {
+      try {
+        const counted = await client.workflow.count(query);
+        total = counted && typeof counted.count === 'number' ? counted.count : null;
+      } catch (error) {
+        // Count is a nicety; a failure here must not fail the whole listing.
+        logger.warn('Temporal workflow count failed', { error: error.message });
+      }
+    }
+
+    return { workflows, total };
+  }
+
   static async close() {
     if (connectionInstance) {
       await connectionInstance.close();
