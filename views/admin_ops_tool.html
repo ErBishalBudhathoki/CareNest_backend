@@ -108,10 +108,24 @@
 
   <section>
     <h2>Analytics</h2><span id="panelStatus-analytics" class="panel-status muted"></span>
-    <label>Days: <input id="daysRange" type="number" value="30" style="width:80px"></label>
+    <label>Range:
+      <select id="rangePreset" onchange="applyPreset(this.value)">
+        <option value="7">Last 7d</option>
+        <option value="30" selected>Last 30d</option>
+        <option value="90">Last 90d</option>
+        <option value="180">Last 180d</option>
+        <option value="365">Last 365d</option>
+        <option value="custom">Custom…</option>
+      </select>
+    </label>
+    <span id="customRange" style="display:none">
+      <input id="dateFrom" type="date"><input id="dateTo" type="date" onchange="loadAnalytics()">
+    </span>
     <label>Org: <input id="orgScope" placeholder="all orgs" style="width:200px"></label>
+    <label><input type="checkbox" id="compareToggle" onchange="loadAnalytics()"> compare previous period</label>
     <button id="analyticsBtn" onclick="runBusy(this, loadAnalytics)">Load charts</button>
     <span id="analyticsScope" class="muted"></span>
+    <div id="compareSummary"></div>
     <div class="grid">
       <div><h3>Users (new vs active/day)</h3><canvas id="usersChart" height="160"></canvas></div>
       <div><h3>Invoices &amp; revenue / day</h3><canvas id="revenueChart" height="160"></canvas></div>
@@ -129,6 +143,11 @@
     <input id="orgIdFilter" placeholder="orgId" style="width:140px">
     <select id="activeFilter"><option value="">any status</option><option value="true">active</option><option value="false">inactive</option></select>
     <button onclick="loadUsers(1)">Search</button>
+    <select id="pageSize" onchange="loadUsers(1)">
+      <option value="25">25/page</option>
+      <option value="50">50/page</option>
+      <option value="100">100/page</option>
+    </select>
     <button class="danger" onclick="exportUsers('csv')">Export CSV</button>
     <button onclick="exportUsers('json')">Export JSON</button>
     <div id="usersTable"></div>
@@ -540,18 +559,35 @@ async function loadStats() {
   } catch (e) { setPanel('kpis', 'error', e.message); }
 }
 
+function rangeDays() {
+  const v = Number(document.getElementById('rangePreset').value);
+  return Number.isFinite(v) && v > 0 ? v : 30;
+}
+function analyticsRange() {
+  const preset = document.getElementById('rangePreset').value;
+  if (preset === 'custom') {
+    const from = document.getElementById('dateFrom').value;
+    if (from) return 'from=' + encodeURIComponent(from);
+  }
+  return 'days=' + rangeDays();
+}
+function applyPreset(v) {
+  document.getElementById('customRange').style.display = v === 'custom' ? 'inline' : 'none';
+  if (v !== 'custom') loadAnalytics();
+}
 async function loadAnalytics() {
   const n = beginSeq('analytics');
   setPanel('analytics', 'loading');
-  const days = Number(document.getElementById('daysRange').value) || 30;
+  const range = analyticsRange();
   const orgId = document.getElementById('orgScope').value.trim();
   const org = orgId ? '&orgId=' + encodeURIComponent(orgId) : '';
+  const compare = document.getElementById('compareToggle').checked ? '&compare=previous' : '';
   try {
     const [ts, status, topClients, topUsers] = await Promise.all([
-      req(`/admin-dev/api/ops/analytics/timeseries?days=${days}${org}`),
-      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&days=${days}${org}`),
-      req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${days}&limit=8${org}`),
-      req(`/admin-dev/api/ops/analytics/top?entity=users&days=${days}&limit=8${org}`),
+      req(`/admin-dev/api/ops/analytics/timeseries?${range}${org}${compare}`),
+      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&days=${rangeDays()}${org}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${rangeDays()}&limit=8${org}${compare}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=users&days=${rangeDays()}&limit=8${org}${compare}`),
     ]);
     // A newer load started while this one was in flight: drop the stale result
     // instead of letting the slower earlier response overwrite the newer one.
@@ -559,9 +595,10 @@ async function loadAnalytics() {
     const s = ts.data.series;
     document.getElementById('analyticsScope').textContent = ts.data.scope === 'platform'
       ? 'platform-wide' : 'scoped to org ' + ts.data.scope;
-    destroyChart('usersChart'); charts.usersChart = new Chart(document.getElementById('usersChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'new', data: s.map(x => x.newUsers), borderColor:'#3498db', fill:false }, { label: 'active', data: s.map(x => x.activeUsers), borderColor:'#2ecc71', fill:false } ] }, options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } } });
+    renderCompareSummary(ts.data);
+    destroyChart('usersChart'); charts.usersChart = new Chart(document.getElementById('usersChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'new', data: s.map(x => x.newUsers), borderColor:'#3498db', fill:false }, { label: 'active', data: s.map(x => x.activeUsers), borderColor:'#2ecc71', fill:false }, ...(s[0] && s[0].prevNewUsers !== undefined ? [{ label: 'new (prev)', data: s.map(x => x.prevNewUsers), borderColor:'#3498db', borderDash:[4,3], fill:false }] : []) ] }, options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } } });
     destroyChart('revenueChart'); charts.revenueChart = new Chart(document.getElementById('revenueChart'), { type: 'bar', data: { labels: s.map(x => x.date), datasets: [ { label: 'invoices', data: s.map(x => x.invoices), backgroundColor:'#9b59b6', yAxisID:'y' }, { label: 'revenue', data: s.map(x => x.revenue), type: 'line', borderColor:'#e67e22', yAxisID:'y1' } ] }, options: { scales: { y: { beginAtZero: true }, y1: { position: 'right', beginAtZero: true } } } });
-    destroyChart('hoursChart'); charts.hoursChart = new Chart(document.getElementById('hoursChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'hours', data: s.map(x => x.workedHours), borderColor:'#16a085', fill:false } ] }, options: { scales: { y: { beginAtZero: true } } } });
+    destroyChart('hoursChart'); charts.hoursChart = new Chart(document.getElementById('hoursChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'hours', data: s.map(x => x.workedHours), borderColor:'#16a085', fill:false }, ...(s[0] && s[0].prevWorkedHours !== undefined ? [{ label: 'hours (prev)', data: s.map(x => x.prevWorkedHours), borderColor:'#16a085', borderDash:[4,3], fill:false }] : []) ] }, options: { scales: { y: { beginAtZero: true } } } });
     destroyChart('statusChart'); charts.statusChart = new Chart(document.getElementById('statusChart'), { type: 'doughnut', data: { labels: status.data.map(x => x.label), datasets: [ { data: status.data.map(x => x.count), backgroundColor: ['#3498db','#2ecc71','#e67e22','#9b59b6','#e74c3c','#1abc9c','#f1c40f'] } ] } });
     destroyChart('topClientsChart'); charts.topClientsChart = new Chart(document.getElementById('topClientsChart'), { type: 'bar', data: { labels: topClients.data.map(x => x.label), datasets: [ { label: 'value', data: topClients.data.map(x => x.total), backgroundColor:'#2980b9' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
     destroyChart('topUsersChart'); charts.topUsersChart = new Chart(document.getElementById('topUsersChart'), { type: 'bar', data: { labels: topUsers.data.map(x => x.label), datasets: [ { label: 'hours', data: topUsers.data.map(x => x.total), backgroundColor:'#8e44ad' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
@@ -569,10 +606,62 @@ async function loadAnalytics() {
     setPanel('analytics', 'ok', new Date().toLocaleTimeString());
   } catch (e) { setPanel('analytics', 'error', e.message); }
 }
+function renderCompareSummary(d) {
+  const node = document.getElementById('compareSummary');
+  if (!node) return;
+  if (!d.totals || !d.totals.previous) { node.replaceChildren(); return; }
+  const cur = d.totals.current, prev = d.totals.previous;
+  const rows = [
+    ['New users', cur.newUsers, prev.newUsers],
+    ['Invoices', cur.invoices, prev.invoices],
+    ['Revenue', cur.revenue, prev.revenue],
+    ['Worked hours', cur.workedHours, prev.workedHours],
+  ];
+  const grid = el('div', undefined, 'kv');
+  rows.forEach(([label, c, p]) => {
+    const delta = p === 0 ? null : ((c - p) / p) * 100;
+    const box = el('div');
+    box.appendChild(el('div', label, 'k'));
+    const v = el('div', label === 'Revenue' ? fmtMoney(c) : fmtNum(c), 'v');
+    box.appendChild(v);
+    if (delta !== null) {
+      const sign = delta >= 0 ? '+' : '';
+      box.appendChild(el('div', sign + delta.toFixed(0) + '% vs prev', delta >= 0 ? 'ok' : 'warn'));
+    }
+    grid.appendChild(box);
+  });
+  node.replaceChildren(grid);
+}
 function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
 let usersPage = 1;
 let usersSort = 'createdAt', usersOrder = 'desc';
+
+// Reflect table state in the URL so a filtered view can be bookmarked or
+// shared, and restored on reload.
+function writeUsersUrl(params) {
+  try {
+    const u = new URL(window.location.href);
+    u.search = params.toString();
+    window.history.replaceState(null, '', u);
+  } catch (e) { /* ignore */ }
+}
+function restoreUsersFromUrl() {
+  const u = new URL(window.location.href);
+  if (!u.search) return false;
+  const p = u.searchParams;
+  const set = (id, v) => { if (v) document.getElementById(id).value = v; };
+  set('q', p.get('q'));
+  set('roleFilter', p.get('role'));
+  set('orgIdFilter', p.get('orgId'));
+  set('activeFilter', p.get('isActive'));
+  set('pageSize', p.get('limit'));
+  if (p.get('sort')) usersSort = p.get('sort');
+  if (p.get('order')) usersOrder = p.get('order');
+  if (p.get('page')) usersPage = Number(p.get('page')) || 1;
+  return true;
+}
+
 
 // Format a date defensively. A malformed legacy date used to throw
 // RangeError inside .toISOString(), which killed the whole table render.
@@ -593,7 +682,8 @@ async function loadUsers(page) {
   const n = beginSeq('users');
   setPanel('users', 'loading');
   usersPage = page || 1;
-  const p = new URLSearchParams({ page: usersPage, limit: 25, sort: usersSort, order: usersOrder });
+  const limit = Number(document.getElementById('pageSize').value) || 25;
+  const p = new URLSearchParams({ page: usersPage, limit, sort: usersSort, order: usersOrder });
   if (document.getElementById('q').value) p.set('q', document.getElementById('q').value);
   if (document.getElementById('roleFilter').value) p.set('role', document.getElementById('roleFilter').value);
   if (document.getElementById('orgIdFilter').value) p.set('orgId', document.getElementById('orgIdFilter').value);
@@ -612,11 +702,14 @@ async function loadUsers(page) {
     const thead = el('thead');
     const htr = el('tr');
     [['email', 'email'], ['name', null], ['role', 'role'], ['active', null], ['lastLoginAt', 'lastLogin'], ['createdAt', 'created'], ['', '']].forEach(([field, label]) => {
-      const th = el('th', label ? label + ' ⇅' : '');
+      const active = field && field === usersSort;
+      const arrow = active ? (usersOrder === 'asc' ? ' ↑' : ' ↓') : ' ⇅';
+      const th = el('th', label ? label + (field ? arrow : '') : '');
       if (field) {
         th.style.cursor = 'pointer';
         th.addEventListener('click', () => toggleSort(field));
         th.dataset.sort = field;
+        if (active) th.setAttribute('aria-sort', usersOrder === 'asc' ? 'ascending' : 'descending');
       }
       htr.appendChild(th);
     });
@@ -652,6 +745,7 @@ async function loadUsers(page) {
     pager.appendChild(document.createTextNode(`Page ${d.page}/${pages} (${d.total} rows)  `));
     if (d.page > 1) { const b = el('button', 'Prev'); b.addEventListener('click', () => loadUsers(d.page - 1)); pager.appendChild(b); }
     if (d.page < d.pages) { const b = el('button', 'Next'); b.addEventListener('click', () => loadUsers(d.page + 1)); pager.appendChild(b); }
+    writeUsersUrl(p);
     setPanel('users', 'ok', d.total + ' rows · ' + new Date().toLocaleTimeString());
   } catch (e) { setPanel('users', 'error', e.message); }
 }
@@ -755,7 +849,8 @@ document.addEventListener('keydown', (ev) => {
 // Analytics is deliberately NOT eager: it is four aggregate round trips and
 // most visits never need it. The instance payload is fetched once because the
 // header build identity comes from the same response.
-loadStats(); loadUsers(1); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit(); loadInstance();
+const hadState = restoreUsersFromUrl();
+loadStats(); loadUsers(hadState ? usersPage : 1); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit(); loadInstance();
 </script>
 </body>
 </html>

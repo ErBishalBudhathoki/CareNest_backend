@@ -213,8 +213,10 @@ describe('admin-dev ops console', () => {
 
   test('instance payload is fetched exactly once, not once per consumer', async () => {
     const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
-    const bootstrap = res.text.split('\nloadStats(); loadUsers(1);')[1] || '';
-    expect(bootstrap.match(/loadInstance\(\)/g) || []).toHaveLength(1);
+    const js = (res.text.match(/<script>\n([\s\S]*?)\n<\/script>/) || [])[1] || '';
+    const bootstrap = js.trim().split('\n').slice(-1)[0];
+    expect(bootstrap).toContain('loadStats();');
+    expect((bootstrap.match(/loadInstance\(\)/g) || [])).toHaveLength(1);
     // A separate build-info fetch would duplicate the same request.
     expect(res.text).not.toMatch(/loadBuildInfo/);
   });
