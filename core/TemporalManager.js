@@ -180,16 +180,19 @@ class TemporalManager {
     const query = status ? `ExecutionStatus = "${String(status).toUpperCase()}"` : null;
     const capped = Math.max(1, Math.min(Number(limit) || 50, 200));
 
-    const res = await client.workflow.list({ query, pageSize: capped });
+    // list() returns AsyncWorkflowListIterable, which *is* the async iterable
+    // of WorkflowExecutionInfo — it has no .workflows property.
+    const iterable = await client.workflow.list({ query, pageSize: capped });
 
     const workflows = [];
-    for await (const info of res.workflows) {
+    for await (const info of iterable) {
       workflows.push({
         workflowId: info.workflowId,
-        type: info.workflowType || info.type || null,
-        status: info.status ? (info.status.name || String(info.status)) : null,
-        startTime: info.startTime || info.start || null,
-        closeTime: info.closeTime || info.close || null,
+        type: info.type || null,
+        status: info.status ? (info.status.name || String(info.status.code)) : null,
+        taskQueue: info.taskQueue || null,
+        startTime: info.startTime || null,
+        closeTime: info.closeTime || null,
       });
       if (workflows.length >= capped) break;
     }
