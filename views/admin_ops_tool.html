@@ -6,42 +6,81 @@
 <title>CareNest Ops Console (Dev)</title>
 <script src="/admin-dev/static/chart.umd.js"></script>
 <style>
-  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background:#f4f7f6; color:#333; margin:0; padding:20px; }
+  :root {
+    --bg:#f4f7f6; --panel:#fff; --ink:#333; --ink-strong:#2c3e50; --ink-muted:#555;
+    --line:#eee; --soft:#f8f9fa; --chip:#eef2f7; --focus:#3498db;
+    --warn:#b3541e; --ok:#1e7d50; --dim:#8898aa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#12181c; --panel:#1a2228; --ink:#dfe6ea; --ink-strong:#eef4f7; --ink-muted:#a9b6bf;
+      --line:#2a343b; --soft:#212b32; --chip:#263239;
+      --warn:#e08b5a; --ok:#5cc98d; --dim:#7d8b95;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#12181c; --panel:#1a2228; --ink:#dfe6ea; --ink-strong:#eef4f7; --ink-muted:#a9b6bf;
+    --line:#2a343b; --soft:#212b32; --chip:#263239;
+    --warn:#e08b5a; --ok:#5cc98d; --dim:#7d8b95;
+  }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background:var(--bg); color:var(--ink); margin:0; padding:20px; }
   .container { max-width: 1180px; margin: 0 auto; }
-  section { background:#fff; border-radius:8px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
-  h2 { margin-top:0; color:#2c3e50; font-size:16px; }
-  h3 { margin:12px 0 6px; font-size:13px; color:#555; }
-  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #eee; font-size:13px; }
+  section { background:var(--panel); border-radius:8px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  h2 { margin-top:0; color:var(--ink-strong); font-size:16px; }
+  h3 { margin:12px 0 6px; font-size:13px; color:var(--ink-muted); }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; }
   th { cursor:pointer; user-select:none; }
-  input,select,button { padding:6px 10px; margin:4px 4px 4px 0; border:1px solid #ccc; border-radius:4px; }
+  input,select,button { padding:6px 10px; margin:4px 4px 4px 0; border:1px solid var(--line); border-radius:4px; background:var(--soft); color:var(--ink); }
   button { background:#3498db; color:#fff; border:none; cursor:pointer; } button:hover { background:#2980b9; }
   button.danger { background:#c0392b; } button.danger:hover { background:#a93226; }
-  pre { background:#f8f9fa; padding:10px; border-radius:4px; overflow:auto; font-size:12px; max-height:320px; }
+  pre { background:var(--soft); color:var(--ink); padding:10px; border-radius:4px; overflow:auto; font-size:12px; max-height:320px; }
   .alert { padding:10px; border-radius:4px; margin-bottom:12px; display:none; }
   .alert.success { background:#d4edda; color:#155724; } .alert.error { background:#f8d7da; color:#721c24; }
-  .kpi { display:inline-block; min-width:140px; padding:10px 14px; margin:0 8px 8px 0; background:#f8f9fa; border-radius:6px; }
-  .kpi .val { font-size:22px; font-weight:600; color:#2c3e50; }
-  .kpi .lab { font-size:11px; color:#888; text-transform:uppercase; }
+  .kpi { display:inline-block; min-width:140px; padding:10px 14px; margin:0 8px 8px 0; background:var(--soft); border-radius:6px; }
+  .kpi .val { font-size:22px; font-weight:600; color:var(--ink-strong); }
+  .kpi .lab { font-size:11px; color:var(--dim); text-transform:uppercase; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
   .pager { margin-top:10px; }
-  .chip { display:inline-block; padding:2px 8px; border-radius:12px; background:#eef2f7; font-size:11px; margin:0 2px; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:12px; background:var(--chip); color:var(--ink); font-size:11px; margin:0 2px; }
   details > summary { cursor:pointer; list-style:revert; display:list-item; }
-  details > summary::marker { color:#8898aa; }
+  details > summary::marker { color:var(--dim); }
   #instanceBody { margin-top:10px; }
   .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:14px; }
-  .kv > div { background:#f8f9fa; border-radius:6px; padding:8px 10px; }
-  .kv .k { font-size:11px; color:#888; text-transform:uppercase; }
-  .kv .v { font-size:15px; font-weight:600; color:#2c3e50; }
-  .warn { color:#b3541e; }
-  .ok { color:#1e7d50; }
-  .muted { color:#888; font-size:12px; }
+  .kv > div { background:var(--soft); border-radius:6px; padding:8px 10px; }
+  .kv .k { font-size:11px; color:var(--dim); text-transform:uppercase; }
+  .kv .v { font-size:15px; font-weight:600; color:var(--ink-strong); }
+  .warn { color:var(--warn); }
+  .ok { color:var(--ok); }
+  .panel-status { font-size:11px; margin-left:10px; }
+  .panel-status.ok { color:var(--ok); }
+  .panel-status.warn { color:var(--warn); }
+  .panel-status.muted { color:var(--dim); }
+  .head-row { display:flex; align-items:center; flex-wrap:wrap; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+  .muted { color:var(--dim); font-size:12px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>CareNest Ops Console (Developer Only)</h1>
-  <p><a href="/admin-dev">AI Invoice Settings</a> &middot; <a href="/admin-dev/ops">Ops Console</a></p>
-  <div id="alert" class="alert"></div>
+  <p>
+    <a href="/admin-dev">AI Invoice Settings</a> &middot; <a href="/admin-dev/ops">Ops Console</a>
+    &middot; <span id="buildInfo" class="muted">loading build…</span>
+  </p>
+  <p class="head-row">
+    <button id="themeToggle" onclick="toggleTheme()">Theme</button>
+    <label class="muted">Auto-refresh:
+      <select id="autoRefresh" onchange="setAutoRefresh(this.value)">
+        <option value="0">off</option>
+        <option value="10000">10s</option>
+        <option value="30000">30s</option>
+        <option value="60000">1m</option>
+      </select>
+    </label>
+    <span class="muted">Press <kbd>/</kbd> to search users &middot; <kbd>r</kbd> to refresh all</span>
+  </p>
+  <div id="alert" class="alert" role="alert" aria-live="polite"></div>
 
   <section>
     <details id="instanceHealth">
@@ -60,7 +99,7 @@
   </section>
 
   <section>
-    <h2>Platform KPIs</h2>
+    <h2>Platform KPIs</h2><span id="panelStatus-kpis" class="panel-status muted"></span>
     <label>Org: <input id="kpiOrgId" placeholder="all orgs (platform-wide)" style="width:220px"></label>
     <button onclick="loadStats()">Refresh</button>
     <span id="kpiScope" class="muted"></span>
@@ -68,10 +107,10 @@
   </section>
 
   <section>
-    <h2>Analytics</h2>
+    <h2>Analytics</h2><span id="panelStatus-analytics" class="panel-status muted"></span>
     <label>Days: <input id="daysRange" type="number" value="30" style="width:80px"></label>
     <label>Org: <input id="orgScope" placeholder="all orgs" style="width:200px"></label>
-    <button onclick="loadAnalytics()">Load charts</button>
+    <button id="analyticsBtn" onclick="runBusy(this, loadAnalytics)">Load charts</button>
     <span id="analyticsScope" class="muted"></span>
     <div class="grid">
       <div><h3>Users (new vs active/day)</h3><canvas id="usersChart" height="160"></canvas></div>
@@ -84,7 +123,7 @@
   </section>
 
   <section>
-    <h2>User Records</h2>
+    <h2>User Records</h2><span id="panelStatus-users" class="panel-status muted"></span>
     <input id="q" placeholder="search email/name" style="width:220px">
     <select id="roleFilter"><option value="">any role</option><option>admin</option><option>superadmin</option><option>employee</option><option>client</option><option>manager</option><option>moderator</option><option>family</option></select>
     <input id="orgIdFilter" placeholder="orgId" style="width:140px">
@@ -97,7 +136,7 @@
   </section>
 
   <section>
-    <h2>User Drill-down</h2>
+    <h2>User Drill-down</h2><span id="panelStatus-lookup" class="panel-status muted"></span>
     <input id="luEmail" placeholder="user@example.com" style="width:260px">
     <button onclick="lookupUser()">Lookup</button>
     <pre id="luResult"></pre>
@@ -119,40 +158,40 @@
   </section>
 
   <section>
-    <h2>Leave Balance Integrity</h2>
+    <h2>Leave Balance Integrity</h2><span id="panelStatus-leave" class="panel-status muted"></span>
     <button onclick="loadIntegrity()">Refresh</button>
     <pre id="integrityResult"></pre>
   </section>
 
   <section>
-    <h2>Certifications Expiring</h2>
+    <h2>Certifications Expiring</h2><span id="panelStatus-certs" class="panel-status muted"></span>
     <input id="certDays" type="number" value="30" style="width:80px"> days
     <button onclick="loadCertExpiry()">Load</button>
     <pre id="certResult"></pre>
   </section>
 
   <section>
-    <h2>Valkey Rate-Limit Keys</h2>
+    <h2>Valkey Rate-Limit Keys</h2><span id="panelStatus-valkey" class="panel-status muted"></span>
     <button onclick="loadValkey()">Refresh</button>
     <pre id="valkeyResult"></pre>
     <button class="danger" onclick="resetRateLimits()">Clear all rl:* keys</button>
   </section>
 
   <section>
-    <h2>Temporal Workflow Lookup</h2>
+    <h2>Temporal Workflow Lookup</h2><span id="panelStatus-wf" class="panel-status muted"></span>
     <input id="wfId" placeholder="workflow id" style="width:320px">
     <button onclick="lookupWf()">Describe</button>
     <pre id="wfResult"></pre>
   </section>
 
   <section>
-    <h2>Recent Admin Actions</h2>
+    <h2>Recent Admin Actions</h2><span id="panelStatus-audit" class="panel-status muted"></span>
     <button onclick="loadAudit()">Refresh</button>
     <pre id="auditResult"></pre>
   </section>
 
   <section>
-    <h2>Org Data Reset (DESTRUCTIVE)</h2>
+    <h2>Org Data Reset (DESTRUCTIVE)</h2><span id="panelStatus-orgreset" class="panel-status muted"></span>
     <input id="orgId" placeholder="organizationId" style="width:260px">
     <input id="orgConfirm" placeholder="type orgId to confirm" style="width:260px">
     <button class="danger" onclick="resetOrg()">Reset leave balances + notifications for org</button>
@@ -168,14 +207,72 @@ function alertBox(msg, type, sticky) {
   a.textContent = msg; a.className = 'alert ' + (type || 'success'); a.style.display = 'block';
   if (!sticky) setTimeout(() => a.style.display = 'none', 8000);
 }
+
+const REQUEST_TIMEOUT_MS = 30000;
+
 async function req(url, opts) {
-  const r = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'x-admin-dev-csrf': csrf() }, ...opts });
+  // A hung request previously hung forever, leaving the button clickable so a
+  // second click fired the same expensive query again.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(url, {
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'x-admin-dev-csrf': csrf() },
+      signal: ctrl.signal,
+      ...opts,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Request timed out after ' + (REQUEST_TIMEOUT_MS / 1000) + 's');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.message || j.error || r.statusText);
+  if (!r.ok) throw new Error(j.message || j.error || (r.status === 401 ? 'Session expired — reload to re-authenticate' : r.statusText));
   return j;
 }
+
+// ---- Per-panel state -------------------------------------------------------
+// The console previously funnelled every failure into one sticky banner at the
+// top of the page, so six simultaneous failures overwrote each other and one
+// dead panel blanked the lot. Each panel now owns its own status line.
+const panelStates = new Map();
+
+function setPanel(id, state, detail) {
+  panelStates.set(id, { state, detail, at: Date.now() });
+  const node = document.getElementById('panelStatus-' + id);
+  if (!node) return;
+  node.textContent =
+    state === 'loading' ? 'loading…' :
+    state === 'error' ? 'error: ' + (detail || 'unknown') :
+    state === 'ok' && detail ? detail :
+    '';
+  node.className = 'panel-status' + (state === 'error' ? ' warn' : state === 'ok' ? ' ok' : ' muted');
+}
+
+// Monotonic sequence guard: without it, two overlapping loads race and the
+// slower earlier response wins, showing data for the wrong filter.
+const seq = new Map();
+function beginSeq(key) {
+  const n = (seq.get(key) || 0) + 1;
+  seq.set(key, n);
+  return n;
+}
+function isCurrent(key, n) { return seq.get(key) === n; }
+
+// Wraps a button so it cannot be double-fired while its request is in flight.
+function busy(btn, promise) {
+  if (btn) { btn.disabled = true; }
+  return promise.finally(() => { if (btn) btn.disabled = false; });
+}
+// onclick helper: disables the button for the duration, so a double click
+// cannot fire the same expensive aggregation twice.
+function runBusy(btn, fn) { return busy(btn, fn()); }
+let analyticsEverLoaded = false;
+
 function fmtNum(n) { return (n === undefined || n === null) ? 0 : n.toLocaleString(); }
-function fmtMoney(n) { return '$' + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 
 // ---- Instance health -------------------------------------------------------
 // Collapsed and un-fetched by default. On Cloud Run these counters are empty
@@ -221,6 +318,15 @@ async function loadInstance() {
   try {
     const j = await req('/admin-dev/api/ops/instance');
     const d = j.data;
+
+    // Build identity lives in the same payload, so the header is filled here
+    // rather than issuing a second request for five fields. During an incident
+    // the first question is usually "am I even looking at the deployed build?".
+    const build = d.build || {};
+    const rev = build.revision ? String(build.revision).slice(0, 7) : 'local';
+    document.getElementById('buildInfo').textContent = build.service
+      ? build.service + ' @ ' + rev + ' · instance ' + String(build.instance || '?').slice(-6) + ' · up ' + fmtUptime(build.uptimeSeconds)
+      : 'local build @ ' + rev;
 
     // Three genuinely different states — collapse "no data" into a single
     // zeros panel would read as "healthy" when it may not be.
@@ -406,6 +512,8 @@ document.getElementById('failureLedgers').addEventListener('toggle', (ev) => {
 });
 
 async function loadStats() {
+  const n = beginSeq('kpis');
+  setPanel('kpis', 'loading');
   try {
     const orgId = document.getElementById('kpiOrgId').value.trim();
     const q = orgId ? '?orgId=' + encodeURIComponent(orgId) : '';
@@ -428,10 +536,13 @@ async function loadStats() {
     }));
     document.getElementById('kpiScope').textContent = d.scope === 'platform'
       ? 'platform-wide' : 'scoped to org ' + d.scope;
-  } catch (e) { alertBox(e.message, 'error', true); }
+    if (isCurrent('kpis', n)) setPanel('kpis', 'ok', new Date().toLocaleTimeString());
+  } catch (e) { setPanel('kpis', 'error', e.message); }
 }
 
 async function loadAnalytics() {
+  const n = beginSeq('analytics');
+  setPanel('analytics', 'loading');
   const days = Number(document.getElementById('daysRange').value) || 30;
   const orgId = document.getElementById('orgScope').value.trim();
   const org = orgId ? '&orgId=' + encodeURIComponent(orgId) : '';
@@ -442,6 +553,9 @@ async function loadAnalytics() {
       req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${days}&limit=8${org}`),
       req(`/admin-dev/api/ops/analytics/top?entity=users&days=${days}&limit=8${org}`),
     ]);
+    // A newer load started while this one was in flight: drop the stale result
+    // instead of letting the slower earlier response overwrite the newer one.
+    if (!isCurrent('analytics', n)) return;
     const s = ts.data.series;
     document.getElementById('analyticsScope').textContent = ts.data.scope === 'platform'
       ? 'platform-wide' : 'scoped to org ' + ts.data.scope;
@@ -451,7 +565,9 @@ async function loadAnalytics() {
     destroyChart('statusChart'); charts.statusChart = new Chart(document.getElementById('statusChart'), { type: 'doughnut', data: { labels: status.data.map(x => x.label), datasets: [ { data: status.data.map(x => x.count), backgroundColor: ['#3498db','#2ecc71','#e67e22','#9b59b6','#e74c3c','#1abc9c','#f1c40f'] } ] } });
     destroyChart('topClientsChart'); charts.topClientsChart = new Chart(document.getElementById('topClientsChart'), { type: 'bar', data: { labels: topClients.data.map(x => x.label), datasets: [ { label: 'value', data: topClients.data.map(x => x.total), backgroundColor:'#2980b9' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
     destroyChart('topUsersChart'); charts.topUsersChart = new Chart(document.getElementById('topUsersChart'), { type: 'bar', data: { labels: topUsers.data.map(x => x.label), datasets: [ { label: 'hours', data: topUsers.data.map(x => x.total), backgroundColor:'#8e44ad' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
-  } catch (e) { alertBox(e.message, 'error', true); }
+    analyticsEverLoaded = true;
+    setPanel('analytics', 'ok', new Date().toLocaleTimeString());
+  } catch (e) { setPanel('analytics', 'error', e.message); }
 }
 function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
@@ -474,6 +590,8 @@ function el(tag, text, cls) {
 }
 
 async function loadUsers(page) {
+  const n = beginSeq('users');
+  setPanel('users', 'loading');
   usersPage = page || 1;
   const p = new URLSearchParams({ page: usersPage, limit: 25, sort: usersSort, order: usersOrder });
   if (document.getElementById('q').value) p.set('q', document.getElementById('q').value);
@@ -523,6 +641,7 @@ async function loadUsers(page) {
     });
     table.appendChild(tbody);
 
+    if (!isCurrent('users', n)) return;
     const host = document.getElementById('usersTable');
     host.replaceChildren(table);
 
@@ -533,7 +652,8 @@ async function loadUsers(page) {
     pager.appendChild(document.createTextNode(`Page ${d.page}/${pages} (${d.total} rows)  `));
     if (d.page > 1) { const b = el('button', 'Prev'); b.addEventListener('click', () => loadUsers(d.page - 1)); pager.appendChild(b); }
     if (d.page < d.pages) { const b = el('button', 'Next'); b.addEventListener('click', () => loadUsers(d.page + 1)); pager.appendChild(b); }
-  } catch (e) { alertBox(e.message, 'error', true); }
+    setPanel('users', 'ok', d.total + ' rows · ' + new Date().toLocaleTimeString());
+  } catch (e) { setPanel('users', 'error', e.message); }
 }
 
 // One delegated listener for every "view" button, instead of an inline
@@ -556,29 +676,86 @@ function exportUsers(format) {
 async function lookupUser(emailArg) {
   const email = emailArg || document.getElementById('luEmail').value;
   if (!email) return;
-  document.getElementById('luEmail').value = email;
-  try { document.getElementById('luResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/users/' + encodeURIComponent(email))).data, null, 2); }
-  catch (e) { alertBox(e.message, 'error', true); }
+  // Only sync the input when the operator typed it. Clicking "view" on a table
+  // row used to overwrite the search box as a side effect.
+  if (!emailArg) document.getElementById('luEmail').value = email;
+  const n = beginSeq('lookup');
+  setPanel('lookup', 'loading', email);
+  try {
+    const d = (await req('/admin-dev/api/ops/users/' + encodeURIComponent(email))).data;
+    if (!isCurrent('lookup', n)) return;
+    document.getElementById('luResult').textContent = JSON.stringify(d, null, 2);
+    setPanel('lookup', 'ok', d.user.email + ' · ' + d.invoices.count + ' invoices · ' + d.memberships.length + ' orgs');
+  } catch (e) { setPanel('lookup', 'error', e.message); }
 }
-async function loadIntegrity() { try { document.getElementById('integrityResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/leave-integrity')).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
-async function loadCertExpiry() { try { document.getElementById('certResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/cert-expiry?days=' + document.getElementById('certDays').value)).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
-async function loadValkey() { try { const j = await req('/admin-dev/api/ops/valkey-stats'); document.getElementById('valkeyResult').textContent = JSON.stringify(j.data ?? j, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
+async function loadIntegrity() { setPanel('leave', 'loading'); try { const j = await req('/admin-dev/api/ops/leave-integrity'); document.getElementById('integrityResult').textContent = JSON.stringify(j.data, null, 2); setPanel('leave', 'ok', j.count + (j.truncated ? '+ (capped)' : '')); } catch (e) { setPanel('leave', 'error', e.message); } }
+async function loadCertExpiry() { setPanel('certs', 'loading'); try { const j = await req('/admin-dev/api/ops/cert-expiry?days=' + document.getElementById('certDays').value); document.getElementById('certResult').textContent = JSON.stringify(j.data, null, 2); setPanel('certs', 'ok', j.count + ' expiring'); } catch (e) { setPanel('certs', 'error', e.message); } }
+async function loadValkey() { setPanel('valkey', 'loading'); try { const j = await req('/admin-dev/api/ops/valkey-stats'); document.getElementById('valkeyResult').textContent = JSON.stringify(j.data ?? j, null, 2); setPanel('valkey', 'ok', j.total + ' keys' + (j.truncated ? ' (capped)' : '')); } catch (e) { setPanel('valkey', 'error', e.message); } }
 async function resetRateLimits() {
   if (!confirm('Clear ALL rl:* rate-limit keys?')) return;
   try { document.getElementById('valkeyResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/reset-rate-limits', { method: 'POST', body: JSON.stringify({ confirm: 'CLEAR_RL' }) }), null, 2); }
-  catch (e) { alertBox(e.message, 'error', true); }
+  catch (e) { setPanel('valkey', 'error', e.message); }
 }
-async function lookupWf() { try { document.getElementById('wfResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/temporal/' + encodeURIComponent(document.getElementById('wfId').value))).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
-async function loadAudit() { try { document.getElementById('auditResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/audit-recent')).data, null, 2); } catch (e) { alertBox(e.message, 'error', true); } }
+async function lookupWf() { try { document.getElementById('wfResult').textContent = JSON.stringify((await req('/admin-dev/api/ops/temporal/' + encodeURIComponent(document.getElementById('wfId').value))).data, null, 2); } catch (e) { setPanel('wf', 'error', e.message); } }
+async function loadAudit() { setPanel('audit', 'loading'); try { const j = await req('/admin-dev/api/ops/audit-recent'); document.getElementById('auditResult').textContent = JSON.stringify(j.data, null, 2); setPanel('audit', 'ok', j.data.length + ' entries'); } catch (e) { setPanel('audit', 'error', e.message); } }
 async function resetOrg() {
   const orgId = document.getElementById('orgId').value;
   const orgConfirm = document.getElementById('orgConfirm').value;
   if (!confirm('Really delete leave balances + notifications for org ' + orgId + '?')) return;
   try { document.getElementById('orgResult').textContent = JSON.stringify(await req('/admin-dev/api/ops/org-reset/' + encodeURIComponent(orgId), { method: 'POST', body: JSON.stringify({ confirm: orgConfirm }) }), null, 2); }
-  catch (e) { alertBox(e.message, 'error', true); }
+  catch (e) { setPanel('orgreset', 'error', e.message); }
 }
 
-loadStats(); loadAnalytics(); loadUsers(1); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit();
+// ---- Theme ---------------------------------------------------------------
+function applyTheme(mode) {
+  if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', mode);
+  try { localStorage.setItem('admin-dev-theme', mode); } catch (e) { /* private mode */ }
+}
+function toggleTheme() {
+  const root = document.documentElement;
+  const explicit = root.getAttribute('data-theme');
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const current = explicit || (prefersDark ? 'dark' : 'light');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+try {
+  const saved = localStorage.getItem('admin-dev-theme');
+  if (saved && saved !== 'auto') applyTheme(saved);
+} catch (e) { /* ignore */ }
+
+// ---- Auto refresh --------------------------------------------------------
+let refreshTimer = null;
+function refreshAll() {
+  loadStats(); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit();
+  if (analyticsEverLoaded) loadAnalytics();
+  if (panelStates.get('instance') && panelStates.get('instance').state !== 'error') loadInstance();
+  if (panelStates.get('ledgers') && panelStates.get('ledgers').state !== 'error') loadLedgers();
+}
+function setAutoRefresh(ms) {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  const n = Number(ms) || 0;
+  if (n > 0) refreshTimer = setInterval(refreshAll, n);
+}
+
+// ---- Keyboard ------------------------------------------------------------
+document.addEventListener('keydown', (ev) => {
+  const tag = (ev.target.tagName || '').toLowerCase();
+  const typing = tag === 'input' || tag === 'select' || tag === 'textarea';
+  if (ev.key === '/' && !typing) { ev.preventDefault(); document.getElementById('q').focus(); return; }
+  if (ev.key === 'r' && !typing && !ev.metaKey && !ev.ctrlKey) { ev.preventDefault(); refreshAll(); return; }
+  if (ev.key === 'Enter' && ev.target.id === 'q') { ev.preventDefault(); loadUsers(1); return; }
+});
+
+// ---- Build identity ------------------------------------------------------
+
+// Analytics was previously in the eager bootstrap, which meant every page load
+// fired ten simultaneous requests and fanned out to roughly twenty-three
+// database round trips before anything rendered.
+// Analytics is deliberately NOT eager: it is four aggregate round trips and
+// most visits never need it. The instance payload is fetched once because the
+// header build identity comes from the same response.
+loadStats(); loadUsers(1); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit(); loadInstance();
 </script>
 </body>
 </html>

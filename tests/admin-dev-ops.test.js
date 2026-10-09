@@ -202,15 +202,26 @@ describe('admin-dev ops console', () => {
     expect(src).toMatch(/LATENCY_ROW_LIMIT = 25/);
   });
 
-  test('instance health is collapsed and not fetched on first paint', async () => {
+  test('instance health panel is collapsed', async () => {
     const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
-    // On Cloud Run these counters are empty after a cold start, so loading
-    // them eagerly either wastes round trips or renders a misleading all-zero
-    // panel. It must be lazy.
+    // Collapsed so its detail is opt-in. It IS fetched on first paint, because
+    // the header build identity comes from the same payload — issuing a second
+    // request for five fields would be wasteful.
     expect(res.text).toMatch(/<details id="instanceHealth">/);
     expect(res.text).not.toMatch(/<details id="instanceHealth" open/);
-    const bootstrap = res.text.split('loadStats();')[1] || '';
-    expect(bootstrap).not.toContain('loadInstance()');
+  });
+
+  test('instance payload is fetched exactly once, not once per consumer', async () => {
+    const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
+    const bootstrap = res.text.split('\nloadStats(); loadUsers(1);')[1] || '';
+    expect(bootstrap.match(/loadInstance\(\)/g) || []).toHaveLength(1);
+    // A separate build-info fetch would duplicate the same request.
+    expect(res.text).not.toMatch(/loadBuildInfo/);
+  });
+
+  test('the console reports which build it is talking to', async () => {
+    const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
+    expect(res.text).toMatch(/id="buildInfo"/);
   });
 
   test('instance health carries the cold-start caveat into the UI', async () => {

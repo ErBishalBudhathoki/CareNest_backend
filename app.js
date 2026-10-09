@@ -288,6 +288,13 @@ app.get('/health', (req, res) => {
     service: environmentConfig.getConfig().app.name,
     timestamp: new Date().toISOString(),
     environment: environmentConfig.getEnvironment(),
+    // Cloud Run injects these; they let an operator confirm which build and
+    // which instance they are actually talking to. Non-secret by definition.
+    revision: process.env.K_REVISION || null,
+    cloudRunService: process.env.K_SERVICE || null,
+    configuration: process.env.K_CONFIGURATION || null,
+    instance: process.env.HOSTNAME || null,
+    uptimeSeconds: Math.round(process.uptime()),
     dependencies: {
       // Modes only — never the host, URL, or port. This endpoint is public.
       redis: redisMode,
