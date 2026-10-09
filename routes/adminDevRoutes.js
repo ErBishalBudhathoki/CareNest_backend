@@ -951,11 +951,16 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
       series.push(row);
     }
 
-    const totals = (prefix) => ({
-      newUsers: series.reduce((s, r) => s + (r[prefix + 'NewUsers'] || 0), 0),
-      invoices: series.reduce((s, r) => s + (r[prefix + 'Invoices'] || 0), 0),
-      revenue: series.reduce((s, r) => s + (r[prefix + 'Revenue'] || 0), 0),
-      workedHours: series.reduce((s, r) => s + (r[prefix + 'WorkedHours'] || 0), 0),
+    // Current rows use bare keys (invoices) while previous rows use a `prev`
+    // prefix with camelCase (prevInvoices). The two conventions do not share a
+    // casing rule, so concatenating a prefix silently produced undefined for
+    // one window or the other — map them explicitly instead.
+    const sumField = (field) => series.reduce((s, r) => s + (Number(r[field]) || 0), 0);
+    const totalsFor = (pfx) => ({
+      newUsers: sumField(pfx ? 'prevNewUsers' : 'newUsers'),
+      invoices: sumField(pfx ? 'prevInvoices' : 'invoices'),
+      revenue: sumField(pfx ? 'prevRevenue' : 'revenue'),
+      workedHours: sumField(pfx ? 'prevWorkedHours' : 'workedHours'),
     });
 
     res.json({
@@ -966,7 +971,7 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
         from: isoDay(from),
         to: isoDay(now),
         series,
-        totals: { current: totals(''), ...(compare ? { previous: totals('prev') } : {}) },
+        totals: { current: totalsFor(''), ...(compare ? { previous: totalsFor('prev') } : {}) },
       },
     });
   } catch (error) {
