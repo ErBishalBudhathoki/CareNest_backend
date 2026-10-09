@@ -84,6 +84,11 @@ app.use(helmet({
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"],
+      // frameSrc governs what this app may embed. frameAncestors is the other
+      // direction: it stops a hostile page iframing /admin-dev and clickjacking
+      // its destructive buttons (org reset, rate-limit wipe), which basic auth
+      // credentials would be auto-attached to.
+      frameAncestors: ["'none'"],
       workerSrc: ["'self'", "blob:"],
       upgradeInsecureRequests: []
     }
