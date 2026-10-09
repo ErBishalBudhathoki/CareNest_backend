@@ -104,6 +104,47 @@ describe('optional — date range and comparison', () => {
     if (plain.status === 200) expect(plain.body.previous).toBeUndefined();
   });
 
+  test('totals equal the sum of the series rows', () => {
+    // Regression, caught only by running it against real data. Current rows use
+    // bare keys (invoices); previous rows use a camelCase `prev` prefix
+    // (prevInvoices). The two conventions share no casing rule, so the original
+    // `prefix + 'Invoices'` silently summed nothing — reporting 0 for one window
+    // or the other while looking entirely plausible.
+    const route = fs.readFileSync(
+      path.join(__dirname, '../routes/adminDevRoutes.js'),
+      'utf8'
+    );
+    const block = route.slice(
+      route.indexOf('const sumField ='),
+      route.indexOf('res.json({', route.indexOf('const sumField ='))
+    );
+    expect(block).toMatch(/pfx \? 'prevNewUsers' : 'newUsers'/);
+    expect(block).toMatch(/pfx \? 'prevInvoices' : 'invoices'/);
+    expect(block).toMatch(/pfx \? 'prevRevenue' : 'revenue'/);
+    expect(block).toMatch(/pfx \? 'prevWorkedHours' : 'workedHours'/);
+    expect(block).not.toMatch(/\+ 'Invoices'/);
+  });
+
+  test('the totals accumulator resolves both key conventions', () => {
+    // Executable form of the same contract, using the exact row shapes the
+    // endpoint emits.
+    const series = [
+      { date: 'a', newUsers: 0, invoices: 2, revenue: 500, workedHours: 10,
+        prevNewUsers: 0, prevInvoices: 1, prevRevenue: 400, prevWorkedHours: 5 },
+      { date: 'b', newUsers: 1, invoices: 3, revenue: 700, workedHours: 12,
+        prevNewUsers: 1, prevInvoices: 2, prevRevenue: 600, prevWorkedHours: 8 },
+    ];
+    const sumField = (f) => series.reduce((s, r) => s + (Number(r[f]) || 0), 0);
+    const totalsFor = (pfx) => ({
+      newUsers: sumField(pfx ? 'prevNewUsers' : 'newUsers'),
+      invoices: sumField(pfx ? 'prevInvoices' : 'invoices'),
+      revenue: sumField(pfx ? 'prevRevenue' : 'revenue'),
+      workedHours: sumField(pfx ? 'prevWorkedHours' : 'workedHours'),
+    });
+    expect(totalsFor('')).toEqual({ newUsers: 1, invoices: 5, revenue: 1200, workedHours: 22 });
+    expect(totalsFor('prev')).toEqual({ newUsers: 1, invoices: 3, revenue: 1000, workedHours: 13 });
+  });
+
   test('the UI offers presets, a custom range and a compare toggle', async () => {
     const html = await pageText();
     expect(html).toMatch(/id="rangePreset"/);
