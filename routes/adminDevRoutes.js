@@ -155,6 +155,13 @@ const WorkedTime = require('../models/WorkedTime');
 const Appointment = require('../models/ClientAssignment');
 const Client = require('../models/Client');
 const LeaveRequest = require('../models/LeaveRequest');
+const IntegrationLog = require('../models/IntegrationLog');
+const NotificationHistoryModel = require('../models/NotificationHistory');
+const RealtimeTrackingSession = require('../models/RealtimeTrackingSession');
+const ActiveTimer = require('../models/ActiveTimer');
+const Trip = require('../models/Trip');
+const Expense = require('../models/Expense');
+const PayrollRecord = require('../models/PayrollRecord');
 const redis = require('../config/redis');
 const TemporalManager = require('../core/TemporalManager');
 const { createAuditLog, AUDIT_SOURCES } = require('../services/auditService');
@@ -443,6 +450,179 @@ router.get('/api/ops/platform-stats', devAuth, async (req, res) => {
         leaveRequestsPending: pendingLeave,
       },
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Failure ledgers.
+//
+// Each of these reads data the application already persists but that nothing
+// surfaced anywhere. Together they are the closest thing the platform has to
+// "something broke and nobody noticed": integration failures, push-delivery
+// failures, workers that vanished mid-shift, timers that never stopped,
+// workflows that failed, approvals waiting on a human, and SCHADS anomalies.
+// Every endpoint is bounded and optional-org scoped.
+// ---------------------------------------------------------------------------
+const clampLimit = (value, dflt, max) => Math.max(1, Math.min(Number(value) || dflt, max));
+// Scope helper: only apply the org filter when a valid id was supplied, so the
+// platform-wide default keeps working.
+const orgFilter = (query) => (query.orgId ? { organizationId: query.orgId } : {});
+
+router.get('/api/ops/ledger/integrations', devAuth, async (req, res) => {
+  try {
+    const limit = clampLimit(req.query.limit, 100, 500);
+    const rows = await IntegrationLog.find({ status: 'failed', ...orgFilter(req.query) })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
+    res.json({ success: true, count: rows.length, data: rows });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/ops/ledger/notifications', devAuth, async (req, res) => {
+  try {
+    const limit = clampLimit(req.query.limit, 100, 500);
+    // NotificationHistory has no organizationId, so orgId is not applicable
+    // here and is deliberately ignored rather than silently matching nothing.
+    const rows = await NotificationHistoryModel.find({ status: 'failed' })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+    res.json({ success: true, count: rows.length, data: rows });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/ops/ledger/stale-sessions', devAuth, async (req, res) => {
+  try {
+    // A session still marked active but not updated for this long means the
+    // worker's device stopped reporting without ever closing the shift.
+    const minutes = clampLimit(req.query.minutes, 30, 24 * 60);
+    const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+    const rows = await RealtimeTrackingSession.find({ status: 'active', lastUpdate: { $lt: cutoff } })
+      .sort({ lastUpdate: 1 })
+      .limit(200)
+      .select('appointmentId workerId status progress insideGeofence startTime lastUpdate')
+      .lean();
+    res.json({
+      success: true,
+      staleAfterMinutes: minutes,
+      count: rows.length,
+      data: rows,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/ops/ledger/orphan-timers', devAuth, async (req, res) => {
+  try {
+    // ActiveTimer has no endTime and no status field — the model's only signal
+    // for "still running" is the row existing. A timer older than the threshold
+    // is therefore a timer whose worker never stopped it.
+    const hours = clampLimit(req.query.hours, 12, 24 * 14);
+    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const rows = await ActiveTimer.find({ startTime: { $lt: cutoff }, ...orgFilter(req.query) })
+      .sort({ startTime: 1 })
+      .limit(200)
+      .lean();
+    res.json({
+      success: true,
+      staleAfterHours: hours,
+      count: rows.length,
+      data: rows,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/ops/ledger/failed-workflows', devAuth, async (req, res) => {
+  try {
+    const limit = clampLimit(req.query.limit, 25, 200);
+    const result = await TemporalManager.listWorkflows({
+      status: req.query.status || 'failed',
+      limit,
+    });
+    res.json({
+      success: true,
+      status: String(req.query.status || 'failed').toUpperCase(),
+      total: result.total,
+      count: result.workflows.length,
+      data: result.workflows,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/ops/ledger/approvals', devAuth, async (req, res) => {
+  try {
+    const limit = clampLimit(req.query.limit, 50, 200);
+    const filter = orgFilter(req.query);
+    const [trips, expenses] = await Promise.all([
+      Trip.find({ adminApprovalStatus: 'PENDING', ...filter })
+        .sort({ date: -1 })
+        .limit(limit)
+        .select('userId date status adminApprovalStatus isBillable')
+        .lean(),
+      Expense.find({ approvalStatus: 'pending', ...filter })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .select('organizationId amount description approvalStatus submittedBy createdAt')
+        .lean(),
+    ]);
+    res.json({
+      success: true,
+      count: trips.length + expenses.length,
+      data: { trips, expenses },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/ops/ledger/payroll-anomalies', devAuth, async (req, res) => {
+  try {
+    const limit = clampLimit(req.query.limit, 50, 200);
+    // PayrollRecord.anomalies[] is a SCHADS-compliance signal written by
+    // services/anomalyService.js and previously never read by anything.
+    const rows = await PayrollRecord.find({
+      'anomalies.0': { $exists: true },
+      ...orgFilter(req.query),
+    })
+      .sort({ periodStart: -1 })
+      .limit(limit)
+      .select('employeeId employeeName organizationId periodStart periodEnd status anomalies')
+      .lean();
+
+    const flattened = [];
+    for (const record of rows) {
+      for (const anomaly of record.anomalies || []) {
+        flattened.push({
+          employeeId: record.employeeId,
+          employeeName: record.employeeName,
+          organizationId: record.organizationId,
+          periodStart: record.periodStart,
+          periodEnd: record.periodEnd,
+          payrollStatus: record.status,
+          type: anomaly.type,
+          description: anomaly.description,
+          severity: anomaly.severity,
+        });
+      }
+    }
+    flattened.sort((a, b) => {
+      const rank = { high: 0, medium: 1, low: 2 };
+      return (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
+    });
+
+    res.json({ success: true, count: flattened.length, data: flattened.slice(0, limit) });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

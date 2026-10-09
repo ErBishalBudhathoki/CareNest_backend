@@ -100,6 +100,21 @@
   </section>
 
   <section>
+    <details id="failureLedgers">
+      <summary>
+        <strong>Failure Ledgers</strong>
+        <span class="muted">&mdash; what broke and is still broken</span>
+        <span id="ledgerSummary" class="chip" style="margin-left:10px">not loaded</span>
+      </summary>
+      <p class="muted" style="margin:8px 0">
+        Reads failures the app already persists but that nothing else surfaces. Lazy-loaded on first expand.
+      </p>
+      <button onclick="loadLedgers()">Refresh</button>
+      <div id="ledgerBody"></div>
+    </details>
+  </section>
+
+  <section>
     <h2>Leave Balance Integrity</h2>
     <button onclick="loadIntegrity()">Refresh</button>
     <pre id="integrityResult"></pre>
@@ -262,6 +277,128 @@ async function loadInstance() {
 // Fetch on first expand only, then let the Refresh button drive it.
 document.getElementById('instanceHealth').addEventListener('toggle', (ev) => {
   if (ev.target.open && !instanceLoaded) loadInstance();
+});
+
+// ---- Failure ledgers -------------------------------------------------------
+// Each ledger answers a distinct "did something break?" question. They are
+// loaded together on first expand so one summary chip can total them, and a
+// per-ledger failure is caught individually — losing one ledger must not blank
+// the other six.
+let ledgersLoaded = false;
+
+const LEDGER_DEFS = [
+  { key: 'integrations', label: 'Integration failures', path: '/admin-dev/api/ops/ledger/integrations',
+    columns: ['timestamp', 'organizationId', 'integrationType', 'action', 'error'] },
+  { key: 'notifications', label: 'Push delivery failures', path: '/admin-dev/api/ops/ledger/notifications',
+    columns: ['createdAt', 'type', 'status', 'error', 'fcmMessageId'] },
+  { key: 'stale', label: 'Stale tracking sessions', path: '/admin-dev/api/ops/ledger/stale-sessions',
+    columns: ['workerId', 'appointmentId', 'status', 'insideGeofence', 'lastUpdate'] },
+  { key: 'timers', label: 'Orphaned timers', path: '/admin-dev/api/ops/ledger/orphan-timers',
+    columns: ['userEmail', 'clientEmail', 'startTime', 'organizationId'] },
+  { key: 'workflows', label: 'Failed Temporal workflows', path: '/admin-dev/api/ops/ledger/failed-workflows',
+    columns: ['workflowId', 'type', 'status', 'startTime', 'closeTime'] },
+  { key: 'anomalies', label: 'Payroll / SCHADS anomalies', path: '/admin-dev/api/ops/ledger/payroll-anomalies',
+    columns: ['employeeName', 'periodStart', 'type', 'severity', 'description'] },
+];
+
+function ledgerCell(def, row, col) {
+  let v = row[col];
+  if (v === undefined || v === null || v === '') v = '—';
+  if (v === true) v = 'yes';
+  if (v === false) v = 'no';
+  if (v instanceof Object) v = JSON.stringify(v);
+  if (col === 'severity' || col === 'status') {
+    const span = el('td', String(v));
+    if (col === 'severity') span.className = v === 'high' ? 'warn' : (v === 'medium' ? '' : 'ok');
+    return span;
+  }
+  return el('td', String(v));
+}
+
+async function loadLedgers() {
+  const body = document.getElementById('ledgerBody');
+  const summary = document.getElementById('ledgerSummary');
+  body.replaceChildren(el('p', 'Loading failure ledgers…', 'muted'));
+
+  // Approvals is two buckets rather than a flat list, so it renders separately.
+  const defs = LEDGER_DEFS;
+  const results = await Promise.all(defs.map(async (def) => {
+    try {
+      const j = await req(def.path);
+      return { def, ok: true, rows: Array.isArray(j.data) ? j.data : [] };
+    } catch (e) {
+      return { def, ok: false, error: e.message };
+    }
+  }));
+
+  let approvals = { ok: false, count: 0, error: null };
+  try {
+    const j = await req('/admin-dev/api/ops/ledger/approvals');
+    approvals = { ok: true, count: j.count || 0, trips: j.data.trips || [], expenses: j.data.expenses || [] };
+  } catch (e) {
+    approvals.error = e.message;
+  }
+
+  const total = results.filter(r => r.ok).reduce((s, r) => s + r.rows.length, 0)
+    + (approvals.ok ? approvals.count : 0);
+  const failed = results.filter(r => !r.ok).length + (approvals.ok ? 0 : 1);
+  summary.textContent = failed
+    ? `${total} issues · ${failed} ledger(s) failed`
+    : (total ? `${total} issues` : 'all clear');
+
+  body.replaceChildren();
+
+  for (const r of results) {
+    body.appendChild(el('h3', r.def.label));
+    if (!r.ok) {
+      body.appendChild(el('p', 'Could not load: ' + r.error, 'warn'));
+      continue;
+    }
+    if (!r.rows.length) {
+      body.appendChild(el('p', 'None recorded.', 'ok'));
+      continue;
+    }
+    const rows = r.rows.slice(0, 25).map((row) => r.def.columns.map((c) => ledgerCell(r.def, row, c)));
+    const t = el('table');
+    const tr = el('tr');
+    r.def.columns.forEach((c) => tr.appendChild(el('th', c)));
+    const head = el('thead'); head.appendChild(tr); t.appendChild(head);
+    const tb = el('tbody');
+    rows.forEach((cells) => {
+      const trr = el('tr');
+      cells.forEach((c) => trr.appendChild(c));
+      tb.appendChild(trr);
+    });
+    t.appendChild(tb);
+    body.appendChild(t);
+  }
+
+  body.appendChild(el('h3', 'Pending approvals'));
+  if (!approvals.ok) {
+    body.appendChild(el('p', 'Could not load: ' + approvals.error, 'warn'));
+  } else if (!approvals.count) {
+    body.appendChild(el('p', 'Nothing waiting on a human.', 'ok'));
+  } else {
+    const tripRows = (approvals.trips || []).map((t) => [
+      t.userId ? String(t.userId) : '—', t.date || '—', t.status || '—', t.isBillable ? 'yes' : 'no',
+    ]);
+    const expRows = (approvals.expenses || []).map((e) => [
+      e.submittedBy ? String(e.submittedBy) : '—', e.amount != null ? e.amount : '—',
+      (e.description || '—').slice(0, 40), e.createdAt || '—',
+    ]);
+    if (tripRows.length) {
+      body.appendChild(el('h3', 'Trips awaiting admin approval'));
+      body.appendChild(simpleTable(['user', 'date', 'status', 'billable'], tripRows));
+    }
+    if (expRows.length) {
+      body.appendChild(el('h3', 'Expenses awaiting approval'));
+      body.appendChild(simpleTable(['submittedBy', 'amount', 'description', 'created'], expRows));
+    }
+  }
+}
+
+document.getElementById('failureLedgers').addEventListener('toggle', (ev) => {
+  if (ev.target.open && !ledgersLoaded) { ledgersLoaded = true; loadLedgers(); }
 });
 
 async function loadStats() {
