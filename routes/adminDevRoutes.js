@@ -205,6 +205,7 @@ const requestTiming = require('../utils/requestTiming');
 const { apiUsageMonitor } = require('../utils/apiUsageMonitor');
 const crypto = require('crypto');
 const fs = require('fs');
+const logger = require('../config/logger');
 
 // Serve the Ops Console page
 router.get('/ops', devAuth, (req, res) => {
@@ -311,6 +312,29 @@ router.get('/api/ops/users/:email', devAuth, async (req, res) => {
       ]).catch(() => []),
       LeaveRequest.find({ userEmail: email }).sort({ createdAt: -1 }).limit(5).lean().catch(() => []),
     ]);
+
+    // Reading a participant record is a disclosure of NDIS PII, so it is
+    // audited like any other access — not just the destructive actions and the
+    // bulk export. Deliberately best-effort: an audit-write failure must not
+    // turn a successful lookup into a 500.
+    try {
+      await createAuditLog({
+        action: 'VIEW',
+        entityType: 'user',
+        entityId: (user._id || user.id).toString(),
+        userEmail: req.devUser || 'admin-dev',
+        organizationId: user.organizationId || 'global',
+        reason: 'manual ops drill-down',
+        source: AUDIT_SOURCES.ADMIN_DEV,
+        metadata: {
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          additionalInfo: { targetUserEmail: email, memberships: memberships.length },
+        },
+      });
+    } catch (auditError) {
+      logger.warn('admin-dev drill-down audit write failed', { error: auditError.message, email });
+    }
 
     res.json({ success: true, data: { user, memberships, fcmTokenCount: fcmCount, leaveBalances: balanceRows, recentAudits, orgMembershipCount: orgCounts, invoices: { count: invoiceAgg[0]?.count || 0, totalValue: invoiceAgg[0]?.total || 0, recent: recentInvoices }, workedHoursTotal: workedTimeAgg[0]?.totalHours || 0, leaveRequests } });
   } catch (error) {
@@ -823,66 +847,128 @@ router.get('/api/ops/instance', devAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Aggregate one window of daily buckets. `from`/`to` bound the window; the
+// six metrics are grouped by day so the chart gets a stable, gap-free series.
+async function aggregateWindow(scope, from, to) {
+  const dayFmt = '%Y-%m-%d';
+  const range = { $gte: from, $lte: to };
+  const [newUsers, activeUsers, invoices, revenue, appointments, workedHours] = await Promise.all([
+    User.aggregate([
+      { $match: { ...scope, createdAt: range } },
+      { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
+    ]),
+    User.aggregate([
+      { $match: { ...scope, lastLoginAt: range } },
+      { $group: { _id: { $dateToString: { format: dayFmt, date: '$lastLoginAt' } }, count: { $sum: 1 } } },
+    ]),
+    Invoice.aggregate([
+      { $match: { ...scope, createdAt: range } },
+      { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
+    ]),
+    Invoice.aggregate([
+      { $match: { ...scope, createdAt: range } },
+      { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, total: { $sum: '$financialSummary.totalAmount' } } },
+    ]),
+    Appointment.aggregate([
+      { $match: { ...scope, createdAt: range } },
+      { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
+    ]),
+    WorkedTime.aggregate([
+      { $match: { ...scope, workDate: range } },
+      { $group: { _id: { $dateToString: { format: dayFmt, date: '$workDate' } }, hours: { $sum: '$totalHours' } } },
+    ]),
+  ]);
+  const map = (arr, field) => Object.fromEntries(arr.map((d) => [d._id, d[field] || 0]));
+  return {
+    newUsers: map(newUsers, 'count'),
+    activeUsers: map(activeUsers, 'count'),
+    invoices: map(invoices, 'count'),
+    revenue: map(revenue, 'total'),
+    appointments: map(appointments, 'count'),
+    workedHours: map(workedHours, 'hours'),
+  };
+}
+
+const isoDay = (d) => d.toISOString().split('T')[0];
+
 router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
   try {
-    const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
-    const since = new Date(Date.now() - days * DAY_MS);
-    const dayFmt = '%Y-%m-%d';
-    // Optional tenant scope, applied as a leading $match so the new compound
-    // indexes can actually be used.
+    const now = new Date();
+    let from;
+    // Explicit from/to wins over days, so a custom absolute range is
+    // reproducible rather than relative to "now".
+    const fromRaw = req.query.from ? new Date(`${String(req.query.from).slice(0, 10)}T00:00:00.000Z`) : null;
+    if (fromRaw && !Number.isNaN(fromRaw.getTime())) {
+      from = fromRaw;
+    } else {
+      const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+      from = new Date(now.getTime() - (days - 1) * DAY_MS);
+      from.setUTCHours(0, 0, 0, 0);
+    }
+    const days = Math.max(1, Math.min(365, Math.round((new Date(isoDay(now)) - new Date(isoDay(from))) / DAY_MS) + 1));
+
+    // Optional tenant scope, applied as a leading $match so the compound
+    // indexes can serve it.
     const orgId = req.query.orgId ? String(req.query.orgId) : null;
     const scope = orgId ? { organizationId: orgId } : {};
 
-    const [newUsers, activeUsers, invoices, revenue, appointments, workedHours] = await Promise.all([
-      User.aggregate([
-        { $match: { ...scope, createdAt: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
-      ]),
-      User.aggregate([
-        { $match: { ...scope, lastLoginAt: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: dayFmt, date: '$lastLoginAt' } }, count: { $sum: 1 } } },
-      ]),
-      Invoice.aggregate([
-        { $match: { ...scope, createdAt: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
-      ]),
-      Invoice.aggregate([
-        { $match: { ...scope, createdAt: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, total: { $sum: '$financialSummary.totalAmount' } } },
-      ]),
-      Appointment.aggregate([
-        { $match: { ...scope, createdAt: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: dayFmt, date: '$createdAt' } }, count: { $sum: 1 } } },
-      ]),
-      WorkedTime.aggregate([
-        { $match: { ...scope, workDate: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: dayFmt, date: '$workDate' } }, hours: { $sum: '$totalHours' } } },
-      ]),
-    ]);
+    // compare=previous adds the immediately preceding window of equal length,
+    // so the chart can show "this period" against "the one before it".
+    const compare = req.query.compare === 'previous';
+    const current = await aggregateWindow(scope, from, now);
 
-    const map = (arr, field) => Object.fromEntries(arr.map((d) => [d._id, d[field] || 0]));
-    const newUsersM = map(newUsers, 'count');
-    const activeUsersM = map(activeUsers, 'count');
-    const invoicesM = map(invoices, 'count');
-    const revenueM = map(revenue, 'total');
-    const appointmentsM = map(appointments, 'count');
-    const workedHoursM = map(workedHours, 'hours');
+    let previous = null;
+    if (compare) {
+      const prevTo = new Date(from.getTime() - 1);
+      const prevFrom = new Date(from.getTime() - (days - 1) * DAY_MS);
+      previous = await aggregateWindow(scope, prevFrom, prevTo);
+    }
 
     const series = [];
-    for (let i = days - 1; i >= 0; i -= 1) {
-      const d = new Date(Date.now() - i * DAY_MS);
-      const key = d.toISOString().split('T')[0];
-      series.push({
+    for (let i = 0; i < days; i += 1) {
+      const d = new Date(from.getTime() + i * DAY_MS);
+      const key = isoDay(d);
+      const row = {
         date: key,
-        newUsers: newUsersM[key] || 0,
-        activeUsers: activeUsersM[key] || 0,
-        invoices: invoicesM[key] || 0,
-        revenue: Math.round(revenueM[key] || 0),
-        appointments: appointmentsM[key] || 0,
-        workedHours: workedHoursM[key] || 0,
-      });
+        newUsers: current.newUsers[key] || 0,
+        activeUsers: current.activeUsers[key] || 0,
+        invoices: current.invoices[key] || 0,
+        revenue: Math.round(current.revenue[key] || 0),
+        appointments: current.appointments[key] || 0,
+        workedHours: current.workedHours[key] || 0,
+      };
+      if (previous) {
+        // Previous-period values are aligned by offset so the two series line
+        // up day-for-day on the same x-axis.
+        const pk = isoDay(new Date(from.getTime() + (i - (days - 1)) * DAY_MS));
+        row.prevNewUsers = previous.newUsers[pk] || 0;
+        row.prevActiveUsers = previous.activeUsers[pk] || 0;
+        row.prevInvoices = previous.invoices[pk] || 0;
+        row.prevRevenue = Math.round(previous.revenue[pk] || 0);
+        row.prevAppointments = previous.appointments[pk] || 0;
+        row.prevWorkedHours = previous.workedHours[pk] || 0;
+      }
+      series.push(row);
     }
-    res.json({ success: true, data: { days, scope: orgId || 'platform', series } });
+
+    const totals = (prefix) => ({
+      newUsers: series.reduce((s, r) => s + (r[prefix + 'NewUsers'] || 0), 0),
+      invoices: series.reduce((s, r) => s + (r[prefix + 'Invoices'] || 0), 0),
+      revenue: series.reduce((s, r) => s + (r[prefix + 'Revenue'] || 0), 0),
+      workedHours: series.reduce((s, r) => s + (r[prefix + 'WorkedHours'] || 0), 0),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        days,
+        scope: orgId || 'platform',
+        from: isoDay(from),
+        to: isoDay(now),
+        series,
+        totals: { current: totals(''), ...(compare ? { previous: totals('prev') } : {}) },
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -948,6 +1034,7 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
     const since = new Date(Date.now() - days * DAY_MS);
     const orgId = req.query.orgId ? String(req.query.orgId) : null;
     const scope = orgId ? { organizationId: orgId } : {};
+    const compare = req.query.compare === 'previous';
 
     let rows = [];
     if (entity === 'clients') {
@@ -957,7 +1044,18 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
         { $sort: { total: -1 } },
         { $limit: limit },
       ]);
-      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, count: rows.length, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.total || 0 })) });
+      const out = rows.map((r) => ({ label: r._id, count: r.count, total: r.total || 0 }));
+      let previous = null;
+      if (compare) {
+        const prevSince = new Date(since.getTime() - days * DAY_MS);
+        const prevRows = await Invoice.aggregate([
+          { $match: { ...scope, createdAt: { $gte: prevSince, $lt: since } } },
+          { $group: { _id: '$clientEmail', count: { $sum: 1 }, total: { $sum: '$financialSummary.totalAmount' } } },
+        ]);
+        const prevMap = Object.fromEntries(prevRows.map((r) => [r._id, r.total || 0]));
+        previous = out.map((r) => ({ label: r.label, total: prevMap[r.label] || 0 }));
+      }
+      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, count: out.length, ...(previous ? { previous } : {}), data: out });
     }
     if (entity === 'users') {
       rows = await WorkedTime.aggregate([
@@ -966,7 +1064,18 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
         { $sort: { hours: -1 } },
         { $limit: limit },
       ]);
-      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, count: rows.length, data: rows.map((r) => ({ label: r._id, count: r.count, total: r.hours || 0 })) });
+      const out = rows.map((r) => ({ label: r._id, count: r.count, total: r.hours || 0 }));
+      let previous = null;
+      if (compare) {
+        const prevSince = new Date(since.getTime() - days * DAY_MS);
+        const prevRows = await WorkedTime.aggregate([
+          { $match: { ...scope, workDate: { $gte: prevSince, $lt: since } } },
+          { $group: { _id: '$userEmail', hours: { $sum: '$totalHours' } } },
+        ]);
+        const prevMap = Object.fromEntries(prevRows.map((r) => [r._id, r.hours || 0]));
+        previous = out.map((r) => ({ label: r.label, total: prevMap[r.label] || 0 }));
+      }
+      return res.json({ success: true, scope: orgId || 'platform', window: `${days}d`, count: out.length, ...(previous ? { previous } : {}), data: out });
     }
     return res.status(400).json({ success: false, message: 'entity must be clients|users' });
   } catch (error) {
