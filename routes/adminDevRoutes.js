@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const path = require('path');
+const multer = require('multer');
+const verifier = require('../services/invoicePdfVerifier');
 const Organization = require('../models/Organization');
 
 // Simple basic auth middleware for the dev tool.
@@ -1210,6 +1212,116 @@ router.get('/api/ops/organizations', devAuth, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+/**
+ * Upload an invoice PDF and report whether it still agrees with the record the
+ * app actually issued.
+ *
+ * The check is deliberately NOT "verify the watermark". The watermark is an HMAC
+ * over the invoice number alone, its secret lives on the generating device, and
+ * — as of this writing — package:pdf's base-14 font strips the zero-width
+ * characters, so no issued invoice carries one at all. A tool built on that would
+ * report confidence it does not have.
+ *
+ * Instead the verdict rests on two signals that need no shared secret:
+ *
+ *   1. Arithmetic. Do the line items sum to the subtotal, and subtotal + tax to
+ *      the total? A hand-edited amount breaks this immediately, and it holds
+ *      even for a file that was never ours.
+ *   2. The stored record. The database knows what was issued, so a field-level
+ *      comparison catches edits to items, dates or client that arithmetic alone
+ *      would miss.
+ *
+ * Watermark presence is reported as a weak provenance note only.
+ */
+const uploadInvoicePdf = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  fileFilter(req, file, cb) {
+    // Invoices are small; a large "PDF" is either an attachment bundle or an
+    // attempt at resource exhaustion. Accept only the PDF content type.
+    if (file.mimetype && file.mimetype !== 'application/pdf') {
+      return cb(new Error('Only PDF files are accepted'));
+    }
+    return cb(null, true);
+  },
+});
+
+router.post(
+  '/api/ops/verify-invoice-pdf',
+  devAuth,
+  requireCsrf,
+  (req, res, next) => {
+    uploadInvoicePdf.single('pdf')(req, res, (err) => {
+      if (err) {
+        const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+        return res.status(status).json({ success: false, message: err.message });
+      }
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No PDF uploaded' });
+      }
+      return next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const buf = req.file.buffer || Buffer.alloc(0);
+      // Magic bytes rather than the filename, which is attacker-controlled.
+      if (buf.length < 5 || buf.slice(0, 5).toString() !== '%PDF-') {
+        return res.status(400).json({ success: false, message: 'File is not a PDF' });
+      }
+
+      const text = verifier.extractPdfText(buf);
+      if (!text || text.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Could not read any text from the PDF — it may be a scan or image-only file',
+        });
+      }
+
+      const fields = verifier.parseInvoiceFields(text);
+      const watermark = verifier.inspectWatermark(text);
+      const checks = verifier.checkArithmetic(fields);
+      const arithmetic = { passed: checks.every((c) => c.passed), checks };
+
+      // A missing invoice number is a normal outcome for a foreign PDF, not an
+      // error; there is simply nothing to compare it against.
+      let record = { found: false, matches: null, diffs: [], realDiffCount: 0 };
+      if (fields.invoiceNumber) {
+        const invoice = await Invoice.findOne({ invoiceNumber: fields.invoiceNumber })
+          .select('invoiceNumber startDate endDate financialSummary lineItems clientName')
+          .lean();
+        if (invoice) {
+          const compared = verifier.compareToRecord(fields, invoice);
+          record = {
+            found: true,
+            matches: compared.matches,
+            diffs: compared.diffs,
+            realDiffCount: compared.realDiffCount,
+            unparsedCount: compared.unparsedCount,
+          };
+        }
+      }
+
+      const verdict = verifier.buildVerdict({ arithmetic, record, watermark });
+
+      res.json({
+        success: true,
+        data: {
+          verdict,
+          watermark,
+          watermarkLimits: verifier.WATERMARK_LIMITS,
+          parsed: fields,
+          arithmetic,
+          record,
+        },
+      });
+    } catch (error) {
+      logger.error('admin-dev invoice PDF verification failed', { error: error.message });
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
 
 router.get('/static/chart.umd.js', devAuth, (req, res) => {
   res.sendFile(path.join(__dirname, '../public/vendor/chart.umd.js'));
