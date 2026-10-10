@@ -167,6 +167,7 @@
       <button class="nav-item" data-view="ledgers">Failure Ledgers</button>
       <div class="nav-label">Admin</div>
       <button class="nav-item" data-view="audit">Audit Trail</button>
+      <button class="nav-item" data-view="verify">Invoice Verifier</button>
       <button class="nav-item" data-view="danger">Danger Zone</button>
     </nav>
     <div class="sidebar-foot">
@@ -368,6 +369,32 @@
         </div>
         <button onclick="loadAudit()">Refresh</button>
         <pre id="auditResult"></pre>
+      </section>
+
+      <!-- ============ INVOICE VERIFIER ============ -->
+      <section class="view" data-view="verify" hidden>
+        <div class="view-head">
+          <h2>Invoice Verifier</h2>
+          <span class="muted">does an uploaded PDF still agree with what was issued?</span>
+        </div>
+
+        <section class="card">
+          <p class="muted" style="margin:0 0 10px">
+            Upload an invoice PDF. The file's own numbers are checked for internal
+            consistency, and its invoice number is looked up in the database and
+            compared field by field.
+          </p>
+          <div class="toolbar">
+            <input type="file" id="verifyFile" accept="application/pdf,.pdf">
+            <button class="primary" id="verifyBtn" onclick="verifyInvoicePdf(this)">Verify</button>
+          </div>
+          <div id="verifyResult" style="margin-top:12px"></div>
+        </section>
+
+        <section class="card">
+          <h3 style="margin-top:0">What this can and cannot tell you</h3>
+          <div id="verifyLimits"></div>
+        </section>
       </section>
 
       <!-- ============ DANGER ============ -->
@@ -1070,6 +1097,7 @@ function showView(name) {
     if (name === 'analytics') loadAnalytics();
     if (name === 'ledgers') loadLedgers();
     if (name === 'audit') loadAudit();
+    if (name === 'verify') renderVerifyLimits();
   }
 }
 
@@ -1145,6 +1173,182 @@ function scopeToOrg(org) {
   loadAnalytics();
   loadStats();
   alertBox('Scoped to ' + (org.name || org._id));
+}
+
+// ---- Invoice verifier ---------------------------------------------------
+// Stated up front in the UI, because the natural assumption is that this
+// validates a cryptographic watermark and it does not.
+const VERIFIER_LIMITS = [
+  ['Arithmetic', 'The strongest signal. Line items must sum to the subtotal, and subtotal + tax to the total. A hand-edited amount always breaks this, and it needs no secret and no database.'],
+  ['Stored record', 'The invoice number is looked up and every field the database knows — items, hours, rates, dates, totals — compared. Catches edits arithmetic alone would miss.'],
+  ['Watermark', 'NOT verified. The watermark is an HMAC over the invoice number only, its secret stays on the device that generated it, and the current PDF writer strips the zero-width characters entirely. This tool reports only whether a payload is present — which today is never.'],
+  ['Not covered', 'A re-typed invoice that keeps its arithmetic consistent and matches a stale record will pass. This is a consistency check, not a forensic proof of authenticity.'],
+];
+
+function renderVerifyLimits() {
+  const host = document.getElementById('verifyLimits');
+  if (!host || host.dataset.rendered) return;
+  host.replaceChildren();
+  VERIFIER_LIMITS.forEach(([k, v]) => {
+    const row = el('div');
+    row.style.padding = '6px 0';
+    row.appendChild(el('div', k, 'k'));
+    row.appendChild(el('div', v, ''));
+    row.childNodes[1].style.color = 'var(--ink-muted)';
+    row.childNodes[1].style.fontSize = '12px';
+    host.appendChild(row);
+  });
+  host.dataset.rendered = '1';
+}
+
+async function verifyInvoicePdf(btn) {
+  const input = document.getElementById('verifyFile');
+  const file = input.files && input.files[0];
+  const out = document.getElementById('verifyResult');
+  if (!file) { out.replaceChildren(el('p', 'Choose a PDF first.', 'muted')); return; }
+  if (file.size > 8 * 1024 * 1024) {
+    out.replaceChildren(el('p', 'PDF is larger than the 8 MB limit.', 'warn'));
+    return;
+  }
+
+  await runBusy(btn, async () => {
+    out.replaceChildren(el('p', 'Reading…', 'muted'));
+    const fd = new FormData();
+    fd.append('pdf', file, file.name);
+    let d;
+    try {
+      d = await (await fetch('/admin-dev/api/ops/verify-invoice-pdf', {
+        method: 'POST',
+        headers: { 'x-admin-dev-csrf': csrf() },
+        body: fd,
+        signal: AbortSignal.timeout ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined,
+      })).json();
+    } catch (e) {
+      out.replaceChildren(el('p', 'Request failed: ' + e.message, 'warn'));
+      return;
+    }
+    if (!d.success) {
+      out.replaceChildren(el('p', d.message || d.error || 'Verification failed', 'warn'));
+      return;
+    }
+    out.replaceChildren(renderVerdict(d.data));
+  });
+}
+
+function verdictClass(v) {
+  if (v === 'original' || v === 'consistent-with-record') return 'chip ok';
+  if (v === 'modified') return 'chip warn';
+  return 'chip';
+}
+
+function renderVerdict(d) {
+  const wrap = el('div');
+
+  // --- headline ---
+  const head = el('div');
+  head.style.display = 'flex';
+  head.style.alignItems = 'center';
+  head.style.gap = '8px';
+  head.style.flexWrap = 'wrap';
+  head.appendChild(el('span', d.verdict.verdict.replace(/-/g, ' ').toUpperCase(), verdictClass(d.verdict.verdict)));
+  head.appendChild(el('span', 'confidence: ' + d.verdict.confidence, 'muted'));
+  if (d.verdict.signals && d.verdict.signals.length) {
+    head.appendChild(el('span', 'signals: ' + d.verdict.signals.join(', '), 'muted'));
+  }
+  wrap.appendChild(head);
+
+  const claims = d.verdict.claims;
+  const grid = el('div', undefined, 'kv');
+  const claimRows = [
+    ['Arithmetic consistent', claims.arithmeticSelfConsistent],
+    ['Matches stored record', claims.matchesStoredRecord],
+    ['Watermark present', claims.watermarkPresent],
+    ['Watermark cryptographically verified', claims.watermarkCryptographicallyVerified],
+  ];
+  claimRows.forEach(([label, val]) => {
+    const box = el('div');
+    box.appendChild(el('div', label, 'k'));
+    const v = el('div', val === null || val === undefined ? 'n/a' : (val ? 'yes' : 'no'), 'v');
+    v.style.color = val === true ? 'var(--ok)' : (val === false ? 'var(--warn)' : 'var(--dim)');
+    box.appendChild(v);
+    grid.appendChild(box);
+  });
+  wrap.appendChild(grid);
+
+  // --- parsed ---
+  const p = d.parsed;
+  wrap.appendChild(el('h3', 'Read from the PDF'));
+  const ptable = el('table');
+  const pbody = el('tbody');
+  [
+    ['Invoice number', p.invoiceNumber || '—'],
+    ['Period', (p.periodStart || '?') + ' → ' + (p.periodEnd || '?')],
+    ['Line items', p.items.length],
+    ['Hours', p.hoursCompleted === null || p.hoursCompleted === undefined ? '—' : p.hoursCompleted],
+    ['Subtotal', p.subtotal === null ? '—' : fmtMoney(p.subtotal)],
+    ['Tax', p.tax === null ? '—' : fmtMoney(p.tax)],
+    ['Total', p.total === null ? '—' : fmtMoney(p.total)],
+  ].forEach(([k, v]) => {
+    const tr = el('tr');
+    tr.appendChild(el('td', k));
+    tr.appendChild(el('td', String(v)));
+    pbody.appendChild(tr);
+  });
+  ptable.appendChild(pbody);
+  wrap.appendChild(ptable);
+
+  // --- arithmetic checks ---
+  wrap.appendChild(el('h3', 'Internal arithmetic'));
+  const atable = el('table');
+  const abody = el('tbody');
+  d.arithmetic.checks.forEach((c) => {
+    const tr = el('tr');
+    tr.appendChild(el('td', (c.passed ? 'PASS  ' : 'FAIL  ') + c.name));
+    tr.appendChild(el('td', c.detail, c.passed ? 'ok' : 'warn'));
+    abody.appendChild(tr);
+  });
+  atable.appendChild(abody);
+  wrap.appendChild(atable);
+
+  // --- record comparison ---
+  wrap.appendChild(el('h3', 'Stored record'));
+  if (!d.record.found) {
+    wrap.appendChild(el('p', d.parsed.invoiceNumber
+      ? 'No invoice stored under ' + d.parsed.invoiceNumber + ' — nothing to compare against.'
+      : 'No invoice number could be read from the PDF.', 'muted'));
+  } else {
+    const real = d.record.diffs.filter((x) => x.state === 'differs');
+    if (real.length === 0) {
+      wrap.appendChild(el('p', 'Matches the stored invoice on every comparable field.', 'ok'));
+    } else {
+      wrap.appendChild(el('p', real.length + ' field(s) differ from the stored invoice:', 'warn'));
+      const dtable = el('table');
+      const dbody = el('tbody');
+      const hr = el('tr');
+      hr.appendChild(el('th', 'Field'));
+      hr.appendChild(el('th', 'In the PDF'));
+      hr.appendChild(el('th', 'Stored'));
+      dtable.appendChild(el('thead'));
+      dtable.firstChild.appendChild(hr);
+      real.forEach((x) => {
+        const tr = el('tr');
+        tr.appendChild(el('td', x.field, 'mono'));
+        tr.appendChild(el('td', String(x.pdf), 'warn'));
+        tr.appendChild(el('td', String(x.stored)));
+        dbody.appendChild(tr);
+      });
+      dtable.appendChild(dbody);
+      wrap.appendChild(dtable);
+    }
+  }
+
+  // --- watermark, honestly ---
+  wrap.appendChild(el('h3', 'Watermark'));
+  const w = d.watermark;
+  wrap.appendChild(el('p', w.present
+    ? 'A zero-width payload of ' + w.zeroWidthCharacters + ' characters is embedded. This proves the file came from a build of the app — it does NOT prove the amounts are unchanged.'
+    : 'No watermark payload found. The current PDF writer strips these characters, so this is expected for every invoice the app has issued.', 'muted'));
+  return wrap;
 }
 
 // ---- Boot ----------------------------------------------------------------

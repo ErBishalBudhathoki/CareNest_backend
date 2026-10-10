@@ -389,6 +389,39 @@ describe('optional — view routing', () => {
   });
 });
 
+describe('optional — invoice verifier view', () => {
+  test('the console exposes a verifier view', async () => {
+    const html = await pageText();
+    expect(html).toContain('data-view="verify"');
+    expect(html).toMatch(/id="verifyFile"/);
+    expect(html).toMatch(/id="verifyBtn"/);
+    expect(html).toMatch(/id="verifyResult"/);
+  });
+
+  test('the UI states the watermark is not verified', async () => {
+    const js = scriptOf(await pageText());
+    // The feature is only honest if it says so out loud.
+    expect(js).toMatch(/NOT verified/);
+    expect(js).toMatch(/strips the zero-width characters/);
+    expect(js).toMatch(/watermarkCryptographicallyVerified/);
+  });
+
+  test('the verdict renderer covers all three signals', async () => {
+    const js = scriptOf(await pageText());
+    expect(js).toMatch(/function renderVerdict/);
+    expect(js).toMatch(/d\.arithmetic\.checks/);
+    expect(js).toMatch(/d\.record\.diffs/);
+    expect(js).toMatch(/d\.watermark/);
+  });
+
+  test('a record mismatch lists the differing fields with both sides', async () => {
+    const js = scriptOf(await pageText());
+    expect(js).toMatch(/field\(s\) differ from the stored invoice/);
+    expect(js).toMatch(/In the PDF/);
+    expect(js).toMatch(/Stored/);
+  });
+});
+
 describe('optional — custom date range end', () => {
   test('the to field is forwarded to the server', async () => {
     const js = scriptOf(await pageText());
