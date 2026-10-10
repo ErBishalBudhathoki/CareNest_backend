@@ -895,8 +895,8 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
   try {
     const now = new Date();
     let from;
-    // Explicit from/to wins over days, so a custom absolute range is
-    // reproducible rather than relative to "now".
+    // Explicit from/to wins over days, so a custom range is reproducible rather
+    // than relative to "now".
     const fromRaw = req.query.from ? new Date(`${String(req.query.from).slice(0, 10)}T00:00:00.000Z`) : null;
     if (fromRaw && !Number.isNaN(fromRaw.getTime())) {
       from = fromRaw;
@@ -905,7 +905,18 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
       from = new Date(now.getTime() - (days - 1) * DAY_MS);
       from.setUTCHours(0, 0, 0, 0);
     }
-    const days = Math.max(1, Math.min(365, Math.round((new Date(isoDay(now)) - new Date(isoDay(from))) / DAY_MS) + 1));
+    // `to` is inclusive and defaults to now. The UI exposed a date-to field for
+    // several releases while the server ignored it, which made the control
+    // silently do nothing.
+    let to = now;
+    const toRaw = req.query.to ? new Date(`${String(req.query.to).slice(0, 10)}T23:59:59.999Z`) : null;
+    if (toRaw && !Number.isNaN(toRaw.getTime())) to = toRaw;
+    // Reject an inverted window rather than returning an empty chart that looks
+    // like a data problem.
+    if (to.getTime() < from.getTime()) {
+      return res.status(400).json({ success: false, message: '`to` must not be before `from`' });
+    }
+    const days = Math.max(1, Math.min(365, Math.round((new Date(isoDay(to)) - new Date(isoDay(from))) / DAY_MS) + 1));
 
     // Optional tenant scope, applied as a leading $match so the compound
     // indexes can serve it.
@@ -915,7 +926,7 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
     // compare=previous adds the immediately preceding window of equal length,
     // so the chart can show "this period" against "the one before it".
     const compare = req.query.compare === 'previous';
-    const current = await aggregateWindow(scope, from, now);
+    const current = await aggregateWindow(scope, from, to);
 
     let previous = null;
     if (compare) {
@@ -969,7 +980,7 @@ router.get('/api/ops/analytics/timeseries', devAuth, async (req, res) => {
         days,
         scope: orgId || 'platform',
         from: isoDay(from),
-        to: isoDay(now),
+        to: isoDay(to),
         series,
         totals: { current: totalsFor(''), ...(compare ? { previous: totalsFor('prev') } : {}) },
       },
@@ -1089,6 +1100,117 @@ router.get('/api/ops/analytics/top', devAuth, async (req, res) => {
 });
 
 // Serve the vendored Chart.js bundle only to authenticated admin users.
+/**
+ * Every organization with its real per-org footprint.
+ *
+ * Exists so an operator never has to know an ObjectId to inspect a tenant. The
+ * previous UI exposed an `orgId` text input, which meant discovering the value
+ * meant leaving the console, opening a database tool, and copying an ObjectId —
+ * so in practice the tenant scope went unused.
+ *
+ * Counts are derived from $lookup/$facet rather than N+1 queries: the org table
+ * is small but each org's users, invoices and clients are not, and a loop here
+ * would be one round trip per org per panel.
+ */
+router.get('/api/ops/organizations', devAuth, async (req, res) => {
+  try {
+    const orgs = await Organization.aggregate([
+      { $sort: { name: 1 } },
+      {
+        $lookup: {
+          from: 'userorganizations',
+          let: { oid: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: [{ $toString: '$organizationId' }, '$$oid'] } } },
+          ],
+          as: 'memberships',
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          let: { oid: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: [{ $toString: '$organizationId' }, '$$oid'] } } },
+            { $project: { role: 1, isActive: 1, lastLoginAt: 1 } },
+          ],
+          as: 'orgUsers',
+        },
+      },
+      {
+        $lookup: {
+          from: 'invoices',
+          let: { oid: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: [{ $toString: '$organizationId' }, '$$oid'] } } },
+            { $group: { _id: null, count: { $sum: 1 }, revenue: { $sum: '$financialSummary.totalAmount' }, recent: { $max: '$createdAt' } } },
+          ],
+          as: 'invoiceAgg',
+        },
+      },
+      {
+        $lookup: {
+          from: 'clients',
+          let: { oid: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: [{ $toString: '$organizationId' }, '$$oid'] } } },
+            { $count: 'count' },
+          ],
+          as: 'clientAgg',
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          name: { $ifNull: ['$name', '$organizationName'] },
+          code: { $ifNull: ['$organizationCode', '$code'] },
+          ownerEmail: 1,
+          abn: 1,
+          isActive: { $ifNull: ['$isActive', true] },
+          isMultiOrgEnabled: { $ifNull: ['$isMultiOrgEnabled', false] },
+          createdAt: 1,
+          // $lookup always yields an array, even for an org with no users.
+          members: { $size: '$memberships' },
+          directUsers: { $size: '$orgUsers' },
+          invoiceCount: { $ifNull: [{ $arrayElemAt: ['$invoiceAgg.count', 0] }, 0] },
+          revenue: { $ifNull: [{ $arrayElemAt: ['$invoiceAgg.revenue', 0] }, 0] },
+          lastInvoiceAt: { $arrayElemAt: ['$invoiceAgg.recent', 0] },
+          clientCount: { $ifNull: [{ $arrayElemAt: ['$clientAgg.count', 0] }, 0] },
+          roleCounts: {
+            $arrayToObject: {
+              $map: {
+                input: { $setUnion: ['$orgUsers.role'] },
+                as: 'r',
+                in: {
+                  k: '$$r',
+                  v: {
+                    $size: {
+                      $filter: { input: '$orgUsers', as: 'u', cond: { $eq: ['$$u.role', '$$r'] } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          activeUsers: {
+            $size: { $filter: { input: '$orgUsers', as: 'u', cond: { $eq: ['$$u.isActive', true] } } },
+          },
+        },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      data: orgs,
+      // Cheap enough to compute; lets the UI show "N orgs" without counting rows.
+      total: orgs.length,
+    });
+  } catch (error) {
+    logger.error('admin-dev organizations list failed', { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.get('/static/chart.umd.js', devAuth, (req, res) => {
   res.sendFile(path.join(__dirname, '../public/vendor/chart.umd.js'));
 });
