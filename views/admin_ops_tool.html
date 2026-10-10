@@ -292,6 +292,12 @@ function runBusy(btn, fn) { return busy(btn, fn()); }
 let analyticsEverLoaded = false;
 
 function fmtNum(n) { return (n === undefined || n === null) ? 0 : n.toLocaleString(); }
+// AUD, matching billingNotificationService's audFormatter. Revenue is stored in
+// whole dollars, not cents.
+function fmtMoney(n) {
+  if (n === undefined || n === null || Number.isNaN(Number(n))) return '—';
+  return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(Number(n));
+}
 
 // ---- Instance health -------------------------------------------------------
 // Collapsed and un-fetched by default. On Cloud Run these counters are empty
@@ -583,11 +589,15 @@ async function loadAnalytics() {
   const org = orgId ? '&orgId=' + encodeURIComponent(orgId) : '';
   const compare = document.getElementById('compareToggle').checked ? '&compare=previous' : '';
   try {
+    // `range` carries the custom from/to when one is selected, so the
+    // breakdown and top panels must use it too rather than re-deriving a day
+    // count — otherwise picking a custom range changed the timeseries only and
+    // left these panels silently on the last preset.
     const [ts, status, topClients, topUsers] = await Promise.all([
       req(`/admin-dev/api/ops/analytics/timeseries?${range}${org}${compare}`),
-      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&days=${rangeDays()}${org}`),
-      req(`/admin-dev/api/ops/analytics/top?entity=clients&days=${rangeDays()}&limit=8${org}${compare}`),
-      req(`/admin-dev/api/ops/analytics/top?entity=users&days=${rangeDays()}&limit=8${org}${compare}`),
+      req(`/admin-dev/api/ops/analytics/breakdown?entity=invoiceStatus&${range}${org}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=clients&${range}&limit=8${org}${compare}`),
+      req(`/admin-dev/api/ops/analytics/top?entity=users&${range}&limit=8${org}${compare}`),
     ]);
     // A newer load started while this one was in flight: drop the stale result
     // instead of letting the slower earlier response overwrite the newer one.
@@ -595,7 +605,9 @@ async function loadAnalytics() {
     const s = ts.data.series;
     document.getElementById('analyticsScope').textContent = ts.data.scope === 'platform'
       ? 'platform-wide' : 'scoped to org ' + ts.data.scope;
-    renderCompareSummary(ts.data);
+    // Charts are drawn first and the comparison summary last. The summary is
+    // decorative: if it throws it must not take the whole analytics panel —
+    // including every chart below it — down with it.
     destroyChart('usersChart'); charts.usersChart = new Chart(document.getElementById('usersChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'new', data: s.map(x => x.newUsers), borderColor:'#3498db', fill:false }, { label: 'active', data: s.map(x => x.activeUsers), borderColor:'#2ecc71', fill:false }, ...(s[0] && s[0].prevNewUsers !== undefined ? [{ label: 'new (prev)', data: s.map(x => x.prevNewUsers), borderColor:'#3498db', borderDash:[4,3], fill:false }] : []) ] }, options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } } });
     destroyChart('revenueChart'); charts.revenueChart = new Chart(document.getElementById('revenueChart'), { type: 'bar', data: { labels: s.map(x => x.date), datasets: [ { label: 'invoices', data: s.map(x => x.invoices), backgroundColor:'#9b59b6', yAxisID:'y' }, { label: 'revenue', data: s.map(x => x.revenue), type: 'line', borderColor:'#e67e22', yAxisID:'y1' } ] }, options: { scales: { y: { beginAtZero: true }, y1: { position: 'right', beginAtZero: true } } } });
     destroyChart('hoursChart'); charts.hoursChart = new Chart(document.getElementById('hoursChart'), { type: 'line', data: { labels: s.map(x => x.date), datasets: [ { label: 'hours', data: s.map(x => x.workedHours), borderColor:'#16a085', fill:false }, ...(s[0] && s[0].prevWorkedHours !== undefined ? [{ label: 'hours (prev)', data: s.map(x => x.prevWorkedHours), borderColor:'#16a085', borderDash:[4,3], fill:false }] : []) ] }, options: { scales: { y: { beginAtZero: true } } } });
@@ -603,6 +615,7 @@ async function loadAnalytics() {
     destroyChart('topClientsChart'); charts.topClientsChart = new Chart(document.getElementById('topClientsChart'), { type: 'bar', data: { labels: topClients.data.map(x => x.label), datasets: [ { label: 'value', data: topClients.data.map(x => x.total), backgroundColor:'#2980b9' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
     destroyChart('topUsersChart'); charts.topUsersChart = new Chart(document.getElementById('topUsersChart'), { type: 'bar', data: { labels: topUsers.data.map(x => x.label), datasets: [ { label: 'hours', data: topUsers.data.map(x => x.total), backgroundColor:'#8e44ad' } ] }, options: { indexAxis: 'y', scales: { x: { beginAtZero: true } } } });
     analyticsEverLoaded = true;
+    try { renderCompareSummary(ts.data); } catch (e) { /* decorative — never break charts */ }
     setPanel('analytics', 'ok', new Date().toLocaleTimeString());
   } catch (e) { setPanel('analytics', 'error', e.message); }
 }
