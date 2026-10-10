@@ -13,12 +13,21 @@ const express = require('express');
 const router = express.Router();
 
 const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const DeviceSigningKey = require('../models/DeviceSigningKey');
 const svc = require('../services/invoiceSignatureService');
 
-router.use(authenticateUser);
+// requireOrgMembership validates an active membership against the caller's
+// organization context, so a device cannot register a signing key against an
+// organization it does not belong to. Reading organizationId from the signed-in
+// account without this is exactly what the org-tenancy guard rejects.
+router.use(authenticateUser, requireOrgMembership);
 
 const RAW_ED25519_LENGTH = 32;
+
+/** The organizationId this request is authorised for. */
+const contextOrgId = (req) =>
+  String((req.organizationContext && req.organizationContext.organizationId) || '');
 
 /**
  * Registers or replaces a device public key.
@@ -42,15 +51,12 @@ router.post('/register', async (req, res) => {
     // Validate the key is actually a usable Ed25519 public key before storing
     // it, so a malformed registration is caught at the door rather than at the
     // first verification attempt, when it is too late to fix.
-    let raw;
-    let key;
+    const raw = Buffer.from(publicKeyBase64, 'base64');
     try {
-      raw = Buffer.from(publicKeyBase64, 'base64');
-      key = svc.publicKeyFromBase64(publicKeyBase64);
+      svc.publicKeyFromBase64(publicKeyBase64);
     } catch (e) {
       return res.status(400).json({ success: false, message: 'key is not a valid Ed25519 public key' });
     }
-    if (!key) return res.status(500).json({ success: false, message: 'key validation unavailable' });
 
     if (raw.length !== RAW_ED25519_LENGTH && raw.length !== 44) {
       return res.status(400).json({
@@ -59,7 +65,7 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    const organizationId = String(req.user.organizationId || req.user.organization || '');
+    const organizationId = contextOrgId(req);
     if (!organizationId) {
       return res.status(400).json({ success: false, message: 'Signed-in account has no organizationId' });
     }
@@ -107,7 +113,7 @@ router.post('/register', async (req, res) => {
 /** Public keys for the caller's organisation. */
 router.get('/', async (req, res) => {
   try {
-    const organizationId = String(req.user.organizationId || req.user.organization || '');
+    const organizationId = contextOrgId(req);
     const keys = await DeviceSigningKey.find(organizationId ? { organizationId } : {})
       .select('-__v')
       .sort({ createdAt: -1 })
