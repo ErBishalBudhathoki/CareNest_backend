@@ -165,14 +165,32 @@ that device already issued. Rotation must be explicit.
 | `backend/routes/invoiceSigning.routes.js` | registration and lookup (app-authenticated) |
 | `backend/services/invoicePdfVerifier.js` | PDF parsing + signature + arithmetic + record comparison |
 
+## Registration flow
+
+`InvoiceSigningService.ensureRegistered` is called before signing. It:
+
+1. **skips entirely with no organisation context.** Guessing an organisation and
+   binding a signing key to it is what the backend guard rejects, and it is the one
+   thing that would undermine the scheme.
+2. **returns early if the key is already registered**, cached in memory for the
+   session and in secure storage across launches, so it is one call per key rather
+   than one per invoice.
+3. **fails soft.** A rejected or offline registration leaves the invoice generated
+   but unverifiable — the verifier reports `unregistered-key` rather than the
+   invoice failing. A flaky connection must not stop someone from invoicing.
+
+The HTTP call is injected as a `KeyRegistrationPoster` rather than hard-coded, so
+the path is testable without the network.
+
 ## Known gaps
 
-- **Signing is wired but registration is not called automatically.** The generator
-  signs when a keypair exists on the device; there is no onboarding flow that
-  registers the public key with the backend yet, so on a fresh device the first
-  invoice is emitted signed-but-unregistered. The verifier reports this as
-  `unregistered-key` rather than as a failure — which is correct, but it does mean
-  the signature is not yet usable until that registration call lands.
 - **The canonical form covers the document's financial facts, not its presentation.**
+  Change the logo, the wording or the layout and the signature still verifies,
+  correctly: those are not the facts being protected.
+- **Registration is per-organisation and first-write-wins.** A device registers a
+  key once, bound to the organisation it was signed into. If that device is later
+  moved to a different organisation, the existing key stays registered to the old
+  one and the verifier reports an organisation mismatch. Deliberate: the
+  alternative lets a key be re-pointed at another tenant.
   Change the logo, the wording or the layout and the signature still verifies,
   correctly: those are not the facts being protected.
