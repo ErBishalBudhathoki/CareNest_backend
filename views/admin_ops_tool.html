@@ -6,216 +6,391 @@
 <title>CareNest Ops Console (Dev)</title>
 <script src="/admin-dev/static/chart.umd.js"></script>
 <style>
+  /* Design language follows Twenty's record-browser model: a fixed record
+     sidebar, a thin top bar, and dense single-column content. Near-neutral
+     greys carry the hierarchy instead of shadows or saturated accent colours,
+     so the data stays the loudest thing on screen. */
   :root {
-    --bg:#f4f7f6; --panel:#fff; --ink:#333; --ink-strong:#2c3e50; --ink-muted:#555;
-    --line:#eee; --soft:#f8f9fa; --chip:#eef2f7; --focus:#3498db;
-    --warn:#b3541e; --ok:#1e7d50; --dim:#8898aa;
+    --bg:#ffffff; --panel:#ffffff; --sidebar:#fafafa; --ink:#1c1c1c; --ink-strong:#0a0a0a; --ink-muted:#767676;
+    --line:#e8e8e8; --soft:#f5f5f5; --chip:#ececec; --focus:#2f6fed;
+    --warn:#b3541e; --ok:#1e7d50; --dim:#8c8c8c; --accent:#2f6fed;
+    --radius:6px;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg:#12181c; --panel:#1a2228; --ink:#dfe6ea; --ink-strong:#eef4f7; --ink-muted:#a9b6bf;
-      --line:#2a343b; --soft:#212b32; --chip:#263239;
-      --warn:#e08b5a; --ok:#5cc98d; --dim:#7d8b95;
+      --bg:#111111; --panel:#181818; --sidebar:#141414; --ink:#e6e6e6; --ink-strong:#ffffff; --ink-muted:#8c8c8c;
+      --line:#282828; --soft:#1f1f1f; --chip:#262626;
+      --warn:#e08b5a; --ok:#5cc98d; --dim:#8c8c8c; --accent:#5b8dff;
     }
   }
   :root[data-theme="dark"] {
-    --bg:#12181c; --panel:#1a2228; --ink:#dfe6ea; --ink-strong:#eef4f7; --ink-muted:#a9b6bf;
-    --line:#2a343b; --soft:#212b32; --chip:#263239;
-    --warn:#e08b5a; --ok:#5cc98d; --dim:#7d8b95;
+    --bg:#111111; --panel:#181818; --sidebar:#141414; --ink:#e6e6e6; --ink-strong:#ffffff; --ink-muted:#8c8c8c;
+    --line:#282828; --soft:#1f1f1f; --chip:#262626;
+    --warn:#e08b5a; --ok:#5cc98d; --dim:#8c8c8c; --accent:#5b8dff;
   }
-  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; background:var(--bg); color:var(--ink); margin:0; padding:20px; }
-  .container { max-width: 1180px; margin: 0 auto; }
-  section { background:var(--panel); border-radius:8px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
-  h2 { margin-top:0; color:var(--ink-strong); font-size:16px; }
-  h3 { margin:12px 0 6px; font-size:13px; color:var(--ink-muted); }
-  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; }
-  th { cursor:pointer; user-select:none; }
-  input,select,button { padding:6px 10px; margin:4px 4px 4px 0; border:1px solid var(--line); border-radius:4px; background:var(--soft); color:var(--ink); }
-  button { background:#3498db; color:#fff; border:none; cursor:pointer; } button:hover { background:#2980b9; }
-  button.danger { background:#c0392b; } button.danger:hover { background:#a93226; }
-  pre { background:var(--soft); color:var(--ink); padding:10px; border-radius:4px; overflow:auto; font-size:12px; max-height:320px; }
-  .alert { padding:10px; border-radius:4px; margin-bottom:12px; display:none; }
-  .alert.success { background:#d4edda; color:#155724; } .alert.error { background:#f8d7da; color:#721c24; }
-  .kpi { display:inline-block; min-width:140px; padding:10px 14px; margin:0 8px 8px 0; background:var(--soft); border-radius:6px; }
-  .kpi .val { font-size:22px; font-weight:600; color:var(--ink-strong); }
-  .kpi .lab { font-size:11px; color:var(--dim); text-transform:uppercase; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
-  .pager { margin-top:10px; }
-  .chip { display:inline-block; padding:2px 8px; border-radius:12px; background:var(--chip); color:var(--ink); font-size:11px; margin:0 2px; }
-  details > summary { cursor:pointer; list-style:revert; display:list-item; }
+  * { box-sizing:border-box; }
+  body { font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); margin:0; font-size:13px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; }
+
+  .app { display:grid; grid-template-columns:236px 1fr; min-height:100vh; }
+
+  /* ---- sidebar ---- */
+  .sidebar { background:var(--sidebar); border-right:1px solid var(--line); position:sticky; top:0;
+    height:100vh; overflow-y:auto; display:flex; flex-direction:column; }
+  .brand { display:flex; align-items:center; gap:9px; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .brand-mark { width:24px; height:24px; border-radius:5px; background:var(--ink-strong); color:var(--panel);
+    font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; letter-spacing:.3px; }
+  .brand-name { font-weight:600; color:var(--ink-strong); font-size:13px; }
+  .brand-name small { display:block; font-weight:400; color:var(--dim); font-size:10px; }
+  .nav { padding:8px; flex:1; }
+  .nav-label { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim);
+    padding:14px 8px 6px; font-weight:600; }
+  .nav-item { display:flex; align-items:center; gap:9px; width:100%; text-align:left; padding:6px 8px;
+    border-radius:var(--radius); background:none; border:none; color:var(--ink-muted); font-size:13px;
+    cursor:pointer; font-weight:400; margin:0; }
+  .nav-item:hover { background:var(--soft); color:var(--ink); }
+  .nav-item[aria-current="page"] { background:var(--chip); color:var(--ink-strong); font-weight:500; }
+  .nav-item .nav-count { margin-left:auto; font-size:10px; color:var(--dim); font-variant-numeric:tabular-nums; }
+  .sidebar-foot { padding:8px; border-top:1px solid var(--line); }
+
+  /* ---- top bar ---- */
+  .topbar { position:sticky; top:0; z-index:6; display:flex; align-items:center; gap:10px;
+    padding:0 16px; height:48px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .search { flex:0 1 340px; }
+  .topbar-right { margin-left:auto; display:flex; align-items:center; gap:10px; }
+  .ctl { display:flex; align-items:center; gap:6px; color:var(--ink-muted); font-size:12px; white-space:nowrap; }
+
+  .content { padding:18px 20px 48px; max-width:1280px; }
+  .view[hidden] { display:none; }
+
+  .view-head { display:flex; align-items:baseline; gap:12px; margin:0 0 14px; flex-wrap:wrap; }
+  .view-head h2 { margin:0; font-size:16px; color:var(--ink-strong); font-weight:600; letter-spacing:-.01em; }
+  .view-head .muted { margin:0; }
+
+  section.card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:14px 16px; margin-bottom:14px; }
+  h3 { margin:14px 0 6px; font-size:11px; color:var(--ink-muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  h3:first-child { margin-top:0; }
+
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); font-size:13px; }
+  th { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); font-weight:600;
+    cursor:pointer; user-select:none; white-space:nowrap; }
+  th[aria-sort]:hover, th[aria-sort="none"] { color:var(--ink-muted); }
+  tbody tr:hover { background:var(--soft); }
+  tbody tr:last-child td { border-bottom:none; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; }
+
+  input,select,button { padding:5px 9px; margin:4px 4px 4px 0; border:1px solid var(--line);
+    border-radius:var(--radius); background:var(--panel); color:var(--ink); font-size:13px; font-family:inherit; }
+  select { background:var(--soft); }
+  button { background:var(--soft); color:var(--ink); cursor:pointer; font-weight:500; }
+  button:hover { background:var(--chip); }
+  button.primary { background:var(--ink-strong); color:var(--panel); border-color:var(--ink-strong); }
+  button.primary:hover { opacity:.88; background:var(--ink-strong); }
+  button.danger { background:#c0392b; color:#fff; border-color:#c0392b; }
+  button.danger:hover { background:#a93226; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+  pre { background:var(--soft); color:var(--ink); padding:10px 12px; border:1px solid var(--line);
+    border-radius:var(--radius); overflow:auto; font-size:11px; max-height:340px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+
+  .alert { padding:9px 12px; border-radius:var(--radius); margin-bottom:12px; display:none;
+    border:1px solid var(--line); font-size:12px; }
+  .alert.success { background:color-mix(in srgb, var(--ok) 10%, var(--panel)); color:var(--ok); border-color:color-mix(in srgb, var(--ok) 30%, var(--line)); }
+  .alert.error { background:color-mix(in srgb, #c0392b 10%, var(--panel)); color:#c0392b; border-color:color-mix(in srgb, #c0392b 30%, var(--line)); }
+
+  .kpi { display:inline-block; min-width:132px; padding:10px 14px; margin:0 8px 8px 0;
+    background:var(--soft); border:1px solid var(--line); border-radius:var(--radius); }
+  .kpi .val { font-size:20px; font-weight:600; color:var(--ink-strong); font-variant-numeric:tabular-nums; }
+  .kpi .lab { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:14px; }
+  .chart-card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; }
+  .chart-card h3 { margin-top:0; }
+  .pager { margin-top:10px; display:flex; align-items:center; gap:8px; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:99px; background:var(--chip);
+    color:var(--ink-muted); font-size:10px; font-weight:500; white-space:nowrap; }
+  .chip.ok { background:color-mix(in srgb, var(--ok) 12%, var(--panel)); color:var(--ok); }
+  .chip.warn { background:color-mix(in srgb, var(--warn) 14%, var(--panel)); color:var(--warn); }
+  details { border:1px solid var(--line); border-radius:var(--radius); padding:2px 14px; background:var(--panel); }
+  details[open] { padding-bottom:12px; }
+  details > summary { cursor:pointer; list-style:revert; display:list-item; padding:10px 0; }
   details > summary::marker { color:var(--dim); }
-  #instanceBody { margin-top:10px; }
+  #instanceBody, #ledgerBody { margin-top:10px; }
   .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:14px; }
-  .kv > div { background:var(--soft); border-radius:6px; padding:8px 10px; }
-  .kv .k { font-size:11px; color:var(--dim); text-transform:uppercase; }
-  .kv .v { font-size:15px; font-weight:600; color:var(--ink-strong); }
+  .kv > div { background:var(--soft); border:1px solid var(--line); border-radius:var(--radius); padding:8px 10px; }
+  .kv .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+  .kv .v { font-size:15px; font-weight:600; color:var(--ink-strong); font-variant-numeric:tabular-nums; }
   .warn { color:var(--warn); }
   .ok { color:var(--ok); }
-  .panel-status { font-size:11px; margin-left:10px; }
+  .panel-status { font-size:10px; margin-left:8px; font-weight:500; white-space:nowrap; }
   .panel-status.ok { color:var(--ok); }
   .panel-status.warn { color:var(--warn); }
   .panel-status.muted { color:var(--dim); }
-  .head-row { display:flex; align-items:center; flex-wrap:wrap; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
   .muted { color:var(--dim); font-size:12px; }
-</style>
+  kbd { background:var(--chip); border:1px solid var(--line); border-radius:4px; padding:0 5px;
+    font-size:10px; font-family:inherit; color:var(--ink-muted); }
+  .toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:2px; }
+
+  /* Narrow viewports collapse the sidebar into a horizontal strip rather than
+     hiding it — the console is useless without navigation. */
+  @media (max-width:820px) {
+    .app { grid-template-columns:1fr; }
+    .sidebar { position:static; height:auto; flex-direction:row; align-items:center; overflow-x:auto; }
+    .brand { border-bottom:none; border-right:1px solid var(--line); }
+    .nav, .sidebar-foot { display:flex; padding:6px; gap:2px; flex:0 0 auto; }
+    .nav-label { display:none; }
+    .nav-item { white-space:nowrap; }
+    .nav-item .nav-count { display:none; }
+  }
+  </style>
 </head>
 <body>
-<div class="container">
-  <h1>CareNest Ops Console (Developer Only)</h1>
-  <p>
-    <a href="/admin-dev">AI Invoice Settings</a> &middot; <a href="/admin-dev/ops">Ops Console</a>
-    &middot; <span id="buildInfo" class="muted">loading build…</span>
-  </p>
-  <p class="head-row">
-    <button id="themeToggle" onclick="toggleTheme()">Theme</button>
-    <label class="muted">Auto-refresh:
-      <select id="autoRefresh" onchange="setAutoRefresh(this.value)">
-        <option value="0">off</option>
-        <option value="10000">10s</option>
-        <option value="30000">30s</option>
-        <option value="60000">1m</option>
-      </select>
-    </label>
-    <span class="muted">Press <kbd>/</kbd> to search users &middot; <kbd>r</kbd> to refresh all</span>
-  </p>
-  <div id="alert" class="alert" role="alert" aria-live="polite"></div>
-
-  <section>
-    <details id="instanceHealth">
-      <summary>
-        <strong>Instance Health</strong>
-        <span class="muted">&mdash; this instance only</span>
-        <span id="instanceSummary" class="chip" style="margin-left:10px">not loaded</span>
-      </summary>
-      <p class="muted" style="margin:8px 0">
-        In-memory counters. Reset on every deploy and on Cloud Run scale-to-zero cold start.
-        Not platform history &mdash; use Grafana / Cloud Monitoring for that.
-      </p>
-      <button onclick="loadInstance()">Refresh</button>
-      <div id="instanceBody"></div>
-    </details>
-  </section>
-
-  <section>
-    <h2>Platform KPIs</h2><span id="panelStatus-kpis" class="panel-status muted"></span>
-    <label>Org: <input id="kpiOrgId" placeholder="all orgs (platform-wide)" style="width:220px"></label>
-    <button onclick="loadStats()">Refresh</button>
-    <span id="kpiScope" class="muted"></span>
-    <div id="kpis"></div>
-  </section>
-
-  <section>
-    <h2>Analytics</h2><span id="panelStatus-analytics" class="panel-status muted"></span>
-    <label>Range:
-      <select id="rangePreset" onchange="applyPreset(this.value)">
-        <option value="7">Last 7d</option>
-        <option value="30" selected>Last 30d</option>
-        <option value="90">Last 90d</option>
-        <option value="180">Last 180d</option>
-        <option value="365">Last 365d</option>
-        <option value="custom">Custom…</option>
-      </select>
-    </label>
-    <span id="customRange" style="display:none">
-      <input id="dateFrom" type="date"><input id="dateTo" type="date" onchange="loadAnalytics()">
-    </span>
-    <label>Org: <input id="orgScope" placeholder="all orgs" style="width:200px"></label>
-    <label><input type="checkbox" id="compareToggle" onchange="loadAnalytics()"> compare previous period</label>
-    <button id="analyticsBtn" onclick="runBusy(this, loadAnalytics)">Load charts</button>
-    <span id="analyticsScope" class="muted"></span>
-    <div id="compareSummary"></div>
-    <div class="grid">
-      <div><h3>Users (new vs active/day)</h3><canvas id="usersChart" height="160"></canvas></div>
-      <div><h3>Invoices &amp; revenue / day</h3><canvas id="revenueChart" height="160"></canvas></div>
-      <div><h3>Worked hours / day</h3><canvas id="hoursChart" height="160"></canvas></div>
-      <div><h3>Invoice status</h3><canvas id="statusChart" height="160"></canvas></div>
-      <div><h3>Top clients by value</h3><canvas id="topClientsChart" height="160"></canvas></div>
-      <div><h3>Top users by hours</h3><canvas id="topUsersChart" height="160"></canvas></div>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">CN</span>
+      <span class="brand-name">CareNest Ops<small>developer console</small></span>
     </div>
-  </section>
+    <nav class="nav" aria-label="Console sections">
+      <div class="nav-label">Records</div>
+      <button class="nav-item" data-view="organizations" aria-current="page">Organizations <span class="nav-count" id="orgCount"></span></button>
+      <button class="nav-item" data-view="users">Users <span class="nav-count" id="usersCount"></span></button>
+      <div class="nav-label">Insights</div>
+      <button class="nav-item" data-view="analytics">Analytics</button>
+      <div class="nav-label">Operations</div>
+      <button class="nav-item" data-view="health">Instance Health</button>
+      <button class="nav-item" data-view="ledgers">Failure Ledgers</button>
+      <div class="nav-label">Admin</div>
+      <button class="nav-item" data-view="audit">Audit Trail</button>
+      <button class="nav-item" data-view="danger">Danger Zone</button>
+    </nav>
+    <div class="sidebar-foot">
+      <a class="nav-item" href="/admin-dev">AI Invoice Settings</a>
+    </div>
+  </aside>
 
-  <section>
-    <h2>User Records</h2><span id="panelStatus-users" class="panel-status muted"></span>
-    <input id="q" placeholder="search email/name" style="width:220px">
-    <select id="roleFilter"><option value="">any role</option><option>admin</option><option>superadmin</option><option>employee</option><option>client</option><option>manager</option><option>moderator</option><option>family</option></select>
-    <input id="orgIdFilter" placeholder="orgId" style="width:140px">
-    <select id="activeFilter"><option value="">any status</option><option value="true">active</option><option value="false">inactive</option></select>
-    <button onclick="loadUsers(1)">Search</button>
-    <select id="pageSize" onchange="loadUsers(1)">
-      <option value="25">25/page</option>
-      <option value="50">50/page</option>
-      <option value="100">100/page</option>
-    </select>
-    <button class="danger" onclick="exportUsers('csv')">Export CSV</button>
-    <button onclick="exportUsers('json')">Export JSON</button>
-    <div id="usersTable"></div>
-    <div class="pager" id="usersPager"></div>
-  </section>
+  <div class="main">
+    <header class="topbar">
+      <input id="q" class="search" placeholder="Search users…  ( / )" aria-label="Search users">
+      <div class="topbar-right">
+        <span id="buildInfo" class="muted">loading build…</span>
+        <label class="ctl">Auto-refresh
+          <select id="autoRefresh" onchange="setAutoRefresh(this.value)">
+            <option value="0">off</option>
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+            <option value="60000">1m</option>
+          </select>
+        </label>
+        <button id="themeToggle" onclick="toggleTheme()">Theme</button>
+      </div>
+    </header>
 
-  <section>
-    <h2>User Drill-down</h2><span id="panelStatus-lookup" class="panel-status muted"></span>
-    <input id="luEmail" placeholder="user@example.com" style="width:260px">
-    <button onclick="lookupUser()">Lookup</button>
-    <pre id="luResult"></pre>
-  </section>
+    <div class="content">
+      <div id="alert" class="alert" role="alert" aria-live="polite"></div>
 
-  <section>
-    <details id="failureLedgers">
-      <summary>
-        <strong>Failure Ledgers</strong>
-        <span class="muted">&mdash; what broke and is still broken</span>
-        <span id="ledgerSummary" class="chip" style="margin-left:10px">not loaded</span>
-      </summary>
-      <p class="muted" style="margin:8px 0">
-        Reads failures the app already persists but that nothing else surfaces. Lazy-loaded on first expand.
-      </p>
-      <button onclick="loadLedgers()">Refresh</button>
-      <div id="ledgerBody"></div>
-    </details>
-  </section>
+      <!-- ============ ORGANIZATIONS ============ -->
+      <section class="view" data-view="organizations">
+        <div class="view-head">
+          <h2>Organizations</h2>
+          <span id="panelStatus-orgs" class="panel-status muted"></span>
+          <button onclick="loadOrgs()">Refresh</button>
+          <span id="orgsScope" class="muted"></span>
+        </div>
+        <p class="muted" style="margin:0 0 12px">
+          Every tenant on this instance with its real footprint. Pick one to scope Analytics or KPIs — no ObjectId required.
+        </p>
+        <div id="orgsTable"></div>
+      </section>
 
-  <section>
-    <h2>Leave Balance Integrity</h2><span id="panelStatus-leave" class="panel-status muted"></span>
-    <button onclick="loadIntegrity()">Refresh</button>
-    <pre id="integrityResult"></pre>
-  </section>
+      <!-- ============ USERS ============ -->
+      <section class="view" data-view="users" hidden>
+        <div class="view-head">
+          <h2>Users</h2>
+          <span id="panelStatus-users" class="panel-status muted"></span>
+        </div>
+        <div class="toolbar">
+          <select id="roleFilter"><option value="">any role</option><option>admin</option><option>superadmin</option><option>employee</option><option>client</option><option>manager</option><option>moderator</option><option>family</option></select>
+          <input id="orgIdFilter" placeholder="orgId" style="width:150px">
+          <select id="activeFilter"><option value="">any status</option><option value="true">active</option><option value="false">inactive</option></select>
+          <button class="primary" onclick="loadUsers(1)">Search</button>
+          <select id="pageSize" onchange="loadUsers(1)">
+            <option value="25">25/page</option>
+            <option value="50">50/page</option>
+            <option value="100">100/page</option>
+          </select>
+          <button class="danger" onclick="exportUsers('csv')">Export CSV</button>
+          <button onclick="exportUsers('json')">Export JSON</button>
+        </div>
+        <div id="usersTable"></div>
+        <div class="pager" id="usersPager"></div>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">User Drill-down</h2><span id="panelStatus-lookup" class="panel-status muted"></span>
+          </div>
+          <input id="luEmail" placeholder="user@example.com" style="width:280px">
+          <button onclick="lookupUser()">Lookup</button>
+          <pre id="luResult"></pre>
+        </section>
+      </section>
 
-  <section>
-    <h2>Certifications Expiring</h2><span id="panelStatus-certs" class="panel-status muted"></span>
-    <input id="certDays" type="number" value="30" style="width:80px"> days
-    <button onclick="loadCertExpiry()">Load</button>
-    <pre id="certResult"></pre>
-  </section>
+      <!-- ============ ANALYTICS ============ -->
+      <section class="view" data-view="analytics" hidden>
+        <div class="view-head">
+          <h2>Analytics</h2>
+          <span id="panelStatus-analytics" class="panel-status muted"></span>
+        </div>
+        <div class="toolbar">
+          <label class="ctl">Range:
+            <select id="rangePreset" onchange="applyPreset(this.value)">
+              <option value="7">Last 7d</option>
+              <option value="30" selected>Last 30d</option>
+              <option value="90">Last 90d</option>
+              <option value="180">Last 180d</option>
+              <option value="365">Last 365d</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <span id="customRange" style="display:none">
+            <label class="ctl">from <input id="dateFrom" type="date" onchange="loadAnalytics()"></label>
+            <label class="ctl">to <input id="dateTo" type="date" onchange="loadAnalytics()"></label>
+          </span>
+          <label class="ctl">Org:
+            <input id="orgScope" placeholder="all orgs" style="width:180px">
+          </label>
+          <label class="ctl"><input type="checkbox" id="compareToggle" onchange="loadAnalytics()"> compare previous</label>
+          <button id="analyticsBtn" class="primary" onclick="runBusy(this, loadAnalytics)">Load charts</button>
+          <span id="analyticsScope" class="muted"></span>
+        </div>
+        <div id="compareSummary"></div>
+        <div class="grid">
+          <div class="chart-card"><h3>Users (new vs active/day)</h3><canvas id="usersChart" height="160"></canvas></div>
+          <div class="chart-card"><h3>Invoices &amp; revenue / day</h3><canvas id="revenueChart" height="160"></canvas></div>
+          <div class="chart-card"><h3>Worked hours / day</h3><canvas id="hoursChart" height="160"></canvas></div>
+          <div class="chart-card"><h3>Invoice status</h3><canvas id="statusChart" height="160"></canvas></div>
+          <div class="chart-card"><h3>Top clients by value</h3><canvas id="topClientsChart" height="160"></canvas></div>
+          <div class="chart-card"><h3>Top users by hours</h3><canvas id="topUsersChart" height="160"></canvas></div>
+        </div>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">Platform KPIs</h2><span id="panelStatus-kpis" class="panel-status muted"></span>
+            <span id="kpiScope" class="muted"></span>
+          </div>
+          <div class="toolbar">
+            <label class="ctl">Org: <input id="kpiOrgId" placeholder="all orgs (platform-wide)" style="width:220px"></label>
+            <button onclick="loadStats()">Refresh</button>
+          </div>
+          <div id="kpis"></div>
+        </section>
+      </section>
 
-  <section>
-    <h2>Valkey Rate-Limit Keys</h2><span id="panelStatus-valkey" class="panel-status muted"></span>
-    <button onclick="loadValkey()">Refresh</button>
-    <pre id="valkeyResult"></pre>
-    <button class="danger" onclick="resetRateLimits()">Clear all rl:* keys</button>
-  </section>
+      <!-- ============ HEALTH ============ -->
+      <section class="view" data-view="health" hidden>
+        <div class="view-head">
+          <h2>Operations</h2>
+          <span class="muted">live instance diagnostics and failure ledgers</span>
+        </div>
+        <details id="instanceHealth">
+          <summary>
+            <strong>Instance Health</strong>
+            <span class="muted">&mdash; this instance only</span>
+            <span id="instanceSummary" class="chip" style="margin-left:10px">not loaded</span>
+          </summary>
+          <p class="muted" style="margin:8px 0">
+            In-memory counters. Reset on every deploy and on Cloud Run scale-to-zero cold start.
+            Not platform history &mdash; use Grafana / Cloud Monitoring for that.
+          </p>
+          <button onclick="loadInstance()">Refresh</button>
+          <div id="instanceBody"></div>
+        </details>
+      </section>
 
-  <section>
-    <h2>Temporal Workflow Lookup</h2><span id="panelStatus-wf" class="panel-status muted"></span>
-    <input id="wfId" placeholder="workflow id" style="width:320px">
-    <button onclick="lookupWf()">Describe</button>
-    <pre id="wfResult"></pre>
-  </section>
+      <!-- ============ LEDGERS ============ -->
+      <section class="view" data-view="ledgers" hidden>
+        <details id="failureLedgers" open>
+          <summary>
+            <strong>Failure Ledgers</strong>
+            <span class="muted">&mdash; what broke and is still broken</span>
+            <span id="ledgerSummary" class="chip" style="margin-left:10px">not loaded</span>
+          </summary>
+          <p class="muted" style="margin:8px 0">
+            Reads failures the app already persists but that nothing else surfaces. Lazy-loaded on first open.
+          </p>
+          <button onclick="loadLedgers()">Refresh</button>
+          <div id="ledgerBody"></div>
+        </details>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">Leave Balance Integrity</h2><span id="panelStatus-leave" class="panel-status muted"></span>
+          </div>
+          <button onclick="loadIntegrity()">Refresh</button>
+          <pre id="integrityResult"></pre>
+        </section>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">Certifications Expiring</h2><span id="panelStatus-certs" class="panel-status muted"></span>
+          </div>
+          <div class="toolbar">
+            <input id="certDays" type="number" value="30" style="width:80px"> days
+            <button onclick="loadCertExpiry()">Load</button>
+          </div>
+          <pre id="certResult"></pre>
+        </section>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">Valkey Rate-Limit Keys</h2><span id="panelStatus-valkey" class="panel-status muted"></span>
+          </div>
+          <button onclick="loadValkey()">Refresh</button>
+          <pre id="valkeyResult"></pre>
+          <button class="danger" onclick="resetRateLimits()">Clear all rl:* keys</button>
+        </section>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">Temporal Workflow Lookup</h2><span id="panelStatus-wf" class="panel-status muted"></span>
+          </div>
+          <div class="toolbar">
+            <input id="wfId" placeholder="workflow id" style="width:340px">
+            <button onclick="lookupWf()">Describe</button>
+          </div>
+          <pre id="wfResult"></pre>
+        </section>
+      </section>
 
-  <section>
-    <h2>Recent Admin Actions</h2><span id="panelStatus-audit" class="panel-status muted"></span>
-    <button onclick="loadAudit()">Refresh</button>
-    <pre id="auditResult"></pre>
-  </section>
+      <!-- ============ AUDIT ============ -->
+      <section class="view" data-view="audit" hidden>
+        <div class="view-head">
+          <h2>Recent Admin Actions</h2><span id="panelStatus-audit" class="panel-status muted"></span>
+        </div>
+        <button onclick="loadAudit()">Refresh</button>
+        <pre id="auditResult"></pre>
+      </section>
 
-  <section>
-    <h2>Org Data Reset (DESTRUCTIVE)</h2><span id="panelStatus-orgreset" class="panel-status muted"></span>
-    <input id="orgId" placeholder="organizationId" style="width:260px">
-    <input id="orgConfirm" placeholder="type orgId to confirm" style="width:260px">
-    <button class="danger" onclick="resetOrg()">Reset leave balances + notifications for org</button>
-    <pre id="orgResult"></pre>
-  </section>
+      <!-- ============ DANGER ============ -->
+      <section class="view" data-view="danger" hidden>
+        <div class="view-head">
+          <h2>Danger Zone</h2>
+          <span class="muted">destructive actions — no undo</span>
+        </div>
+        <section class="card">
+          <div class="view-head">
+            <h2 style="font-size:14px">Org Data Reset</h2><span id="panelStatus-orgreset" class="panel-status muted"></span>
+          </div>
+          <p class="muted" style="margin:0 0 8px">Clears leave balances and notifications for a single organization.</p>
+          <div class="toolbar">
+            <input id="orgId" placeholder="organizationId" style="width:260px">
+            <input id="orgConfirm" placeholder="type organizationId to confirm" style="width:260px">
+            <button class="danger" onclick="resetOrg()">Reset org</button>
+          </div>
+          <pre id="orgResult"></pre>
+        </section>
+      </section>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -573,12 +748,21 @@ function analyticsRange() {
   const preset = document.getElementById('rangePreset').value;
   if (preset === 'custom') {
     const from = document.getElementById('dateFrom').value;
-    if (from) return 'from=' + encodeURIComponent(from);
+    const to = document.getElementById('dateTo').value;
+    // Both ends are now honoured server-side; without `to` selecting an end date
+    // silently did nothing.
+    if (from) return 'from=' + encodeURIComponent(from) + (to ? '&to=' + encodeURIComponent(to) : '');
+    if (to) {
+      // An end date with no start: back off 30 days so the window is still sane.
+      const start = new Date(to + 'T00:00:00.000Z');
+      start.setUTCDate(start.getUTCDate() - 29);
+      return 'from=' + start.toISOString().slice(0, 10) + '&to=' + encodeURIComponent(to);
+    }
   }
   return 'days=' + rangeDays();
 }
 function applyPreset(v) {
-  document.getElementById('customRange').style.display = v === 'custom' ? 'inline' : 'none';
+  document.getElementById('customRange').style.display = v === 'custom' ? 'inline-flex' : 'none';
   if (v !== 'custom') loadAnalytics();
 }
 async function loadAnalytics() {
@@ -851,19 +1035,123 @@ document.addEventListener('keydown', (ev) => {
   const typing = tag === 'input' || tag === 'select' || tag === 'textarea';
   if (ev.key === '/' && !typing) { ev.preventDefault(); document.getElementById('q').focus(); return; }
   if (ev.key === 'r' && !typing && !ev.metaKey && !ev.ctrlKey) { ev.preventDefault(); refreshAll(); return; }
-  if (ev.key === 'Enter' && ev.target.id === 'q') { ev.preventDefault(); loadUsers(1); return; }
+  // Enter in the global search jumps to the Users view and searches there,
+  // since the search field lives in the top bar rather than inside the view.
+  if (ev.key === 'Enter' && ev.target.id === 'q') { ev.preventDefault(); showView('users'); loadUsers(1); return; }
 });
 
-// ---- Build identity ------------------------------------------------------
+// ---- View routing --------------------------------------------------------
+// The console is now a record browser rather than one long scroll: the sidebar
+// selects a record type, and only the active section is in the layout. Views
+// are addressable via the hash so a view can be linked or reloaded, and each
+// is lazy-loaded on first visit — previously every panel fired on page load
+// even when nobody was looking at it.
+let currentView = 'organizations';
+const loadedViews = new Set();
 
-// Analytics was previously in the eager bootstrap, which meant every page load
-// fired ten simultaneous requests and fanned out to roughly twenty-three
-// database round trips before anything rendered.
-// Analytics is deliberately NOT eager: it is four aggregate round trips and
-// most visits never need it. The instance payload is fetched once because the
-// header build identity comes from the same response.
+function showView(name) {
+  const target = document.querySelector(`.view[data-view="${name}"]`);
+  if (!target) return;
+  currentView = name;
+  document.querySelectorAll('.view').forEach((v) => { v.hidden = v !== target; });
+  document.querySelectorAll('.nav-item[data-view]').forEach((b) => {
+    if (b.dataset.view === name) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+  if (window.location.hash.slice(1) !== name) {
+    window.history.replaceState(null, '', '#' + name);
+  }
+  // Lazy-load on first visit only. Analytics in particular is four aggregate
+  // round trips, so it must not fire merely because the page loaded.
+  if (!loadedViews.has(name)) {
+    loadedViews.add(name);
+    if (name === 'organizations') loadOrgs();
+    if (name === 'users') loadUsers(1);
+    if (name === 'analytics') loadAnalytics();
+    if (name === 'ledgers') loadLedgers();
+    if (name === 'audit') loadAudit();
+  }
+}
+
+document.querySelectorAll('.nav-item[data-view]').forEach((btn) => {
+  btn.addEventListener('click', () => showView(btn.dataset.view));
+});
+
+// ---- Organizations -------------------------------------------------------
+// Every tenant with its real footprint. Previously the console exposed an
+// `orgId` text input and nothing else, so inspecting a tenant meant finding its
+// ObjectId somewhere else entirely — which meant the scope went unused.
+async function loadOrgs() {
+  const n = beginSeq('orgs');
+  setPanel('orgs', 'loading');
+  try {
+    const d = await req('/admin-dev/api/ops/organizations');
+    if (!isCurrent('orgs', n)) return;
+    const orgs = d.data || [];
+    document.getElementById('orgCount').textContent = orgs.length || '';
+    document.getElementById('orgsScope').textContent = orgs.length
+      ? orgs.length + ' organization' + (orgs.length === 1 ? '' : 's')
+      : '';
+    const host = document.getElementById('orgsTable');
+    host.replaceChildren();
+    if (!orgs.length) {
+      host.appendChild(el('p', 'No organizations found.', 'muted'));
+      setPanel('orgs', 'ok', '0 orgs');
+      return;
+    }
+    const table = el('table');
+    const thead = el('thead');
+    const hr = el('tr');
+    ['Organization', 'Code', 'Owner', 'Members', 'Users', 'Clients', 'Invoices', 'Revenue', 'Status', '']
+      .forEach((h) => hr.appendChild(el('th', h)));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tb = el('tbody');
+    orgs.forEach((o) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', o.name || '(unnamed)'));
+      tr.appendChild(el('td', o.code || '—', 'mono'));
+      tr.appendChild(el('td', o.ownerEmail || '—'));
+      tr.appendChild(el('td', String(o.members ?? 0), 'num'));
+      tr.appendChild(el('td', String(o.directUsers ?? 0), 'num'));
+      tr.appendChild(el('td', String(o.clientCount ?? 0), 'num'));
+      tr.appendChild(el('td', String(o.invoiceCount ?? 0), 'num'));
+      tr.appendChild(el('td', fmtMoney(o.revenue || 0), 'num'));
+      const status = el('td');
+      status.appendChild(el('span', o.isActive ? 'active' : 'inactive',
+        o.isActive ? 'chip ok' : 'chip warn'));
+      tr.appendChild(status);
+      const act = el('td');
+      const scope = el('button', 'Scope analytics');
+      scope.onclick = () => scopeToOrg(o);
+      act.appendChild(scope);
+      tr.appendChild(act);
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    host.appendChild(table);
+    setPanel('orgs', 'ok', new Date().toLocaleTimeString());
+  } catch (e) {
+    setPanel('orgs', 'error', e.message);
+  }
+}
+
+// Jumping to Analytics with this org pre-filled is the whole point of listing
+// them: the operator clicks what they want to look at instead of pasting an id.
+function scopeToOrg(org) {
+  document.getElementById('orgScope').value = org._id;
+  document.getElementById('kpiOrgId').value = org._id;
+  showView('analytics');
+  loadAnalytics();
+  loadStats();
+  alertBox('Scoped to ' + (org.name || org._id));
+}
+
+// ---- Boot ----------------------------------------------------------------
 const hadState = restoreUsersFromUrl();
-loadStats(); loadUsers(hadState ? usersPage : 1); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit(); loadInstance();
+showView(window.location.hash.slice(1) || 'organizations');
+loadStats(); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit(); loadInstance();
+loadUsers(hadState ? usersPage : 1);
 </script>
 </body>
 </html>
