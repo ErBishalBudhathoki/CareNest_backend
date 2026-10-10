@@ -187,6 +187,7 @@ const AuditLog = require('../models/AuditLog');
 const UserOrganization = require('../models/UserOrganization');
 const { Invoice } = require('../models/Invoice');
 const WorkedTime = require('../models/WorkedTime');
+const DeviceSigningKey = require('../models/DeviceSigningKey');
 const Appointment = require('../models/ClientAssignment');
 const Client = require('../models/Client');
 const LeaveRequest = require('../models/LeaveRequest');
@@ -1283,12 +1284,14 @@ router.post(
       const watermark = verifier.inspectWatermark(text);
       const checks = verifier.checkArithmetic(fields);
       const arithmetic = { passed: checks.every((c) => c.passed), checks };
+      const signatureMeta = verifier.extractSignatureMetadata(buf);
 
       // A missing invoice number is a normal outcome for a foreign PDF, not an
       // error; there is simply nothing to compare it against.
       let record = { found: false, matches: null, diffs: [], realDiffCount: 0 };
+      let invoice = null;
       if (fields.invoiceNumber) {
-        const invoice = await Invoice.findOne({ invoiceNumber: fields.invoiceNumber })
+        invoice = await Invoice.findOne({ invoiceNumber: fields.invoiceNumber })
           .select('invoiceNumber startDate endDate financialSummary lineItems clientName')
           .lean();
         if (invoice) {
@@ -1303,7 +1306,29 @@ router.post(
         }
       }
 
-      const verdict = verifier.buildVerdict({ arithmetic, record, watermark });
+      // The signature names the device that signed, so the verifier can fetch
+      // that device's public key and check the document against it directly —
+      // which is what makes verification possible on any machine, including
+      // this one, without the signing device being present.
+      let storedKey = null;
+      if (signatureMeta.deviceKeyId) {
+        storedKey = await DeviceSigningKey.findOne({
+          deviceKeyId: signatureMeta.deviceKeyId,
+        }).lean();
+        // A key registered to a different organisation is still a valid key;
+        // it simply cannot vouch for this invoice.
+        if (storedKey && invoice && storedKey.organizationId !== invoice.organizationId) {
+          storedKey = { ...storedKey, organizationMismatch: true };
+        }
+      }
+
+      const signature = verifier.verifyEmbeddedSignature({
+        meta: signatureMeta,
+        storedKey,
+        record: invoice,
+      });
+
+      const verdict = verifier.buildVerdict({ arithmetic, record, watermark, signature });
 
       res.json({
         success: true,
@@ -1311,6 +1336,7 @@ router.post(
           verdict,
           watermark,
           watermarkLimits: verifier.WATERMARK_LIMITS,
+          signature: { ...signature, meta: signatureMeta },
           parsed: fields,
           arithmetic,
           record,

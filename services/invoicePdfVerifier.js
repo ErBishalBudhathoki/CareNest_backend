@@ -9,6 +9,7 @@
  * `WATERMARK_LIMITS` below.
  */
 const zlib = require('zlib');
+const signatureService = require('./invoiceSignatureService');
 
 /**
  * What the watermark can and cannot prove, stated explicitly because the
@@ -149,7 +150,27 @@ function extractPdfText(buffer) {
   return Buffer.from(textOps.join(' '), 'latin1').toString('utf8');
 }
 
-/** Reports whether an invisible watermark payload is present, and how big. */
+/**
+ * Extracts the signature block from the raw PDF.
+ *
+ * The signature lives in the Info dictionary, not the page content, so it is
+ * invisible when the PDF renders and invisible to text extraction — reaching it
+ * requires scanning the raw file. That is precisely what made the old
+ * zero-width watermark approach not merely insufficient but absent: base-14
+ * fonts dropped those glyphs before they reached the file.
+ */
+function extractSignatureMetadata(buffer) {
+  const raw = buffer.toString('latin1');
+  return signatureService.parseSignatureMetadata(raw);
+}
+
+/**
+ * Reports whether an invisible watermark payload is present, and how big.
+ *
+ * Presence only. The zero-width watermark this inspected never worked
+ * (base-14 font dropped the glyphs), and even a working one would prove nothing
+ * about the amounts. See WATERMARK_LIMITS.
+ */
 function inspectWatermark(text) {
   const found = {};
   for (const zw of ZERO_WIDTH) {
@@ -398,7 +419,7 @@ function compareToRecord(fields, invoice) {
  * Produces a single verdict from the three independent signals, and says
  * plainly which of them can and cannot support a tampering conclusion.
  */
-function buildVerdict({ arithmetic, record, watermark }) {
+function buildVerdict({ arithmetic, record, watermark, signature }) {
   const signals = [];
 
   if (!arithmetic.passed) {
@@ -410,10 +431,19 @@ function buildVerdict({ arithmetic, record, watermark }) {
   if (!watermark.present) {
     signals.push('no-watermark');
   }
+  // A failing signature is the strongest signal of the three: unlike arithmetic
+  // it also catches edits that keep the numbers self-consistent, and unlike the
+  // record it does not depend on the database being intact.
+  if (signature.status === 'invalid' || signature.status === 'unregistered-key') {
+    signals.push('signature-invalid');
+  }
 
   let verdict;
   let confidence;
-  if (!arithmetic.passed) {
+  if (signature.status === 'valid' && arithmetic.passed && (!record.found || record.matches)) {
+    verdict = 'authentic';
+    confidence = 'high';
+  } else if (!arithmetic.passed) {
     // Broken arithmetic is the strongest signal, because it needs no secret and
     // no database: the document contradicts itself.
     verdict = 'modified';
@@ -421,9 +451,12 @@ function buildVerdict({ arithmetic, record, watermark }) {
   } else if (record.found && !record.matches) {
     verdict = 'differs-from-record';
     confidence = 'high';
+  } else if (signature.status === 'absent') {
+    verdict = 'unsigned';
+    confidence = 'medium';
   } else if (record.found) {
-    verdict = watermark.present ? 'original' : 'consistent-with-record';
-    confidence = 'high';
+    verdict = 'consistent-with-record';
+    confidence = 'medium';
   } else {
     // Arithmetic is fine but there is nothing to compare against — either a
     // foreign invoice, or the invoice number could not be read. Claiming it
@@ -441,17 +474,76 @@ function buildVerdict({ arithmetic, record, watermark }) {
       arithmeticSelfConsistent: arithmetic.passed,
       matchesStoredRecord: record.found ? record.matches : null,
       watermarkPresent: watermark.present,
-      watermarkCryptographicallyVerified: false,
+      signatureValid: signature.status === 'valid',
+      signatureStatus: signature.status,
+      // The one thing this tool never claims: that a signature is unforgeable.
+      // A determined attacker with access to the device can extract its private
+      // key. Detects edits; does not prevent forgeries.
+      tamperProof: false,
     },
+  };
+}
+
+/**
+ * Verifies the embedded signature against the stored invoice record, using the
+ * device public key the metadata names.
+ *
+ * @param {object} params
+ * @param {object} params.meta parsed signature metadata
+ * @param {object|null} params.storedKey the registered DeviceSigningKey, or null
+ * @param {object|null} params.record the stored invoice (may be null if the PDF
+ *   named an invoice we have no record of)
+ * @returns {{status: string, reason?: string, deviceKeyId?: string}}
+ */
+function verifyEmbeddedSignature({ meta, storedKey, record }) {
+  // 'other' is reported distinctly from 'unregistered-key': the key may well be
+  // registered, but under a different organisation, which is a different problem
+  // worth telling the operator about.
+  if (!meta || !meta.signatureBase64) {
+    return { status: 'absent', reason: 'no signature embedded in PDF metadata' };
+  }
+  if (!meta.deviceKeyId) {
+    return { status: 'absent', reason: 'signature present but no device key id' };
+  }
+  if (!storedKey) {
+    return {
+      status: 'unregistered-key',
+      deviceKeyId: meta.deviceKeyId,
+      reason: 'no active device key registered for this device id',
+    };
+  }
+  if (!record) {
+    return {
+      status: 'unverifiable',
+      deviceKeyId: meta.deviceKeyId,
+      reason: 'no stored invoice record to verify against',
+    };
+  }
+
+  const res = signatureService.verifyInvoiceSignature({
+    signatureBase64: meta.signatureBase64,
+    publicKeyBase64: storedKey.publicKeyBase64,
+    record,
+  });
+
+  return {
+    status: res.verified ? 'valid' : 'invalid',
+    deviceKeyId: meta.deviceKeyId,
+    keyStatus: storedKey.status,
+    reason: res.reason,
+    expectedFingerprint: res.expectedFingerprint,
+    fingerprintInPdf: meta.fingerprint || null,
   };
 }
 
 module.exports = {
   WATERMARK_LIMITS,
   extractPdfText,
+  extractSignatureMetadata,
   inspectWatermark,
   parseInvoiceFields,
   checkArithmetic,
   compareToRecord,
   buildVerdict,
+  verifyEmbeddedSignature,
 };

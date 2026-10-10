@@ -205,26 +205,31 @@ describe('invoice PDF verifier — record comparison', () => {
 });
 
 describe('invoice PDF verifier — verdict', () => {
+  const absentSig = { status: 'absent' };
+  const validSig = { status: 'valid' };
+
   const fields = () => verifier.parseInvoiceFields(sampleText);
 
-  test('a consistent invoice with a watermark is called original', () => {
+  test('a signed invoice is called authentic', () => {
     const verdict = verifier.buildVerdict({
       arithmetic: { passed: true, checks: [] },
       record: { found: true, matches: true },
-      watermark: { present: true },
+      watermark: { present: false },
+      signature: validSig,
     });
-    expect(verdict.verdict).toBe('original');
+    expect(verdict.verdict).toBe('authentic');
     expect(verdict.confidence).toBe('high');
   });
 
-  test('broken arithmetic is called modified regardless of the watermark', () => {
+  test('broken arithmetic is called modified even with a valid signature', () => {
     const verdict = verifier.buildVerdict({
       arithmetic: { passed: false, checks: [] },
       record: { found: true, matches: true },
-      watermark: { present: true },
+      watermark: { present: false },
+      signature: validSig,
     });
-    // The watermark cannot vouch for content, so a document that contradicts
-    // itself must not be cleared by one being present.
+    // A signature over content that does not match the PDF's own numbers is
+    // meaningless, so arithmetic failure wins.
     expect(verdict.verdict).toBe('modified');
   });
 
@@ -232,42 +237,108 @@ describe('invoice PDF verifier — verdict', () => {
     const verdict = verifier.buildVerdict({
       arithmetic: { passed: true, checks: [] },
       record: { found: true, matches: false },
-      watermark: { present: true },
+      watermark: { present: false },
+      signature: absentSig,
     });
     expect(verdict.verdict).toBe('differs-from-record');
     expect(verdict.confidence).toBe('high');
     expect(verdict.signals).toContain('record-mismatch');
   });
 
-  test('no stored record means self-consistent, not a clean bill', () => {
+  test('no stored record and no signature means unsigned, not self-consistent', () => {
     const verdict = verifier.buildVerdict({
       arithmetic: { passed: true, checks: [] },
       record: { found: false, matches: null },
       watermark: { present: false },
+      // 'unsigned' replaced 'self-consistent' here: with no record to compare
+      // against and no signature either, the honest answer is that the file is
+      // unauthenticated — not that it is merely internally tidy.
+      signature: absentSig,
     });
-    // Earlier this reported "consistent-with-record" for an invoice that was
-    // never compared to anything — a claim about a comparison that did not
-    // happen.
-    expect(verdict.verdict).toBe('self-consistent');
+    expect(verdict.verdict).toBe('unsigned');
     expect(verdict.confidence).toBe('medium');
   });
 
-  test('the verdict never claims the watermark was cryptographically verified', () => {
+  test('a signature with nothing to verify against is self-consistent', () => {
+    const verdict = verifier.buildVerdict({
+      arithmetic: { passed: true, checks: [] },
+      record: { found: false, matches: null },
+      watermark: { present: false },
+      // The document claims to be signed, but we hold no matching record to
+      // check it against.
+      signature: { status: 'unverifiable' },
+    });
+    expect(verdict.verdict).toBe('self-consistent');
+  });
+
+  test('an unsigned invoice is labelled as such rather than cleared', () => {
+    const verdict = verifier.buildVerdict({
+      arithmetic: { passed: true, checks: [] },
+      record: { found: false, matches: null },
+      watermark: { present: false },
+      signature: absentSig,
+    });
+    expect(verdict.verdict).toBe('unsigned');
+  });
+
+  test('an invalid signature is reported and blocks an authentic verdict', () => {
+    const verdict = verifier.buildVerdict({
+      arithmetic: { passed: true, checks: [] },
+      record: { found: true, matches: true },
+      watermark: { present: false },
+      signature: { status: 'invalid' },
+    });
+    expect(verdict.signals).toContain('signature-invalid');
+    expect(verdict.verdict).not.toBe('authentic');
+    expect(verdict.claims.signatureValid).toBe(false);
+  });
+
+  test('the verdict never claims tamper-proofing', () => {
     const v = verifier.buildVerdict({
       arithmetic: { passed: true, checks: [] },
       record: { found: true, matches: true },
-      watermark: { present: true },
+      watermark: { present: false },
+      signature: validSig,
     });
-    // This is the whole honesty contract of the module: presence is not proof.
-    expect(v.claims.watermarkCryptographicallyVerified).toBe(false);
+    // This is the honesty contract of the whole feature: the scheme detects
+    // edits, but a determined attacker with the device can extract its key.
+    expect(v.claims.tamperProof).toBe(false);
+    expect(v.claims.signatureStatus).toBe('valid');
+  });
+});
+
+describe('invoice PDF verifier — embedded signature', () => {
+  test('a missing signature block is absent, not invalid', () => {
+    const r = verifier.verifyEmbeddedSignature({ meta: {}, storedKey: null, record: null });
+    expect(r.status).toBe('absent');
   });
 
-  test('the stated watermark limitations match the implementation', () => {
-    expect(verifier.WATERMARK_LIMITS).toEqual({
-      coversContentOnly: false,
-      serverHasSecret: false,
-      persistedOnInvoice: false,
+  test('a signature naming an unknown key is reported distinctly', () => {
+    const r = verifier.verifyEmbeddedSignature({
+      meta: { signatureBase64: 'AAAA', deviceKeyId: 'device-xyz' },
+      storedKey: null,
+      record: { invoiceNumber: 'X' },
     });
+    expect(r.status).toBe('unregistered-key');
+    expect(r.deviceKeyId).toBe('device-xyz');
+  });
+
+  test('a signature with no stored record cannot be verified', () => {
+    const r = verifier.verifyEmbeddedSignature({
+      meta: { signatureBase64: 'AAAA', deviceKeyId: 'device-xyz' },
+      storedKey: { publicKeyBase64: 'AAAA', status: 'active' },
+      record: null,
+    });
+    expect(r.status).toBe('unverifiable');
+  });
+
+  test('the real sample invoice carries no signature yet', () => {
+    if (!sampleExists) return;
+    // The app does not sign yet, so this documents the current state rather than
+    // asserting a target. Once signing lands, this becomes the regression test
+    // for the generator side.
+    const meta = verifier.extractSignatureMetadata(sampleBuffer);
+    expect(meta.signatureBase64).toBeNull();
   });
 });
 
