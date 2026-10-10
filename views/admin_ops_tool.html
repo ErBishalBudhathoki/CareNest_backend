@@ -1237,7 +1237,9 @@ async function verifyInvoicePdf(btn) {
 
 function verdictClass(v) {
   if (v === 'original' || v === 'consistent-with-record') return 'chip ok';
-  if (v === 'modified') return 'chip warn';
+  if (v === 'modified' || v === 'differs-from-record') return 'chip warn';
+  // 'self-consistent' is deliberately neither green nor red: the numbers add
+  // up, but nothing corroborates them.
   return 'chip';
 }
 
@@ -1314,7 +1316,7 @@ function renderVerdict(d) {
   wrap.appendChild(el('h3', 'Stored record'));
   if (!d.record.found) {
     wrap.appendChild(el('p', d.parsed.invoiceNumber
-      ? 'No invoice stored under ' + d.parsed.invoiceNumber + ' — nothing to compare against.'
+      ? 'No invoice stored under ' + d.parsed.invoiceNumber + ' — the numbers add up on their own, but there is nothing to compare them against.'
       : 'No invoice number could be read from the PDF.', 'muted'));
   } else {
     const real = d.record.diffs.filter((x) => x.state === 'differs');

@@ -413,17 +413,24 @@ function buildVerdict({ arithmetic, record, watermark }) {
 
   let verdict;
   let confidence;
-  if (arithmetic.passed && (!record.found || record.matches)) {
-    verdict = watermark.present ? 'original' : 'consistent-with-record';
-    confidence = 'high';
-  } else if (!arithmetic.passed) {
+  if (!arithmetic.passed) {
     // Broken arithmetic is the strongest signal, because it needs no secret and
     // no database: the document contradicts itself.
     verdict = 'modified';
     confidence = 'high';
+  } else if (record.found && !record.matches) {
+    verdict = 'differs-from-record';
+    confidence = 'high';
+  } else if (record.found) {
+    verdict = watermark.present ? 'original' : 'consistent-with-record';
+    confidence = 'high';
   } else {
-    verdict = 'indeterminate';
-    confidence = 'low';
+    // Arithmetic is fine but there is nothing to compare against — either a
+    // foreign invoice, or the invoice number could not be read. Claiming it
+    // "matches the record" here would be a statement about a comparison that
+    // never happened.
+    verdict = 'self-consistent';
+    confidence = 'medium';
   }
 
   return {

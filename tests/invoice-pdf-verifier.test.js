@@ -228,13 +228,28 @@ describe('invoice PDF verifier — verdict', () => {
     expect(verdict.verdict).toBe('modified');
   });
 
-  test('a record mismatch is reported', () => {
+  test('a record mismatch is called out as differing, not ambiguous', () => {
     const verdict = verifier.buildVerdict({
       arithmetic: { passed: true, checks: [] },
       record: { found: true, matches: false },
       watermark: { present: true },
     });
+    expect(verdict.verdict).toBe('differs-from-record');
+    expect(verdict.confidence).toBe('high');
     expect(verdict.signals).toContain('record-mismatch');
+  });
+
+  test('no stored record means self-consistent, not a clean bill', () => {
+    const verdict = verifier.buildVerdict({
+      arithmetic: { passed: true, checks: [] },
+      record: { found: false, matches: null },
+      watermark: { present: false },
+    });
+    // Earlier this reported "consistent-with-record" for an invoice that was
+    // never compared to anything — a claim about a comparison that did not
+    // happen.
+    expect(verdict.verdict).toBe('self-consistent');
+    expect(verdict.confidence).toBe('medium');
   });
 
   test('the verdict never claims the watermark was cryptographically verified', () => {
