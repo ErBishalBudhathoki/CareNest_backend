@@ -382,6 +382,11 @@ app.use(
     message: { success: false, message: 'Too many admin-dev requests, try again later' },
   })
 );
+// Invoice signing device-key registry. Mounted unconditionally — it is a normal
+// app-authenticated endpoint the mobile app calls to register its signing key,
+// not an operator console.
+app.use('/api/invoice-signing', require('./routes/invoiceSigning.routes'));
+
 if (environmentConfig.isProductionEnvironment() && process.env.ENABLE_ADMIN_DEV !== 'true') {
   logger.warn('Skipping /admin-dev mount in production (set ENABLE_ADMIN_DEV=true to allow it)');
 } else {
