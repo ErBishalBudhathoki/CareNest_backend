@@ -146,6 +146,31 @@ const corsOptions = {
   maxAge: 86400 // 24 hours - cache preflight requests
 };
 
+// Same-origin requests are not cross-origin.
+//
+// Browsers send an `Origin` header on same-origin POST/PUT/DELETE, not just on
+// cross-origin ones. The allowlist below exists to stop *other* sites calling the
+// API, but without this check it also blocks the app's own console from fetching
+// its own endpoints: curl passes because it sends no Origin, while a browser
+// sends one equal to the request's own host. That mismatch is why the admin-dev
+// verifier worked from the command line and failed with "Not allowed by CORS"
+// from the page.
+//
+// Dropping the header for genuinely same-origin requests lets them fall through
+// the no-Origin branch below. A malformed Origin is left in place so CORS judges
+// it, rather than being treated as trusted.
+app.use((req, res, next) => {
+  const { origin } = req.headers;
+  if (origin && req.headers.host) {
+    try {
+      if (new URL(origin).host === req.headers.host) delete req.headers.origin;
+    } catch (e) {
+      /* not a parseable Origin — let the CORS policy decide */
+    }
+  }
+  next();
+});
+
 app.use(cors(corsOptions));
 
 // Webhook routes (Must be before express.json() to capture raw body)
