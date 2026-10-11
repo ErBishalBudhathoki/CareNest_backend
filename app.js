@@ -164,7 +164,7 @@ app.use((req, res, next) => {
   if (origin && req.headers.host) {
     try {
       if (new URL(origin).host === req.headers.host) delete req.headers.origin;
-    } catch (e) {
+    } catch {
       /* not a parseable Origin — let the CORS policy decide */
     }
   }
