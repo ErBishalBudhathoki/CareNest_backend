@@ -197,3 +197,34 @@ describe('CSP compatibility', () => {
     });
   });
 });
+
+describe('same-origin CORS', () => {
+  // A second independent breakage behind the first. Browsers send `Origin` on
+  // same-origin POSTs, not only cross-origin ones, and the public allowlist did
+  // not include the app's own host — so the console's fetches to its own API were
+  // rejected as cross-origin. curl worked because it sends no Origin at all,
+  // which is why this only ever appeared in a browser.
+  test('a same-origin POST reaches the handler instead of being CORS-blocked', async () => {
+    const res = await request(app)
+      .post('/admin-dev/api/ops/verify-invoice-pdf')
+      .set('Authorization', authHeader)
+      .set('Host', 'console.test')
+      .set('Origin', 'https://console.test');
+    // 403 means the request reached requireCsrf — i.e. it got past CORS and the
+    // route ran. A CORS block surfaces as 500 with a generic body, so the status
+    // is the signal, not the message.
+    expect([400, 403]).toContain(res.status);
+  });
+
+  test('a foreign origin is still rejected', async () => {
+    const res = await request(app)
+      .post('/admin-dev/api/ops/verify-invoice-pdf')
+      .set('Authorization', authHeader)
+      .set('Host', 'console.test')
+      .set('Origin', 'https://evil.example');
+    // A foreign origin is still refused: the policy exists to stop other sites
+    // calling the API, and same-origin must not have widened it.
+    expect(res.status).toBe(500);
+    expect(res.body.message).toBe('Internal Server Error');
+  });
+});
