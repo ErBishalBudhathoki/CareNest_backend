@@ -154,3 +154,46 @@ describe('Phase 4 — deploy identity', () => {
     expect(js).toMatch(/d\.build/);
   });
 });
+describe('CSP compatibility', () => {
+  // The console ships `script-src-attr 'none'`, which makes the browser refuse
+  // every inline event handler. The page still looked correct, so every button
+  // was silently dead and only a real click in a browser revealed it. This pins
+  // the cause so the markup cannot regress into inline handlers again.
+  const consolePage = () =>
+    request(app).get('/admin-dev/ops').set('Authorization', authHeader).then((r) => r.text);
+
+  test('the console has no inline event handlers', async () => {
+    const html = await consolePage();
+    expect(html).not.toMatch(/\son(click|change|input|keydown|keyup|submit|load|blur|focus)=/);
+  });
+
+  test('actions are wired through data-action markers instead', async () => {
+    const html = await consolePage();
+    expect(html).toMatch(/data-action="verify-invoice"/);
+    expect(html).toMatch(/data-action="load-stats"/);
+    expect(html).toMatch(/data-action="export-csv"/);
+    expect((html.match(/data-action="/g) || []).length).toBeGreaterThanOrEqual(18);
+  });
+
+  test('the binding layer is registered before the first view is shown', async () => {
+    const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
+    const js = (res.text.match(/<script>\n([\s\S]*?)\n<\/script>/) || [])[1] || '';
+    expect(js).toMatch(/function bindConsoleActions\(\)/);
+    const boundAt = js.indexOf('bindConsoleActions();');
+    const shownAt = js.indexOf('showView(window.location.hash');
+    expect(boundAt).toBeGreaterThan(-1);
+    expect(shownAt).toBeGreaterThan(-1);
+    expect(boundAt).toBeLessThan(shownAt);
+  });
+
+  test('every declared action has a handler', async () => {
+    const res = await request(app).get('/admin-dev/ops').set('Authorization', authHeader);
+    const js = (res.text.match(/<script>\n([\s\S]*?)\n<\/script>/) || [])[1] || '';
+    const declared = (res.text.match(/data-action="([^"]+)"/g) || [])
+      .map((s) => s.slice(13, -1));
+    const wired = (js.match(/^\s*'([a-z-]+)':/gm) || []).map((s) => s.trim().slice(1, -2));
+    declared.forEach((action) => {
+      expect(wired).toContain(action);
+    });
+  });
+});
