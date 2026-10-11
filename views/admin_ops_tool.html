@@ -181,14 +181,14 @@
       <div class="topbar-right">
         <span id="buildInfo" class="muted">loading build…</span>
         <label class="ctl">Auto-refresh
-          <select id="autoRefresh" onchange="setAutoRefresh(this.value)">
+          <select id="autoRefresh">
             <option value="0">off</option>
             <option value="10000">10s</option>
             <option value="30000">30s</option>
             <option value="60000">1m</option>
           </select>
         </label>
-        <button id="themeToggle" onclick="toggleTheme()">Theme</button>
+        <button id="themeToggle" data-action="toggle-theme">Theme</button>
       </div>
     </header>
 
@@ -200,7 +200,7 @@
         <div class="view-head">
           <h2>Organizations</h2>
           <span id="panelStatus-orgs" class="panel-status muted"></span>
-          <button onclick="loadOrgs()">Refresh</button>
+          <button data-action="load-orgs">Refresh</button>
           <span id="orgsScope" class="muted"></span>
         </div>
         <p class="muted" style="margin:0 0 12px">
@@ -219,14 +219,14 @@
           <select id="roleFilter"><option value="">any role</option><option>admin</option><option>superadmin</option><option>employee</option><option>client</option><option>manager</option><option>moderator</option><option>family</option></select>
           <input id="orgIdFilter" placeholder="orgId" style="width:150px">
           <select id="activeFilter"><option value="">any status</option><option value="true">active</option><option value="false">inactive</option></select>
-          <button class="primary" onclick="loadUsers(1)">Search</button>
-          <select id="pageSize" onchange="loadUsers(1)">
+          <button class="primary" data-action="load-users">Search</button>
+          <select id="pageSize">
             <option value="25">25/page</option>
             <option value="50">50/page</option>
             <option value="100">100/page</option>
           </select>
-          <button class="danger" onclick="exportUsers('csv')">Export CSV</button>
-          <button onclick="exportUsers('json')">Export JSON</button>
+          <button class="danger" data-action="export-csv">Export CSV</button>
+          <button data-action="export-json">Export JSON</button>
         </div>
         <div id="usersTable"></div>
         <div class="pager" id="usersPager"></div>
@@ -235,7 +235,7 @@
             <h2 style="font-size:14px">User Drill-down</h2><span id="panelStatus-lookup" class="panel-status muted"></span>
           </div>
           <input id="luEmail" placeholder="user@example.com" style="width:280px">
-          <button onclick="lookupUser()">Lookup</button>
+          <button data-action="lookup-user">Lookup</button>
           <pre id="luResult"></pre>
         </section>
       </section>
@@ -248,7 +248,7 @@
         </div>
         <div class="toolbar">
           <label class="ctl">Range:
-            <select id="rangePreset" onchange="applyPreset(this.value)">
+            <select id="rangePreset">
               <option value="7">Last 7d</option>
               <option value="30" selected>Last 30d</option>
               <option value="90">Last 90d</option>
@@ -258,14 +258,14 @@
             </select>
           </label>
           <span id="customRange" style="display:none">
-            <label class="ctl">from <input id="dateFrom" type="date" onchange="loadAnalytics()"></label>
-            <label class="ctl">to <input id="dateTo" type="date" onchange="loadAnalytics()"></label>
+            <label class="ctl">from <input id="dateFrom" type="date"></label>
+            <label class="ctl">to <input id="dateTo" type="date"></label>
           </span>
           <label class="ctl">Org:
             <input id="orgScope" placeholder="all orgs" style="width:180px">
           </label>
-          <label class="ctl"><input type="checkbox" id="compareToggle" onchange="loadAnalytics()"> compare previous</label>
-          <button id="analyticsBtn" class="primary" onclick="runBusy(this, loadAnalytics)">Load charts</button>
+          <label class="ctl"><input type="checkbox" id="compareToggle"> compare previous</label>
+          <button id="analyticsBtn" class="primary" data-action="load-analytics">Load charts</button>
           <span id="analyticsScope" class="muted"></span>
         </div>
         <div id="compareSummary"></div>
@@ -284,7 +284,7 @@
           </div>
           <div class="toolbar">
             <label class="ctl">Org: <input id="kpiOrgId" placeholder="all orgs (platform-wide)" style="width:220px"></label>
-            <button onclick="loadStats()">Refresh</button>
+            <button data-action="load-stats">Refresh</button>
           </div>
           <div id="kpis"></div>
         </section>
@@ -306,7 +306,7 @@
             In-memory counters. Reset on every deploy and on Cloud Run scale-to-zero cold start.
             Not platform history &mdash; use Grafana / Cloud Monitoring for that.
           </p>
-          <button onclick="loadInstance()">Refresh</button>
+          <button data-action="load-instance">Refresh</button>
           <div id="instanceBody"></div>
         </details>
       </section>
@@ -322,14 +322,14 @@
           <p class="muted" style="margin:8px 0">
             Reads failures the app already persists but that nothing else surfaces. Lazy-loaded on first open.
           </p>
-          <button onclick="loadLedgers()">Refresh</button>
+          <button data-action="load-ledgers">Refresh</button>
           <div id="ledgerBody"></div>
         </details>
         <section class="card">
           <div class="view-head">
             <h2 style="font-size:14px">Leave Balance Integrity</h2><span id="panelStatus-leave" class="panel-status muted"></span>
           </div>
-          <button onclick="loadIntegrity()">Refresh</button>
+          <button data-action="load-integrity">Refresh</button>
           <pre id="integrityResult"></pre>
         </section>
         <section class="card">
@@ -338,7 +338,7 @@
           </div>
           <div class="toolbar">
             <input id="certDays" type="number" value="30" style="width:80px"> days
-            <button onclick="loadCertExpiry()">Load</button>
+            <button data-action="load-cert-expiry">Load</button>
           </div>
           <pre id="certResult"></pre>
         </section>
@@ -346,9 +346,9 @@
           <div class="view-head">
             <h2 style="font-size:14px">Valkey Rate-Limit Keys</h2><span id="panelStatus-valkey" class="panel-status muted"></span>
           </div>
-          <button onclick="loadValkey()">Refresh</button>
+          <button data-action="load-valkey">Refresh</button>
           <pre id="valkeyResult"></pre>
-          <button class="danger" onclick="resetRateLimits()">Clear all rl:* keys</button>
+          <button class="danger" data-action="reset-rate-limits">Clear all rl:* keys</button>
         </section>
         <section class="card">
           <div class="view-head">
@@ -356,7 +356,7 @@
           </div>
           <div class="toolbar">
             <input id="wfId" placeholder="workflow id" style="width:340px">
-            <button onclick="lookupWf()">Describe</button>
+            <button data-action="lookup-wf">Describe</button>
           </div>
           <pre id="wfResult"></pre>
         </section>
@@ -367,7 +367,7 @@
         <div class="view-head">
           <h2>Recent Admin Actions</h2><span id="panelStatus-audit" class="panel-status muted"></span>
         </div>
-        <button onclick="loadAudit()">Refresh</button>
+        <button data-action="load-audit">Refresh</button>
         <pre id="auditResult"></pre>
       </section>
 
@@ -386,7 +386,7 @@
           </p>
           <div class="toolbar">
             <input type="file" id="verifyFile" accept="application/pdf,.pdf">
-            <button class="primary" id="verifyBtn" onclick="verifyInvoicePdf(this)">Verify</button>
+            <button class="primary" id="verifyBtn" data-action="verify-invoice">Verify</button>
           </div>
           <div id="verifyResult" style="margin-top:12px"></div>
         </section>
@@ -411,7 +411,7 @@
           <div class="toolbar">
             <input id="orgId" placeholder="organizationId" style="width:260px">
             <input id="orgConfirm" placeholder="type organizationId to confirm" style="width:260px">
-            <button class="danger" onclick="resetOrg()">Reset org</button>
+            <button class="danger" data-action="reset-org">Reset org</button>
           </div>
           <pre id="orgResult"></pre>
         </section>
@@ -1067,6 +1067,56 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter' && ev.target.id === 'q') { ev.preventDefault(); showView('users'); loadUsers(1); return; }
 });
 
+// ---- Action wiring -------------------------------------------------------
+// Inline `onclick`/`onchange` attributes are refused by the CSP this console
+// ships with (script-src-attr 'none'), which silently disabled every button in
+// the page — the markup looked correct and nothing happened on click. All
+// handlers are therefore bound here, from `data-action` markers, so the
+// security policy and the behaviour stay compatible.
+const ACTIONS = {
+  'toggle-theme': () => toggleTheme(),
+  'load-analytics': (btn) => runBusy(btn, loadAnalytics),
+  'verify-invoice': (btn) => verifyInvoicePdf(btn),
+  'reset-rate-limits': () => resetRateLimits(),
+  'reset-org': () => resetOrg(),
+  'lookup-wf': () => lookupWf(),
+  'lookup-user': () => lookupUser(),
+  'load-valkey': () => loadValkey(),
+  'load-users': () => loadUsers(1),
+  'load-stats': () => loadStats(),
+  'load-orgs': () => loadOrgs(),
+  'load-ledgers': () => loadLedgers(),
+  'load-integrity': () => loadIntegrity(),
+  'load-instance': () => loadInstance(),
+  'load-cert-expiry': () => loadCertExpiry(),
+  'load-audit': () => loadAudit(),
+  'export-json': () => exportUsers('json'),
+  'export-csv': () => exportUsers('csv'),
+};
+
+function bindConsoleActions() {
+  // Event delegation: one listener covers every current and future action
+  // button, so a new control cannot be added without a handler by accident.
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-action]');
+    if (!btn) return;
+    const fn = ACTIONS[btn.dataset.action];
+    if (!fn) return;
+    // A disabled control (e.g. mid-request) must not re-fire.
+    if (btn.disabled) { ev.preventDefault(); return; }
+    fn(btn);
+  });
+
+  const onChange = (id, fn) => {
+    const el_ = document.getElementById(id);
+    if (el_) el_.addEventListener('change', () => fn(el_.value));
+  };
+  onChange('autoRefresh', setAutoRefresh);
+  onChange('rangePreset', applyPreset);
+  onChange('pageSize', () => loadUsers(1));
+  ['compareToggle', 'dateTo', 'dateFrom'].forEach((id) => onChange(id, () => loadAnalytics()));
+}
+
 // ---- View routing --------------------------------------------------------
 // The console is now a record browser rather than one long scroll: the sidebar
 // selects a record type, and only the active section is in the layout. Views
@@ -1355,6 +1405,7 @@ function renderVerdict(d) {
 
 // ---- Boot ----------------------------------------------------------------
 const hadState = restoreUsersFromUrl();
+bindConsoleActions();
 showView(window.location.hash.slice(1) || 'organizations');
 loadStats(); loadIntegrity(); loadCertExpiry(); loadValkey(); loadAudit(); loadInstance();
 loadUsers(hadState ? usersPage : 1);
