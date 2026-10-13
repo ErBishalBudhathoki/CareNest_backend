@@ -48,7 +48,7 @@ class EarningsController {
   
   setPayRate = catchAsync(async (req, res) => {
     const { userEmail } = req.params;
-    const { rate, type, rates, classificationLevel, payPoint, stream, employmentType, activeAllowances, dob } = req.body;
+    const { rate, type, rates, classificationLevel, payPoint, stream, employmentType, activeAllowances, dob, award } = req.body;
     
     if (!rate) {
          return res.status(400).json({ success: false, message: 'Rate is required' });
@@ -64,7 +64,8 @@ class EarningsController {
       stream, 
       employmentType, 
       activeAllowances, 
-      dob
+      dob,
+      award
     );
     if (success) {
         res.status(200).json({ success: true, message: 'Pay rate updated' });
