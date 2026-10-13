@@ -46,10 +46,20 @@ const addNoteValidation = [
     .trim()
     .matches(emailRegex)
     .withMessage('Valid clientEmail is required'),
+  // `notes` is required for free-text notes but optional for structured notes
+  // (validated in the controller based on noteType/templateId).
   body('notes')
-    .trim()
-    .isLength({ min: 1, max: 5000 })
-    .withMessage('Notes must be between 1 and 5000 characters')
+    .optional({ nullable: true })
+    .isLength({ max: 5000 })
+    .withMessage('Notes must be at most 5000 characters'),
+  body('templateId')
+    .optional({ nullable: true })
+    .isMongoId()
+    .withMessage('Invalid templateId format'),
+  body('shiftId')
+    .optional({ nullable: true })
+    .isMongoId()
+    .withMessage('Invalid shiftId format')
 ];
 
 const getNotesValidation = [

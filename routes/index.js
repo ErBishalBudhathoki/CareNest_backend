@@ -60,6 +60,7 @@ const geofenceRoutes = require('./geofenceRoutes');
 const holidayRoutes = require('./holidayRoutes');
 const supportItemsRoutes = require('./supportItems');
 const notesRoutes = require('./notesRoutes');
+const noteTemplateRoutes = require('./noteTemplateRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const filesRoutes = require('./files');
 const employeeTrackingRoutes = require('./employeeTracking');
@@ -146,6 +147,7 @@ router.use('/bank-details', bankDetailsRoutes);
 router.use('/geofence', geofenceRoutes);
 router.use('/holidays', holidayRoutes);
 router.use('/support-items', supportItemsRoutes);
+router.use('/notes/templates', noteTemplateRoutes); // Progress-note templates (Phase 2) — before /notes
 router.use('/notes', notesRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/files', filesRoutes);

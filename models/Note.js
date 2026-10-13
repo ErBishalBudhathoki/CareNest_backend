@@ -13,12 +13,50 @@ const noteSchema = new mongoose.Schema({
   },
   notes: {
     type: String,
-    required: true,
+    default: '',
     maxlength: 5000
   },
   organizationId: {
     type: String,
     required: true,
+    index: true
+  },
+  // --- Phase 2: structured progress notes (all optional / additive) ---
+  noteType: {
+    type: String,
+    enum: ['free_text', 'structured'],
+    default: 'free_text',
+    index: true
+  },
+  templateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'NoteTemplate',
+    default: null
+  },
+  shiftId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shift',
+    default: null,
+    index: true
+  },
+  // Answers keyed by template section key: { sectionKey: value }
+  structuredData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  attachments: {
+    type: [{
+      url: { type: String, required: true },
+      kind: { type: String, default: 'file' },
+      name: { type: String, default: '' },
+      uploadedAt: { type: Date, default: Date.now }
+    }],
+    default: []
+  },
+  // Client-generated idempotency key for offline draft sync.
+  clientNoteId: {
+    type: String,
+    default: null,
     index: true
   },
   createdAt: {
@@ -47,5 +85,6 @@ const noteSchema = new mongoose.Schema({
 // Compound indexes for common queries
 noteSchema.index({ userEmail: 1, clientEmail: 1, createdAt: -1 });
 noteSchema.index({ organizationId: 1, createdAt: -1 });
+noteSchema.index({ organizationId: 1, clientNoteId: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Note', noteSchema);
