@@ -61,6 +61,7 @@ const holidayRoutes = require('./holidayRoutes');
 const supportItemsRoutes = require('./supportItems');
 const notesRoutes = require('./notesRoutes');
 const noteTemplateRoutes = require('./noteTemplateRoutes');
+const silRoutes = require('./silRoutes'); // SIL management (Phase 4)
 const notificationRoutes = require('./notificationRoutes');
 const filesRoutes = require('./files');
 const employeeTrackingRoutes = require('./employeeTracking');
@@ -149,6 +150,7 @@ router.use('/holidays', holidayRoutes);
 router.use('/support-items', supportItemsRoutes);
 router.use('/notes/templates', noteTemplateRoutes); // Progress-note templates (Phase 2) — before /notes
 router.use('/notes', notesRoutes);
+router.use('/sil', silRoutes); // SIL management (Phase 4)
 router.use('/notifications', notificationRoutes);
 router.use('/files', filesRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
