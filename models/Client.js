@@ -80,6 +80,27 @@ const clientSchema = new mongoose.Schema({
   ndisItem: {
     type: Object
   },
+  // Phase 5: funding route determines billing path (see Phase 6 claiming).
+  fundingType: {
+    type: String,
+    enum: ['ndia_managed', 'plan_managed', 'self_managed', 'combination'],
+    default: 'plan_managed',
+    index: true
+  },
+  // Phase 5: linked care-network stakeholders (plan manager, support
+  // coordinator, nominee, family). The Stakeholder collection is the source of
+  // truth for contact/permissions; this is the participant-side link list.
+  stakeholders: {
+    type: [{
+      stakeholderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stakeholder' },
+      role: {
+        type: String,
+        enum: ['plan_manager', 'support_coordinator', 'nominee', 'family', 'other']
+      },
+      isPrimary: { type: Boolean, default: false }
+    }],
+    default: []
+  },
   // Phase 4: SIL back-reference (convenience; SILOccupancy is the source of
   // truth for occupancy periods).
   sil: {
