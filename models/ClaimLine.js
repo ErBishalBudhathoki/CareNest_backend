@@ -21,8 +21,11 @@ const claimLineSchema = new mongoose.Schema(
     hours: { type: Number, default: 0 },
     unitPrice: { type: Number, default: 0 },
     gstCode: { type: String, default: 'P2' },
-    claimType: { type: String, default: 'DIRECT_SERVICE' },
+    claimType: { type: String, default: 'STANDARD' },
     cancellationReason: { type: String, default: '' },
+    authorisedBy: { type: String, default: '' },
+    participantApproved: { type: String, enum: ['Y', 'N'], default: 'Y' },
+    inKindFundingProgramCode: { type: String, default: '' },
     claimReference: { type: String, required: true, unique: true },
     requestedAmount: { type: Number, default: 0 },
     status: {
