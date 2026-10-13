@@ -1,6 +1,7 @@
 /**
- * Tests for Phase 6 NDIS claiming: CSV format, unique refs, validation gate,
- * BPRF reconciliation and billing routing. Models are mocked.
+ * Tests for Phase 6 NDIS claiming: CSV format (2026-27 myplace template),
+ * unique refs, validation gate, BPRF reconciliation and billing routing.
+ * Models are mocked.
  */
 
 jest.mock('../../config/logger', () => ({
@@ -40,86 +41,150 @@ const billingRoutingService = require('../../services/billingRoutingService');
 
 const lean = (docs) => ({ lean: async () => docs });
 
-describe('NDISClaimService.buildCsv', () => {
-  test('emits the 16-column header and DD/MM/YYYY rows', () => {
+const VALID_ABN = '51824753556'; // ATO ABN (passes checksum)
+
+describe('NDISClaimService.buildCsv (2026-27 myplace template)', () => {
+  test('emits the exact 16-column header in order', () => {
+    const csv = ndisClaimService.buildCsv([], { registrationNumber: '405000123', abn: VALID_ABN });
+    expect(csv).toBe(
+      'RegistrationNumber,NDISNumber,SupportsDeliveredFrom,SupportsDeliveredTo,SupportNumber,ClaimReference,Quantity,Hours,UnitPrice,GSTCode,AuthorisedBy,ParticipantApproved,InKindFundingProgramCode,ClaimType,CancellationReason,ABN',
+    );
+  });
+
+  test('formats dates as YYYY/MM/DD and fills Hours for hourly items', () => {
     const csv = ndisClaimService.buildCsv(
       [
         {
           ndisNumber: '430123456',
           supportNumber: '01_011_0107_1_1',
           claimReference: 'CN-ORG123-ABCD1234-000001',
-          quantity: 8,
+          isHourly: true,
+          quantity: 0,
           hours: 8,
           unitPrice: 81.27,
           gstCode: 'P2',
-          claimType: 'DIRECT_SERVICE',
+          claimType: 'STANDARD',
           cancellationReason: '',
+          authorisedBy: '',
+          participantApproved: 'Y',
+          inKindFundingProgramCode: '',
           serviceDate: new Date('2026-04-01T00:00:00Z'),
-          requestedAmount: 650.16,
         },
       ],
-      { registrationNumber: '405000123', abn: '12345678901' },
+      { registrationNumber: '405000123', abn: VALID_ABN },
     );
 
-    const lines = csv.split('\r\n');
-    expect(lines[0]).toBe(
-      'RegistrationNumber,NDISNumber,SupportsDeliveredFrom,SupportsDeliveredTo,SupportNumber,ClaimReference,Quantity,Hours,UnitPrice,GSTCode,ClaimType,CancellationReason,ABN,InKindFundingProgram,ClaimReason,RequestedAmount',
-    );
-    expect(lines[1]).toBe(
-      '405000123,430123456,01/04/2026,01/04/2026,01_011_0107_1_1,CN-ORG123-ABCD1234-000001,8.00,8.00,81.27,P2,DIRECT_SERVICE,,12345678901,,,650.16',
+    const row = csv.split('\r\n')[1];
+    expect(row).toBe(
+      `405000123,430123456,2026/04/01,2026/04/01,01_011_0107_1_1,CN-ORG123-ABCD1234-000001,,8.00,81.27,P2,,Y,,STANDARD,,${VALID_ABN}`,
     );
   });
 
-  test('formats dates as DD/MM/YYYY (never ISO)', () => {
-    expect(ndisClaimService.formatAuDate(new Date('2026-12-25T00:00:00Z'))).toBe('25/12/2026');
+  test('fills Quantity (and blanks Hours) for per-each items', () => {
+    const csv = ndisClaimService.buildCsv(
+      [
+        {
+          ndisNumber: '430123456',
+          supportNumber: '01_015_0107_1_1',
+          claimReference: 'ref',
+          isHourly: false,
+          quantity: 3,
+          hours: 0,
+          unitPrice: 10,
+          gstCode: 'P2',
+          claimType: 'STANDARD',
+          participantApproved: 'Y',
+          serviceDate: new Date('2026-04-01T00:00:00Z'),
+        },
+      ],
+      { registrationNumber: '405000123', abn: VALID_ABN },
+    );
+    const cols = csv.split('\r\n')[1].split(',');
+    expect(cols[6]).toBe('3.00'); // Quantity
+    expect(cols[7]).toBe(''); // Hours
+  });
+
+  test('formats dates as YYYY/MM/DD', () => {
+    expect(ndisClaimService.formatNdisDate(new Date('2026-12-25T00:00:00Z'))).toBe('2026/12/25');
+  });
+});
+
+describe('NDISClaimService.isValidAbn', () => {
+  test('accepts a valid ABN', () => {
+    expect(ndisClaimService.isValidAbn('51824753556')).toBe(true);
+    expect(ndisClaimService.isValidAbn('51 824 753 556')).toBe(true);
+  });
+  test('rejects a bad checksum or length', () => {
+    expect(ndisClaimService.isValidAbn('12345678901')).toBe(false);
+    expect(ndisClaimService.isValidAbn('405000123')).toBe(false);
   });
 });
 
 describe('NDISClaimService.validateLines', () => {
-  test('flags a missing NDIS number', async () => {
-    const result = await ndisClaimService.validateLines([
-      {
-        claimReference: 'ref1',
-        ndisNumber: '',
-        supportNumber: '01_011_0107_1_1',
-        quantity: 1,
-        unitPrice: 50,
-        requestedAmount: 50,
-      },
-    ]);
-    expect(result.errors.some((e) => e.field === 'NDISNumber')).toBe(true);
+  const baseLine = {
+    claimReference: 'ref1',
+    ndisNumber: '430123456',
+    supportNumber: '01_011_0107_1_1',
+    isHourly: true,
+    quantity: 0,
+    hours: 8,
+    unitPrice: 50,
+    gstCode: 'P2',
+    claimType: 'STANDARD',
+    cancellationReason: '',
+    participantApproved: 'Y',
+    requestedAmount: 400,
+  };
+
+  test('flags an invalid provider registration number', async () => {
+    const r = await ndisClaimService.validateLines([baseLine], { registrationNumber: '12', abn: VALID_ABN });
+    expect(r.errors.some((e) => e.field === 'RegistrationNumber')).toBe(true);
   });
 
-  test('flags a requested-amount mismatch', async () => {
-    const result = await ndisClaimService.validateLines([
-      {
-        claimReference: 'ref1',
-        ndisNumber: '430123456',
-        supportNumber: '01_011_0107_1_1',
-        quantity: 2,
-        unitPrice: 50,
-        requestedAmount: 99,
-      },
+  test('flags an invalid ABN', async () => {
+    const r = await ndisClaimService.validateLines([baseLine], { registrationNumber: '405000123', abn: '12345678901' });
+    expect(r.errors.some((e) => e.field === 'ABN')).toBe(true);
+  });
+
+  test('flags a missing NDIS number', async () => {
+    const r = await ndisClaimService.validateLines([{ ...baseLine, ndisNumber: '' }]);
+    expect(r.errors.some((e) => e.field === 'NDISNumber')).toBe(true);
+  });
+
+  test('flags both Quantity and Hours present', async () => {
+    const r = await ndisClaimService.validateLines([{ ...baseLine, quantity: 2, hours: 8 }]);
+    expect(r.errors.some((e) => e.field === 'Quantity/Hours')).toBe(true);
+  });
+
+  test('flags neither Quantity nor Hours present', async () => {
+    const r = await ndisClaimService.validateLines([{ ...baseLine, quantity: 0, hours: 0 }]);
+    expect(r.errors.some((e) => e.field === 'Quantity/Hours')).toBe(true);
+  });
+
+  test('flags a bad GST code', async () => {
+    const r = await ndisClaimService.validateLines([{ ...baseLine, gstCode: 'P3' }]);
+    expect(r.errors.some((e) => e.field === 'GSTCode')).toBe(true);
+  });
+
+  test('requires NSCC/NSDH when ClaimType is CANCELLATION', async () => {
+    const missing = await ndisClaimService.validateLines([{ ...baseLine, claimType: 'CANCELLATION' }]);
+    expect(missing.errors.some((e) => e.field === 'CancellationReason')).toBe(true);
+
+    const ok = await ndisClaimService.validateLines([
+      { ...baseLine, claimType: 'CANCELLATION', cancellationReason: 'NSCC' },
     ]);
-    expect(result.errors.some((e) => e.field === 'RequestedAmount')).toBe(true);
+    expect(ok.errors.some((e) => e.field === 'CancellationReason')).toBe(false);
+  });
+
+  test('forbids CancellationReason for non-cancellation claims', async () => {
+    const r = await ndisClaimService.validateLines([{ ...baseLine, cancellationReason: 'NSCC' }]);
+    expect(r.errors.some((e) => e.field === 'CancellationReason')).toBe(true);
   });
 
   test('flags a line over the price cap', async () => {
-    priceValidationService.validatePrice.mockResolvedValueOnce({
-      isValid: false,
-      message: 'over cap',
-    });
-    const result = await ndisClaimService.validateLines([
-      {
-        claimReference: 'ref1',
-        ndisNumber: '430123456',
-        supportNumber: '01_011_0107_1_1',
-        quantity: 1,
-        unitPrice: 999,
-        requestedAmount: 999,
-      },
-    ]);
-    expect(result.errors.some((e) => e.field === 'UnitPrice')).toBe(true);
+    priceValidationService.validatePrice.mockResolvedValueOnce({ isValid: false, message: 'over cap' });
+    const r = await ndisClaimService.validateLines([{ ...baseLine, unitPrice: 999 }]);
+    expect(r.errors.some((e) => e.field === 'UnitPrice')).toBe(true);
   });
 });
 
@@ -127,7 +192,7 @@ describe('NDISClaimService.generateBatch', () => {
   beforeEach(() => {
     Organization.findOne.mockResolvedValue({
       ndisRegistration: { registrationNumber: '405000123' },
-      abn: '12345678901',
+      abn: VALID_ABN,
     });
     Client.find.mockReturnValue(
       lean([{ _id: 'c1', fundingType: 'ndia_managed', ndisNumber: '430123456' }]),
@@ -139,7 +204,13 @@ describe('NDISClaimService.generateBatch', () => {
           clientId: 'c1',
           createdAt: new Date('2026-04-01T00:00:00Z'),
           lineItems: [
-            { supportItemNumber: '01_011_0107_1_1', quantity: 8, price: 81.27, date: new Date('2026-04-01T00:00:00Z') },
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 8,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-01T00:00:00Z'),
+            },
           ],
         },
       ]),
@@ -158,9 +229,9 @@ describe('NDISClaimService.generateBatch', () => {
     expect(result.lineCount).toBe(1);
     expect(result.batch.totals.amount).toBe(650.16);
     expect(result.csv).toContain('CN-org1-');
-    // Stored as base64 on the batch.
     const decoded = Buffer.from(result.batch.fileRef, 'base64').toString('utf8');
     expect(decoded).toContain('430123456');
+    expect(decoded).toContain('2026/04/01');
   });
 
   test('rejects the batch when validation fails', async () => {
