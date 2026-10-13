@@ -63,6 +63,7 @@ const notesRoutes = require('./notesRoutes');
 const noteTemplateRoutes = require('./noteTemplateRoutes');
 const silRoutes = require('./silRoutes'); // SIL management (Phase 4)
 const stakeholderRoutes = require('./stakeholderRoutes'); // Multi-stakeholder CRM (Phase 5)
+const ndisClaimRoutes = require('./ndisClaimRoutes'); // NDIS claiming/export (Phase 6)
 const notificationRoutes = require('./notificationRoutes');
 const filesRoutes = require('./files');
 const employeeTrackingRoutes = require('./employeeTracking');
@@ -153,6 +154,7 @@ router.use('/notes/templates', noteTemplateRoutes); // Progress-note templates (
 router.use('/notes', notesRoutes);
 router.use('/sil', silRoutes); // SIL management (Phase 4)
 router.use('/stakeholders', stakeholderRoutes); // Multi-stakeholder CRM (Phase 5)
+router.use('/ndis-claims', ndisClaimRoutes); // NDIS claiming/export (Phase 6)
 router.use('/notifications', notificationRoutes);
 router.use('/files', filesRoutes);
 router.use('/employee-tracking', employeeTrackingRoutes);
