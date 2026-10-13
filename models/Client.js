@@ -80,6 +80,17 @@ const clientSchema = new mongoose.Schema({
   ndisItem: {
     type: Object
   },
+  // Phase 4: SIL back-reference (convenience; SILOccupancy is the source of
+  // truth for occupancy periods).
+  sil: {
+    propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'SILProperty', default: null },
+    roomId: { type: String, default: null },
+    rosterOfCareId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SILRosterOfCare',
+      default: null,
+    },
+  },
   isActive: {
     type: Boolean,
     default: true,
