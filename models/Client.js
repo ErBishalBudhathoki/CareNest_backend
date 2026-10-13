@@ -80,6 +80,13 @@ const clientSchema = new mongoose.Schema({
   ndisItem: {
     type: Object
   },
+  // Phase 6: participant NDIS number, required for Bulk Payment Request CSV.
+  ndisNumber: {
+    type: String,
+    trim: true,
+    default: '',
+    index: true
+  },
   // Phase 5: funding route determines billing path (see Phase 6 claiming).
   fundingType: {
     type: String,

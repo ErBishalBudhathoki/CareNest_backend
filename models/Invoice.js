@@ -86,6 +86,24 @@ const invoiceSchema = new mongoose.Schema({
     internalNotes: String
   },
 
+  // Phase 6: funding route determines the billing artefact
+  // (ndia_managed -> claim CSV; plan_managed -> plan-manager PDF;
+  //  self_managed -> participant PDF).
+  billing: {
+    fundingType: {
+      type: String,
+      enum: ['ndia_managed', 'plan_managed', 'self_managed']
+    },
+    recipientType: {
+      type: String,
+      enum: ['participant', 'plan_manager', 'ndia']
+    },
+    planManagerStakeholderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Stakeholder'
+    }
+  },
+
   // Preserved for employee payroll workflows and PDF regeneration.
   header: {
     issuer: mongoose.Schema.Types.Mixed,
