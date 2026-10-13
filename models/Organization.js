@@ -278,6 +278,14 @@ const organizationSchema = new mongoose.Schema({
       lastRunDate: {
         type: Date
       }
+    },
+    sil: {
+      // When true, publishing a SIL roster with understaffed shifts is blocked
+      // (Phase 4 §8.5). Default false = warn only.
+      blockOnRatioBreach: {
+        type: Boolean,
+        default: false
+      }
     }
   },
   timesheetReminders: {

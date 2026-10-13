@@ -116,6 +116,18 @@ class SILQuoteService {
     const from = effectiveFrom ? new Date(effectiveFrom) : new Date();
     const nextReview = this._nextReview(from, cadence);
 
+    // §8.6: reject a new active RoC when the client already has an active /
+    // under-review RoC (its period is open-ended unless it has an effectiveTo).
+    const existingActive = await SILRosterOfCare.findOne({
+      organizationId,
+      clientId: quote.clientId,
+      status: { $in: ['active', 'under_review'] },
+      $or: [{ effectiveTo: null }, { effectiveTo: { $gte: from } }],
+    });
+    if (existingActive) {
+      return { conflict: true, existing: existingActive };
+    }
+
     const roc = await SILRosterOfCare.create({
       organizationId,
       clientId: quote.clientId,

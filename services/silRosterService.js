@@ -148,12 +148,26 @@ class SILRosterService {
    * Publish a roster. Blocks only when `blockOnRatioBreach` is true and there
    * are understaffed entries; otherwise publishes with warnings.
    */
-  async publishRoster(organizationId, id, { blockOnRatioBreach = false } = {}, actor = '') {
+  async publishRoster(organizationId, id, { blockOnRatioBreach } = {}, actor = '') {
     const roster = await SILRoster.findOne({ _id: id, organizationId });
     if (!roster) return { notFound: true };
 
+    // §8.5: the org setting is authoritative; an explicit request flag may
+    // override it. Default is warn-only (false).
+    let effectiveBlock = blockOnRatioBreach === true;
+    try {
+      const Organization = require('../models/Organization');
+      const org = await Organization.findOne({ organizationId }).lean();
+      const setting = org?.settings?.sil?.blockOnRatioBreach;
+      if (setting !== undefined && blockOnRatioBreach === undefined) {
+        effectiveBlock = setting === true;
+      }
+    } catch (_) {
+      // Fall back to the request flag.
+    }
+
     const understaffed = roster.entries.filter((e) => e.compliance === 'understaffed');
-    if (blockOnRatioBreach && understaffed.length > 0) {
+    if (effectiveBlock && understaffed.length > 0) {
       return { blocked: true, roster, understaffed };
     }
 

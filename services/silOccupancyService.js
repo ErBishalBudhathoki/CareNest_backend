@@ -39,14 +39,21 @@ class SILOccupancyService {
       throw err;
     }
 
+    // §8.2: occupancy date ranges must not overlap for the same room, across
+    // active AND pending rows (not just a single active row).
+    const start = data.startDate ? new Date(data.startDate) : new Date();
+    const end = data.endDate ? new Date(data.endDate) : null;
+    const farFuture = new Date('9999-12-31T00:00:00.000Z');
     const conflict = await SILOccupancy.findOne({
       organizationId,
       propertyId: data.propertyId,
       roomId: data.roomId,
-      status: 'active',
+      status: { $in: ['active', 'pending'] },
+      startDate: { $lt: end || farFuture },
+      $or: [{ endDate: null }, { endDate: { $gt: start } }],
     });
     if (conflict) {
-      const err = new Error('This room already has an active occupancy.');
+      const err = new Error('This room already has an occupancy overlapping those dates.');
       err.statusCode = 409;
       throw err;
     }
@@ -56,8 +63,8 @@ class SILOccupancyService {
       propertyId: data.propertyId,
       roomId: data.roomId,
       clientId: data.clientId,
-      startDate: data.startDate || new Date(),
-      endDate: data.endDate || null,
+      startDate: start,
+      endDate: end,
       status: data.status || 'active',
       fundingType: data.fundingType || 'plan_managed',
       createdBy: actor,

@@ -336,6 +336,14 @@ class SILController {
         message: `Only accepted quotes can be converted (current: ${result.status}).`,
       });
     }
+    if (result.conflict) {
+      return res.status(409).json({
+        success: false,
+        code: 'ROC_CONFLICT',
+        message: 'This client already has an active roster of care.',
+        data: { rosterOfCareId: result.existing?._id?.toString?.() ?? null },
+      });
+    }
     res.status(201).json({
       success: true,
       message: 'Quote converted to roster of care.',

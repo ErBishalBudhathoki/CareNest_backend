@@ -316,6 +316,20 @@ class NDISClaimService {
         errors.push({ claimReference: ref, field: 'ParticipantApproved', message: 'ParticipantApproved must be Y or N.' });
       }
 
+      // §5.7: RequestedAmount must reconcile to the billable quantity × unit
+      // price (skipped for cancellations, whose amount is a fee, not qty×rate).
+      if (claimType !== 'CANCELLATION' && line.requestedAmount != null) {
+        const billable = Number(line.quantity) > 0 ? Number(line.quantity) : Number(line.hours);
+        const expected = round2(billable * (Number(line.unitPrice) || 0));
+        if (Math.abs(expected - round2(line.requestedAmount)) > 0.001) {
+          errors.push({
+            claimReference: ref,
+            field: 'RequestedAmount',
+            message: 'RequestedAmount does not equal Quantity/Hours × UnitPrice.',
+          });
+        }
+      }
+
       // Price cap check — tolerant when the catalog is unavailable.
       if (line.supportNumber && line.unitPrice >= 0) {
         try {
