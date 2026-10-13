@@ -336,7 +336,7 @@ class EarningsService {
   }
 
   // Admin function to set rate (Enhanced for SCHADS)
-  async setPayRate(userEmail, rate, type = 'Hourly', rates = null, classificationLevel = null, payPoint = null, stream = null, employmentType = null, activeAllowances = [], dob = null) {
+  async setPayRate(userEmail, rate, type = 'Hourly', rates = null, classificationLevel = null, payPoint = null, stream = null, employmentType = null, activeAllowances = [], dob = null, award = null) {
     const updateData = {
       payRate: parseFloat(rate),
       payType: type
@@ -348,6 +348,31 @@ class EarningsService {
     if (employmentType) updateData.employmentType = employmentType;
     if (activeAllowances) updateData.activeAllowances = activeAllowances;
     if (dob) updateData.dob = dob; // Save Date of Birth
+
+    // Structured SCHADS award config (Phase 1). Optional + additive.
+    if (award && typeof award === 'object') {
+      const awardData = {};
+      if (award.awardCode) awardData.awardCode = award.awardCode;
+      if (award.level != null) awardData.level = Number(award.level);
+      if (award.payPoint) awardData.payPoint = award.payPoint;
+      if (award.stream) awardData.stream = award.stream;
+      if (award.employmentType) awardData.employmentType = award.employmentType;
+      if (award.casualLoadingRate != null) {
+        awardData.casualLoadingRate = Number(award.casualLoadingRate);
+      }
+      if (award.standardHoursPerDay != null) {
+        awardData.standardHoursPerDay = Number(award.standardHoursPerDay);
+      }
+      if (award.firstAidAllowance != null) {
+        awardData.firstAidAllowance = !!award.firstAidAllowance;
+      }
+      if (award.mealAllowanceEligible != null) {
+        awardData.mealAllowanceEligible = !!award.mealAllowanceEligible;
+      }
+      Object.keys(awardData).forEach((key) => {
+        updateData[`award.${key}`] = awardData[key];
+      });
+    }
 
     if (rates) {
       updateData.rates = { // Field name is 'rates' in User model, not 'payRates'

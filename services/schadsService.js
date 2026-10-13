@@ -1,134 +1,380 @@
+/**
+ * SCHADS shift breakdown engine - time-segmented.
+ *
+ * Replaces the previous whole-shift, start-day-only approximation.
+ * See docs/NDIS_DEPTH_ROADMAP.md section 1.2 for the evidence.
+ *
+ * The engine splits a shift at every rate boundary:
+ *   - clock boundaries: 0600 (night->day), 2000 (day->afternoon), 2400
+ *   - calendar: weekday->Saturday, Saturday->Sunday, Sunday->weekday
+ *   - public-holiday entry/exit
+ *   - overtime threshold (after standardHoursPerDay of ordinary work)
+ *
+ * All boundary arithmetic is performed on absolute instants (UTC ms) and only
+ * formatted/compared in the target IANA timezone, so DST folds and jumps do
+ * not double-count or shift hours.
+ *
+ * Backward compatibility: calculateShiftBreakdown keeps the flat aggregate
+ * keys (baseHours, afternoonShiftHours, ... totalHours) that
+ * payrollService.calculateEmployeePayroll already consumes, and adds a new
+ * additive segments array.
+ */
+
+const schadsRates = require('../config/schadsRates');
+const logger = require('../config/logger');
+
+const MS_PER_MIN = 60 * 1000;
+
+const CATEGORIES = {
+  BASE: 'base',
+  AFTERNOON: 'afternoon',
+  NIGHT: 'night',
+  SATURDAY: 'saturday',
+  SUNDAY: 'sunday',
+  PUBLIC_HOLIDAY: 'publicHoliday',
+  OVERTIME_1: 'overtimeFirst2h',
+  OVERTIME_AFTER: 'overtimeAfter2h',
+};
+
+const HOURS_KEY = {
+  [CATEGORIES.BASE]: 'baseHours',
+  [CATEGORIES.AFTERNOON]: 'afternoonShiftHours',
+  [CATEGORIES.NIGHT]: 'nightShiftHours',
+  [CATEGORIES.SATURDAY]: 'saturdayHours',
+  [CATEGORIES.SUNDAY]: 'sundayHours',
+  [CATEGORIES.PUBLIC_HOLIDAY]: 'publicHolidayHours',
+  [CATEGORIES.OVERTIME_1]: 'overtimeFirst2h',
+  [CATEGORIES.OVERTIME_AFTER]: 'overtimeAfter2h',
+};
+
+const WEEKDAY_MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+function getZonedParts(date, timeZone) {
+  const fmt = Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    weekday: 'short',
+  });
+  const parts = {};
+  for (const p of fmt.formatToParts(date)) {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  }
+  let hour = parseInt(parts.hour, 10);
+  if (hour === 24) hour = 0;
+  const year = parseInt(parts.year, 10);
+  const month = parseInt(parts.month, 10);
+  const day = parseInt(parts.day, 10);
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute: parseInt(parts.minute, 10),
+    second: parseInt(parts.second, 10),
+    weekday: WEEKDAY_MAP[parts.weekday],
+    dateKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+  };
+}
+
+function getOffsetMinutes(date, timeZone) {
+  const parts = getZonedParts(date, timeZone);
+  const asUTC = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+  return Math.round((asUTC - date.getTime()) / MS_PER_MIN);
+}
+
+function zonedWallClockToUtc(year, month, day, hour, minute, timeZone) {
+  const guessUTC = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const offset1 = getOffsetMinutes(new Date(guessUTC), timeZone);
+  let candidate = guessUTC - offset1 * MS_PER_MIN;
+  const offset2 = getOffsetMinutes(new Date(candidate), timeZone);
+  if (offset2 !== offset1) {
+    candidate = guessUTC - offset2 * MS_PER_MIN;
+  }
+  return new Date(candidate);
+}
+
+function startOfZonedDay(parts, timeZone) {
+  return zonedWallClockToUtc(parts.year, parts.month, parts.day, 0, 0, timeZone);
+}
+
+function buildBoundaries(start, end, timeZone) {
+  const boundaries = [start.getTime()];
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  boundaries.push(endMs);
+
+  let dayStartInstant = startOfZonedDay(getZonedParts(start, timeZone), timeZone);
+  let guard = 0;
+  while (dayStartInstant.getTime() <= endMs && guard < 1000) {
+    guard += 1;
+    const dp = getZonedParts(dayStartInstant, timeZone);
+    for (const h of [0, 6, 20]) {
+      const b = zonedWallClockToUtc(dp.year, dp.month, dp.day, h, 0, timeZone);
+      const t = b.getTime();
+      if (t > startMs && t < endMs) boundaries.push(t);
+    }
+    const nextDay = new Date(dayStartInstant.getTime() + 24 * 60 * MS_PER_MIN);
+    dayStartInstant = startOfZonedDay(getZonedParts(nextDay, timeZone), timeZone);
+  }
+
+  return Array.from(new Set(boundaries)).sort((a, b) => a - b);
+}
+
+/**
+ * Classify a segment.
+ *
+ * SCHADS loading windows (time-segmented interpretation):
+ *   - 00:00–06:00                -> night
+ *   - 06:00–20:00                -> base (day)
+ *   - 20:00–24:00, shift does
+ *     NOT cross midnight         -> afternoon
+ *   - 20:00–24:00, shift DOES
+ *     cross midnight             -> night (part of a night shift)
+ *
+ * The midnight-crossing distinction matters because SCHADS defines a night
+ * shift as one that finishes after midnight (or starts before 06:00). The
+ * pre-midnight portion of such a shift therefore also attracts night loading.
+ *
+ * @param {Date} segStart
+ * @param {Date} segEnd
+ * @param {string} timeZone
+ * @param {Set<string>} holidaySet
+ * @param {boolean} crossesMidnight
+ */
+function classifySegment(segStart, segEnd, timeZone, holidaySet, crossesMidnight) {
+  const p = getZonedParts(segStart, timeZone);
+  if (holidaySet.has(p.dateKey)) return CATEGORIES.PUBLIC_HOLIDAY;
+  if (p.weekday === 0) return CATEGORIES.SUNDAY;
+  if (p.weekday === 6) return CATEGORIES.SATURDAY;
+
+  const startMinuteOfDay = p.hour * 60 + p.minute;
+
+  // Early morning is always night.
+  if (startMinuteOfDay < 6 * 60) return CATEGORIES.NIGHT;
+
+  // Evening window: afternoon unless the shift is a night shift (crosses
+  // midnight), in which case the whole pre-midnight evening is night.
+  if (startMinuteOfDay >= 20 * 60) {
+    return crossesMidnight ? CATEGORIES.NIGHT : CATEGORIES.AFTERNOON;
+  }
+
+  return CATEGORIES.BASE;
+}
+
+function zeroAggregates() {
+  const agg = {};
+  for (const key of Object.values(HOURS_KEY)) {
+    agg[key] = 0;
+  }
+  agg.totalHours = 0;
+  return agg;
+}
+
+function aggregateSegments(segments) {
+  const agg = zeroAggregates();
+  let totalMinutes = 0;
+  for (const seg of segments) {
+    const hours = seg.minutes / 60;
+    totalMinutes += seg.minutes;
+    const key = HOURS_KEY[seg.category];
+    if (key) agg[key] += hours;
+  }
+  for (const k of Object.keys(agg)) {
+    agg[k] = parseFloat(agg[k].toFixed(2));
+  }
+  agg.totalHours = parseFloat((totalMinutes / 60).toFixed(2));
+  return agg;
+}
+
+function segmentShift(shift, config = {}) {
+  const timezone = config.timezone || schadsRates.DEFAULTS.timezone;
+  const holidaySet = config.holidaySet || new Set();
+  const standardHoursPerDay =
+    config.standardHoursPerDay || schadsRates.DEFAULTS.standardHoursPerDay;
+
+  const start = new Date(shift.startTime);
+  const end = new Date(shift.endTime);
+  const breakMins = shift.breakDuration || 0;
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    return { segments: [], aggregates: zeroAggregates() };
+  }
+
+  const boundaries = buildBoundaries(start, end, timezone);
+  const baseSegments = [];
+
+  // A night shift is defined (SCHADS) as one that finishes after midnight. If
+  // the shift spans more than one zoned calendar day, its evening hours are
+  // night rather than afternoon.
+  const startDateKey = getZonedParts(start, timezone).dateKey;
+  const endDateKey = getZonedParts(new Date(end.getTime() - 1), timezone).dateKey;
+  const crossesMidnight = startDateKey !== endDateKey;
+
+  for (let i = 0; i < boundaries.length - 1; i += 1) {
+    const segStart = new Date(boundaries[i]);
+    const segEnd = new Date(boundaries[i + 1]);
+    const minutes = Math.round((segEnd.getTime() - segStart.getTime()) / MS_PER_MIN);
+    if (minutes <= 0) continue;
+    baseSegments.push({
+      from: segStart.toISOString(),
+      to: segEnd.toISOString(),
+      minutes,
+      category: classifySegment(segStart, segEnd, timezone, holidaySet, crossesMidnight),
+    });
+  }
+
+  let breakRemaining = breakMins;
+  for (const seg of baseSegments) {
+    if (breakRemaining <= 0) break;
+    const take = Math.min(seg.minutes, breakRemaining);
+    seg.minutes -= take;
+    breakRemaining -= take;
+  }
+
+  const standardMinutes = standardHoursPerDay * 60;
+  let ordinaryAccumulated = 0;
+  let overtimeAccumulated = 0;
+  const segments = [];
+
+  for (const seg of baseSegments) {
+    if (seg.minutes <= 0) continue;
+    if (seg.category === CATEGORIES.PUBLIC_HOLIDAY) {
+      segments.push({ ...seg });
+      continue;
+    }
+    let remaining = seg.minutes;
+    while (remaining > 0) {
+      // Ordinary hours first, up to the daily threshold.
+      if (ordinaryAccumulated < standardMinutes) {
+        const take = Math.min(remaining, standardMinutes - ordinaryAccumulated);
+        segments.push({ ...seg, minutes: take });
+        ordinaryAccumulated += take;
+        remaining -= take;
+        continue;
+      }
+      // Overtime: first 2h at tier 1, thereafter tier 2.
+      const ot1Remaining = Math.max(0, 2 * 60 - overtimeAccumulated);
+      if (ot1Remaining > 0) {
+        const take = Math.min(remaining, ot1Remaining);
+        segments.push({ ...seg, minutes: take, category: CATEGORIES.OVERTIME_1 });
+        overtimeAccumulated += take;
+        remaining -= take;
+        continue;
+      }
+      segments.push({ ...seg, minutes: remaining, category: CATEGORIES.OVERTIME_AFTER });
+      overtimeAccumulated += remaining;
+      remaining = 0;
+    }
+  }
+
+  return { segments, aggregates: aggregateSegments(segments) };
+}
 
 class SCHADSService {
-    /**
-     * Calculate breakdown of hours for a shift based on SCHADS Award rules
-     * @param {Object} shift - The shift object with startTime, endTime, breakDuration, isPublicHoliday
-     * @param {Object} config - Optional configuration overrides
-     * @returns {Object} Breakdown of hours by category
-     */
-    calculateShiftBreakdown(shift, config = {}) {
-        const breakdown = {
-            baseHours: 0,
-            afternoonShiftHours: 0,
-            nightShiftHours: 0,
-            saturdayHours: 0,
-            sundayHours: 0,
-            publicHolidayHours: 0,
-            overtimeFirst2h: 0,
-            overtimeAfter2h: 0,
-            totalHours: 0
-        };
-
-        if (!shift.startTime || !shift.endTime) {
-            return breakdown;
-        }
-
-        const start = new Date(shift.startTime);
-        const end = new Date(shift.endTime);
-        const breakMins = shift.breakDuration || 0;
-
-        // Calculate total duration in hours (excluding break)
-        const totalDurationMs = end - start;
-        const totalDurationMins = (totalDurationMs / (1000 * 60)) - breakMins;
-        
-        if (totalDurationMins <= 0) return breakdown;
-
-        const totalHours = totalDurationMins / 60;
-        breakdown.totalHours = parseFloat(totalHours.toFixed(2));
-
-        // 1. Public Holiday Check (Highest Priority)
-        if (shift.isPublicHoliday) {
-            // Check if OT applies on PH? Usually double time and a half for all hours.
-            // If standard hours exceeded, it's still 250% (or higher?). 
-            // SCHADS: PH OT is 250%. So simplified: All PH hours are PH penalty.
-            breakdown.publicHolidayHours = breakdown.totalHours;
-            return breakdown;
-        }
-
-        // 2. Day of Week Check
-        const dayOfWeek = start.getDay(); // 0 = Sunday, 6 = Saturday
-
-        if (dayOfWeek === 0) { // Sunday
-            // SCHADS Sunday OT is 200%. Sunday Ordinary is 200%.
-            // So effectively same rate for all Sunday hours (unless Casual?).
-            breakdown.sundayHours = breakdown.totalHours;
-            return breakdown;
-        } else if (dayOfWeek === 6) { // Saturday
-            // SCHADS Saturday OT is 150% first 2h, 200% after? 
-            // Saturday Ordinary is 150%. 
-            // So effectively 150% for first 8h (or 10h) then OT logic applies?
-            // For simplicity in this "Breakdown" function, we bucket as Saturday.
-            // The PayrollService will apply OT logic if needed, but here we just return Saturday hours.
-            // Wait, if we want to support OT on Saturday (200% after 2h), we need to split.
-            // However, typical setup: Saturday Ordinary = 150%. Saturday OT = 150% (first 2h) then 200%.
-            // So Saturday is effectively 150% unless it goes very long.
-            breakdown.saturdayHours = breakdown.totalHours;
-            return breakdown;
-        }
-
-        // 3. Weekday Processing (Monday-Friday)
-        
-        // Define standard hours for OT trigger
-        const standardDayHours = config.standardDayHours || 8; // Max ordinary hours per day
-        
-        // Calculate Overtime portion
-        let ordinaryHours = Math.min(totalHours, standardDayHours);
-        let overtimeTotal = Math.max(0, totalHours - standardDayHours);
-        
-        // Split Overtime
-        breakdown.overtimeFirst2h = parseFloat(Math.min(2, overtimeTotal).toFixed(2));
-        breakdown.overtimeAfter2h = parseFloat(Math.max(0, overtimeTotal - 2).toFixed(2));
-
-        // 4. Shift Loading (Afternoon vs Night) on Ordinary Hours
-        // Afternoon Shift: Finishes after 8 PM and at or before 12 Midnight (Mon-Fri)
-        // Night Shift: Finishes after 12 Midnight or commences before 6 AM (Mon-Fri)
-        
-        const shiftEndHour = end.getHours();
-        const shiftStartHour = start.getHours();
-        
-        // Check "Night Shift" condition first (Finishes > 12am OR Starts < 6am)
-        // Note: Finishes > 12am usually means it crosses midnight or ends at e.g. 01:00.
-        // If end date > start date, it definitely finishes after midnight.
-        // If same day, check hours.
-        const crossesMidnight = end.getDate() !== start.getDate();
-        const finishesAfterMidnight = crossesMidnight || (shiftEndHour >= 0 && shiftEndHour < 6); // Simple check
-        const startsBefore6am = shiftStartHour < 6;
-
-        let isNightShift = finishesAfterMidnight || startsBefore6am;
-        
-        // Check "Afternoon Shift" condition (Finishes > 8pm and <= 12am)
-        // 20:00 = 8 PM.
-        let isAfternoonShift = false;
-        if (!isNightShift) {
-            // Must finish after 8 PM.
-            // If same day and end hour >= 20. (Actually > 20:00).
-            // Example: Ends 20:30.
-            const endMins = shiftEndHour * 60 + end.getMinutes();
-            const thresholdMins = 20 * 60; // 1200 mins
-            
-            if (endMins > thresholdMins) {
-                isAfternoonShift = true;
-            }
-        }
-
-        // SCHADS Rule: The WHOLE shift gets the loading if it meets the criteria?
-        // "A shiftworker who works an afternoon shift..." -> Yes, usually applies to the whole shift.
-        // "A shiftworker who works a night shift..." -> Yes, whole shift.
-        // Note: This is a simplification. Some interpretations split hours. 
-        // But standard award interpretation is "Shift Allowance" applies to the shift.
-        
-        if (isNightShift) {
-            breakdown.nightShiftHours = parseFloat(ordinaryHours.toFixed(2));
-            breakdown.baseHours = 0;
-        } else if (isAfternoonShift) {
-            breakdown.afternoonShiftHours = parseFloat(ordinaryHours.toFixed(2));
-            breakdown.baseHours = 0;
-        } else {
-            breakdown.baseHours = parseFloat(ordinaryHours.toFixed(2));
-        }
-
-        return breakdown;
+  calculateShiftBreakdown(shift, config = {}) {
+    try {
+      const { segments, aggregates } = segmentShift(shift, config);
+      return { ...aggregates, segments };
+    } catch (error) {
+      logger.error('SCHADS calculateShiftBreakdown failed', error);
+      return { ...zeroAggregates(), segments: [] };
     }
+  }
+
+  segmentShift(shift, config = {}) {
+    return segmentShift(shift, config);
+  }
+
+  calculateShiftAmount(shift, profile = {}) {
+    const { segments, aggregates } = segmentShift(shift, {
+      timezone: profile.timezone,
+      holidaySet: profile.holidaySet,
+      standardHoursPerDay: profile.standardHoursPerDay,
+    });
+
+    const baseRate = profile.baseRate || 0;
+    const mult = profile.multipliers || schadsRates.resolveMultipliers();
+    const casualLoading = profile.isCasual ? mult.casualLoading || 0 : 0;
+    const loaded = 1 + casualLoading;
+
+    // Legacy mode: `categoryRates` supplies fully-resolved dollar rates per
+    // category (already including casual loading / penalties). When present we
+    // use them directly to avoid double-loading.
+    const categoryRates = profile.categoryRates || null;
+
+    const rateFor = (category) => {
+      if (categoryRates) {
+        const direct = categoryRates[category];
+        if (direct != null && direct > 0) return direct;
+      }
+      switch (category) {
+        case CATEGORIES.AFTERNOON:
+          return baseRate * (mult.afternoon || 1) * loaded;
+        case CATEGORIES.NIGHT:
+          return baseRate * (mult.night || 1) * loaded;
+        case CATEGORIES.SATURDAY:
+          return baseRate * (mult.saturday || 1) * loaded;
+        case CATEGORIES.SUNDAY:
+          return baseRate * (mult.sunday || 1) * loaded;
+        case CATEGORIES.PUBLIC_HOLIDAY:
+          return baseRate * (mult.publicHoliday || 1) * loaded;
+        case CATEGORIES.OVERTIME_1:
+          return baseRate * (mult.overtimeFirst2h || 1.5);
+        case CATEGORIES.OVERTIME_AFTER:
+          return baseRate * (mult.overtimeAfter2h || 2.0);
+        case CATEGORIES.BASE:
+        default:
+          return baseRate * (mult.base || 1) * loaded;
+      }
+    };
+
+    const byCategory = {};
+    let gross = 0;
+    for (const seg of segments) {
+      const hours = seg.minutes / 60;
+      const rate = rateFor(seg.category);
+      const amt = hours * rate;
+      byCategory[seg.category] = (byCategory[seg.category] || 0) + amt;
+      gross += amt;
+    }
+    for (const k of Object.keys(byCategory)) {
+      byCategory[k] = parseFloat(byCategory[k].toFixed(2));
+    }
+
+    return {
+      segments,
+      aggregates,
+      amount: {
+        baseRate,
+        hours: aggregates.totalHours,
+        byCategory,
+        gross: parseFloat(gross.toFixed(2)),
+      },
+    };
+  }
 }
 
 module.exports = new SCHADSService();
+module.exports._internal = {
+  getZonedParts,
+  getOffsetMinutes,
+  zonedWallClockToUtc,
+  buildBoundaries,
+  segmentShift,
+  classifySegment,
+  CATEGORIES,
+  HOURS_KEY,
+};

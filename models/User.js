@@ -118,6 +118,35 @@ const userSchema = new mongoose.Schema({
   payPoint: String,
   employmentType: String,
 
+  // SCHADS award configuration (Phase 1 — additive, all optional).
+  // Consumed by services/schadsService.js via config/schadsRates.js.
+  award: {
+    awardCode: { type: String, default: 'MA000100' }, // SCHADS
+    level: { type: Number, min: 1, max: 5 },
+    payPoint: String, // e.g. "1.3"
+    stream: { type: String, enum: ['home_care', 'disability', 'social_community'] },
+    employmentType: { type: String, enum: ['casual', 'permanent_ft', 'permanent_pt'] },
+    casualLoadingRate: { type: Number, default: 0.25 },
+    standardHoursPerDay: { type: Number, default: 8 },
+    firstAidAllowance: { type: Boolean, default: false },
+    mealAllowanceEligible: { type: Boolean, default: false },
+    // Effective-dated rate overrides. When present, the latest override whose
+    // effectiveFrom <= service date wins over the shared rate table.
+    rateOverrides: [{
+      effectiveFrom: Date,
+      rates: {
+        baseRate: Number,
+        saturdayRate: Number,
+        sundayRate: Number,
+        publicHolidayRate: Number,
+        overtimeRate: Number,
+        overtimeRate2: Number,
+        nightShiftRate: Number,
+        eveningShiftRate: Number
+      }
+    }]
+  },
+
   dob: Date,
   fcmToken: String,
   lastLogin: Date,
