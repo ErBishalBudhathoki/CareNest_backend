@@ -41,6 +41,7 @@ jest.mock('../../models/SILRosterOfCare', () => ({
   create: jest.fn(),
 }));
 jest.mock('../../models/Shift', () => ({ find: jest.fn() }));
+jest.mock('../../models/Organization', () => ({ findOne: jest.fn() }));
 jest.mock('../../services/priceValidationService', () => ({
   priceValidationService: { validatePrice: jest.fn() },
 }));
@@ -376,5 +377,76 @@ describe('SILController org scoping', () => {
     await silController.listProperties(req, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('MISSING_ORGANIZATION');
+  });
+});
+
+describe('SIL findings — §8 validation rules', () => {
+  const Organization = require('../../models/Organization');
+
+  test('F4.1 rejects an occupancy overlapping an existing (pending) row', async () => {
+    SILProperty.findOne.mockResolvedValue({ _id: 'p1', rooms: [{ roomId: 'r1' }] });
+    SILOccupancy.findOne.mockResolvedValue({ _id: 'overlap' });
+
+    await expect(
+      silOccupancyService.createOccupancy('org1', {
+        propertyId: 'p1',
+        roomId: 'r1',
+        clientId: 'c1',
+        startDate: '2026-06-01',
+        endDate: '2026-06-30',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    // The overlap query must consider active AND pending rows.
+    const [query] = SILOccupancy.findOne.mock.calls[0];
+    expect(query.status).toEqual({ $in: ['active', 'pending'] });
+  });
+
+  test('F4.2 rejects converting a quote when the client has an active RoC', async () => {
+    SILQuote.findOne.mockResolvedValue({
+      _id: 'q1',
+      status: 'accepted',
+      clientId: 'c1',
+      propertyId: 'p1',
+      lines: [],
+    });
+    SILRosterOfCare.findOne.mockResolvedValue({ _id: 'roc-existing' });
+
+    const result = await silQuoteService.convertToRosterOfCare('org1', 'q1');
+    expect(result.conflict).toBe(true);
+    expect(result.existing._id).toBe('roc-existing');
+  });
+
+  test('F4.3 publish reads the org blockOnRatioBreach setting', async () => {
+    SILRoster.findOne.mockResolvedValue({
+      _id: 'r1',
+      entries: [{ compliance: 'understaffed' }],
+      ratioWarnings: [],
+      save: jest.fn(),
+    });
+    Organization.findOne.mockReturnValue({
+      lean: async () => ({ settings: { sil: { blockOnRatioBreach: true } } }),
+    });
+
+    const result = await silRosterService.publishRoster('org1', 'r1', {});
+    expect(result.blocked).toBe(true);
+  });
+
+  test('F4.3 request flag overrides the org setting', async () => {
+    SILRoster.findOne.mockResolvedValue({
+      _id: 'r1',
+      entries: [{ compliance: 'understaffed' }],
+      ratioWarnings: [],
+      save: jest.fn(),
+    });
+    Organization.findOne.mockReturnValue({
+      lean: async () => ({ settings: { sil: { blockOnRatioBreach: true } } }),
+    });
+
+    const result = await silRosterService.publishRoster('org1', 'r1', {
+      blockOnRatioBreach: false,
+    });
+    expect(result.blocked).toBeUndefined();
+    expect(result.roster.status).toBe('published');
   });
 });

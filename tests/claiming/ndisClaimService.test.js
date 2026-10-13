@@ -318,3 +318,45 @@ describe('BillingRoutingService', () => {
     expect(billing.recipientType).toBe('plan_manager');
   });
 });
+
+describe('NDISClaimService.validateLines — RequestedAmount (F6.3)', () => {
+  test('flags a RequestedAmount that does not equal qty × price', async () => {
+    const r = await ndisClaimService.validateLines([
+      {
+        claimReference: 'r1',
+        ndisNumber: '430123456',
+        supportNumber: '01_011_0107_1_1',
+        isHourly: true,
+        quantity: 0,
+        hours: 8,
+        unitPrice: 81.27,
+        gstCode: 'P2',
+        claimType: 'STANDARD',
+        cancellationReason: '',
+        participantApproved: 'Y',
+        requestedAmount: 999.99, // wrong
+      },
+    ]);
+    expect(r.errors.some((e) => e.field === 'RequestedAmount')).toBe(true);
+  });
+
+  test('accepts a reconciling RequestedAmount', async () => {
+    const r = await ndisClaimService.validateLines([
+      {
+        claimReference: 'r1',
+        ndisNumber: '430123456',
+        supportNumber: '01_011_0107_1_1',
+        isHourly: true,
+        quantity: 0,
+        hours: 8,
+        unitPrice: 81.27,
+        gstCode: 'P2',
+        claimType: 'STANDARD',
+        cancellationReason: '',
+        participantApproved: 'Y',
+        requestedAmount: 650.16,
+      },
+    ]);
+    expect(r.errors.some((e) => e.field === 'RequestedAmount')).toBe(false);
+  });
+});

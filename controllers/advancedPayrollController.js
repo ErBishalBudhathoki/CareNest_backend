@@ -34,6 +34,25 @@ class AdvancedPayrollController {
           // Leave holidaySet unset; engine treats no dates as holidays.
         }
       }
+
+      // Phase 1 (F1.1): when the caller supplies shifts but no employee award
+      // profile, resolve the employee so the segmented engine uses their award
+      // config (level/stream/rates). Best-effort.
+      if (!payrollData.employee && payrollData.userId) {
+        try {
+          const User = require('../models/User');
+          const mongoose = require('mongoose');
+          const idOrEmail = String(payrollData.userId);
+          const query = mongoose.Types.ObjectId.isValid(idOrEmail)
+            ? { _id: idOrEmail }
+            : { email: idOrEmail.toLowerCase() };
+          const employee = await User.findOne(query).lean();
+          if (employee) payrollData.employee = employee;
+        } catch (_) {
+          // No employee resolved; the service falls back to provided data.
+        }
+      }
+
       const result = await advancedPayrollService.calculatePayroll(payrollData);
       return res.status(result.success ? 200 : 400).json(result);
     } catch (error) {
