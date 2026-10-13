@@ -6,24 +6,69 @@ class NotesController {
   /**
    * Add a note for a client
    * POST /api/notes
+   *
+   * Supports two shapes (Phase 2):
+   *   - free text:  { userEmail, clientEmail, notes }
+   *   - structured: { userEmail, clientEmail, templateId, structuredData,
+   *                   shiftId?, attachments?, clientNoteId? }
+   * `notes` may be empty for structured notes.
    */
   addNote = catchAsync(async (req, res) => {
-    const { userEmail, clientEmail, notes } = req.body;
+    const {
+      userEmail,
+      clientEmail,
+      notes,
+      templateId,
+      shiftId,
+      structuredData,
+      attachments,
+      clientNoteId,
+      noteType,
+    } = req.body;
     const organizationId = req.user?.organizationId;
 
-    if (!userEmail || !clientEmail || !notes) {
+    if (!userEmail || !clientEmail) {
       return res.status(400).json({
         success: false,
         code: 'VALIDATION_ERROR',
-        message: 'userEmail, clientEmail, and notes are required fields.'
+        message: 'userEmail and clientEmail are required fields.'
       });
+    }
+
+    const isStructured = noteType === 'structured' || (templateId && structuredData);
+    if (!isStructured && !notes) {
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'Either notes (free text) or templateId + structuredData is required.'
+      });
+    }
+
+    // Idempotency: return the existing note when a client retries an offline
+    // draft with the same clientNoteId.
+    if (clientNoteId) {
+      const existing = await Note.findOne({ organizationId, clientNoteId });
+      if (existing) {
+        return res.status(200).json({
+          success: true,
+          code: 'NOTE_ALREADY_EXISTS',
+          message: 'Note already synced.',
+          data: existing
+        });
+      }
     }
 
     const note = await Note.create({
       userEmail,
       clientEmail,
-      notes,
-      organizationId
+      notes: notes || '',
+      organizationId,
+      noteType: isStructured ? 'structured' : 'free_text',
+      templateId: templateId || null,
+      shiftId: shiftId || null,
+      structuredData: structuredData || null,
+      attachments: Array.isArray(attachments) ? attachments : [],
+      clientNoteId: clientNoteId || null
     });
 
     logger.business('Note Added', {
@@ -32,6 +77,7 @@ class NotesController {
       clientEmail,
       organizationId,
       noteId: note._id.toString(),
+      noteType: note.noteType,
       timestamp: new Date().toISOString()
     });
 
@@ -45,6 +91,11 @@ class NotesController {
         clientEmail: note.clientEmail,
         notes: note.notes,
         organizationId: note.organizationId,
+        noteType: note.noteType,
+        templateId: note.templateId,
+        shiftId: note.shiftId,
+        structuredData: note.structuredData,
+        attachments: note.attachments,
         createdAt: note.createdAt
       }
     });
