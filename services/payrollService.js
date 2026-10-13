@@ -46,6 +46,16 @@ class PayrollService {
 
             const shifts = await db.collection('workedTime').find(query).toArray();
 
+            // Phase 1: resolve public holidays for the org so the SCHADS engine
+            // classifies holiday hours correctly. Best-effort.
+            let holidaySet = new Set();
+            try {
+                const HolidayService = require('./holidayService');
+                holidaySet = await HolidayService.getHolidayDateKeys(safeOrgId);
+            } catch (_) {
+                // No holiday data available; treat as none.
+            }
+
             // 3. Process Data
             const payrollData = {
                 summary: {
@@ -79,7 +89,7 @@ class PayrollService {
 
             for (const employee of employees) {
                 const empShifts = shiftsByUser[employee.email] || [];
-                const empResult = this.calculateEmployeePayroll(employee, empShifts);
+                const empResult = this.calculateEmployeePayroll(employee, empShifts, { holidaySet });
                 
                 payrollData.employees.push(empResult);
                 
@@ -121,7 +131,7 @@ class PayrollService {
     /**
      * Calculate payroll for a single employee
      */
-    calculateEmployeePayroll(employee, shifts) {
+    calculateEmployeePayroll(employee, shifts, config = {}) {
         const result = {
             employeeId: employee._id,
             name: `${employee.firstName} ${employee.lastName}`,
@@ -188,7 +198,7 @@ class PayrollService {
 
         for (const shift of shifts) {
             // Calculate Hours Breakdown
-            const breakdown = schadsService.calculateShiftBreakdown(shift);
+            const breakdown = schadsService.calculateShiftBreakdown(shift, config);
             
             // Accumulate Hours
             result.hoursWorked += breakdown.totalHours;

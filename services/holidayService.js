@@ -8,8 +8,38 @@ const uri = process.env.MONGODB_URI;
 
 class HolidayService {
   /**
+   * Build a Set of 'YYYY-MM-DD' zoned date keys for the SCHADS engine's
+   * public-holiday detection (Phase 1). Accepts the DB 'DD-MM-YYYY' format and
+   * ISO/DD-MM-YYYY inputs.
+   * @param {string} organizationId
+   * @returns {Promise<Set<string>>}
+   */
+  static async getHolidayDateKeys(organizationId = null) {
+    const holidays = await this.getAllHolidays(organizationId);
+    const set = new Set();
+    for (const holiday of holidays || []) {
+      const key = this.toDateKey(holiday?.Date ?? holiday?.date ?? holiday?.holidayDate);
+      if (key) set.add(key);
+    }
+    return set;
+  }
+
+  /** Convert a holiday date value to a 'YYYY-MM-DD' key, or null. */
+  static toDateKey(value) {
+    if (!value) return null;
+    const s = String(value).trim();
+    let m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/); // DD-MM-YYYY
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); // DD/MM/YYYY
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return null;
+  }
+
+  /**
    * Get all holidays from the database (Global + Organization Specific)
-   * @param {string} organizationId - Optional organization ID to filter custom holidays
+   * @param {string} organizationId - Optional ID to filter custom holidays
    * @returns {Promise<Array>} Array of holiday objects
    */
   static async getAllHolidays(organizationId = null) {

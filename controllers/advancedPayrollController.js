@@ -17,7 +17,23 @@ class AdvancedPayrollController {
 
   async calculatePayroll(req, res) {
     try {
-      const payrollData = req.body;
+      const payrollData = req.body || {};
+      // Phase 1: resolve public holidays for the org so the SCHADS engine can
+      // classify holiday hours. Best-effort — never block payroll on it.
+      if (!payrollData.holidaySet) {
+        try {
+          const HolidayService = require('../services/holidayService');
+          const organizationId = this._resolveOrganizationId(
+            payrollData.organizationId,
+            req.user,
+          );
+          payrollData.holidaySet = await HolidayService.getHolidayDateKeys(
+            organizationId || null,
+          );
+        } catch (_) {
+          // Leave holidaySet unset; engine treats no dates as holidays.
+        }
+      }
       const result = await advancedPayrollService.calculatePayroll(payrollData);
       return res.status(result.success ? 200 : 400).json(result);
     } catch (error) {
