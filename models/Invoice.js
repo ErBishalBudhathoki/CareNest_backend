@@ -251,6 +251,29 @@ invoiceSchema.index({ organizationId: 1, createdAt: -1 });
 // Per-tenant top-clients grouping (clientEmail) inside a date window.
 invoiceSchema.index({ organizationId: 1, clientEmail: 1, createdAt: -1 });
 
+// Phase 6: stamp the funding/billing route on new invoices so the billing
+// artefact (NDIA claim CSV vs plan-manager/participant PDF) is recorded at
+// creation time regardless of which service created the invoice. Additive and
+// best-effort: a lookup failure must never block invoice creation.
+invoiceSchema.pre('save', async function stampBillingRoute() {
+  try {
+    if (!this.isNew) return;
+    if (this.billing && this.billing.fundingType) return;
+    if (!this.clientId) return;
+
+    // Lazy requires avoid import cycles at module load.
+    const Client = require('./Client');
+    const billingRoutingService = require('../services/billingRoutingService');
+
+    const client = await Client.findById(this.clientId).lean();
+    if (client) {
+      this.billing = billingRoutingService.buildInvoiceBilling(client);
+    }
+  } catch (_) {
+    // Never block invoice creation on routing metadata.
+  }
+});
+
 const InvoiceStatus = {
   DRAFT: 'draft',
   PENDING_APPROVAL: 'pending_approval',

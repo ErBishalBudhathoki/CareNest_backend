@@ -112,10 +112,11 @@ class ClientService {
       emergencyContact,
       medicalConditions,
       riskAssessment,
+      ndisNumber,
+      fundingType,
       organizationId,
       userEmail 
     } = clientData;
-
     try {
       const normalizedClientEmail = this._normalizeEmail(clientEmail);
       if (!normalizedClientEmail) {
@@ -239,6 +240,8 @@ class ClientService {
         emergencyContact: emergencyContact || {},
         medicalConditions: medicalConditions || [],
         riskAssessment: riskAssessment || {},
+        ndisNumber: ndisNumber || '',
+        fundingType: fundingType || 'plan_managed',
         organizationId: organizationId, // Always required
         isActive: true,
         isActivated: false,
