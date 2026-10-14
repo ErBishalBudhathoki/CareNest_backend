@@ -1,7 +1,10 @@
 const ClientAssignment = require('../models/ClientAssignment');
+const Client = require('../models/Client');
 const Invoice = require('../models/Invoice');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
 const logger = require('../utils/logger');
+const { formatDisplayDate } = require('../utils/dateHelpers');
+const billingRoutingService = require('./billingRoutingService');
 const crypto = require('crypto');
 
 /**
@@ -72,7 +75,7 @@ async function generateInvoicesFromAppointments({
         lineItems.push({
           invoiceId: invoice._id,
           appointmentId: apt._id,
-          description: `${apt.serviceId.name} - ${apt.date.toLocaleDateString()}`,
+          description: `${apt.serviceId.name} - ${formatDisplayDate(apt.date)}`,
           quantity: apt.duration,
           unitPrice: apt.serviceId.rate,
           amount,
@@ -103,7 +106,7 @@ async function generateInvoicesFromAppointments({
       lineItems.push({
         invoiceId: invoice._id,
         appointmentId: apt._id,
-        description: `${apt.serviceId.name} - ${apt.date.toLocaleDateString()}`,
+        description: `${apt.serviceId.name} - ${formatDisplayDate(apt.date)}`,
         quantity: apt.duration,
         unitPrice: apt.serviceId.rate,
         amount,
@@ -111,6 +114,25 @@ async function generateInvoicesFromAppointments({
 
       invoices.push(invoice);
     });
+  }
+
+  // Apply funding/billing routing to each invoice before insertMany
+  // (insertMany skips pre-save hooks, so the billing block must be stamped
+  // here explicitly). Best-effort: a routing failure must never block
+  // invoice creation.
+  try {
+    const clientIds = [...new Set(invoices.map((inv) => inv.clientId?.toString()).filter(Boolean))];
+    const clients = await Client.find({ _id: { $in: clientIds } }).lean();
+    const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
+
+    for (const invoice of invoices) {
+      const client = clientMap.get(invoice.clientId?.toString());
+      if (client) {
+        invoice.billing = billingRoutingService.buildInvoiceBilling(client);
+      }
+    }
+  } catch (_) {
+    // Never block bulk invoice creation on routing metadata.
   }
 
   // Save invoices and line items

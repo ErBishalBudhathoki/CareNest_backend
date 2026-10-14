@@ -5,6 +5,18 @@ global.console = require('console');
 jest.unmock('mongoose');
 jest.unmock('mongodb');
 
+// Mock Temporal so the suite doesn't depend on a running Temporal server.
+jest.mock('../../core/TemporalManager', () => {
+  return class TemporalManager {
+    static getTaskQueue() { return 'default-test'; }
+    static async getClient() { return { workflow: { start: jest.fn().mockResolvedValue({}) } }; }
+    static async startWorkflow() { return { workflowId: 'test-wf-id', runId: 'test-run-id' }; }
+    static async describeWorkflow() { return { status: { name: 'COMPLETED' } }; }
+    static async listWorkflows() { return { workflows: [], total: 0, degraded: false }; }
+    static async close() {}
+  };
+});
+
 // Mock firebase-admin BEFORE anything else
 jest.mock('../../firebase-admin-config', () => {
   const mockAuth = {
@@ -86,10 +98,28 @@ describe('Multi-Tenant Workflow Integration Tests', () => {
   }));
 
   beforeAll(async () => {
-    // Connect to test database
+    // Connect to test database.
+    // NOTE: this hook wipes whole collections below, so it must never be
+    // pointed at a non-test database. It falls back to MONGODB_URI (which in
+    // this project is the real cluster), so the database-name guard further
+    // down is load-bearing — do not remove it.
     if (mongoose.connection.readyState === 0) {
       await mongoose.connect(process.env.MONGODB_URI_TEST || process.env.MONGODB_URI);
     }
+
+    // Safety guard: refuse to destroy data unless the target database is
+    // unambiguously a test database (e.g. `test`, `carenest_test`).
+    const targetDb =
+      (mongoose.connection.db && mongoose.connection.db.databaseName) || '';
+    if (!/test/i.test(targetDb)) {
+      throw new Error(
+        `Refusing to run destructive cleanup: connected database is "${targetDb}", ` +
+          'which does not look like a test database. Set MONGODB_URI_TEST to a ' +
+          'dedicated test database (its name must contain "test").'
+      );
+    }
+    console.log(`[multi_tenant_workflow] destructive cleanup target: ${targetDb}`);
+
     // Clear relevant collections
     await User.deleteMany({});
     await Organization.deleteMany({});
@@ -97,7 +127,7 @@ describe('Multi-Tenant Workflow Integration Tests', () => {
     await Client.deleteMany({});
     await ClientAssignment.deleteMany({});
     await mongoose.connection.collection('login').deleteMany({});
-  });
+  }, 30000);
 
   afterAll(async () => {
     // Cleanup test data

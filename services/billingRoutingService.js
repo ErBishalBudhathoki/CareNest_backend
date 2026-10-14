@@ -34,6 +34,7 @@ class BillingRoutingService {
 
   /**
    * Build the additive `billing` block to stamp on an Invoice.
+   * Includes `artifact` so consumers know what to produce (claim CSV vs PDF).
    * @param {Object} client - { fundingType, stakeholders? }
    * @returns {Object} billing block
    */
@@ -46,6 +47,7 @@ class BillingRoutingService {
     return {
       fundingType: route.fundingType,
       recipientType: route.recipientType,
+      artifact: route.artifact,
       planManagerStakeholderId: planManagerId,
     };
   }

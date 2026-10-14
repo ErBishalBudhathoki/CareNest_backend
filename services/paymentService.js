@@ -320,7 +320,7 @@ class PaymentService {
           amount, 
           'AUD', 
           invoice.invoiceNumber, 
-          new Date().toLocaleDateString(), 
+          formatDisplayDate(new Date()), 
           paymentData.method
         );
         // Don't await email sending to keep response fast

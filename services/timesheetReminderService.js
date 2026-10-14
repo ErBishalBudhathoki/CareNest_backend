@@ -12,6 +12,7 @@ const ClientAssignment = require('../models/ClientAssignment');
 const WorkedTime = require('../models/WorkedTime');
 const FcmToken = require('../models/FcmToken');
 const ReminderLog = require('../models/ReminderLog');
+const { parseFlexibleDate } = require('../utils/dateHelpers');
 
 /**
  * Default reminder configuration
@@ -98,8 +99,9 @@ async function getUsersWithIncompleteTimesheets(organizationId, weekStart, weekE
                 if (assignment.schedule && Array.isArray(assignment.schedule)) {
                     for (const shift of assignment.schedule) {
                         if (shift.date) {
-                            const shiftDate = new Date(shift.date);
-                            if (shiftDate >= weekStart && shiftDate <= weekEnd) {
+                            // Day-first (DD/MM/YYYY) read as day-first; ISO passes through.
+                            const shiftDate = parseFlexibleDate(shift.date);
+                            if (shiftDate && shiftDate >= weekStart && shiftDate <= weekEnd) {
                                 scheduledShiftCount++;
                             }
                         }

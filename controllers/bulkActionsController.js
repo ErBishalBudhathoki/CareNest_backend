@@ -3,6 +3,7 @@ const ClientAssignment = require('../models/ClientAssignment');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const catchAsync = require('../utils/catchAsync');
+const { formatDisplayDate } = require('../utils/dateHelpers');
 const logger = require('../utils/logger');
 
 /**
@@ -46,7 +47,7 @@ exports.approveTimesheets = catchAsync(async (req, res) => {
     organizationId,
     type: 'timesheet_approved',
     title: 'Timesheet Approved',
-    message: `Your timesheet for ${timesheet.date.toLocaleDateString()} has been approved`,
+    message: `Your timesheet for ${formatDisplayDate(timesheet.date)} has been approved`,
     data: {
       timesheetId: timesheet._id,
       date: timesheet.date,
@@ -121,7 +122,7 @@ exports.rejectTimesheets = catchAsync(async (req, res) => {
     organizationId,
     type: 'timesheet_rejected',
     title: 'Timesheet Rejected',
-    message: `Your timesheet for ${timesheet.date.toLocaleDateString()} was rejected: ${reason}`,
+    message: `Your timesheet for ${formatDisplayDate(timesheet.date)} was rejected: ${reason}`,
     data: {
       timesheetId: timesheet._id,
       date: timesheet.date,
@@ -459,7 +460,7 @@ exports.assignShifts = catchAsync(async (req, res) => {
         organizationId,
         type: 'shift_assigned',
         title: 'New Shift Assigned',
-        message: `You have been assigned a shift on ${shift.date.toLocaleDateString()} at ${shift.startTime}`,
+        message: `You have been assigned a shift on ${formatDisplayDate(shift.date)} at ${shift.startTime}`,
         data: {
           shiftId: shift._id,
           date: shift.date,

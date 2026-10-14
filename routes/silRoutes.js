@@ -117,5 +117,16 @@ router.get('/rosters-of-care', silReadLimiter, silController.listRostersOfCare);
 router.get('/rosters-of-care/:id', silReadLimiter, mongoId('id'), handleValidationErrors, silController.getRosterOfCare);
 router.put('/rosters-of-care/:id', silWriteLimiter, mongoId('id'), handleValidationErrors, silController.updateRosterOfCare);
 router.post('/rosters-of-care/:id/review', silWriteLimiter, mongoId('id'), handleValidationErrors, silController.reviewRosterOfCare);
+router.post(
+  '/rosters-of-care/:id/invoice',
+  silWriteLimiter,
+  [
+    mongoId('id'),
+    body('from').notEmpty().withMessage('from is required'),
+    body('to').notEmpty().withMessage('to is required'),
+  ],
+  handleValidationErrors,
+  silController.generateRosterOfCareInvoice,
+);
 
 module.exports = router;

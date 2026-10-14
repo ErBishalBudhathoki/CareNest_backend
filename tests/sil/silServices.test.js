@@ -42,6 +42,7 @@ jest.mock('../../models/SILRosterOfCare', () => ({
 }));
 jest.mock('../../models/Shift', () => ({ find: jest.fn() }));
 jest.mock('../../models/Organization', () => ({ findOne: jest.fn() }));
+jest.mock('../../models/Client', () => ({ updateOne: jest.fn() }));
 jest.mock('../../services/priceValidationService', () => ({
   priceValidationService: { validatePrice: jest.fn() },
 }));
@@ -53,6 +54,7 @@ const SILQuote = require('../../models/SILQuote');
 const SILRosterOfCare = require('../../models/SILRosterOfCare');
 const SILRoster = require('../../models/SILRoster');
 const Shift = require('../../models/Shift');
+const Client = require('../../models/Client');
 const { priceValidationService } = require('../../services/priceValidationService');
 
 const silPropertyService = require('../../services/silPropertyService');
@@ -307,6 +309,28 @@ describe('SILQuoteService', () => {
     SILQuote.findOne.mockResolvedValue({ _id: 'q1', status: 'draft' });
     const result = await silQuoteService.convertToRosterOfCare('org1', 'q1');
     expect(result.invalidState).toBe(true);
+  });
+
+  test('convertToRosterOfCare propagates the quote funding type to the client', async () => {
+    SILQuote.findOne.mockResolvedValue({
+      _id: 'q1',
+      status: 'accepted',
+      clientId: 'c1',
+      propertyId: 'p1',
+      fundingType: 'ndia_managed',
+      lines: [],
+      save: jest.fn(),
+    });
+    SILRosterOfCare.findOne.mockResolvedValue(null);
+    SILRosterOfCare.create.mockImplementation(async (doc) => ({ _id: 'roc1', ...doc }));
+
+    const result = await silQuoteService.convertToRosterOfCare('org1', 'q1', {}, 'admin@org.com');
+
+    expect(result.rosterOfCare.status).toBe('active');
+    expect(Client.updateOne).toHaveBeenCalledWith(
+      { _id: 'c1', organizationId: 'org1' },
+      { $set: { fundingType: 'ndia_managed' } },
+    );
   });
 });
 

@@ -23,17 +23,27 @@ jest.mock('../../models/ClaimLine', () => ({
 }));
 jest.mock('../../models/Client', () => ({ find: jest.fn() }));
 jest.mock('../../models/Organization', () => ({ findOne: jest.fn() }));
-jest.mock('../../models/Invoice', () => ({ find: jest.fn() }));
+// The real module exports the model under `Invoice` (plus the status enums),
+// so the mock must mirror that shape.
+jest.mock('../../models/Invoice', () => ({ Invoice: { find: jest.fn() } }));
 jest.mock('../../services/priceValidationService', () => ({
   priceValidationService: { validatePrice: jest.fn().mockResolvedValue({ isValid: true }) },
+}));
+
+// Keep the R2 storage path hermetic — `.env` is loaded by tests/setup.js, so the
+// real utility would otherwise attempt a live upload during unit tests.
+jest.mock('../../utils/cloudFunctionsUpload', () => ({
+  isR2Configured: jest.fn(() => false),
+  uploadBufferToR2: jest.fn(),
 }));
 
 const ClaimBatch = require('../../models/ClaimBatch');
 const ClaimLine = require('../../models/ClaimLine');
 const Client = require('../../models/Client');
 const Organization = require('../../models/Organization');
-const Invoice = require('../../models/Invoice');
+const { Invoice } = require('../../models/Invoice');
 const { priceValidationService } = require('../../services/priceValidationService');
+const { isR2Configured, uploadBufferToR2 } = require('../../utils/cloudFunctionsUpload');
 
 const ndisClaimService = require('../../services/ndisClaimService');
 const ndisClaimResultsService = require('../../services/ndisClaimResultsService');
@@ -51,7 +61,7 @@ describe('NDISClaimService.buildCsv (2026-27 myplace template)', () => {
     );
   });
 
-  test('formats dates as YYYY/MM/DD and fills Hours for hourly items', () => {
+  test('formats dates as DD/MM/YYYY and fills Hours for hourly items', () => {
     const csv = ndisClaimService.buildCsv(
       [
         {
@@ -76,7 +86,7 @@ describe('NDISClaimService.buildCsv (2026-27 myplace template)', () => {
 
     const row = csv.split('\r\n')[1];
     expect(row).toBe(
-      `405000123,430123456,2026/04/01,2026/04/01,01_011_0107_1_1,CN-ORG123-ABCD1234-000001,,8.00,81.27,P2,,Y,,STANDARD,,${VALID_ABN}`,
+      `405000123,430123456,01/04/2026,01/04/2026,01_011_0107_1_1,CN-ORG123-ABCD1234-000001,,8.00,81.27,P2,,Y,,STANDARD,,${VALID_ABN}`,
     );
   });
 
@@ -104,8 +114,8 @@ describe('NDISClaimService.buildCsv (2026-27 myplace template)', () => {
     expect(cols[7]).toBe(''); // Hours
   });
 
-  test('formats dates as YYYY/MM/DD', () => {
-    expect(ndisClaimService.formatNdisDate(new Date('2026-12-25T00:00:00Z'))).toBe('2026/12/25');
+  test('formats dates as DD/MM/YYYY', () => {
+    expect(ndisClaimService.formatNdisDate(new Date('2026-12-25T00:00:00Z'))).toBe('25/12/2026');
   });
 });
 
@@ -134,6 +144,7 @@ describe('NDISClaimService.validateLines', () => {
     cancellationReason: '',
     participantApproved: 'Y',
     requestedAmount: 400,
+    serviceDate: new Date('2026-04-01T00:00:00Z'),
   };
 
   test('flags an invalid provider registration number', async () => {
@@ -186,6 +197,16 @@ describe('NDISClaimService.validateLines', () => {
     const r = await ndisClaimService.validateLines([{ ...baseLine, unitPrice: 999 }]);
     expect(r.errors.some((e) => e.field === 'UnitPrice')).toBe(true);
   });
+
+  test('flags a missing service date (BPR date format)', async () => {
+    const r = await ndisClaimService.validateLines([{ ...baseLine, serviceDate: undefined }]);
+    expect(r.errors.some((e) => e.field === 'SupportsDeliveredFrom')).toBe(true);
+  });
+
+  test('accepts a service date in the BPR format', async () => {
+    const r = await ndisClaimService.validateLines([baseLine]);
+    expect(r.errors.some((e) => e.field === 'SupportsDeliveredFrom')).toBe(false);
+  });
 });
 
 describe('NDISClaimService.generateBatch', () => {
@@ -218,6 +239,10 @@ describe('NDISClaimService.generateBatch', () => {
     ClaimLine.find.mockReturnValue(lean([]));
     ClaimBatch.create.mockImplementation(async (doc) => ({ _id: 'b1', ...doc, save: jest.fn() }));
     ClaimLine.insertMany.mockResolvedValue([]);
+    // `clearMocks` does not reset implementations, so reset the storage mocks
+    // explicitly to keep each test independent.
+    isR2Configured.mockReturnValue(false);
+    uploadBufferToR2.mockReset();
   });
 
   test('generates a batch with unique refs and stores the CSV', async () => {
@@ -231,7 +256,47 @@ describe('NDISClaimService.generateBatch', () => {
     expect(result.csv).toContain('CN-org1-');
     const decoded = Buffer.from(result.batch.fileRef, 'base64').toString('utf8');
     expect(decoded).toContain('430123456');
-    expect(decoded).toContain('2026/04/01');
+    expect(decoded).toContain('01/04/2026');
+    // R2 is unavailable in this test → inline fallback.
+    expect(result.batch.storageProvider).toBe('inline');
+    expect(result.batch.fileUrl).toBe('');
+  });
+
+  test('stores the CSV in R2 with a storage ref when R2 is configured', async () => {
+    isR2Configured.mockReturnValue(true);
+    uploadBufferToR2.mockResolvedValue({
+      key: 'claimBatches/org1/b1.csv',
+      location: 'https://cdn.example.com/claimBatches/org1/b1.csv',
+    });
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(uploadBufferToR2).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'claimBatches/org1/b1.csv',
+        contentType: 'text/csv',
+      }),
+    );
+    expect(result.batch.fileRef).toBe('claimBatches/org1/b1.csv');
+    expect(result.batch.fileUrl).toBe('https://cdn.example.com/claimBatches/org1/b1.csv');
+    expect(result.batch.storageProvider).toBe('r2');
+  });
+
+  test('falls back to inline base64 when the R2 upload fails', async () => {
+    isR2Configured.mockReturnValue(true);
+    uploadBufferToR2.mockRejectedValue(new Error('R2 outage'));
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(result.batch.storageProvider).toBe('inline');
+    const decoded = Buffer.from(result.batch.fileRef, 'base64').toString('utf8');
+    expect(decoded).toContain('CN-org1-');
   });
 
   test('rejects the batch when validation fails', async () => {
@@ -241,6 +306,65 @@ describe('NDISClaimService.generateBatch', () => {
     await expect(
       ndisClaimService.generateBatch('org1', { from: '2026-04-01', to: '2026-04-30' }),
     ).rejects.toMatchObject({ statusCode: 422, code: 'CLAIM_VALIDATION_FAILED' });
+  });
+
+  test('excludes invoices routed to a PDF (plan/self-managed) from the claim', async () => {
+    // The client is NDIA-managed, but one of their invoices was explicitly
+    // stamped for the invoice_pdf path (e.g. funding type changed). Only the
+    // claim_csv-routed invoice may be claimed — otherwise the work would be
+    // both claimed AND invoiced.
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-claim',
+          clientId: 'c1',
+          billing: { artifact: 'claim_csv' },
+          createdAt: new Date('2026-04-01T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 8,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-01T00:00:00Z'),
+            },
+          ],
+        },
+        {
+          _id: 'inv-pdf',
+          clientId: 'c1',
+          billing: { artifact: 'invoice_pdf' },
+          createdAt: new Date('2026-04-01T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 5,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-01T00:00:00Z'),
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(result.lineCount).toBe(1);
+    expect(result.batch.totals.amount).toBe(650.16);
+  });
+
+  test('keeps legacy invoices without a billing block claimable', async () => {
+    // Default fixture has no `billing` block → fall back to the client's
+    // funding type and remain claimable (backwards compatibility).
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+    expect(result.lineCount).toBe(1);
   });
 });
 
@@ -316,6 +440,19 @@ describe('BillingRoutingService', () => {
     });
     expect(billing.planManagerStakeholderId).toBe('pm1');
     expect(billing.recipientType).toBe('plan_manager');
+    expect(billing.artifact).toBe('invoice_pdf');
+  });
+
+  test('buildInvoiceBilling stamps the artifact consumers rely on', () => {
+    expect(billingRoutingService.buildInvoiceBilling({ fundingType: 'ndia_managed' }).artifact).toBe(
+      'claim_csv',
+    );
+    expect(billingRoutingService.buildInvoiceBilling({ fundingType: 'self_managed' }).artifact).toBe(
+      'invoice_pdf',
+    );
+    // Unknown/missing funding type must default to plan-managed (PDF) rather
+    // than accidentally claiming an invoice as NDIA.
+    expect(billingRoutingService.buildInvoiceBilling({}).artifact).toBe('invoice_pdf');
   });
 });
 

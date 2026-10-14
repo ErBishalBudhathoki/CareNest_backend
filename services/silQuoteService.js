@@ -1,5 +1,6 @@
 const SILQuote = require('../models/SILQuote');
 const SILRosterOfCare = require('../models/SILRosterOfCare');
+const Client = require('../models/Client');
 const { priceValidationService } = require('./priceValidationService');
 const logger = require('../config/logger');
 
@@ -154,6 +155,17 @@ class SILQuoteService {
     quote.rosterOfCareId = roc._id;
     quote.updatedBy = actor;
     await quote.save();
+
+    // §7: the participant's funding type follows the accepted quote, so the
+    // Phase 6 route (claim CSV vs plan/self-managed PDF) is correct for every
+    // invoice generated from this roster of care. Past invoices keep their own
+    // stamped `billing` block and are unaffected.
+    if (quote.fundingType) {
+      await Client.updateOne(
+        { _id: quote.clientId, organizationId },
+        { $set: { fundingType: quote.fundingType } },
+      );
+    }
 
     logger.business('SIL Quote Converted', {
       event: 'sil_quote_converted',

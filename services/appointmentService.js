@@ -1,6 +1,7 @@
 const ClientAssignment = require('../models/ClientAssignment');
 const WorkedTime = require('../models/WorkedTime');
 const logger = require('../config/logger');
+const { parseFlexibleDate, normalizeToIsoDate } = require('../utils/dateHelpers');
 
 /**
  * Service for handling appointment-related database operations
@@ -480,8 +481,9 @@ class AppointmentService {
       if (shiftDate instanceof Date) {
         normalizedWorkDate = shiftDate;
       } else if (typeof shiftDate === 'string' && shiftDate.trim()) {
-        const parsedShiftDate = new Date(shiftDate);
-        if (!Number.isNaN(parsedShiftDate.getTime())) {
+        // Day-first (DD/MM/YYYY) is read as day-first; ISO passes through.
+        const parsedShiftDate = parseFlexibleDate(shiftDate);
+        if (parsedShiftDate) {
           normalizedWorkDate = parsedShiftDate;
         } else {
           throw new Error('Selected shift date is invalid');
@@ -489,6 +491,12 @@ class AppointmentService {
       } else {
         throw new Error('Selected shift date is missing');
       }
+
+      // `WorkedTime.shiftDate` is a String column that analytics/payroll range
+      // query lexicographically, so it must always be stored as ISO
+      // (YYYY-MM-DD). Normalise whatever the caller sent (ISO, DD/MM/YYYY, or
+      // even a Date) to that single sortable shape.
+      const shiftDateKey = normalizeToIsoDate(shiftDate) || null;
 
       // Parse HH:mm:ss into decimal hours for reporting queries.
       const parseTotalHours = (worked) => {
@@ -509,11 +517,12 @@ class AppointmentService {
 
       const combineDateAndTime = (dateValue, timeValue) => {
         if (!dateValue || !timeValue) return null;
-        const datePart = dateValue instanceof Date
-          ? dateValue.toISOString().split('T')[0]
-          : dateValue.toString().split('T')[0];
+        // Always build from an ISO date part so `new Date()` cannot re-read a
+        // DD/MM/YYYY string as US MM/DD.
+        const datePart = normalizeToIsoDate(dateValue);
+        if (!datePart) return null;
         const timePart = timeValue.toString().trim();
-        const parsed = new Date(`${datePart} ${timePart}`);
+        const parsed = new Date(`${datePart}T${timePart}`);
         if (!Number.isNaN(parsed.getTime())) return parsed;
         return null;
       };
@@ -535,7 +544,7 @@ class AppointmentService {
         shiftIndex: shiftIndex || 0,
         assignedClientId: assignedClient._id,
         // Add specific shift details for better linking
-        shiftDate: shiftDate,
+        shiftDate: shiftDateKey,
         shiftStartTime: shiftStartTime,
         shiftEndTime: shiftEndTime,
         shiftBreak: shiftBreak,
@@ -544,7 +553,7 @@ class AppointmentService {
         startTime: normalizedStartDateTime,
         endTime: normalizedEndDateTime,
         // Create a unique shift identifier
-        shiftKey: shiftDate && shiftStartTime ? `${shiftDate}_${shiftStartTime}` : null,
+        shiftKey: shiftDateKey && shiftStartTime ? `${shiftDateKey}_${shiftStartTime}` : null,
         createdAt: new Date(),
         isActive: true
       });

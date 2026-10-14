@@ -83,7 +83,19 @@ const invoiceSchema = new mongoose.Schema({
     tags: [String],
     category: String,
     priority: String,
-    internalNotes: String
+    internalNotes: String,
+    // Phase 4 → 6: back-reference + billing period for SIL roster-of-care
+    // invoices. The (RoC, period) pair is the idempotency key so the same
+    // roster week is never billed twice.
+    silRosterOfCareId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SILRosterOfCare',
+      index: true
+    },
+    silPeriod: {
+      from: Date,
+      to: Date
+    }
   },
 
   // Phase 6: funding route determines the billing artefact
@@ -92,11 +104,15 @@ const invoiceSchema = new mongoose.Schema({
   billing: {
     fundingType: {
       type: String,
-      enum: ['ndia_managed', 'plan_managed', 'self_managed']
+      enum: ['ndia_managed', 'plan_managed', 'self_managed', 'combination']
     },
     recipientType: {
       type: String,
       enum: ['participant', 'plan_manager', 'ndia']
+    },
+    artifact: {
+      type: String,
+      enum: ['claim_csv', 'invoice_pdf']
     },
     planManagerStakeholderId: {
       type: mongoose.Schema.Types.ObjectId,

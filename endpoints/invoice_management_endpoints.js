@@ -845,16 +845,26 @@ async function createInvoice(req, res) {
         }
       }
 
+      // Funding/billing routing (Phase 6) — stamped on the invoice by
+      // billingRoutingService at save time. Drives which billing artefact the
+      // client should produce (claim CSV vs plan-manager/participant PDF).
+      const billing = result.data.billing || null;
+      const isClaimInvoice = billing?.artifact === 'claim_csv';
+
       // Create an online payment link on the organization's connected Stripe
       // account so the generated client invoice can be paid by link. Employee
-      // invoices are not paid by the client, so they are skipped. Best-effort:
-      // a failure here must not fail invoice creation.
+      // invoices are not paid by the client, so they are skipped. An
+      // NDIA-managed (claim) invoice is billed through a Bulk Payment Request,
+      // never by a participant payment link, so no link is created for it.
+      // Best-effort: a failure here must not fail invoice creation.
       let paymentLinkUrl = null;
       let paymentLinkReason = null;
       let paymentLinkDetail = null;
       const isClientInvoice =
         String(invoiceType || '').toLowerCase() === 'client';
-      if (isClientInvoice) {
+      if (isClaimInvoice) {
+        paymentLinkReason = 'ndia_claim';
+      } else if (isClientInvoice) {
         try {
           const linkResult = await stripePaymentLinkService.createInvoicePaymentLink({
             organizationId,
@@ -886,6 +896,69 @@ async function createInvoice(req, res) {
         paymentLinkReason = 'not_a_client_invoice';
       }
 
+      // Resolve the billing recipient for a plan-managed invoice so the client
+      // can address the PDF to the plan manager rather than the participant.
+      let billingRecipient = null;
+      if (
+        billing &&
+        billing.recipientType === 'plan_manager' &&
+        billing.planManagerStakeholderId
+      ) {
+        try {
+          const Stakeholder = require('../models/Stakeholder');
+          const pm = await Stakeholder.findOne({
+            _id: billing.planManagerStakeholderId,
+            organizationId,
+          })
+            .select('name email company type')
+            .lean();
+          if (pm) {
+            billingRecipient = {
+              type: 'plan_manager',
+              name: pm.name || pm.company || '',
+              company: pm.company || '',
+              email: pm.email || '',
+            };
+          }
+        } catch (recipientError) {
+          logger.warn('Invoice created but billing recipient lookup failed', {
+            invoiceId: result.data._id,
+            organizationId,
+            error: recipientError.message,
+          });
+        }
+      }
+
+      // A plan-managed invoice is payable by the plan manager, so record that
+      // recipient on the stored header too — keeping the persisted document and
+      // the rendered PDF consistent. The participant remains the service
+      // recipient; only the billing addressee changes. Best-effort.
+      if (billingRecipient) {
+        try {
+          const existingBilledTo = result.data.header?.billedTo || {};
+          await Invoice.updateOne(
+            { _id: result.data._id, organizationId },
+            {
+              $set: {
+                'header.billedTo': {
+                  ...existingBilledTo,
+                  name: billingRecipient.name,
+                  email: billingRecipient.email,
+                  businessName: billingRecipient.company || existingBilledTo.businessName,
+                  recipientType: 'plan_manager',
+                },
+              },
+            },
+          );
+        } catch (headerError) {
+          logger.warn('Invoice created but plan-manager header update failed', {
+            invoiceId: result.data._id,
+            organizationId,
+            error: headerError.message,
+          });
+        }
+      }
+
       logger.info('Invoice created successfully', {
         invoiceId: result.data._id,
         invoiceNumber: result.data.invoiceNumber,
@@ -906,7 +979,15 @@ async function createInvoice(req, res) {
           createdAt: result.data.auditTrail.createdAt,
           paymentLinkUrl,
           paymentLinkReason,
-          paymentLinkDetail
+          paymentLinkDetail,
+          // Funding/billing routing (Phase 6). The client (Flutter) reads this
+          // to decide what artifact to produce:
+          //   billing.artifact === 'claim_csv'  → NDIA claim (suppress PDF)
+          //   billing.artifact === 'invoice_pdf' → generate PDF
+          //   billing.recipientType === 'plan_manager' → address PDF to the
+          //   plan-manager stakeholder, not the participant.
+          billing,
+          billingRecipient,
         }
       });
     } else {

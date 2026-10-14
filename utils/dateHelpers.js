@@ -3,6 +3,23 @@
  */
 
 /**
+ * Canonical user-facing date format for the whole application: Australian
+ * DD/MM/YYYY. Use this for anything a human reads (UI payloads, emails, PDFs,
+ * CSV exports). Do NOT feed these strings to `new Date()` directly — Node parses
+ * a slash date as US MM/DD/YYYY. Always use `parseDisplayDate` instead.
+ */
+const DISPLAY_DATE_FORMAT = 'DD/MM/YYYY';
+
+/**
+ * Date format used in the NDIS Bulk Payment Request (BPR) CSV.
+ * Kept as a single constant so it can be changed in one place.
+ */
+const BPR_DATE_FORMAT = 'DD/MM/YYYY';
+
+/** Regex a {@link formatBprDate} string must match. Keep in sync with BPR_DATE_FORMAT. */
+const BPR_DATE_PATTERN = /^\d{2}\/\d{2}\/\d{4}$/;
+
+/**
  * Get current timestamp in ISO format
  * @returns {string} Current timestamp
  */
@@ -33,6 +50,169 @@ function formatDateAU(date) {
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
   const year = d.getFullYear();
   
+  return `${day}/${month}/${year}`;
+}
+
+/**
+ * Format a date as the canonical display format (DD/MM/YYYY).
+ * Alias of {@link formatDateAU} kept for readability at call sites that care
+ * about the canonical format rather than the locale name.
+ * @param {Date|string} date
+ * @returns {string} e.g. "01/04/2026", or '' when invalid
+ */
+function formatDisplayDate(date) {
+  return formatDateAU(date);
+}
+
+/**
+ * Strictly parse a DD/MM/YYYY (or D/M/YYYY) string into a local-midnight Date.
+ *
+ * Unlike `new Date(str)`, this never interprets a slash date as US MM/DD/YYYY.
+ * Also accepts an ISO date/datetime string and a Date instance for convenience.
+ *
+ * @param {Date|string|null} value
+ * @returns {Date|null} local-midnight Date, or null when unparseable
+ */
+function parseDisplayDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value !== 'string') return null;
+
+  const s = value.trim();
+  if (!s) return null;
+
+  // ISO date or datetime (e.g. 2026-04-01 or 2026-04-01T00:00:00Z).
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Australian DD/MM/YYYY (day first) — never MM/DD.
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    const day = parseInt(dmy[1], 10);
+    const month = parseInt(dmy[2], 10);
+    const year = parseInt(dmy[3], 10);
+    const d = new Date(year, month - 1, day);
+    // Reject rollover (e.g. 31/02/2026 → 03/03/2026).
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+      return null;
+    }
+    return d;
+  }
+
+  return null;
+}
+
+/**
+ * Tolerant, unambiguous date parser for stored date strings.
+ *
+ * Slash dates are ALWAYS read day-first (DD/MM/YYYY) — the app's canonical
+ * order — so `01/04/2026` is 1 April, never 4 January. Legacy ISO dates
+ * (`YYYY-MM-DD`) are still accepted, which lets existing rows keep working
+ * after the storage format moved to DD/MM/YYYY.
+ *
+ * Use this instead of `new Date(str)` for any stored date string.
+ *
+ * @param {Date|string|null} value
+ * @returns {Date|null}
+ */
+function parseFlexibleDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value !== 'string') return null;
+
+  const s = value.trim();
+  if (!s) return null;
+
+  // ISO date / datetime (unambiguous, year first).
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Slash or hyphen date with a 4-digit year → day-first.
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (m) {
+    const day = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    const year = parseInt(m[3], 10);
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+      return null;
+    }
+    return d;
+  }
+
+  const fallback = new Date(s);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+/**
+ * Normalise any stored date string to the canonical display format
+ * (DD/MM/YYYY). Returns '' when the value cannot be parsed.
+ *
+ * DISPLAY ONLY. Do not persist the result: the DB and the API transport keep
+ * dates in ISO `YYYY-MM-DD` so that (a) Mongo lexicographic range queries and
+ * indexes stay valid and (b) Dart's `DateTime.parse` / `DateTime.tryParse`
+ * keep working. Convert to DD/MM/YYYY at the presentation boundary.
+ *
+ * @param {Date|string|null} value
+ * @returns {string}
+ */
+function normalizeToDisplayDate(value) {
+  const d = parseFlexibleDate(value);
+  return d ? formatDateAU(d) : '';
+}
+
+/**
+ * Normalise any date input to the canonical *storage / transport* key:
+ * ISO `YYYY-MM-DD`. Day-first input (DD/MM/YYYY, DD-MM-YYYY) is read as
+ * day-first, never as US MM/DD. Returns '' when the value cannot be parsed.
+ *
+ * Use this on the write path so stored date strings are always sortable and
+ * parseable by every reader (Mongo range queries, Dart DateTime.parse, etc.).
+ *
+ * @param {Date|string|null} value
+ * @returns {string} e.g. "2026-04-01", or '' when invalid
+ */
+function normalizeToIsoDate(value) {
+  const pad = (n) => String(n).padStart(2, '0');
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  if (typeof value !== 'string') return '';
+
+  const s = value.trim();
+  if (!s) return '';
+
+  // Already ISO — return the date part verbatim (UTC-safe, no re-parse).
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const d = parseFlexibleDate(s);
+  if (!d) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Format a date for the NDIS BPR CSV (see {@link BPR_DATE_FORMAT}).
+ *
+ * Service dates are date-only values stored at UTC midnight, so this reads the
+ * UTC calendar parts to avoid a timezone shift.
+ * @param {Date|string} value
+ * @returns {string}
+ */
+function formatBprDate(value) {
+  const d = value instanceof Date ? value : parseDisplayDate(value) || new Date(value);
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const year = d.getUTCFullYear();
   return `${day}/${month}/${year}`;
 }
 
@@ -321,9 +501,18 @@ function formatDuration(milliseconds) {
 }
 
 module.exports = {
+  DISPLAY_DATE_FORMAT,
+  BPR_DATE_FORMAT,
+  BPR_DATE_PATTERN,
   getCurrentTimestamp,
   getCurrentDate,
   formatDateAU,
+  formatDisplayDate,
+  parseDisplayDate,
+  parseFlexibleDate,
+  normalizeToDisplayDate,
+  normalizeToIsoDate,
+  formatBprDate,
   formatDateISO,
   formatDateTime,
   addDays,

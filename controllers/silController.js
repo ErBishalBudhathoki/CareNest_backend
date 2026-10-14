@@ -5,6 +5,7 @@ const silRatioService = require('../services/silRatioService');
 const silRosterService = require('../services/silRosterService');
 const silQuoteService = require('../services/silQuoteService');
 const silRosterOfCareService = require('../services/silRosterOfCareService');
+const silBillingService = require('../services/silBillingService');
 
 /**
  * SIL management API (Phase 4). All handlers are org-scoped via the
@@ -391,6 +392,55 @@ class SILController {
       return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Roster of care not found.' });
     }
     res.json({ success: true, message: 'Roster of care reviewed.', data: roc });
+  });
+
+  /**
+   * Bill one period of an active roster of care. Produces a client invoice
+   * whose funding route (claim CSV vs PDF) is stamped from the participant's
+   * funding type. See docs/SIL_MANAGEMENT_SPEC.md section 7.
+   */
+  generateRosterOfCareInvoice = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const result = await silBillingService.generateInvoiceFromRosterOfCare(
+      org,
+      req.params.id,
+      { from: req.body.from, to: req.body.to, dueDate: req.body.dueDate },
+      this._actor(req),
+    );
+    if (result.notFound) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Roster of care not found.' });
+    }
+    if (result.clientNotFound) {
+      return res.status(404).json({ success: false, code: 'CLIENT_NOT_FOUND', message: 'Participant not found.' });
+    }
+    if (result.invalidPeriod) {
+      return res.status(400).json({ success: false, code: 'INVALID_PERIOD', message: result.message });
+    }
+    if (result.invalidState) {
+      return res.status(409).json({
+        success: false,
+        code: 'INVALID_STATE',
+        message: result.message || `Only an active roster of care can be invoiced (current: ${result.status}).`,
+      });
+    }
+    if (result.conflict) {
+      return res.status(409).json({
+        success: false,
+        code: 'DUPLICATE_PERIOD',
+        message: 'This roster of care has already been invoiced for that period.',
+        data: { invoiceId: result.existingInvoiceId },
+      });
+    }
+    res.status(201).json({
+      success: true,
+      message: 'Roster of care invoiced.',
+      data: {
+        invoiceId: result.invoice?._id,
+        invoiceNumber: result.invoice?.invoiceNumber,
+        billing: result.billing,
+      },
+    });
   });
 }
 
