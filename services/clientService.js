@@ -6,6 +6,7 @@ const GeofenceLocation = require('../models/GeofenceLocation');
 const CustomPricing = require('../models/CustomPricing');
 const auditService = require('./auditService');
 const { processCustomPricing } = require('../utils/pricingHelpers');
+const { normalizeToIsoDate } = require('../utils/dateHelpers');
 const { admin } = require('../firebase-admin-config');
 
 class ClientService {
@@ -1014,10 +1015,13 @@ class ClientService {
         }
       }
       
-      // Create assignment data
+      // Create assignment data. Stored dates stay ISO (YYYY-MM-DD) so Mongo
+      // range queries and the Flutter `DateTime.parse` readers keep working;
+      // any day-first input is normalised here. DD/MM/YYYY is applied only
+      // when the date is shown to a user.
       const scheduleData = dateList.map((date, i) => {
         let scheduleEntry = {
-          date: date,
+          date: normalizeToIsoDate(date) || date,
           startTime: startTimeList[i],
           endTime: endTimeList[i],
           break: breakList[i],

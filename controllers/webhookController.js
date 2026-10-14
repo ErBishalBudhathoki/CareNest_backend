@@ -8,6 +8,7 @@ const ndisCatalogSyncService = require('../services/ndisCatalogSyncService');
 const HostedCheckoutGrant = require('../models/billing/HostedCheckoutGrant');
 const Organization = require('../models/Organization');
 const recurringAgreementService = require('../services/billing/recurringAgreementService');
+const { formatDisplayDate } = require('../utils/dateHelpers');
 
 let stripe;
 if (process.env.STRIPE_SECRET_KEY) {
@@ -402,7 +403,7 @@ class WebhookController {
   _unixToDateString = (unixSeconds) => {
     if (!unixSeconds) return null;
     try {
-      return new Date(Number(unixSeconds) * 1000).toLocaleDateString('en-AU');
+      return formatDisplayDate(new Date(Number(unixSeconds) * 1000));
     } catch {
       return null;
     }

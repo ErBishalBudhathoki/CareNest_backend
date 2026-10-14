@@ -144,14 +144,19 @@ function parseMultipartForm(req) {
 }
 
 /**
+ * Build the public URL for an R2 object key.
+ */
+function buildPublicUrl(key) {
+    if (process.env.R2_PUBLIC_DOMAIN) {
+        return `https://${process.env.R2_PUBLIC_DOMAIN.replace(/^https?:\/\//, '')}/${key}`;
+    }
+    return `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+}
+
+/**
  * Upload file buffer to Cloudflare R2
  */
 async function uploadToR2(fileBuffer, originalFilename, fieldname) {
-    const client = getS3Client();
-    if (!client) {
-        throw new Error('R2 is not configured');
-    }
-
     const uniqueSuffix = Date.now() + '-' + crypto.randomInt(0, 1000000000);
     let folder = 'others';
     if (fieldname === 'logo') folder = 'logos';
@@ -162,25 +167,40 @@ async function uploadToR2(fileBuffer, originalFilename, fieldname) {
     const extension = path.extname(originalFilename);
     const key = `${folder}/${fieldname}-${uniqueSuffix}${extension}`;
 
+    return uploadBufferToR2({
+        buffer: fileBuffer,
+        key,
+        contentType: getMimeType(extension)
+    });
+}
+
+/**
+ * Upload an arbitrary in-memory buffer to R2 at an explicit key.
+ *
+ * Used for server-generated artefacts (e.g. the NDIS claim-batch CSV) that are
+ * not part of a multipart upload. Throws when R2 is not configured so callers
+ * can fall back to an inline representation.
+ *
+ * @returns {Promise<{key: string, location: string}>}
+ */
+async function uploadBufferToR2({ buffer, key, contentType = 'application/octet-stream' }) {
+    const client = getS3Client();
+    if (!client) {
+        throw new Error('R2 is not configured');
+    }
+
     console.log(`☁️ Uploading to R2: ${key}`);
 
     const command = new PutObjectCommand({
         Bucket: process.env.R2_BUCKET_NAME,
         Key: key,
-        Body: fileBuffer,
-        ContentType: getMimeType(extension)
+        Body: buffer,
+        ContentType: contentType
     });
 
     await client.send(command);
 
-    // Build public URL
-    let publicUrl;
-    if (process.env.R2_PUBLIC_DOMAIN) {
-        publicUrl = `https://${process.env.R2_PUBLIC_DOMAIN.replace(/^https?:\/\//, '')}/${key}`;
-    } else {
-        publicUrl = `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
-    }
-
+    const publicUrl = buildPublicUrl(key);
     console.log(`✅ Uploaded to R2: ${publicUrl}`);
 
     return {
@@ -217,7 +237,8 @@ function getMimeType(ext) {
         '.png': 'image/png',
         '.heif': 'image/heif',
         '.heic': 'image/heic',
-        '.pdf': 'application/pdf'
+        '.pdf': 'application/pdf',
+        '.csv': 'text/csv'
     };
     return mimeTypes[ext.toLowerCase()] || 'application/octet-stream';
 }
@@ -285,6 +306,8 @@ module.exports = {
     handleFileUpload,
     parseMultipartForm,
     uploadToR2,
+    uploadBufferToR2,
+    buildPublicUrl,
     saveToLocalDisk,
     isR2Configured
 };

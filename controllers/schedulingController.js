@@ -1,6 +1,7 @@
 const shiftMatchingService = require('../services/shiftMatchingService');
 const User = require('../models/User');
 const Appointment = require('../models/Appointment');
+const { parseFlexibleDate } = require('../utils/dateHelpers');
 
 /**
  * Match workers to a shift
@@ -160,8 +161,9 @@ exports.optimizeRoute = async (req, res) => {
     shifts.forEach(appointment => {
       if (appointment.schedule && Array.isArray(appointment.schedule)) {
         appointment.schedule.forEach(scheduleItem => {
-          const shiftDate = new Date(scheduleItem.date);
-          if (shiftDate >= startOfDay && shiftDate <= endOfDay) {
+          // Day-first (DD/MM/YYYY) read as day-first; ISO passes through.
+          const shiftDate = parseFlexibleDate(scheduleItem.date);
+          if (shiftDate && shiftDate >= startOfDay && shiftDate <= endOfDay) {
             flatShifts.push({
               _id: appointment._id,
               startTime: scheduleItem.startTime,

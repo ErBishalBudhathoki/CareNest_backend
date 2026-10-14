@@ -4,6 +4,7 @@ const ClientAssignment = require('../models/ClientAssignment');
 const Trip = require('../models/Trip');
 const TripService = require('./tripService');
 const OrganizationService = require('./organizationService');
+const { parseFlexibleDate } = require('../utils/dateHelpers');
 
 class EarningsService {
 
@@ -191,9 +192,11 @@ class EarningsService {
       // Handle new 'schedule' array
       if (assignment.schedule && Array.isArray(assignment.schedule)) {
         for (const shift of assignment.schedule) {
-          // Parse date
-          const shiftDate = new Date(shift.date);
-          if (shiftDate >= startFilter) {
+          // Parse date. Day-first (DD/MM/YYYY) is read as day-first; ISO is
+          // passed through. Never rely on `new Date(str)`, which reads a slash
+          // date as US MM/DD.
+          const shiftDate = parseFlexibleDate(shift.date);
+          if (shiftDate && shiftDate >= startFilter) {
             const duration = this.calculateShiftDuration(shift.startTime, shift.endTime, shift.break);
             projectedHours += duration;
             breakdown.push({
@@ -211,8 +214,8 @@ class EarningsService {
           const dateStr = assignment.dateList[i];
           if (!dateStr) continue;
 
-          const shiftDate = new Date(dateStr);
-          if (shiftDate >= startFilter) {
+          const shiftDate = parseFlexibleDate(dateStr);
+          if (shiftDate && shiftDate >= startFilter) {
             const startTime = assignment.startTimeList?.[i];
             const endTime = assignment.endTimeList?.[i];
             const breakTime = assignment.breakList?.[i];

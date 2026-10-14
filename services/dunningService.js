@@ -8,6 +8,7 @@
 const { Invoice, InvoiceStatus, PaymentStatus } = require('../models/Invoice');
 const emailService = require('./emailService');
 const logger = require('../config/logger');
+const { formatDisplayDate } = require('../utils/dateHelpers');
 
 class DunningService {
     /**
@@ -32,6 +33,10 @@ class DunningService {
                 'workflow.status': { $in: [InvoiceStatus.SENT, InvoiceStatus.OVERDUE] },
                 'payment.status': { $in: [PaymentStatus.PENDING, PaymentStatus.PARTIAL, PaymentStatus.OVERDUE] },
                 'deletion.isDeleted': false,
+                // Phase 6: NDIA-managed invoices are settled via a Bulk Payment
+                // Request, not by the participant — never dun them. Invoices
+                // without a billing block (legacy) still match `$ne`.
+                'billing.artifact': { $ne: 'claim_csv' },
                 $or: [
                     { 'payment.lastReminderDate': { $exists: false } },
                     { 'payment.lastReminderDate': { $lt: new Date(today.getTime() - 24 * 60 * 60 * 1000) } } // At least 24h ago
@@ -119,7 +124,7 @@ class DunningService {
             context: {
                 clientName: invoice.clientName,
                 invoiceNumber: invoice.invoiceNumber,
-                dueDate: invoice.financialSummary.dueDate.toLocaleDateString(),
+                dueDate: formatDisplayDate(invoice.financialSummary.dueDate),
                 amountDue: invoice.payment.balanceDue || invoice.financialSummary.totalAmount,
                 paymentLink: `https://app.carenest.com.au/pay/${invoice._id}` // Example link
             }

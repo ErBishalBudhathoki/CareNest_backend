@@ -23,8 +23,12 @@ const claimBatchSchema = new mongoose.Schema(
       index: true,
     },
     fundingType: { type: String, enum: ['ndia_managed'], default: 'ndia_managed' },
-    // Storage reference for the generated CSV (base64 stored inline for now).
+    // Storage reference for the generated CSV.
+    //  - storageProvider 'r2'     → `fileRef` is the R2 object key; `fileUrl` is its public URL.
+    //  - storageProvider 'inline' → R2 was unavailable, so `fileRef` holds the CSV as base64.
     fileRef: { type: String, default: '' },
+    fileUrl: { type: String, default: '' },
+    storageProvider: { type: String, enum: ['r2', 'inline', ''], default: '' },
     registrationNumber: { type: String, default: '' },
     abn: { type: String, default: '' },
     totals: {

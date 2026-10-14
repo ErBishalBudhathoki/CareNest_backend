@@ -46,7 +46,10 @@ const silQuoteSchema = new mongoose.Schema(
     },
     fundingType: {
       type: String,
-      enum: ['ndia_managed', 'plan_managed', 'self_managed'],
+      // Must stay in lock-step with `Client.fundingType` and
+      // `Invoice.billing.fundingType` so a quote's funding type can drive the
+      // participant's billing route (see billingRoutingService).
+      enum: ['ndia_managed', 'plan_managed', 'self_managed', 'combination'],
       default: 'plan_managed',
     },
     validUntil: { type: Date, default: null },

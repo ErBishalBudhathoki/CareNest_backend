@@ -3,8 +3,10 @@ const ClaimBatch = require('../models/ClaimBatch');
 const ClaimLine = require('../models/ClaimLine');
 const Client = require('../models/Client');
 const Organization = require('../models/Organization');
-const Invoice = require('../models/Invoice');
+const { Invoice } = require('../models/Invoice');
 const { priceValidationService } = require('./priceValidationService');
+const { uploadBufferToR2, isR2Configured } = require('../utils/cloudFunctionsUpload');
+const { formatBprDate, BPR_DATE_FORMAT, BPR_DATE_PATTERN } = require('../utils/dateHelpers');
 const logger = require('../config/logger');
 
 /**
@@ -44,13 +46,15 @@ const CLAIM_TYPES = ['STANDARD', 'CANCELLATION', 'REPORT'];
 const CANCELLATION_REASONS = ['NSCC', 'NSDH'];
 const ABN_WEIGHTS = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
 
-/** Format a date as YYYY/MM/DD — the portal's required format (not ISO/DD-MM). */
+/**
+ * Format a date for the BPR CSV.
+ *
+ * The date order is the app-wide canonical display format (DD/MM/YYYY) — see
+ * `utils/dateHelpers.BPR_DATE_FORMAT`. It is defined in one place so it can be
+ * changed without touching the CSV builder.
+ */
 function formatNdisDate(value) {
-  const d = value ? new Date(value) : new Date();
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}/${m}/${day}`;
+  return formatBprDate(value);
 }
 
 function round2(value) {
@@ -122,6 +126,16 @@ class NDISClaimService {
       }).lean();
 
       for (const invoice of invoices) {
+        // Phase 6 alignment: only claim invoices that are routed to the claim
+        // path. Invoices stamped by the routing service carry `billing.artifact`
+        // ('claim_csv' for NDIA-managed, 'invoice_pdf' for plan/self-managed).
+        // A participant whose funding type later changed to/from NDIA-managed
+        // must not have a work item both claimed AND invoiced: legacy invoices
+        // without a billing block fall back to the client's funding type, which
+        // is what gated this query in the first place.
+        const artifact = invoice.billing?.artifact;
+        if (artifact && artifact !== 'claim_csv') continue;
+
         for (const item of invoice.lineItems || []) {
           const serviceDate = item.date || invoice.createdAt || from;
           const d = new Date(serviceDate);
@@ -224,7 +238,7 @@ class NDISClaimService {
     }
 
     const csv = this.buildCsv(lines, { registrationNumber, abn });
-    batch.fileRef = Buffer.from(csv, 'utf8').toString('base64');
+    await this._storeCsv(batch, csv, organizationId);
     await batch.save();
 
     logger.business('NDIS Claim Batch Generated', {
@@ -330,6 +344,15 @@ class NDISClaimService {
         }
       }
 
+      // §5.7: every service date must render in the configured BPR date format.
+      if (!BPR_DATE_PATTERN.test(formatNdisDate(line.serviceDate))) {
+        errors.push({
+          claimReference: ref,
+          field: 'SupportsDeliveredFrom',
+          message: `Service date is not in the required ${BPR_DATE_FORMAT} format.`,
+        });
+      }
+
       // Price cap + catalogue existence check — tolerant when the catalog is
       // unavailable.
       if (line.supportNumber && line.unitPrice >= 0) {
@@ -357,8 +380,8 @@ class NDISClaimService {
   }
 
   /**
-   * Build the 16-column BPR CSV (UTF-8, YYYY/MM/DD), exactly per the myplace
-   * 2026-27 template.
+   * Build the 16-column BPR CSV (UTF-8, DD/MM/YYYY), exactly per the myplace
+   * 2026-27 template. The date order comes from `BPR_DATE_FORMAT`.
    */
   buildCsv(lines, { registrationNumber, abn }) {
     const rows = [BPR_HEADERS.join(',')];
@@ -400,6 +423,46 @@ class NDISClaimService {
     if (!batch) return null;
     const lines = await ClaimLine.find({ batchId: batch._id, organizationId });
     return { batch, lines };
+  }
+
+  /**
+   * Persist the generated CSV to the shared Cloudflare R2 storage pipeline and
+   * record a storage reference on the batch (F6.4).
+   *
+   * Falls back to an inline base64 payload when R2 is not configured or the
+   * upload fails, so batch generation never fails on a storage outage.
+   */
+  async _storeCsv(batch, csv, organizationId) {
+    const key = `claimBatches/${this._sanitizeKeySegment(organizationId)}/${batch._id}.csv`;
+
+    if (isR2Configured()) {
+      try {
+        const { key: storedKey, location } = await uploadBufferToR2({
+          buffer: Buffer.from(csv, 'utf8'),
+          key,
+          contentType: 'text/csv',
+        });
+        batch.fileRef = storedKey;
+        batch.fileUrl = location;
+        batch.storageProvider = 'r2';
+        return;
+      } catch (error) {
+        logger.warn('NDIS claim CSV upload to R2 failed; storing inline', {
+          error: error.message,
+          batchId: batch._id?.toString?.(),
+        });
+      }
+    }
+
+    batch.fileRef = Buffer.from(csv, 'utf8').toString('base64');
+    batch.fileUrl = '';
+    batch.storageProvider = 'inline';
+  }
+
+  _sanitizeKeySegment(value) {
+    return String(value ?? '')
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 64) || 'unknown';
   }
 
   _objectIdOrNull(value) {
