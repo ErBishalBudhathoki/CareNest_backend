@@ -360,3 +360,30 @@ describe('NDISClaimService.validateLines — RequestedAmount (F6.3)', () => {
     expect(r.errors.some((e) => e.field === 'RequestedAmount')).toBe(false);
   });
 });
+
+describe('NDISClaimService.validateLines — support item in catalogue', () => {
+  test('flags a support number that is not in the catalogue', async () => {
+    priceValidationService.validatePrice.mockResolvedValueOnce({
+      isValid: false,
+      status: 'invalid_item',
+      message: 'Support item not found: 99_999_9999_1_1',
+    });
+    const r = await ndisClaimService.validateLines([
+      {
+        claimReference: 'r1',
+        ndisNumber: '430123456',
+        supportNumber: '99_999_9999_1_1',
+        isHourly: true,
+        quantity: 0,
+        hours: 1,
+        unitPrice: 10,
+        gstCode: 'P2',
+        claimType: 'STANDARD',
+        cancellationReason: '',
+        participantApproved: 'Y',
+        requestedAmount: 10,
+      },
+    ]);
+    expect(r.errors.some((e) => e.field === 'SupportNumber')).toBe(true);
+  });
+});
