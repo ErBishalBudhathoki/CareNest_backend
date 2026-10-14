@@ -330,14 +330,21 @@ class NDISClaimService {
         }
       }
 
-      // Price cap check — tolerant when the catalog is unavailable.
+      // Price cap + catalogue existence check — tolerant when the catalog is
+      // unavailable.
       if (line.supportNumber && line.unitPrice >= 0) {
         try {
           const result = await priceValidationService.validatePrice(
             line.supportNumber,
             line.unitPrice,
           );
-          if (result && result.isValid === false) {
+          if (result && result.status === 'invalid_item') {
+            errors.push({
+              claimReference: ref,
+              field: 'SupportNumber',
+              message: `Support item not in the NDIS catalogue: ${line.supportNumber}.`,
+            });
+          } else if (result && result.isValid === false) {
             errors.push({ claimReference: ref, field: 'UnitPrice', message: result.message || 'Unit price exceeds the NDIS cap.' });
           }
         } catch (_) {
