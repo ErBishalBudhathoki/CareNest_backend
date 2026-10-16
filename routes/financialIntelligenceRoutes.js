@@ -6,6 +6,24 @@
 const express = require('express');
 const router = express.Router();
 const financialIntelligenceController = require('../controllers/financialIntelligenceController');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
+
+// Financial intelligence is an organisation-wide analytics surface reached only
+// from the Admin dashboard, so it is authenticated, tenant-scoped and
+// admin-only.
+//
+// The router previously declared no middleware at all, and the controllers take
+// the organisation straight from the request (body/query/params). A
+// two-tenant probe against dev confirmed the consequence: a member of one
+// organisation received another organisation's revenue trends through
+// `GET /revenue/trends/:organizationId`. `requireOrgMembership` resolves the
+// organisation the caller names and refuses anyone without an active
+// membership row for it, so naming another tenant is now a 403 rather than a
+// read.
+router.use(authenticateUser);
+router.use(requireOrgMembership);
+router.use(requireRoles(['admin', 'owner']));
 
 // ============================================================================
 // Revenue Forecasting Routes (8 endpoints)

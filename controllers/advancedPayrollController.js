@@ -60,14 +60,69 @@ class AdvancedPayrollController {
     }
   }
   
+  /**
+   * Payslip read: self-or-admin, scoped to the caller's organisation.
+   *
+   * Both halves of this check are load-bearing. Without the identity check any
+   * colleague could read someone else's salary; without the organisation scope
+   * an admin of one organisation could read another organisation's payroll by
+   * naming its user id. The route deliberately sits before the admin role gate
+   * in advancedPayrollRoutes so that an employee can still fetch their own.
+   */
   async getPayslip(req, res) {
     try {
       const { userId, period } = req.params;
-      const result = await advancedPayrollService.generatePayslip(userId, period);
+      const caller = req.user || {};
+      const callerId = String(caller.userId || caller._id || '').trim();
+      const requestedUserId = String(userId || '').trim();
+
+      const isSelf = Boolean(callerId) && callerId === requestedUserId;
+
+      if (!isSelf && !this._isOrgAdmin(caller)) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to view this payslip.'
+        });
+      }
+
+      // Scope the lookup to an organisation the caller belongs to. The
+      // organisation context middleware has already proved membership of this
+      // value, so a record belonging to another tenant can never be returned.
+      const organizationId =
+        (req.organizationContext && req.organizationContext.organizationId) ||
+        caller.organizationId ||
+        null;
+
+      if (!organizationId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to view this payslip.'
+        });
+      }
+
+      const result = await advancedPayrollService.generatePayslip(
+        requestedUserId,
+        period,
+        String(organizationId)
+      );
       return res.status(result.success ? 200 : 500).json(result);
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
     }
+  }
+
+  /**
+   * True when the caller holds an admin-style role. Mirrors
+   * `_canAccessOrganization`'s role handling so the two stay consistent.
+   */
+  _isOrgAdmin(user) {
+    if (!user) return false;
+    const roles = Array.isArray(user.roles) && user.roles.length
+      ? user.roles
+      : (user.role ? [user.role] : []);
+    return roles.some((role) =>
+      ['admin', 'owner', 'superadmin'].includes(String(role).toLowerCase().trim())
+    );
   }
   
   async generatePayslips(req, res) {
