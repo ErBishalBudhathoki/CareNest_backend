@@ -18,6 +18,15 @@ const quoteLineSchema = new mongoose.Schema(
     unitPrice: { type: Number, default: 0 },
     gstCode: { type: String, default: 'P2' },
     amount: { type: Number, default: 0 },
+    // Agreed weekly pattern (Phase 4). Lets an active roster of care be
+    // materialised into that week's shifts and staffed in one place.
+    days: {
+      type: [String],
+      enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      default: [],
+    },
+    startTime: { type: String, default: '' }, // HH:MM (24h)
+    endTime: { type: String, default: '' }, // HH:MM (24h); may cross midnight
     priceValidation: {
       passed: { type: Boolean, default: true },
       capApplied: { type: Number, default: null },

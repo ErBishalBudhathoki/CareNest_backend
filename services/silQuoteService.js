@@ -143,6 +143,9 @@ class SILQuoteService {
         unitPrice: l.unitPrice,
         gstCode: l.gstCode,
         amount: l.amount,
+        days: l.days || [],
+        startTime: l.startTime || '',
+        endTime: l.endTime || '',
       })),
       reviewSchedule: { cadence, nextReviewDate: nextReview },
       status: 'active',
@@ -212,6 +215,9 @@ class SILQuoteService {
         unitPrice,
         gstCode: line.gstCode || 'P2',
         amount,
+        days: Array.isArray(line.days) ? line.days.filter(Boolean) : [],
+        startTime: line.startTime || '',
+        endTime: line.endTime || '',
         priceValidation: validation,
       });
     }

@@ -500,6 +500,67 @@ function formatDuration(milliseconds) {
   }
 }
 
+/**
+ * Get the calendar date parts (year/month/day) of an instant in a given IANA
+ * timezone.
+ * @param {Date} date
+ * @param {string} [timeZone='Australia/Sydney']
+ * @returns {{year:number, month:number, day:number}}
+ */
+function getZonedDateParts(date, timeZone = 'Australia/Sydney') {
+  const parts = {};
+  for (const p of new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)) {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  }
+  return {
+    year: parseInt(parts.year, 10),
+    month: parseInt(parts.month, 10),
+    day: parseInt(parts.day, 10),
+  };
+}
+
+/**
+ * Build the UTC instant for a wall-clock time in a given IANA timezone.
+ * Iterates once to converge across the offset (handles DST).
+ * @param {number} year
+ * @param {number} month 1-12
+ * @param {number} day
+ * @param {number} hour 0-23
+ * @param {number} minute
+ * @param {string} [timeZone='Australia/Sydney']
+ * @returns {Date}
+ */
+function zonedWallClockToUtc(year, month, day, hour, minute, timeZone = 'Australia/Sydney') {
+  const MS_PER_MIN = 60 * 1000;
+  const offsetMinutes = (instant) => {
+    const p = getZonedDateParts(instant, timeZone);
+    const hhmm = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(instant);
+    const get = (t) => parseInt(hhmm.find((x) => x.type === t)?.value || '0', 10);
+    let h = get('hour');
+    if (h === 24) h = 0;
+    const asUTC = Date.UTC(p.year, p.month - 1, p.day, h, get('minute'), get('second'));
+    return Math.round((asUTC - instant.getTime()) / MS_PER_MIN);
+  };
+
+  const guessUTC = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const offset1 = offsetMinutes(new Date(guessUTC));
+  let candidate = guessUTC - offset1 * MS_PER_MIN;
+  const offset2 = offsetMinutes(new Date(candidate));
+  if (offset2 !== offset1) candidate = guessUTC - offset2 * MS_PER_MIN;
+  return new Date(candidate);
+}
+
 module.exports = {
   DISPLAY_DATE_FORMAT,
   BPR_DATE_FORMAT,
@@ -530,5 +591,7 @@ module.exports = {
   parseDate,
   getFinancialYear,
   getQuarter,
-  formatDuration
+  formatDuration,
+  getZonedDateParts,
+  zonedWallClockToUtc,
 };

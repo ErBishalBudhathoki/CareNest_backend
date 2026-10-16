@@ -395,6 +395,52 @@ class SILController {
   });
 
   /**
+   * Materialise an active RoC's agreed weekly pattern into that week's shifts
+   * (unassigned) so staff can be assigned in one place.
+   */
+  materializeRosterOfCareShifts = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const result = await silRosterService.materializeRocShifts(
+      org,
+      req.params.id,
+      { weekStarting: req.body.weekStarting, timezone: req.body.timezone },
+      this._actor(req),
+    );
+    if (result.notFound) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Roster of care not found.' });
+    }
+    if (result.invalidState) {
+      return res.status(409).json({
+        success: false,
+        code: 'INVALID_STATE',
+        message: `Only an active roster of care can be planned (current: ${result.status}).`,
+      });
+    }
+    if (result.clientNotFound) {
+      return res.status(404).json({ success: false, code: 'CLIENT_NOT_FOUND', message: 'Client not found.' });
+    }
+    if (result.noPattern) {
+      return res.status(409).json({
+        success: false,
+        code: 'NO_PATTERN',
+        message: 'This roster of care has no agreed days/times. Add a weekly pattern to its supports first.',
+      });
+    }
+    res.status(201).json({
+      success: true,
+      message: `Planned ${result.created.length} shift(s)${result.skipped.length ? ` (${result.skipped.length} already existed)` : ''}.`,
+      data: {
+        rosterOfCareId: String(result.roc._id),
+        weekStarting: result.week,
+        created: result.created.length,
+        skipped: result.skipped.length,
+        shiftIds: result.created.map((s) => s._id?.toString?.()),
+      },
+    });
+  });
+
+  /**
    * Bill one period of an active roster of care. Produces a client invoice
    * whose funding route (claim CSV vs PDF) is stamped from the participant's
    * funding type. See docs/SIL_MANAGEMENT_SPEC.md section 7.
