@@ -540,3 +540,21 @@ describe('SILRosterService.materializeRocShifts', () => {
     expect(result.invalidState).toBe(true);
   });
 });
+
+describe('SILRosterService.buildRoster — org-local week window', () => {
+  test('queries shifts against the Sydney Monday, not UTC midnight', async () => {
+    SILProperty.findOne.mockResolvedValue({ _id: 'p1', name: 'House', silDesignCategory: 'basic' });
+    SILOccupancy.find.mockResolvedValue([{ clientId: 'c1' }]);
+    Shift.find.mockReturnValue({ sort: () => Promise.resolve([]) });
+    SILRoster.findOneAndUpdate.mockImplementation(async (filter, update) => ({ _id: 'r1', ...update }));
+
+    await silRosterService.buildRoster('org1', { propertyId: 'p1', weekStarting: '2026-06-01' });
+
+    const [query] = Shift.find.mock.calls[0];
+    // 2026-06-01 is a Monday; Sydney (AEST, +10) Monday 00:00 = 2026-05-31T14:00Z.
+    // A UTC-midnight window would have started 2026-06-01T00:00Z and missed
+    // early-Monday Sydney shifts.
+    expect(query.startTime.$gte.toISOString()).toBe('2026-05-31T14:00:00.000Z');
+    expect(query.startTime.$lt.toISOString()).toBe('2026-06-07T14:00:00.000Z');
+  });
+});
