@@ -13,6 +13,12 @@ const WorkedTime = require('../models/WorkedTime');
 const FcmToken = require('../models/FcmToken');
 const ReminderLog = require('../models/ReminderLog');
 const { parseFlexibleDate } = require('../utils/dateHelpers');
+// `config/firebase` exports a wrapper object — `{ FirebaseConfig, firebaseConfig,
+// admin, messaging }` — so the sender lives on the exported singleton. Calling
+// an instance method on the module itself (`firebase.getMessaging()`) throws
+// "firebase.getMessaging is not a function" and silently drops every reminder.
+const firebaseModule = require('../config/firebase');
+const firebaseConfig = firebaseModule.firebaseConfig || firebaseModule;
 
 /**
  * Default reminder configuration
@@ -171,9 +177,6 @@ async function sendTimesheetReminder(userEmail, organizationId, details) {
             return { success: false, reason: 'no_fcm_token' };
         }
 
-        // Import Firebase Admin
-        const admin = require('../config/firebase');
-
         // Construct notification message
         const missingText = details.missingEntries === 1
             ? '1 shift entry'
@@ -217,12 +220,11 @@ async function sendTimesheetReminder(userEmail, organizationId, details) {
             token: tokenDoc.fcmToken
         };
 
-        // Send via the shared sender (firebase-admin v12 removed the
-        // admin.messaging() namespace API — calling it throws
+        // Send via the singleton exported by config/firebase (firebase-admin
+        // v12 removed the admin.messaging() namespace API — calling it throws
         // "admin.messaging is not a function" and silently kills every
         // timesheet reminder).
-        const firebase = require('../config/firebase');
-        const response = await firebase.getMessaging().send(message);
+        const response = await firebaseConfig.getMessaging().send(message);
 
         console.log(`Timesheet reminder sent to ${userEmail}: ${response}`);
 
