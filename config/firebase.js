@@ -111,7 +111,10 @@ class FirebaseConfig {
         if (options.webpush) message.webpush = options.webpush;
       }
 
-      const response = await this.messaging.sendMulticast(message);
+      // firebase-admin v12 removed `sendMulticast`; v14 only ships
+      // `sendEachForMulticast`. Calling the old name throws
+      // "sendMulticast is not a function" and drops every push silently.
+      const response = await this.messaging.sendEachForMulticast(message);
       logger.info('Successfully sent Firebase multicast message', {
         successCount: response.successCount,
         failureCount: response.failureCount

@@ -13,8 +13,18 @@ jest.mock('../../config/logger', () => ({
   business: jest.fn(),
 }));
 
-jest.mock('../../config/firebase', () => ({
-  sendMulticastNotification: jest.fn(),
+// The FCM boundary is `firebase-admin-config`, NOT `config/firebase`. Replacing
+// the whole of `config/firebase` with a hand-written `{ sendMulticastNotification }`
+// is what let a real production bug through: the service called the method on the
+// module wrapper instead of on the exported `firebaseConfig` singleton, so every
+// push threw "... is not a function" and was dropped while this suite stayed
+// green. Requiring the real module keeps its export shape under test.
+jest.mock('../../firebase-admin-config', () => ({
+  admin: {},
+  messaging: {
+    send: jest.fn().mockResolvedValue({ messageId: 'msg-1' }),
+    sendEachForMulticast: jest.fn(),
+  },
 }));
 
 jest.mock('../../models/SILProperty', () => ({ findOne: jest.fn() }));
@@ -33,7 +43,8 @@ const User = require('../../models/User');
 const Notification = require('../../models/Notification');
 const NotificationPreference = require('../../models/NotificationPreference');
 const FcmToken = require('../../models/FcmToken');
-const firebaseConfig = require('../../config/firebase');
+const firebaseModule = require('../../config/firebase');
+const { messaging } = require('../../firebase-admin-config');
 
 const notificationService = require('../../services/silRosterNotificationService');
 
@@ -69,9 +80,10 @@ beforeEach(() => {
   Notification.updateMany.mockResolvedValue({});
   NotificationPreference.find.mockReturnValue({ lean: async () => [] });
   FcmToken.find.mockReturnValue({ lean: async () => [] });
-  firebaseConfig.sendMulticastNotification.mockResolvedValue({
+  messaging.sendEachForMulticast.mockResolvedValue({
     successCount: 1,
     failureCount: 0,
+    responses: [],
   });
   SILProperty.findOne.mockReturnValue({
     select: () => ({ lean: async () => ({ name: 'Richmond House' }) }),
@@ -146,9 +158,10 @@ describe('notifyRosterPublished', () => {
     FcmToken.find.mockReturnValue({
       lean: async () => [{ fcmToken: 'tok-android' }, { fcmToken: 'tok-ios' }],
     });
-    firebaseConfig.sendMulticastNotification.mockResolvedValue({
+    messaging.sendEachForMulticast.mockResolvedValue({
       successCount: 2,
       failureCount: 0,
+      responses: [],
     });
 
     const result = await notificationService.notifyRosterPublished({
@@ -162,19 +175,25 @@ describe('notifyRosterPublished', () => {
     expect(Notification.insertMany).toHaveBeenCalledTimes(1);
     expect(Notification.insertMany.mock.calls[0][0]).toHaveLength(3);
 
-    const [tokens, data, notification, options] =
-      firebaseConfig.sendMulticastNotification.mock.calls[0];
-    expect(tokens).toEqual(['tok-android', 'tok-ios']);
-    expect(data.type).toBe('sil_roster');
-    expect(data.rosterId).toBe(String(roster._id));
-    expect(data.channelId).toBe('rosters');
-    expect(notification.title).toBe('Roster published');
-    expect(notification.body).toContain('Richmond House');
-    expect(notification.body).toContain('2026-10-12');
+    // The sender must resolve through the exported singleton. This assertion is
+    // the guard for the bug that shipped: the module object has no
+    // `sendMulticastNotification`, so calling it there dropped every push.
+    expect(typeof firebaseModule.firebaseConfig?.sendMulticastNotification).toBe(
+      'function'
+    );
+
+    const message = messaging.sendEachForMulticast.mock.calls[0][0];
+    expect(message.tokens).toEqual(['tok-android', 'tok-ios']);
+    expect(message.data.type).toBe('sil_roster');
+    expect(message.data.rosterId).toBe(String(roster._id));
+    expect(message.data.channelId).toBe('rosters');
+    expect(message.notification.title).toBe('Roster published');
+    expect(message.notification.body).toContain('Richmond House');
+    expect(message.notification.body).toContain('2026-10-12');
     // Both platforms configured in the same call.
-    expect(options.android.notification.channelId).toBe('rosters');
-    expect(options.apns.headers['apns-priority']).toBe('10');
-    expect(options.apns.payload.aps.alert.title).toBe('Roster published');
+    expect(message.android.notification.channelId).toBe('rosters');
+    expect(message.apns.headers['apns-priority']).toBe('10');
+    expect(message.apns.payload.aps.alert.title).toBe('Roster published');
   });
 
   test('owner/admin still receives it when they opted out of shift-change alerts', async () => {
@@ -218,9 +237,7 @@ describe('notifyRosterPublished', () => {
     FcmToken.find.mockReturnValue({
       lean: async () => [{ fcmToken: 'tok-1' }],
     });
-    firebaseConfig.sendMulticastNotification.mockRejectedValue(
-      new Error('FCM down')
-    );
+    messaging.sendEachForMulticast.mockRejectedValue(new Error('FCM down'));
 
     const result = await notificationService.notifyRosterPublished({
       organizationId: ORG,
