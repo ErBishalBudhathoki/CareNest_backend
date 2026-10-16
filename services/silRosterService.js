@@ -131,7 +131,7 @@ class SILRosterService {
   /**
    * Build (or rebuild) a draft roster for a property/week from shifts.
    */
-  async buildRoster(organizationId, { propertyId, weekStarting }, actor = '') {
+  async buildRoster(organizationId, { propertyId, weekStarting, timezone }, actor = '') {
     const property = await SILProperty.findOne({ _id: propertyId, organizationId });
     if (!property) {
       const err = new Error('Property not found.');
@@ -139,8 +139,16 @@ class SILRosterService {
       throw err;
     }
 
+    const tz = timezone || DEFAULT_TZ;
     const week = SILRosterService.startOfWeek(weekStarting);
-    const weekEnd = new Date(week.getTime() + 7 * 24 * 60 * 60 * 1000);
+    // The week boundary must be the org-local Monday 00:00, not UTC midnight —
+    // shifts are created in Australia/Sydney, so a Monday 09:00 AEDT shift is
+    // Sunday 22:00 UTC and would fall outside a UTC window.
+    const monday = dateHelpers.getZonedDateParts(week, tz);
+    const weekStartUtc = dateHelpers.zonedWallClockToUtc(
+      monday.year, monday.month, monday.day, 0, 0, tz,
+    );
+    const weekEndUtc = new Date(weekStartUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     // Participants currently residing at the property.
     const occupancies = await SILOccupancy.find({
@@ -151,13 +159,13 @@ class SILRosterService {
     const clientIds = occupancies.map((o) => o.clientId);
     const participants = Math.max(1, clientIds.length);
 
-    // Shifts for those clients in the week.
+    // Shifts for those clients in the (org-local) week.
     let shifts = [];
     if (clientIds.length > 0) {
       shifts = await Shift.find({
         organizationId,
         clientId: { $in: clientIds },
-        startTime: { $gte: week, $lt: weekEnd },
+        startTime: { $gte: weekStartUtc, $lt: weekEndUtc },
       }).sort({ startTime: 1 });
     }
 
