@@ -122,6 +122,7 @@ router.get('/rosters-of-care', silReadLimiter, silController.listRostersOfCare);
 router.get('/rosters-of-care/:id', silReadLimiter, mongoId('id'), handleValidationErrors, silController.getRosterOfCare);
 router.put('/rosters-of-care/:id', silWriteLimiter, mongoId('id'), handleValidationErrors, silController.updateRosterOfCare);
 router.post('/rosters-of-care/:id/review', silWriteLimiter, mongoId('id'), handleValidationErrors, silController.reviewRosterOfCare);
+router.post('/rosters-of-care/:id/materialize-shifts', silWriteLimiter, mongoId('id'), handleValidationErrors, silController.materializeRosterOfCareShifts);
 router.post(
   '/rosters-of-care/:id/invoice',
   silWriteLimiter,

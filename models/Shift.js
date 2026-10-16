@@ -28,6 +28,14 @@ const shiftSchema = new mongoose.Schema({
   },
   isRecurring: { type: Boolean, default: false },
   recurringTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: 'RosterTemplate' },
+  // SIL (Phase 4): shifts materialised from a roster of care carry its id so
+  // materialisation is idempotent and the roster can be traced to its plan.
+  silRosterOfCareId: { type: mongoose.Schema.Types.ObjectId, ref: 'SILRosterOfCare', default: null, index: true },
+  shiftType: {
+    type: String,
+    enum: ['day', 'evening', 'active_night', 'sleepover', 'split'],
+    default: null,
+  },
   notes: { type: String, default: '' },
   breakDuration: { type: Number, default: 0 }, // in minutes
   isActive: { type: Boolean, default: true },

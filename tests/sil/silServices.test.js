@@ -40,9 +40,9 @@ jest.mock('../../models/SILRosterOfCare', () => ({
   findOne: jest.fn(),
   create: jest.fn(),
 }));
-jest.mock('../../models/Shift', () => ({ find: jest.fn() }));
+jest.mock('../../models/Shift', () => ({ find: jest.fn(), findOne: jest.fn(), create: jest.fn() }));
 jest.mock('../../models/Organization', () => ({ findOne: jest.fn() }));
-jest.mock('../../models/Client', () => ({ updateOne: jest.fn() }));
+jest.mock('../../models/Client', () => ({ updateOne: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../services/priceValidationService', () => ({
   priceValidationService: { validatePrice: jest.fn() },
 }));
@@ -472,5 +472,71 @@ describe('SIL findings — §8 validation rules', () => {
     });
     expect(result.blocked).toBeUndefined();
     expect(result.roster.status).toBe('published');
+  });
+});
+
+describe('SILRosterService.materializeRocShifts', () => {
+  const rocWithPattern = {
+    _id: 'roc1',
+    status: 'active',
+    clientId: 'c1',
+    supports: [
+      { supportNumber: '01_002_0107_1_1', supportName: 'Night', shiftType: 'active_night', hoursPerWeek: 21, days: ['Mon', 'Tue'], startTime: '22:00', endTime: '06:00' },
+      { supportNumber: '01_016_0104_1_1', supportName: 'Day', shiftType: 'day', hoursPerWeek: 10, days: ['Wed'], startTime: '09:00', endTime: '15:00' },
+    ],
+  };
+
+  test('creates one shift per agreed day and is idempotent', async () => {
+    SILRosterOfCare.findOne.mockResolvedValue(rocWithPattern);
+    Client.findOne.mockReturnValue({ lean: async () => ({ _id: 'c1', clientEmail: 'c@x.com' }) });
+    // First run: no existing shifts.
+    Shift.findOne.mockResolvedValue(null);
+    const createdDocs = [];
+    Shift.create.mockImplementation(async (doc) => {
+      const d = { _id: `s${createdDocs.length + 1}`, ...doc };
+      createdDocs.push(d);
+      return d;
+    });
+
+    const result = await silRosterService.materializeRocShifts('org1', 'roc1', {
+      weekStarting: '2026-10-12', // a Monday
+    });
+
+    // 2 (Mon,Tue night) + 1 (Wed day) = 3 shifts.
+    expect(result.created).toHaveLength(3);
+    expect(result.skipped).toHaveLength(0);
+    // Night shift crosses midnight → end > start.
+    const night = createdDocs.find((d) => d.shiftType === 'active_night');
+    expect(new Date(night.endTime) > new Date(night.startTime)).toBe(true);
+    // All carry the RoC link.
+    expect(createdDocs.every((d) => String(d.silRosterOfCareId) === 'roc1')).toBe(true);
+  });
+
+  test('skips shifts that already exist (idempotent re-plan)', async () => {
+    SILRosterOfCare.findOne.mockResolvedValue(rocWithPattern);
+    Client.findOne.mockReturnValue({ lean: async () => ({ _id: 'c1', clientEmail: 'c@x.com' }) });
+    Shift.findOne.mockResolvedValue({ _id: 'existing' });
+    Shift.create.mockClear();
+
+    const result = await silRosterService.materializeRocShifts('org1', 'roc1', { weekStarting: '2026-10-12' });
+    expect(result.created).toHaveLength(0);
+    expect(result.skipped).toHaveLength(3);
+    expect(Shift.create).not.toHaveBeenCalled();
+  });
+
+  test('returns noPattern when supports have no days/times', async () => {
+    SILRosterOfCare.findOne.mockResolvedValue({
+      _id: 'roc2', status: 'active', clientId: 'c1',
+      supports: [{ supportNumber: 'x', hoursPerWeek: 5 }],
+    });
+    Client.findOne.mockReturnValue({ lean: async () => ({ _id: 'c1' }) });
+    const result = await silRosterService.materializeRocShifts('org1', 'roc2', {});
+    expect(result.noPattern).toBe(true);
+  });
+
+  test('rejects a non-active roster of care', async () => {
+    SILRosterOfCare.findOne.mockResolvedValue({ _id: 'roc3', status: 'draft', supports: [] });
+    const result = await silRosterService.materializeRocShifts('org1', 'roc3', {});
+    expect(result.invalidState).toBe(true);
   });
 });

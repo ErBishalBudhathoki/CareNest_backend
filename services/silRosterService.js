@@ -1,10 +1,16 @@
 const SILRoster = require('../models/SILRoster');
 const SILProperty = require('../models/SILProperty');
 const SILOccupancy = require('../models/SILOccupancy');
+const SILRosterOfCare = require('../models/SILRosterOfCare');
+const Client = require('../models/Client');
 const Shift = require('../models/Shift');
 const silRatioService = require('./silRatioService');
 const silRosterNotificationService = require('./silRosterNotificationService');
+const dateHelpers = require('../utils/dateHelpers');
 const logger = require('../config/logger');
+
+const DAY_INDEX = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+const DEFAULT_TZ = 'Australia/Sydney';
 
 /**
  * SIL roster operations (Phase 4). Rosters reference Phase 1 `Shift`
@@ -24,6 +30,102 @@ class SILRosterService {
   async getRoster(organizationId, propertyId, weekStarting) {
     const week = SILRosterService.startOfWeek(weekStarting);
     return SILRoster.findOne({ organizationId, propertyId, weekStarting: week });
+  }
+
+  /**
+   * Materialise an active roster of care's agreed weekly pattern into that
+   * week's Shifts (unassigned), so staff can be assigned in one place.
+   *
+   * Each support with a `days` + `startTime`/`endTime` pattern produces one
+   * shift per agreed day. Idempotent: a shift already linked to this RoC at the
+   * same start time is skipped, so re-planning a week never duplicates.
+   *
+   * @param {string} organizationId
+   * @param {string} rosterOfCareId
+   * @param {Object} opts - { weekStarting, timezone }
+   * @param {string} actor
+   * @returns {Promise<Object>} { notFound } | { invalidState } | { clientNotFound }
+   *   | { noPattern } | { roc, week, created, skipped }
+   */
+  async materializeRocShifts(organizationId, rosterOfCareId, opts = {}, actor = '') {
+    const timezone = opts.timezone || DEFAULT_TZ;
+    const roc = await SILRosterOfCare.findOne({ _id: rosterOfCareId, organizationId });
+    if (!roc) return { notFound: true };
+    if (!['active', 'under_review'].includes(roc.status)) {
+      return { invalidState: true, status: roc.status };
+    }
+
+    const client = await Client.findOne({ _id: roc.clientId, organizationId }).lean();
+    if (!client) return { clientNotFound: true };
+
+    const supports = (roc.supports || []).filter(
+      (s) => Array.isArray(s.days) && s.days.length > 0 && s.startTime && s.endTime,
+    );
+    if (supports.length === 0) {
+      return { noPattern: true, roc };
+    }
+
+    const week = SILRosterService.startOfWeek(opts.weekStarting || new Date());
+    const monday = dateHelpers.getZonedDateParts(week, timezone);
+    const clientEmail = client.clientEmail || client.email || '';
+
+    const created = [];
+    const skipped = [];
+
+    for (const support of supports) {
+      for (const day of support.days) {
+        const offset = DAY_INDEX[day];
+        if (offset === undefined) continue;
+
+        const base = new Date(Date.UTC(monday.year, monday.month - 1, monday.day + offset));
+        const dp = dateHelpers.getZonedDateParts(base, timezone);
+        const [sh, sm] = String(support.startTime).split(':').map(Number);
+        const [eh, em] = String(support.endTime).split(':').map(Number);
+        const start = dateHelpers.zonedWallClockToUtc(
+          dp.year, dp.month, dp.day, sh || 0, sm || 0, timezone,
+        );
+        let end = dateHelpers.zonedWallClockToUtc(
+          dp.year, dp.month, dp.day, eh || 0, em || 0, timezone,
+        );
+        if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+        const exists = await Shift.findOne({
+          organizationId,
+          clientId: roc.clientId,
+          silRosterOfCareId: roc._id,
+          startTime: start,
+        });
+        if (exists) {
+          skipped.push(exists._id);
+          continue;
+        }
+
+        const shift = await Shift.create({
+          organizationId,
+          clientId: roc.clientId,
+          clientEmail,
+          startTime: start,
+          endTime: end,
+          status: 'pending',
+          shiftType: support.shiftType || 'day',
+          silRosterOfCareId: roc._id,
+          supportItems: [
+            { itemNumber: support.supportNumber, itemName: support.supportName, unit: 'H' },
+          ],
+        });
+        created.push(shift);
+      }
+    }
+
+    logger.business('SIL RoC materialised', {
+      event: 'sil_roc_materialised',
+      organizationId,
+      rosterOfCareId: String(roc._id),
+      created: created.length,
+      skipped: skipped.length,
+    });
+
+    return { roc, week, created, skipped };
   }
 
   /**

@@ -18,6 +18,15 @@ const rocSupportSchema = new mongoose.Schema(
     unitPrice: { type: Number, default: 0 },
     gstCode: { type: String, default: 'P2' },
     amount: { type: Number, default: 0 },
+    // Agreed weekly pattern (Phase 4): days + start/end time. Materialised into
+    // that week's shifts by silRosterService.materializeRocShifts.
+    days: {
+      type: [String],
+      enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      default: [],
+    },
+    startTime: { type: String, default: '' }, // HH:MM (24h)
+    endTime: { type: String, default: '' }, // HH:MM (24h); may cross midnight
   },
   { _id: false },
 );

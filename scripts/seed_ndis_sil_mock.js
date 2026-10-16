@@ -35,9 +35,11 @@ const NDIA_EMAIL = 'sil.ndia@mailinator.com';
 const PLAN_EMAIL = 'sil.plan@mailinator.com';
 
 // Hourly support items that exist in `support_items`, priced below their caps.
+// `days` + `startTime`/`endTime` form the agreed weekly pattern that
+// `materializeRocShifts` turns into shifts for a week.
 const SUPPORTS = [
-  { supportNumber: '01_002_0107_1_1', supportName: 'Assistance With Self-Care Activities - Weekday Night', shiftType: 'active_night', hoursPerWeek: 21, unitPrice: 80 },
-  { supportNumber: '01_016_0104_1_1', supportName: 'Specialised Home Based Assistance', shiftType: 'day', hoursPerWeek: 10, unitPrice: 60 },
+  { supportNumber: '01_002_0107_1_1', supportName: 'Assistance With Self-Care Activities - Weekday Night', shiftType: 'active_night', hoursPerWeek: 21, unitPrice: 80, days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], startTime: '22:00', endTime: '01:00' },
+  { supportNumber: '01_016_0104_1_1', supportName: 'Specialised Home Based Assistance', shiftType: 'day', hoursPerWeek: 10, unitPrice: 60, days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], startTime: '09:00', endTime: '11:00' },
 ];
 
 function isValidAbn(abn) {
@@ -183,7 +185,23 @@ async function ensureRosterOfCare(orgId, client) {
     status: { $in: ['active', 'under_review'] },
   });
   if (roc) {
-    console.log('  roster of care: exists');
+    // Patch the agreed weekly pattern onto supports created before it existed.
+    let changed = false;
+    roc.supports = (roc.supports || []).map((s) => {
+      const def = SUPPORTS.find((d) => d.supportNumber === s.supportNumber);
+      if (def && (!s.days || s.days.length === 0)) {
+        changed = true;
+        return { ...s.toObject?.() ?? s, days: def.days, startTime: def.startTime, endTime: def.endTime };
+      }
+      return s;
+    });
+    if (changed) {
+      roc.markModified('supports');
+      await roc.save();
+      console.log('  roster of care: patched weekly pattern');
+    } else {
+      console.log('  roster of care: exists');
+    }
     return roc;
   }
 
@@ -195,6 +213,9 @@ async function ensureRosterOfCare(orgId, client) {
     unitPrice: s.unitPrice,
     gstCode: 'P2',
     amount: Math.round(s.hoursPerWeek * s.unitPrice * 100) / 100,
+    days: s.days || [],
+    startTime: s.startTime || '',
+    endTime: s.endTime || '',
     priceValidation: { passed: true, capApplied: null, type: 'seeded', errors: [] },
   }));
 
@@ -226,6 +247,9 @@ async function ensureRosterOfCare(orgId, client) {
       unitPrice: l.unitPrice,
       gstCode: l.gstCode,
       amount: l.amount,
+      days: l.days,
+      startTime: l.startTime,
+      endTime: l.endTime,
     })),
     reviewSchedule: { cadence: 'quarterly', nextReviewDate: new Date(Date.now() + 90 * 864e5) },
     status: 'active',
