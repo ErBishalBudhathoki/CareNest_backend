@@ -961,6 +961,16 @@ class SchedulerService {
                 }
             }
 
+            // Resolve the employee's user id from the email so downstream
+            // consumers that count assigned staff (e.g. SIL buildRoster, which
+            // reads shift.employeeId) treat the shift as assigned.
+            if (updateData.employeeEmail && !updateData.employeeId) {
+                const emp = await User.findOne({ email: updateData.employeeEmail })
+                    .select('_id')
+                    .lean();
+                if (emp) updateData.employeeId = emp._id;
+            }
+
             // Apply update
             updateData.updatedAt = new Date();
 

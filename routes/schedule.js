@@ -39,6 +39,18 @@ const shiftValidation = [
   body('notes').optional().trim().isLength({ max: 1000 })
 ];
 
+// PUT is a partial update: assignment only sends { employeeEmail }, so the
+// identifying/time fields are optional here but still validated when present.
+const shiftUpdateValidation = [
+  body('organizationId').optional().isMongoId().withMessage('Invalid organization ID'),
+  body('startTime').optional().isISO8601().toDate().withMessage('Invalid start time'),
+  body('endTime').optional().isISO8601().toDate().withMessage('Invalid end time'),
+  body('clientEmail').optional().isEmail().normalizeEmail().withMessage('Invalid client email'),
+  body('employeeEmail').optional().isEmail().normalizeEmail().withMessage('Invalid employee email'),
+  body('location').optional().trim().isLength({ max: 255 }),
+  body('notes').optional().trim().isLength({ max: 1000 })
+];
+
 const bulkValidation = [
   body('shifts').isArray({ min: 1 }).withMessage('Shifts must be a non-empty array'),
   body('shifts.*.startTime').isISO8601().withMessage('Each shift must have a valid start time'),
@@ -81,7 +93,7 @@ router.use(requireOrgMembership);
 router.post('/shift', strictLimiter, requireEntitlement('create_shift'), shiftValidation, handleValidationErrors, ScheduleController.createShift);
 router.post('/bulk', strictLimiter, requireEntitlement('create_shift'), bulkValidation, handleValidationErrors, ScheduleController.bulkDeploy);
 router.get('/shifts/:organizationId', scheduleLimiter, orgIdValidation, handleValidationErrors, ScheduleController.getShifts);
-router.put('/shift/:id', strictLimiter, requireEntitlement('update_shift'), shiftIdValidation, shiftValidation, handleValidationErrors, ScheduleController.updateShift);
+router.put('/shift/:id', strictLimiter, requireEntitlement('update_shift'), shiftIdValidation, shiftUpdateValidation, handleValidationErrors, ScheduleController.updateShift);
 router.delete('/shift/:id', strictLimiter, requireEntitlement('delete_shift'), shiftIdValidation, handleValidationErrors, ScheduleController.deleteShift);
 
 // AI Recommendations
