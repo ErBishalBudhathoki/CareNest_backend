@@ -10,6 +10,13 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const uri = process.env.MONGODB_URI;
 const DB_NAME = 'Invoice';
 
+// `config/firebase` exports a wrapper object — `{ FirebaseConfig, firebaseConfig,
+// admin, messaging }` — so the sender lives on the exported singleton. Calling
+// an instance method on the module itself (`firebase.getMessaging()`) throws
+// "firebase.getMessaging is not a function" and silently drops every reminder.
+const firebaseModule = require('../config/firebase');
+const firebaseConfig = firebaseModule.firebaseConfig || firebaseModule;
+
 /**
  * Default reminder configuration
  */
@@ -141,12 +148,8 @@ async function sendReceiptReminder(expense) {
             return { success: false, reason: 'no_fcm_token' };
         }
 
-        // Send via the shared sender (firebase-admin v12 removed the
-        // admin.messaging() namespace API — calling it throws
-        // "admin.messaging is not a function" and silently kills every
-        // receipt reminder). Message is constructed below.
-        const firebase = require('../config/firebase');
-
+        // Notification message is constructed below, then sent through the
+        // singleton exported by config/firebase.
         // Calculate hours since creation
         const hoursSinceCreation = Math.floor(
             (Date.now() - new Date(expense.createdAt).getTime()) / (1000 * 60 * 60)
@@ -195,9 +198,9 @@ async function sendReceiptReminder(expense) {
             token: tokenDoc.fcmToken
         };
 
-        // Send the notification via the shared sender (see note above
-        // about the removed admin.messaging() namespace API).
-        const response = await firebase.getMessaging().send(message);
+        // Send the notification via the singleton exported by config/firebase
+        // (see note above about the removed admin.messaging() namespace API).
+        const response = await firebaseConfig.getMessaging().send(message);
 
         console.log(`Receipt reminder sent for expense ${expense._id} to ${userEmail}: ${response}`);
 

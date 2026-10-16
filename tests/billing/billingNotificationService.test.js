@@ -13,11 +13,21 @@ jest.mock('../../models/User');
 jest.mock('../../models/Notification');
 jest.mock('../../models/NotificationPreference');
 jest.mock('../../models/FcmToken');
-jest.mock('../../config/firebase', () => ({
-  sendMulticastNotification: jest.fn(),
+// Mock the FCM boundary (`firebase-admin-config`), NOT `config/firebase`.
+// Replacing config/firebase with a hand-written `{ sendMulticastNotification }`
+// is precisely what hid the bug this suite has to catch: the service called the
+// method on the module wrapper instead of on the exported `firebaseConfig`
+// singleton, so every push threw "... is not a function" while this test stayed
+// green. Requiring the real module keeps its export shape under test.
+jest.mock('../../firebase-admin-config', () => ({
+  admin: {},
+  messaging: {
+    send: jest.fn().mockResolvedValue({ messageId: 'm1' }),
+    sendEachForMulticast: jest.fn(),
+  },
 }));
 
-const { sendMulticastNotification } = require('../../config/firebase');
+const { messaging } = require('../../firebase-admin-config');
 
 // jest automock does not stub Mongoose statics — assign explicitly.
 // Supports both `await Model.find()` and `.select().sort().limit().lean()` chains.
@@ -60,7 +70,11 @@ describe('billingNotificationService', () => {
     tokenDocs = [];
     Notification.insertMany.mockResolvedValue([]);
     Notification.updateMany.mockResolvedValue({});
-    sendMulticastNotification.mockResolvedValue({ successCount: 1 });
+    messaging.sendEachForMulticast.mockResolvedValue({
+      successCount: 1,
+      failureCount: 0,
+      responses: [],
+    });
   });
 
   test('resolves only manage_billing holders, owners and admins in THIS org', async () => {
@@ -135,7 +149,7 @@ describe('billingNotificationService', () => {
     userDocs = [{ _id: 'u-1', email: 'one@example.com' }];
     prefDocs = [];
     tokenDocs = [{ fcmToken: 'tok-1' }];
-    sendMulticastNotification.mockRejectedValue(new Error('FCM down'));
+    messaging.sendEachForMulticast.mockRejectedValue(new Error('FCM down'));
 
     const result = await billingNotificationService.notifyPaymentReceived({
       organizationId: ORG_ID,
@@ -161,10 +175,40 @@ describe('billingNotificationService', () => {
       approvedBy: 'client@example.com',
     });
 
-    const [, data] = sendMulticastNotification.mock.calls[0];
-    expect(data.type).toBe('invoice');
-    expect(data.kind).toBe('invoice_approved');
-    expect(data.invoiceId).toBe('inv-2');
-    expect(data.channelId).toBe('payments');
+    // The shared sender hands FCM a single message object (tokens live inside),
+    // so this asserts the payload FCM actually receives.
+    const [message] = messaging.sendEachForMulticast.mock.calls[0];
+    expect(message.data.type).toBe('invoice');
+    expect(message.data.kind).toBe('invoice_approved');
+    expect(message.data.invoiceId).toBe('inv-2');
+    expect(message.data.channelId).toBe('payments');
+    expect(message.tokens).toEqual(['tok-1']);
+  });
+
+  test('the payload reaches the real sender singleton, addressed to the tokens', async () => {
+    membershipDocs = [membership('u-1', { role: 'owner' })];
+    userDocs = [{ _id: 'u-1', email: 'one@example.com' }];
+    prefDocs = [];
+    tokenDocs = [{ fcmToken: 'tok-android' }, { fcmToken: 'tok-ios' }];
+    messaging.sendEachForMulticast.mockResolvedValue({
+      successCount: 2,
+      failureCount: 0,
+      responses: [],
+    });
+
+    const result = await billingNotificationService.notifyInvoiceApproved({
+      organizationId: ORG_ID,
+      invoice: { _id: 'inv-3', invoiceNumber: 'INV-3', clientName: 'Acme' },
+      approvedBy: 'client@example.com',
+    });
+
+    // Before the fix this was 0: `firebaseConfig` was the module wrapper, which
+    // has no `sendMulticastNotification`, so the send threw into the catch and
+    // the push was lost while the in-app history row was still written.
+    expect(result.pushed).toBe(2);
+    expect(messaging.sendEachForMulticast).toHaveBeenCalledTimes(1);
+    const message = messaging.sendEachForMulticast.mock.calls[0][0];
+    expect(message.tokens).toEqual(['tok-android', 'tok-ios']);
+    expect(message.notification.title).toBeTruthy();
   });
 });

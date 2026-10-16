@@ -1,14 +1,20 @@
 /**
  * Receipt-reminder delivery regression: firebase-admin v12 removed the
  * admin.messaging() namespace API, which threw on every send and silently
- * zeroed all receipt reminders. Sends must go through the shared
- * config/firebase sender.
+ * zeroed all receipt reminders. Sends must go through the singleton exported
+ * by config/firebase.
+ *
+ * The FCM boundary mocked here is `firebase-admin-config`, NOT
+ * `config/firebase`: replacing the latter with a hand-written
+ * `{ getMessaging }` is what previously hid this bug, because the service was
+ * calling `getMessaging()` on the module wrapper (which has no such method)
+ * while the test kept handing it one.
  */
 const mockSend = jest.fn();
 
-jest.mock('../../config/firebase', () => ({
-  getMessaging: jest.fn(() => ({ send: (...args) => mockSend(...args) })),
-  getAdmin: jest.fn(),
+jest.mock('../../firebase-admin-config', () => ({
+  admin: {},
+  messaging: { send: (...args) => mockSend(...args) },
 }));
 
 const mockFcmFindOne = jest.fn();

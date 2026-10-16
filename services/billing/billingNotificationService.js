@@ -4,7 +4,14 @@ const User = require('../../models/User');
 const Notification = require('../../models/Notification');
 const NotificationPreference = require('../../models/NotificationPreference');
 const FcmToken = require('../../models/FcmToken');
-const firebaseConfig = require('../../config/firebase');
+// `config/firebase` exports a wrapper object — `{ FirebaseConfig, firebaseConfig,
+// admin, messaging }` — so the sender lives on the exported singleton. Calling
+// `firebaseConfig.sendMulticastNotification(...)` on the module itself throws
+// "firebaseConfig.sendMulticastNotification is not a function" and silently
+// drops every billing push (the in-app Notification history row is still
+// written, so the loss was invisible from the app).
+const firebaseModule = require('../../config/firebase');
+const firebaseConfig = firebaseModule.firebaseConfig || firebaseModule;
 const logger = require('../../config/logger');
 
 /**
