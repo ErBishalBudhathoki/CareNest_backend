@@ -181,9 +181,11 @@ describe('AdvancedPayrollService legacy label + resolved-rate compatibility', ()
 });
 
 describe('AdvancedPayrollService.generatePayslip', () => {
+  const ORG = '64f0000000000000000000a1';
+
   test('returns a safe placeholder when no records exist', async () => {
     PayrollRecord.find.mockReturnValue({ sort: () => ({ lean: async () => [] }) });
-    const result = await advancedPayrollService.generatePayslip('u1', '2026-06');
+    const result = await advancedPayrollService.generatePayslip('u1', '2026-06', ORG);
     expect(result.success).toBe(true);
     expect(result.data.earnings.total).toBe(0);
     expect(result.data.netPay).toBe(0);
@@ -206,9 +208,29 @@ describe('AdvancedPayrollService.generatePayslip', () => {
         ],
       }),
     });
-    const result = await advancedPayrollService.generatePayslip('u1', '2026-06');
+    const result = await advancedPayrollService.generatePayslip('u1', '2026-06', ORG);
     expect(result.success).toBe(true);
     expect(result.data.earnings.total).toBe(1200);
     expect(result.data.netPay).toBe(972);
+  });
+
+  test('scopes the payroll lookup to the given organisation', async () => {
+    PayrollRecord.find.mockReturnValue({ sort: () => ({ lean: async () => [] }) });
+
+    await advancedPayrollService.generatePayslip('u1', '2026-06', ORG);
+
+    // The query, not just the handler, has to carry the tenant: the same
+    // employee id can exist in more than one organisation, and an unscoped
+    // lookup returned the other tenant's salary for it.
+    expect(PayrollRecord.find).toHaveBeenCalledWith({
+      employeeId: 'u1',
+      organizationId: ORG,
+    });
+  });
+
+  test('refuses to build a payslip without an organisation', async () => {
+    const result = await advancedPayrollService.generatePayslip('u1', '2026-06');
+    expect(result.success).toBe(false);
+    expect(PayrollRecord.find).not.toHaveBeenCalled();
   });
 });

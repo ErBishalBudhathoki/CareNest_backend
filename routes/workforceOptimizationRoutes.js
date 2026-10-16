@@ -6,6 +6,22 @@
 const express = require('express');
 const router = express.Router();
 const workforceController = require('../controllers/workforceOptimizationController');
+const { authenticateUser } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
+
+// The router declared no middleware of its own and the controllers read the
+// organisation from the request, so tenancy rested entirely on whatever each
+// service happened to check. `requireOrgMembership` now resolves the named
+// organisation and requires an active membership row for the caller.
+//
+// Note: no role gate is applied here. A two-tenant probe found the role
+// dimension already refused for `/performance/analytics` (the service checks
+// organisation access), and several endpoints look employee-facing
+// (`/performance/trends/:employeeId`, `/performance/skills/:employeeId`), so
+// gating the whole surface to admins would be a behaviour change that the
+// evidence does not yet support.
+router.use(authenticateUser);
+router.use(requireOrgMembership);
 
 // ============================================================================
 // Workforce Planning Routes

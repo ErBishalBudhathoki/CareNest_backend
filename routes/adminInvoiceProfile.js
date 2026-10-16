@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const adminInvoiceProfileController = require('../controllers/adminInvoiceProfileController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 
 // Rate limiting
@@ -56,6 +56,12 @@ const profileIdValidation = [
 // Protected routes
 router.use(authenticateUser);
 router.use(requireOrgMembership);
+// The profile carries the organisation's business identity and its bank account
+// (account name, BSB, account number) — the details invoices are paid into — and
+// it is only reachable from the Admin dashboard. It was previously readable and
+// writable by any member of the organisation: a two-tenant probe received the
+// full profile, bank details included, for a non-admin caller.
+router.use(requireRoles(['admin', 'owner']));
 
 /**
  * Create admin invoice profile

@@ -137,6 +137,48 @@ const adminOnlyRequests = [
   ['POST', '/api/notes/templates'],
   ['PUT', `/api/notes/templates/${ORG_ID}`],
   ['DELETE', `/api/notes/templates/${ORG_ID}`],
+
+  // Advanced payroll: organisation-wide payroll work is admin-only. The
+  // payslip read is the deliberate exception and is asserted separately below.
+  ['POST', '/api/payroll-advanced/calculate'],
+  ['POST', '/api/payroll-advanced/generate-payslips'],
+  ['GET', `/api/payroll-advanced/summary/${ORG_ID}/2026-09`],
+  ['POST', '/api/payroll-advanced/export'],
+
+  // Financial intelligence is organisation-wide analytics.
+  ['GET', `/api/financial-intelligence/revenue/trends/${ORG_ID}`],
+  ['POST', '/api/financial-intelligence/revenue/forecast'],
+  ['GET', `/api/financial-intelligence/analytics/kpis/${ORG_ID}`],
+  ['GET', `/api/financial-intelligence/billing/pending/${ORG_ID}`],
+
+  // The organisation invoice profile carries the bank account invoices are
+  // paid into.
+  ['GET', `/api/admin-invoice-profile/api/admin-invoice-profile/${ORG_ID}`],
+  ['POST', '/api/admin-invoice-profile/api/admin-invoice-profile'],
+  ['PUT', `/api/admin-invoice-profile/api/admin-invoice-profile/${ORG_ID}`],
+
+  // Bulk actions that change the whole organisation.
+  ['POST', '/api/bulk/approve-timesheets'],
+  ['POST', '/api/bulk/reject-timesheets'],
+  ['POST', '/api/bulk/generate-invoices'],
+  ['POST', '/api/bulk/preview-invoices'],
+  ['POST', '/api/bulk/assign-shifts'],
+  ['POST', '/api/bulk/send-messages'],
+  ['POST', '/api/bulk/schedule-messages'],
+];
+
+// Requests that must stay reachable for a non-admin member. These are the
+// self-service exceptions; if one of them starts returning 403 the fix has gone
+// too far and broken an employee's own screen.
+const memberReachableRequests = [
+  // An employee reads their own payslip. The caller id matches the requested id.
+  ['GET', '/api/payroll-advanced/payslip/507f1f77bcf86cd799439011/2026-09'],
+];
+
+// Requests a non-admin member must NOT reach even though they are not
+// org-wide: a colleague's payslip.
+const colleagueOnlyRequests = [
+  ['GET', '/api/payroll-advanced/payslip/507f1f77bcf86cd799439013/2026-09'],
 ];
 
 // Supertest's `request(app)` spins up and tears down an ephemeral listener per
@@ -190,6 +232,20 @@ describe('admin-surface API authorization', () => {
     const res = await send('GET', '/api/notes/templates', employeeToken());
     expect(res.status).not.toBe(403);
     expect(res.body?.code).not.toBe('INSUFFICIENT_PERMISSIONS');
+  });
+
+  describe.each(memberReachableRequests)('%s %s', (method, path) => {
+    test('employee token is not refused', async () => {
+      const res = await send(method, path, employeeToken());
+      expect(res.status).not.toBe(403);
+    });
+  });
+
+  describe.each(colleagueOnlyRequests)('%s %s', (method, path) => {
+    test('employee token is refused for another employee', async () => {
+      const res = await send(method, path, employeeToken());
+      expect(res.status).toBe(403);
+    });
   });
 
   test('employee token cannot list SIL data through an aliased path', async () => {

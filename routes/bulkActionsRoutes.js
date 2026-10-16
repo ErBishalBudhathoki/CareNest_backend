@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bulkActionsController = require('../controllers/bulkActionsController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const {
   organizationContextMiddleware,
@@ -21,18 +21,26 @@ router.use(authenticateUser);
 router.use(requireOrgMembership);
 router.use(bulkActionsLimiter);
 
+// Organisation-wide actions are admin work. Approving or rejecting the whole
+// organisation's timesheets, generating or previewing its invoices, and
+// broadcasting messages to everyone in it were previously available to any
+// member: a two-tenant probe ran the org-wide timesheet approval path, and was
+// allowed through, with an employee token.
+const requireAdmin = requireRoles(['admin', 'owner']);
+
 // Bulk Timesheet Approval
-router.post('/approve-timesheets', bulkActionsController.approveTimesheets);
-router.post('/reject-timesheets', bulkActionsController.rejectTimesheets);
+router.post('/approve-timesheets', requireAdmin, bulkActionsController.approveTimesheets);
+router.post('/reject-timesheets', requireAdmin, bulkActionsController.rejectTimesheets);
 
 // Bulk Invoice Generation (org-bound: callers send organizationId in body)
 router.post(
   '/generate-invoices',
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationMatch('organizationId'),
   bulkActionsController.generateInvoices
 );
-router.post('/preview-invoices', bulkActionsController.previewInvoices);
+router.post('/preview-invoices', requireAdmin, bulkActionsController.previewInvoices);
 
 // Job status for async bulk runs (?async=true on generate-invoices).
 // Scoped: callers can only poll jobs for their own organization — the
@@ -67,12 +75,12 @@ router.get('/jobs/:workflowId', organizationContextMiddleware, async (req, res) 
   }
 });
 
-// Bulk Worker Assignment
-router.post('/assign-shifts', bulkActionsController.assignShifts);
-router.post('/suggest-assignments', bulkActionsController.suggestAssignments);
+// Bulk Worker Assignment — rostering the organisation's staff is admin work.
+router.post('/assign-shifts', requireAdmin, bulkActionsController.assignShifts);
+router.post('/suggest-assignments', requireAdmin, bulkActionsController.suggestAssignments);
 
 // Bulk Messaging
-router.post('/send-messages', bulkActionsController.sendMessages);
-router.post('/schedule-messages', bulkActionsController.scheduleMessages);
+router.post('/send-messages', requireAdmin, bulkActionsController.sendMessages);
+router.post('/schedule-messages', requireAdmin, bulkActionsController.scheduleMessages);
 
 module.exports = router;

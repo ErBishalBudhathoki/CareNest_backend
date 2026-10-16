@@ -466,11 +466,22 @@ class AdvancedPayrollService {
    * Generate a payslip for a user/period.
    * Derives from PayrollRecord when available; otherwise returns a structured
    * (empty-safe) payslip placeholder. Retains the original response shape.
+   *
+   * `organizationId` is required: payroll records hold a per-organisation
+   * salary, so a lookup that is not scoped by tenant returns another
+   * organisation's numbers for the same employee id.
    */
-  async generatePayslip(userId, period) {
+  async generatePayslip(userId, period, organizationId = null) {
     try {
+      if (!organizationId) {
+        return { success: false, message: 'Organization ID is required.' };
+      }
+
       const PayrollRecord = require('../models/PayrollRecord');
-      const records = await PayrollRecord.find({ employeeId: userId })
+      const records = await PayrollRecord.find({
+        employeeId: userId,
+        organizationId: String(organizationId),
+      })
         .sort({ periodStart: -1 })
         .lean();
 
