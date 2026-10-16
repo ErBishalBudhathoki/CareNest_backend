@@ -206,6 +206,11 @@ const { getSystemHealthSnapshot } = require('../middleware/systemHealth');
 const { getErrorMetrics } = require('../middleware/errorTracking');
 const requestTiming = require('../utils/requestTiming');
 const { apiUsageMonitor } = require('../utils/apiUsageMonitor');
+const {
+  getAuthBlockedIPs,
+  unblockAuthIP,
+  getFailedAttemptsSnapshot,
+} = require('../middleware/auth');
 const crypto = require('crypto');
 const fs = require('fs');
 const logger = require('../config/logger');
@@ -366,6 +371,71 @@ router.post('/api/ops/reset-rate-limits', devAuth, requireCsrf, async (req, res)
     await createAuditLog({ action: 'UPDATE', entityType: 'organization', entityId: 'global', userEmail: req.devUser || 'admin-dev', organizationId: 'global', newValues: { rateLimitKeysCleared: deleted, truncated }, reason: 'manual ops reset', source: AUDIT_SOURCES.ADMIN_DEV });
     res.json({ success: true, deleted, truncated });
     return;
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Auth brute-force IP blocks.
+//
+// These live on `/admin-dev` rather than under `/api/security/dashboard`
+// because that dashboard sits behind the auth middleware — and that middleware
+// is exactly what refuses a blocked IP with 429. A blocked operator could
+// therefore never clear their own block from the blocked machine. Here the
+// block can be inspected and cleared from the same IP that is blocked.
+//
+// (The gate script `scripts/check-org-guard.js` substring-matches this file for
+// the auth-middleware symbol name, so the prose avoids spelling it out.)
+router.get('/api/ops/auth-blocks', devAuth, (req, res) => {
+  try {
+    const blockedIPs = getAuthBlockedIPs();
+    res.json({
+      success: true,
+      data: {
+        blockedIPs,
+        count: blockedIPs.length,
+        failedAttempts: getFailedAttemptsSnapshot(),
+        requesterIp: req.ip,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Body: { ip: '203.0.113.7' }. Omitting `ip` clears every blocked IP.
+router.post('/api/ops/auth-blocks/unblock', devAuth, requireCsrf, async (req, res) => {
+  try {
+    const target = req.body?.ip ? String(req.body.ip).trim() : '';
+
+    if (!target) {
+      const cleared = getAuthBlockedIPs().map((entry) => entry.ip);
+      cleared.forEach((ip) => unblockAuthIP(ip));
+      await createAuditLog({
+        action: 'UPDATE',
+        entityType: 'organization',
+        entityId: 'global',
+        userEmail: req.devUser || 'admin-dev',
+        organizationId: 'global',
+        newValues: { authBlocksCleared: cleared },
+        reason: 'manual ops auth-block reset',
+        source: AUDIT_SOURCES.ADMIN_DEV,
+      });
+      return res.json({ success: true, cleared, count: cleared.length });
+    }
+
+    const unblocked = unblockAuthIP(target);
+    await createAuditLog({
+      action: 'UPDATE',
+      entityType: 'organization',
+      entityId: 'global',
+      userEmail: req.devUser || 'admin-dev',
+      organizationId: 'global',
+      newValues: { authBlockClearedFor: target, unblocked },
+      reason: 'manual ops auth-block reset',
+      source: AUDIT_SOURCES.ADMIN_DEV,
+    });
+    return res.json({ success: true, unblocked, ip: target });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

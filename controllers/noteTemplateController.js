@@ -1,4 +1,5 @@
 const NoteTemplate = require('../models/NoteTemplate');
+const noteTemplateService = require('../services/noteTemplateService');
 const logger = require('../config/logger');
 const catchAsync = require('../utils/catchAsync');
 
@@ -26,7 +27,27 @@ class NoteTemplateController {
       filter['appliesTo.serviceTypes'] = req.query.serviceType;
     }
 
-    const templates = await NoteTemplate.find(filter).sort({ createdAt: -1 });
+    let templates = await NoteTemplate.find(filter).sort({ createdAt: -1 });
+
+    // A brand-new organisation has no templates yet, which left the note
+    // composer's template picker empty. Bootstrap the built-ins on first read
+    // (and on read of an unfiltered empty list) so every account always has at
+    // least the default note template available. Best-effort: a failure here
+    // must never break reading templates, and it only ever inserts when the
+    // organisation has none at all.
+    if (templates.length === 0) {
+      try {
+        const seeded = await noteTemplateService.ensureDefaultTemplates(organizationId);
+        if (seeded.created > 0) {
+          templates = await NoteTemplate.find(filter).sort({ createdAt: -1 });
+        }
+      } catch (error) {
+        logger.warn('Default note template bootstrap failed (list still served)', {
+          organizationId,
+          error: error.message,
+        });
+      }
+    }
 
     res.status(200).json({
       success: true,

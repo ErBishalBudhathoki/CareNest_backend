@@ -220,7 +220,15 @@ class SecurityDashboardController {
       });
     }
     
-    if (!securityMonitor.isIPBlocked(ip)) {
+    // There are two independent block stores: the security monitor's and the
+    // auth middleware's brute-force map, and `authenticateUser` is the one that
+    // actually returns 429. Clearing only the monitor left the IP still locked
+    // out — which is precisely the case an operator reaches for this endpoint
+    // to fix. Clear both, and only report "not blocked" when neither held it.
+    const blockedInMonitor = securityMonitor.isIPBlocked(ip);
+    const blockedInAuth = AuthMiddleware.isIPBlocked(ip);
+
+    if (!blockedInMonitor && !blockedInAuth) {
       return res.status(404).json({
         success: false,
         code: 'IP_NOT_BLOCKED',
@@ -228,7 +236,9 @@ class SecurityDashboardController {
       });
     }
     
-    securityMonitor.unblockIP(ip);
+    if (blockedInMonitor) securityMonitor.unblockIP(ip);
+    if (blockedInAuth) AuthMiddleware.unblockIPAdmin(ip);
+    AuthMiddleware.resetFailedAttempts(ip);
     
     logger.security('IP manually unblocked', {
       userId: req.user.id,

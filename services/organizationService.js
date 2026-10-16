@@ -196,6 +196,21 @@ class OrganizationService {
         }
       }
 
+      // Every organisation starts with the built-in progress-note templates so
+      // the note composer is never empty. Non-fatal; the template list endpoint
+      // also bootstraps on first read.
+      try {
+        const noteTemplateService = require('./noteTemplateService');
+        await noteTemplateService.ensureDefaultTemplates(
+          savedOrganization._id.toString()
+        );
+      } catch (templateError) {
+        console.warn(
+          'Failed to create default note templates:',
+          templateError.message
+        );
+      }
+
       return {
         organizationId: savedOrganization._id.toString(),
         organizationCode: organizationCode,

@@ -15,6 +15,8 @@ jest.mock('../../models/NoteTemplate', () => ({
   findOne: jest.fn(),
   create: jest.fn(),
   findOneAndUpdate: jest.fn(),
+  countDocuments: jest.fn(),
+  exists: jest.fn(),
 }));
 
 jest.mock('../../models/Note', () => ({
@@ -46,6 +48,9 @@ function mockRes() {
 
 const sortable = (docs) => ({ sort: () => Promise.resolve(docs) });
 
+/** Let a `catchAsync`-wrapped handler finish before asserting on its res. */
+const settleHandler = () => new Promise((resolve) => setImmediate(resolve));
+
 describe('NoteTemplateController', () => {
   const user = { organizationId: 'org1', email: 'admin@org.com' };
 
@@ -58,6 +63,48 @@ describe('NoteTemplateController', () => {
 
     expect(NoteTemplate.find).toHaveBeenCalledWith({ organizationId: 'org1' });
     expect(res.body.success).toBe(true);
+    expect(res.body.data.templates).toHaveLength(1);
+  });
+
+  test('bootstraps the default template when the organisation has none', async () => {
+    // First read sees an empty list (brand-new organisation), so the controller
+    // seeds the built-ins and re-reads.
+    NoteTemplate.find.mockReturnValueOnce(sortable([]));
+    NoteTemplate.countDocuments.mockResolvedValue(0);
+    NoteTemplate.exists.mockResolvedValue(null);
+    NoteTemplate.findOneAndUpdate.mockResolvedValue({ _id: 'seeded' });
+    NoteTemplate.find.mockReturnValue(
+      sortable([{ _id: 'seeded', name: 'Daily Support Shift Note' }])
+    );
+
+    const req = { user, query: {} };
+    const res = mockRes();
+
+    await noteTemplateController.listTemplates(req, res);
+    // `catchAsync` does not return the promise it creates, so the awaited call
+    // above resolves before the handler's awaits have run. Yield a macrotask so
+    // the bootstrap chain (find -> count -> exists -> upsert -> re-find) lands.
+    await settleHandler();
+
+    expect(NoteTemplate.countDocuments).toHaveBeenCalledWith({
+      organizationId: 'org1',
+    });
+    expect(NoteTemplate.findOneAndUpdate).toHaveBeenCalled();
+    expect(res.body.data.templates).toHaveLength(1);
+    expect(res.body.data.templates[0].name).toBe('Daily Support Shift Note');
+  });
+
+  test('does not bootstrap when the organisation already has templates', async () => {
+    NoteTemplate.find.mockReturnValue(sortable([{ _id: 't1' }]));
+
+    const req = { user, query: {} };
+    const res = mockRes();
+
+    await noteTemplateController.listTemplates(req, res);
+    await settleHandler();
+
+    expect(NoteTemplate.countDocuments).not.toHaveBeenCalled();
+    expect(NoteTemplate.findOneAndUpdate).not.toHaveBeenCalled();
     expect(res.body.data.templates).toHaveLength(1);
   });
 

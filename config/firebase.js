@@ -86,9 +86,14 @@ class FirebaseConfig {
    * @param {string[]} tokens - Array of FCM tokens
    * @param {Object} data - Notification data
    * @param {Object} notification - Notification payload
+   * @param {Object} [options] - Platform-specific delivery options
+   *   (`android`, `apns`, `webpush`). Optional and additive: callers that omit
+   *   it keep the previous behaviour exactly. Used to set the Android channel
+   *   and the APNs alert/priority headers so the same call reaches both
+   *   Android and iOS devices.
    * @returns {Promise<Object>} Batch response
    */
-  async sendMulticastNotification(tokens, data = {}, notification = null) {
+  async sendMulticastNotification(tokens, data = {}, notification = null, options = null) {
     let message;
     try {
       message = {
@@ -98,6 +103,12 @@ class FirebaseConfig {
 
       if (notification) {
         message.notification = notification;
+      }
+
+      if (options && typeof options === 'object') {
+        if (options.android) message.android = options.android;
+        if (options.apns) message.apns = options.apns;
+        if (options.webpush) message.webpush = options.webpush;
       }
 
       const response = await this.messaging.sendMulticast(message);

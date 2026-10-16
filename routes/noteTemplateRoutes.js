@@ -3,7 +3,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { body, param, validationResult } = require('express-validator');
 const noteTemplateController = require('../controllers/noteTemplateController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 
 const templateReadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -53,10 +53,16 @@ const idValidation = [param('id').isMongoId().withMessage('Invalid template ID f
 
 router.use(authenticateUser);
 
+// Reading is deliberately open to every member of the organisation: support
+// workers pick a template in the note composer (`add_notes_view.dart`), and
+// their token is not an admin token. Everything that changes a template is
+// admin-only, matching the admin template manager screen.
+const requireAdmin = requireRoles(['admin']);
+
 router.get('/', templateReadLimiter, noteTemplateController.listTemplates);
-router.post('/', templateWriteLimiter, createValidation, handleValidationErrors, noteTemplateController.createTemplate);
+router.post('/', requireAdmin, templateWriteLimiter, createValidation, handleValidationErrors, noteTemplateController.createTemplate);
 router.get('/:id', templateReadLimiter, idValidation, handleValidationErrors, noteTemplateController.getTemplate);
-router.put('/:id', templateWriteLimiter, updateValidation, handleValidationErrors, noteTemplateController.updateTemplate);
-router.delete('/:id', templateWriteLimiter, idValidation, handleValidationErrors, noteTemplateController.deleteTemplate);
+router.put('/:id', requireAdmin, templateWriteLimiter, updateValidation, handleValidationErrors, noteTemplateController.updateTemplate);
+router.delete('/:id', requireAdmin, templateWriteLimiter, idValidation, handleValidationErrors, noteTemplateController.deleteTemplate);
 
 module.exports = router;
