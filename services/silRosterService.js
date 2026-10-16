@@ -3,6 +3,7 @@ const SILProperty = require('../models/SILProperty');
 const SILOccupancy = require('../models/SILOccupancy');
 const Shift = require('../models/Shift');
 const silRatioService = require('./silRatioService');
+const silRosterNotificationService = require('./silRosterNotificationService');
 const logger = require('../config/logger');
 
 /**
@@ -147,6 +148,11 @@ class SILRosterService {
   /**
    * Publish a roster. Blocks only when `blockOnRatioBreach` is true and there
    * are understaffed entries; otherwise publishes with warnings.
+   *
+   * A successful publish notifies every rostered staff member plus the
+   * organisation's owner/admin (§4). Notifications are dispatched after the
+   * roster is saved and are never awaited, so a push outage cannot fail or
+   * delay a publish.
    */
   async publishRoster(organizationId, id, { blockOnRatioBreach } = {}, actor = '') {
     const roster = await SILRoster.findOne({ _id: id, organizationId });
@@ -171,10 +177,28 @@ class SILRosterService {
       return { blocked: true, roster, understaffed };
     }
 
+    // Re-publishing an already-published roster is an edit, not a fresh
+    // announcement: notify only on the draft -> published transition so
+    // workers are not re-pinged for every tweak.
+    const isFirstPublish = roster.status !== 'published';
+
     roster.status = 'published';
     roster.publishedAt = new Date();
     roster.updatedBy = actor;
     await roster.save();
+
+    if (isFirstPublish) {
+      silRosterNotificationService
+        .notifyRosterPublished({ organizationId, roster, actor })
+        .catch((error) => {
+          logger.error('Roster publish notification dispatch failed', {
+            organizationId,
+            rosterId: String(roster._id),
+            error: error.message,
+          });
+        });
+    }
+
     return { roster };
   }
 

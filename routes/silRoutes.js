@@ -3,7 +3,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { body, param, query, validationResult } = require('express-validator');
 const silController = require('../controllers/silController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 
 const silReadLimiter = rateLimit({
@@ -33,7 +33,12 @@ const handleValidationErrors = (req, res, next) => {
 const mongoId = (name, location = param) =>
   location(name).isMongoId().withMessage(`Invalid ${name}`);
 
+// SIL management is an admin surface: the dashboard, roster builder and
+// quoting screens only exist on the Admin dashboard. The role check is
+// enforced here (not just in navigation) so a non-admin token cannot reach
+// properties, ratios, rosters, quotes or rosters-of-care directly.
 router.use(authenticateUser);
+router.use(requireRoles(['admin']));
 router.use(requireEntitlement('sil'));
 
 // ---- Properties ----

@@ -303,6 +303,22 @@ class SecureAuthController {
           updatedAt: new Date()
         });
 
+        // Give the new organisation its default progress-note template before
+        // anyone opens the note composer. Non-fatal: registration must not fail
+        // because a built-in template could not be written (the template list
+        // endpoint also bootstraps on first read).
+        try {
+          const noteTemplateService = require('../services/noteTemplateService');
+          await noteTemplateService.ensureDefaultTemplates(
+            createdOrganization._id.toString()
+          );
+        } catch (templateError) {
+          logger.warn('Default note template bootstrap failed (non-fatal)', {
+            organizationId: createdOrganization._id.toString(),
+            error: templateError.message
+          });
+        }
+
         // Create audit log after organization is created
         const auditService = require('../services/auditService');
         try {

@@ -3,7 +3,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { body, param, validationResult } = require('express-validator');
 const ndisClaimController = require('../controllers/ndisClaimController');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, requireRoles } = require('../middleware/auth');
 const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 
 const readLimiter = rateLimit({
@@ -30,7 +30,11 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
+// NDIS claiming (BPR export + results import) is an admin surface, reached
+// only from the Admin dashboard. Enforce the role in the API as well so a
+// non-admin token cannot generate a batch or import a results file.
 router.use(authenticateUser);
+router.use(requireRoles(['admin']));
 router.use(requireEntitlement('ndis_claiming'));
 
 router.get('/batches', readLimiter, ndisClaimController.listBatches);
