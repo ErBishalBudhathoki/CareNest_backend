@@ -178,13 +178,19 @@ async function ensureRatioRules(orgId) {
   }
 }
 
-async function ensureRosterOfCare(orgId, client) {
+async function ensureRosterOfCare(orgId, client, property) {
   let roc = await SILRosterOfCare.findOne({
     organizationId: orgId,
     clientId: client._id,
     status: { $in: ['active', 'under_review'] },
   });
   if (roc) {
+    // Attach the SIL property so the roster can be materialised/planned.
+    if (property && !roc.propertyId) {
+      roc.propertyId = property._id;
+      await roc.save();
+      console.log('  roster of care: attached SIL property');
+    }
     // Patch the agreed weekly pattern onto supports created before it existed.
     let changed = false;
     roc.supports = (roc.supports || []).map((s) => {
@@ -237,6 +243,7 @@ async function ensureRosterOfCare(orgId, client) {
   roc = await SILRosterOfCare.create({
     organizationId: orgId,
     clientId: client._id,
+    propertyId: property ? property._id : null,
     quoteId: quote._id,
     effectiveFrom: startOfMonth(new Date()),
     supports: lines.map((l) => ({
@@ -257,6 +264,40 @@ async function ensureRosterOfCare(orgId, client) {
   });
   console.log('  roster of care: created (quote + RoC)');
   return roc;
+}
+
+// Ensure every active RoC has an agreed weekly pattern so the roster can be
+// materialised (the "Plan week & assign staff" action requires one).
+async function ensureAllActiveRocsHavePattern(orgId, property) {
+  const rocs = await SILRosterOfCare.find({
+    organizationId: orgId,
+    status: { $in: ['active', 'under_review'] },
+  });
+  for (const roc of rocs) {
+    let changed = false;
+    if (property && !roc.propertyId) {
+      roc.propertyId = property._id;
+      changed = true;
+    }
+    roc.supports = (roc.supports || []).map((s) => {
+      if (s.days && s.days.length > 0 && s.startTime && s.endTime) return s;
+      changed = true;
+      const night = s.shiftType === 'night';
+      return {
+        ...(s.toObject?.() ?? s),
+        days: night
+          ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+          : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+        startTime: night ? '22:00' : '09:00',
+        endTime: night ? '06:00' : '17:00',
+      };
+    });
+    if (changed) {
+      roc.markModified('supports');
+      await roc.save();
+      console.log(`  roster of care ${roc._id}: patched default weekly pattern`);
+    }
+  }
 }
 
 async function billRoc(orgId, roc, from, to, label) {
@@ -319,11 +360,13 @@ async function main() {
   await ensureOccupancy(orgId, property, ndia);
   await ensureRatioRules(orgId);
 
-  const ndiaRoc = await ensureRosterOfCare(orgId, ndia);
+  const ndiaRoc = await ensureRosterOfCare(orgId, ndia, property);
   await billRoc(orgId, ndiaRoc, from, to, `NDIA-managed ${ndia.clientEmail}`);
 
-  const planRoc = await ensureRosterOfCare(orgId, plan);
+  const planRoc = await ensureRosterOfCare(orgId, plan, property);
   await billRoc(orgId, planRoc, from, to, `plan-managed ${plan.clientEmail}`);
+
+  await ensureAllActiveRocsHavePattern(orgId, property);
 
   console.log('\nDone.');
   console.log(`  NDIA participant: ${ndia.clientEmail} (ndis ${ndia.ndisNumber})`);
