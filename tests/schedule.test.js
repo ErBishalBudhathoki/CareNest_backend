@@ -463,6 +463,43 @@ describe('Schedule API Tests', () => {
             });
         });
 
+        describe('PUT /api/schedule/shift/:id', () => {
+            it('should assign an employee from a partial payload (employeeEmail only)', async () => {
+                const shiftId = generateObjectId();
+
+                // Existing shift lookup during conflict detection returns null.
+                Shift.findById.mockImplementation(() => mockQuery(null));
+                // The update itself resolves to the updated shift.
+                Shift.findOneAndUpdate = jest.fn().mockImplementation(() => mockQuery({
+                    _id: shiftId,
+                    organizationId: '507f1f77bcf86cd799439011',
+                    employeeEmail: 'employee@example.com',
+                    employeeId: '507f1f77bcf86cd799439011',
+                }));
+
+                const res = await request(app)
+                    .put(`/api/schedule/shift/${shiftId}`)
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
+                    .send({ employeeEmail: 'employee@example.com' });
+
+                // Regression: the roster builder sends only { employeeEmail }.
+                expect(res.status).toBe(200);
+                expect(res.body.success).toBe(true);
+            });
+
+            it('should reject an invalid employeeEmail on update', async () => {
+                const res = await request(app)
+                    .put(`/api/schedule/shift/${generateObjectId()}`)
+                    .set('Authorization', `Bearer ${token}`)
+                    .set('x-organization-id', '507f1f77bcf86cd799439011')
+                    .send({ employeeEmail: 'not-an-email' });
+
+                expect(res.status).toBe(400);
+                expect(res.body.success).toBe(false);
+            });
+        });
+
         describe('GET /api/schedule/shifts/:organizationId', () => {
             it('should return shifts for an organization', async () => {
                 const shifts = [
