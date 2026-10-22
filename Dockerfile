@@ -56,8 +56,11 @@ COPY --from=build --chown=nodejs:nodejs /app/node_modules ./node_modules
 # Copy built application
 COPY --from=build --chown=nodejs:nodejs /app ./
 
-# Create writable logs directory for the application
-RUN mkdir -p /app/logs && chown -R nodejs:nodejs /app/logs
+# Create writable logs/uploads directories for the application.
+# uploads is gitignored, so tarball-based builds (gcloud builds submit skips
+# gitignored paths) must create it here or the runtime mkdir EACCES-crashes
+# the container before it can listen on $PORT.
+RUN mkdir -p /app/logs /app/uploads && chown -R nodejs:nodejs /app/logs /app/uploads
 
 # The runtime container only executes Node directly, so remove npm/npx
 # entirely instead of patching a broken bundled npm release.
