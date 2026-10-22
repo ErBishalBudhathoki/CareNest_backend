@@ -377,6 +377,42 @@ describe('SILRosterService.buildRoster', () => {
       silRosterService.buildRoster('org1', { propertyId: 'nope', weekStarting: '2026-06-01' }),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
+
+  test('ratio warnings name shifts by the roster-timezone date, not UTC', async () => {
+    // A Sydney Monday 09:00 shift is stored as Sunday 22:00Z (AEDT, UTC+11);
+    // the warning must read the local date 2026-10-19, not the UTC-day
+    // 2026-10-18 that a raw toISOString() would produce.
+    SILProperty.findOne.mockResolvedValue({
+      _id: 'p1',
+      name: 'House',
+      silDesignCategory: 'basic',
+    });
+    SILOccupancy.find.mockResolvedValue([{ clientId: 'c1' }]);
+    Shift.find.mockReturnValue({
+      sort: () => Promise.resolve([
+        {
+          _id: 's2',
+          clientId: 'c1',
+          employeeId: null,
+          startTime: new Date('2026-10-18T22:00:00Z'),
+          endTime: new Date('2026-10-19T00:00:00Z'),
+        },
+      ]),
+    });
+    SILRatioRule.find.mockResolvedValue([]); // default 1:1
+    SILRoster.findOneAndUpdate.mockImplementation(async (filter, update) => ({
+      _id: 'r2',
+      ...update,
+    }));
+
+    const roster = await silRosterService.buildRoster('org1', {
+      propertyId: 'p1',
+      weekStarting: '2026-10-19',
+    });
+
+    expect(roster.ratioWarnings[0].message).toContain('on 2026-10-19');
+    expect(roster.ratioWarnings[0].message).not.toContain('2026-10-18');
+  });
 });
 
 describe('SILController org scoping', () => {

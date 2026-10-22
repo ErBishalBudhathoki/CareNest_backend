@@ -200,11 +200,19 @@ class SILRosterService {
       });
 
       if (compliance !== 'ok') {
+        // Name the shift by its LOCAL date in the roster timezone —
+        // `toISOString()` would print the UTC date, which is the previous
+        // calendar day for morning shifts east of UTC (e.g. a Sydney Monday
+        // 09:00 shift is stored as Sunday 22:00Z and would read 2026-10-18).
+        const startParts = dateHelpers.getZonedDateParts(shift.startTime, timezone);
+        const localDate = [
+          String(startParts.year).padStart(2, '0'),
+          String(startParts.month).padStart(2, '0'),
+          String(startParts.day).padStart(2, '0'),
+        ].join('-');
         warnings.push({
           role: 'ratio',
-          message: `${shiftType} shift on ${new Date(shift.startTime)
-            .toISOString()
-            .slice(0, 10)} is ${compliance} (required ${requiredStaff}, assigned ${assignedStaff}).`,
+          message: `${shiftType} shift on ${localDate} is ${compliance} (required ${requiredStaff}, assigned ${assignedStaff}).`,
         });
       }
     }
