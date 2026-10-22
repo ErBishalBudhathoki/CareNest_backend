@@ -29,7 +29,7 @@ jest.mock('../../firebase-admin-config', () => ({
 
 jest.mock('../../models/SILProperty', () => ({ findOne: jest.fn() }));
 jest.mock('../../models/UserOrganization', () => ({ find: jest.fn() }));
-jest.mock('../../models/User', () => ({ find: jest.fn() }));
+jest.mock('../../models/User', () => ({ find: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../models/Notification', () => ({
   insertMany: jest.fn(),
   updateMany: jest.fn(),
@@ -76,6 +76,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   UserOrganization.find.mockReturnValue({ lean: async () => [] });
   User.find.mockImplementation(userFindImpl([]));
+  // Actor-label lookup default: no user row -> the raw actor value is shown.
+  User.findOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
   Notification.insertMany.mockResolvedValue([]);
   Notification.updateMany.mockResolvedValue({});
   NotificationPreference.find.mockReturnValue({ lean: async () => [] });
@@ -155,6 +157,13 @@ describe('notifyRosterPublished', () => {
         { _id: OWNER, email: 'owner@org.com' },
       ])
     );
+    // The notification body must show the actor's NAME, not their email —
+    // "by Jane Smith", not "by admin@org.com".
+    User.findOne.mockReturnValue({
+      select: () => ({
+        lean: async () => ({ firstName: 'Jane', lastName: 'Smith' }),
+      }),
+    });
     FcmToken.find.mockReturnValue({
       lean: async () => [{ fcmToken: 'tok-android' }, { fcmToken: 'tok-ios' }],
     });
@@ -190,6 +199,8 @@ describe('notifyRosterPublished', () => {
     expect(message.notification.title).toBe('Roster published');
     expect(message.notification.body).toContain('Richmond House');
     expect(message.notification.body).toContain('2026-10-12');
+    expect(message.notification.body).toContain('by Jane Smith');
+    expect(message.notification.body).not.toContain('admin@org.com');
     // Both platforms configured in the same call.
     expect(message.android.notification.channelId).toBe('rosters');
     expect(message.apns.headers['apns-priority']).toBe('10');
@@ -257,5 +268,29 @@ describe('notifyRosterPublished', () => {
 
     expect(result).toEqual({ delivered: 0, pushed: 0 });
     expect(Notification.insertMany).not.toHaveBeenCalled();
+  });
+
+  test('falls back to the raw actor value when no user row matches the email', async () => {
+    UserOrganization.find.mockReturnValue({
+      lean: async () => [{ userId: OWNER, role: 'owner', permissions: ['*'] }],
+    });
+    User.find.mockImplementation(
+      userFindImpl([{ _id: OWNER, email: 'owner@org.com' }])
+    );
+    // beforeEach default: the lookup misses, so the email is kept verbatim.
+    FcmToken.find.mockReturnValue({
+      lean: async () => [],
+    });
+
+    const result = await notificationService.notifyRosterPublished({
+      organizationId: ORG,
+      roster: { ...roster, entries: [] },
+      actor: 'unknown.actor@org.com',
+    });
+
+    expect(result.delivered).toBe(1);
+    const inserted = Notification.insertMany.mock.calls[0][0];
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].message).toContain('by unknown.actor@org.com');
   });
 });

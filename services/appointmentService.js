@@ -107,7 +107,11 @@ class AppointmentService {
         }
       ]);
 
-      return appointments;
+      // SIL roster shifts (Phase 2) are not ClientAssignments — augment so
+      // support workers whose bookings are SIL shifts still get home cards.
+      const silAppointments = await this.buildSilShiftAppointments(safeEmail);
+
+      return [...appointments, ...silAppointments];
     } catch (error) {
       logger.error('Appointments load failed', {
         error: error.message,
@@ -115,6 +119,118 @@ class AppointmentService {
         email
       });
       throw new Error('Failed to load appointments');
+    }
+  }
+
+  /**
+   * Employee home "Upcoming shifts" cards are fed from ClientAssignment
+   * documents, but SIL roster shifts (SIL_MANAGEMENT_SPEC Phase 2) live in the
+   * Shift collection carrying `silRosterOfCareId` — without this augmentation
+   * a support worker whose only bookings are SIL roster shifts sees
+   * "No upcoming appointments" on home even though their week was published.
+   *
+   * Synthesises assignment-shaped entries from the employee's SIL shifts,
+   * grouped per client, with schedule items in the roster property timezone
+   * (date 'YYYY-MM-DD', times 'HH:mm' — the shape the mobile dashboard parses).
+   * @param {string} email - employee email (already sanitized)
+   * @returns {Promise<Array<Object>>}
+   */
+  static async buildSilShiftAppointments(email) {
+    try {
+      const Shift = require('../models/Shift');
+      const mongoose = require('mongoose');
+      const { getZonedDateParts } = require('../utils/dateHelpers');
+
+      const TIMEZONE = 'Australia/Sydney';
+      const pad2 = (n) => String(n).padStart(2, '0');
+
+      // Local (zoned) 'YYYY-MM-DD' / 'HH:mm' formatters.
+      const zonedYMD = (date) => {
+        const p = getZonedDateParts(date, TIMEZONE);
+        return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+      };
+      const zonedHHMM = (date) => {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: TIMEZONE,
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).formatToParts(date);
+        const get = (t) => parts.find((x) => x.type === t)?.value || '00';
+        let h = parseInt(get('hour'), 10);
+        if (h === 24) h = 0; // en-US can emit 24 at exactly midnight
+        return `${pad2(h)}:${get('minute')}`;
+      };
+
+      // Yesterday onward: the dashboard also shows today's shift as
+      // in-progress/overdue after its end time when the timer is running.
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const shifts = await Shift.find({
+        employeeEmail: email,
+        silRosterOfCareId: { $ne: null },
+        status: { $ne: 'cancelled' },
+        endTime: { $gte: cutoff }
+      })
+        .sort({ startTime: 1 })
+        .limit(60)
+        .lean();
+      if (shifts.length === 0) return [];
+
+      // One card per client; schedule = all that client's SIL shifts.
+      const byClientId = new Map();
+      for (const shift of shifts) {
+        const key = String(shift.clientId || 'unknown');
+        if (!byClientId.has(key)) byClientId.set(key, []);
+        byClientId.get(key).push(shift);
+      }
+
+      const objectIdKeys = [...byClientId.keys()].filter(
+        (k) => k !== 'unknown' && mongoose.Types.ObjectId.isValid(k)
+      );
+      const Client = require('../models/Client');
+      const clients = objectIdKeys.length
+        ? await Client.find({ _id: { $in: objectIdKeys.map((k) => new mongoose.Types.ObjectId(k)) } })
+            .select('clientFirstName clientLastName clientEmail')
+            .lean()
+        : [];
+      const detailsByClientId = new Map(clients.map((c) => [String(c._id), c]));
+
+      return [...byClientId.entries()].map(([clientIdKey, clientShifts]) => {
+        const clientDetails = detailsByClientId.get(clientIdKey) || null;
+        const first = clientShifts[0];
+        return {
+          // Synthetic id — not a real ClientAssignment row.
+          _id: `sil-shift-${String(first._id)}`,
+          userEmail: first.employeeEmail || email,
+          clientEmail: (clientDetails && clientDetails.clientEmail) || '',
+          clientId: clientIdKey !== 'unknown' ? clientIdKey : null,
+          organizationId: first.organizationId
+            ? String(first.organizationId)
+            : undefined,
+          isActive: true,
+          clientDetails,
+          schedule: clientShifts.map((shift) => ({
+            shiftId: String(shift._id),
+            date: zonedYMD(shift.startTime),
+            startTime: zonedHHMM(shift.startTime),
+            endTime: zonedHHMM(shift.endTime),
+            shiftType: shift.shiftType,
+            status: shift.status,
+            silRosterOfCareId: shift.silRosterOfCareId
+              ? String(shift.silRosterOfCareId)
+              : null
+          })),
+          isSilRosterShift: true
+        };
+      });
+    } catch (error) {
+      // SIL augmentation must never break regular appointment loading.
+      logger.warn('SIL shift appointment augmentation failed', {
+        error: error.message,
+        email
+      });
+      return [];
     }
   }
 

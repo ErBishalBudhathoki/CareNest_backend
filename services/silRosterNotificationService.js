@@ -154,12 +154,46 @@ async function filterByPreference(recipients) {
 }
 
 /**
+ * Human-readable actor label for the notification body.
+ * The publish path passes the actor's EMAIL (it is persisted as
+ * `updatedBy`/`createdBy` on the roster), but the notification must show a
+ * name — "by Jane Smith", not "by jane@x.com" — so email actors are resolved
+ * against the User collection (first+last name), falling back to the raw value.
+ */
+async function resolveActorLabel(actor = '') {
+  const value = (actor || '').trim();
+  if (!value) return '';
+  if (!value.includes('@')) return value;
+  try {
+    const user = await User.findOne({ email: value.toLowerCase() })
+      .select('firstName lastName displayName name')
+      .lean();
+    if (!user) return value;
+    const name = [user.firstName, user.lastName]
+      .filter((v) => v && String(v).trim())
+      .map((v) => String(v).trim())
+      .join(' ')
+      .trim();
+    if (name) return name;
+    return [user.displayName, user.name]
+      .filter((v) => v && String(v).trim())
+      .map(String)
+      .join(' ')
+      .trim() || value;
+  } catch {
+    return value; // lookup must never break the notification
+  }
+}
+
+/**
  * Persist + push the "roster published" notification.
  * Never throws: the caller publishes the roster regardless of the outcome.
  */
 async function notifyRosterPublished({ organizationId, roster, actor = '' }) {
   try {
     if (!roster) return { delivered: 0, pushed: 0 };
+
+    const actorLabel = await resolveActorLabel(actor);
 
     const staffUserIds = (roster.entries || []).flatMap((entry) =>
       (entry.staffUserIds || []).map(String)
@@ -193,7 +227,7 @@ async function notifyRosterPublished({ organizationId, roster, actor = '' }) {
     const message =
       `The roster for ${place} starting ${week} is published` +
       `${shiftCount ? ` (${shiftCount} shift${shiftCount === 1 ? '' : 's'})` : ''}` +
-      `${actor ? ` by ${actor}` : ''}. Check your shifts.`;
+      `${actorLabel ? ` by ${actorLabel}` : ''}. Check your shifts.`;
 
     const orgId = toObjectId(organizationId);
     const data = {
