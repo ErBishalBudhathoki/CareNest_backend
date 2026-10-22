@@ -40,7 +40,7 @@ const TZ = 'Australia/Sydney';
     const inWindow = s.startTime >= startUtc && s.startTime < endUtc;
     console.log(
       `  ${s.startTime.toISOString()} → ${s.endTime.toISOString()} | ${s.shiftType} | status=${s.status} | ` +
-      `assigned=${(s.assignedStaff || []).length}${(s.assignedStaff || []).map(String).join(',')} | ` +
+      `employeeEmail=${s.employeeEmail || '-'} employeeId=${s.employeeId ? String(s.employeeId) : '-'} | ` +
       `clientId=${String(s.clientId)} org=${String(s.organizationId)} | inWindow=${inWindow}`,
     );
   }
@@ -49,7 +49,8 @@ const TZ = 'Australia/Sydney';
     organizationId: ORG, propertyId: property._id,
   }).sort({ weekStarting: -1 }).lean();
   if (roster) {
-    console.log(`latest roster: week=${roster.weekStarting.toISOString()} status=${roster.status} entries=${(roster.entries || []).length} | assigned entries=${(roster.entries || []).filter((e) => (e.assignedStaff || []).length > 0).length}`);
+    const assignedEntries = (roster.entries || []).filter((e) => (e.staffUserIds || []).length > 0);
+    console.log(`latest roster: week=${roster.weekStarting.toISOString()} status=${roster.status} entries=${(roster.entries || []).length} | assigned entries=${assignedEntries.length}`);
   } else {
     console.log('no roster doc exists for the property');
   }
