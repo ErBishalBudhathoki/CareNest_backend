@@ -1,7 +1,30 @@
 const ClientAssignment = require('../models/ClientAssignment');
 const WorkedTime = require('../models/WorkedTime');
 const logger = require('../config/logger');
-const { parseFlexibleDate, normalizeToIsoDate } = require('../utils/dateHelpers');
+const { parseFlexibleDate, normalizeToIsoDate, getZonedDateParts } = require('../utils/dateHelpers');
+
+// SIL roster shifts are stored in UTC; the mobile app renders card and detail
+// dates/times in the organisation's local zone (Australia/Sydney by default).
+const SIL_TIMEZONE = 'Australia/Sydney';
+const pad2 = (n) => String(n).padStart(2, '0');
+
+const zonedYMD = (date) => {
+  const p = getZonedDateParts(date, SIL_TIMEZONE);
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+};
+
+const zonedHHMM = (date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: SIL_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (t) => parts.find((x) => x.type === t)?.value || '00';
+  let h = parseInt(get('hour'), 10);
+  if (h === 24) h = 0; // en-US can emit 24 at exactly midnight
+  return `${pad2(h)}:${get('minute')}`;
+};
 
 /**
  * Service for handling appointment-related database operations
@@ -139,28 +162,6 @@ class AppointmentService {
     try {
       const Shift = require('../models/Shift');
       const mongoose = require('mongoose');
-      const { getZonedDateParts } = require('../utils/dateHelpers');
-
-      const TIMEZONE = 'Australia/Sydney';
-      const pad2 = (n) => String(n).padStart(2, '0');
-
-      // Local (zoned) 'YYYY-MM-DD' / 'HH:mm' formatters.
-      const zonedYMD = (date) => {
-        const p = getZonedDateParts(date, TIMEZONE);
-        return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
-      };
-      const zonedHHMM = (date) => {
-        const parts = new Intl.DateTimeFormat('en-US', {
-          timeZone: TIMEZONE,
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }).formatToParts(date);
-        const get = (t) => parts.find((x) => x.type === t)?.value || '00';
-        let h = parseInt(get('hour'), 10);
-        if (h === 24) h = 0; // en-US can emit 24 at exactly midnight
-        return `${pad2(h)}:${get('minute')}`;
-      };
 
       // Yesterday onward: the dashboard also shows today's shift as
       // in-progress/overdue after its end time when the timer is running.
@@ -232,6 +233,70 @@ class AppointmentService {
       });
       return [];
     }
+  }
+
+  /**
+   * Build appointment details for a SIL roster shift.
+   *
+   * SIL shifts are rostered through `silRostersOfCare`/`shifts`; they are not
+   * `ClientAssignment` rows. Without this fallback the details screen (opened
+   * from a SIL shift card) finds nothing and shows an endless loading state.
+   *
+   * @param {string} userEmail - Support worker email
+   * @param {string} clientEmail - Participant email
+   * @returns {Promise<Object|null>} Appointment-shaped details, or null.
+   */
+  static async buildSilAppointmentDetails(userEmail, clientEmail) {
+    const Shift = require('../models/Shift');
+    const Client = require('../models/Client');
+
+    const client = await Client.findOne({ clientEmail }).lean();
+    if (!client) return null;
+
+    const shifts = await Shift.find({
+      employeeEmail: userEmail,
+      clientId: client._id,
+      silRosterOfCareId: { $ne: null },
+      status: { $ne: 'cancelled' }
+    })
+      .sort({ startTime: 1 })
+      .limit(60)
+      .lean();
+    if (shifts.length === 0) return null;
+
+    const schedule = shifts.map((shift) => ({
+      shiftId: String(shift._id),
+      date: zonedYMD(shift.startTime),
+      startTime: zonedHHMM(shift.startTime),
+      endTime: zonedHHMM(shift.endTime),
+      break: shift.break ?? null,
+      shiftType: shift.shiftType,
+      status: shift.status,
+      silRosterOfCareId: shift.silRosterOfCareId
+        ? String(shift.silRosterOfCareId)
+        : null
+    }));
+
+    return {
+      // Synthetic id — mirrors buildSilShiftAppointments so the home card and
+      // the details screen identify the same record.
+      _id: `sil-shift-${String(shifts[0]._id)}`,
+      userEmail,
+      clientEmail,
+      clientId: String(client._id),
+      organizationId: shifts[0].organizationId
+        ? String(shifts[0].organizationId)
+        : undefined,
+      isActive: true,
+      isSilRosterShift: true,
+      schedule,
+      // Legacy arrays keep the older table renderer working.
+      dateList: schedule.map((s) => s.date),
+      startTimeList: schedule.map((s) => s.startTime),
+      endTimeList: schedule.map((s) => s.endTime),
+      breakList: schedule.map((s) => s.break),
+      clientDetails: client
+    };
   }
 
   /**
@@ -333,11 +398,17 @@ class AppointmentService {
         }
       ]);
 
-      if (appointmentDetails.length === 0) {
+      // SIL roster shifts are NOT ClientAssignment rows: fall back to the
+      // Shift collection so SIL shift cards open with client details instead
+      // of failing as "not found".
+      const appointment =
+        appointmentDetails.length > 0
+          ? appointmentDetails[0]
+          : await this.buildSilAppointmentDetails(safeUserEmail, safeClientEmail);
+
+      if (!appointment) {
         throw new Error('No appointment found for this user-client combination');
       }
-
-      const appointment = appointmentDetails[0];
 
       // Get all worked time records for this user and client to populate history correctly
       const timeRecords = await WorkedTime.find({
