@@ -56,6 +56,24 @@ router.put(
   clientController.updateClient
 );
 
+// Update the participant's NDIS plan period/budget (used by the plan gate)
+router.put(
+  '/client/:clientId/plan',
+  clientLimiter,
+  organizationContextMiddleware,
+  param('clientId').isMongoId(),
+  body('organizationId').optional().isMongoId(),
+  body('userEmail').optional().isEmail(),
+  body('startDate').optional({ nullable: true }).isISO8601(),
+  body('endDate').optional({ nullable: true }).isISO8601(),
+  body('totalBudget').optional().isFloat({ min: 0 }),
+  body('documentUrl').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+  body('documentName').optional({ nullable: true }).isString().isLength({ max: 255 }),
+  body('notes').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+  requireOrganizationOwnership('clientId', () => require('../models/Client')),
+  clientController.updateClientPlan
+);
+
 // Delete (soft-delete) client
 router.post(
   '/client/:clientId/delete',

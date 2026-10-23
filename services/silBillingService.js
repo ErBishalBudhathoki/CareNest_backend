@@ -194,8 +194,9 @@ class SILBillingService {
     const result = await invoiceManagementService.createInvoice(invoiceData);
     if (!result.success) {
       const err = new Error(result.error || 'Failed to create SIL invoice');
-      err.statusCode = 500;
-      err.code = 'SIL_INVOICE_FAILED';
+      err.statusCode = result.statusCode || 500;
+      err.code = result.errorCode || 'SIL_INVOICE_FAILED';
+      err.details = result.planValidation || null;
       throw err;
     }
 

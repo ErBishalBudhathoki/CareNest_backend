@@ -7,15 +7,26 @@ const HolidaySchema = require('../models/holidaySchema');
 const uri = process.env.MONGODB_URI;
 
 class HolidayService {
+  // Nager.Date responses are stable for a year. Keep a short-lived in-process
+  // cache so payroll for many employees does not hammer the public API.
+  static _publicHolidayCache = new Map();
+
   /**
    * Build a Set of 'YYYY-MM-DD' zoned date keys for the SCHADS engine's
    * public-holiday detection (Phase 1). Accepts the DB 'DD-MM-YYYY' format and
    * ISO/DD-MM-YYYY inputs.
+   *
+   * The calendar is the union of:
+   *   - official public holidays for the organisation's state (external API)
+   *   - organisation-configured holidays (MongoDB)
+   * A date only counts when one of those sources says it is a holiday.
+   *
    * @param {string} organizationId
+   * @param {Object} [options] - { startDate, endDate }
    * @returns {Promise<Set<string>>}
    */
-  static async getHolidayDateKeys(organizationId = null) {
-    const holidays = await this.getAllHolidays(organizationId);
+  static async getHolidayDateKeys(organizationId = null, options = {}) {
+    const holidays = await this.getAllHolidays(organizationId, options);
     const set = new Set();
     for (const holiday of holidays || []) {
       const key = this.toDateKey(holiday?.Date ?? holiday?.date ?? holiday?.holidayDate);
@@ -38,11 +49,19 @@ class HolidayService {
   }
 
   /**
-   * Get all holidays from the database (Global + Organization Specific)
+   * Get all holidays for an organisation.
+   *
+   * Public holidays are fetched from the Nager.Date API for the relevant
+   * year(s) and filtered to the organisation's state. Organisation holidays
+   * from MongoDB are always added. If the external API is unreachable the DB
+   * holidays are still returned, so a network outage never removes a holiday
+   * the organisation explicitly configured.
+   *
    * @param {string} organizationId - Optional ID to filter custom holidays
+   * @param {Object} [options] - { startDate, endDate, includeExternal }
    * @returns {Promise<Array>} Array of holiday objects
    */
-  static async getAllHolidays(organizationId = null) {
+  static async getAllHolidays(organizationId = null, options = {}) {
     let client;
     try {
       client = await MongoClient.connect(uri, { 
@@ -62,13 +81,134 @@ class HolidayService {
         ]
       };
 
-      const holidays = await collection.find(query).toArray();
-      return holidays;
+      const storedHolidays = await collection.find(query).toArray();
+
+      if (options.includeExternal === false) {
+        return storedHolidays;
+      }
+
+      const state = await this.getOrganizationState(db, organizationId);
+      const externalHolidays = await this.fetchPublicHolidaysForRange(
+        options.startDate,
+        options.endDate,
+        state,
+      );
+
+      // Organisation-configured holidays win on a shared date (custom label).
+      const byDate = new Map();
+      for (const holiday of externalHolidays) {
+        byDate.set(this.toDateKey(holiday.Date), holiday);
+      }
+      for (const holiday of storedHolidays) {
+        byDate.set(this.toDateKey(holiday.Date ?? holiday.date), holiday);
+      }
+      return Array.from(byDate.values());
     } finally {
       if (client) {
         await client.close();
       }
     }
+  }
+
+  /** Read the organisation's state from its billing address. */
+  static async getOrganizationState(db, organizationId) {
+    if (!organizationId) return null;
+    try {
+      const candidates = [{ _id: String(organizationId) }];
+      if (ObjectId.isValid(String(organizationId))) {
+        candidates.push({ _id: new ObjectId(String(organizationId)) });
+      }
+      const org = await db.collection('organizations').findOne(
+        { $or: candidates },
+        { projection: { address: 1, 'address.state': 1 } },
+      );
+      const raw = org?.address?.state;
+      if (!raw) return null;
+      const value = String(raw).trim().toUpperCase();
+      if (value.startsWith('AU-')) return value.slice(3);
+      return value.length <= 3 ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch official Australian public holidays for the years spanned by the
+   * payroll period, filtered by state. Returns documents shaped like the
+   * MongoDB holidaysList rows.
+   */
+  static async fetchPublicHolidaysForRange(startDate, endDate, state) {
+    const now = new Date();
+    const start = startDate ? new Date(startDate) : now;
+    const end = endDate ? new Date(endDate) : start;
+    const first = start < end ? start : end;
+    const last = start < end ? end : start;
+    if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) return [];
+
+    const years = [];
+    for (let year = first.getUTCFullYear(); year <= last.getUTCFullYear() && years.length < 4; year += 1) {
+      years.push(year);
+    }
+    if (years.length === 0) years.push(now.getFullYear());
+
+    const results = [];
+    for (const year of years) {
+      const rows = await this.fetchPublicHolidays(year);
+      for (const row of rows) {
+        if (this.publicHolidayAppliesToState(row, state)) {
+          results.push({
+            Holiday: row.name || row.localName,
+            Date: row.date,
+            Day: row.date ? new Date(row.date).toLocaleDateString('en-AU', { weekday: 'long' }) : '',
+            isCustom: false,
+            jurisdiction: row.counties?.length ? row.counties.join(',') : 'national',
+            source: 'nager',
+          });
+        }
+      }
+    }
+    return results;
+  }
+
+  static publicHolidayAppliesToState(row, state) {
+    const counties = Array.isArray(row?.counties) ? row.counties : [];
+    if (counties.length === 0) return true; // national holiday
+    if (!state) return true; // unknown org state: keep the full calendar
+    const target = `AU-${String(state).toUpperCase()}`;
+    return counties.includes(target);
+  }
+
+  static fetchPublicHolidays(year) {
+    const cached = this._publicHolidayCache.get(year);
+    if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) {
+      return Promise.resolve(cached.rows);
+    }
+    const url = `https://date.nager.at/api/v3/publicholidays/${year}/AU`;
+
+    return new Promise((resolve) => {
+      const request = https.get(url, { timeout: 2500 }, (response) => {
+        let body = '';
+        if (response.statusCode !== 200) {
+          response.resume();
+          resolve([]);
+          return;
+        }
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          try {
+            const rows = JSON.parse(body);
+            if (!Array.isArray(rows)) return resolve([]);
+            this._publicHolidayCache.set(year, { rows, at: Date.now() });
+            resolve(rows);
+          } catch (_) {
+            resolve([]);
+          }
+        });
+      });
+      request.on('timeout', () => { request.destroy(); resolve([]); });
+      request.on('error', () => resolve([]));
+    });
   }
 
   /**

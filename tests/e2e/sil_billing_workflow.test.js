@@ -185,7 +185,17 @@ describe('E2E: SIL roster of care → invoice → NDIS claim', () => {
   test('once the participant moves to NDIA-managed, a new period bills as a claim CSV', async () => {
     await Client.updateOne(
       { _id: client._id },
-      { $set: { fundingType: 'ndia_managed' } },
+      {
+        $set: {
+          fundingType: 'ndia_managed',
+          plan: {
+            startDate: period1.from,
+            endDate: period2.to,
+            totalBudget: 100000,
+            status: 'active',
+          },
+        },
+      },
     );
 
     const result = await silBillingService.generateInvoiceFromRosterOfCare(

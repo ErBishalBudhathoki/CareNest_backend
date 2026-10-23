@@ -445,6 +445,125 @@ class ClientService {
     }
   }
 
+  /**
+   * Update the participant's NDIS plan envelope. Kept separate from the
+   * general client update so the budget/period can be validated and audited.
+   */
+  async updateClientPlan(clientId, planData = {}, organizationId, userEmail) {
+    const { toSafeString } = require('../utils/security');
+    const safeOrgId = toSafeString(organizationId);
+    const safeUserEmail = toSafeString(userEmail);
+
+    if (organizationId && userEmail) {
+      const user = await User.findOne({
+        email: safeUserEmail,
+        organizationId: safeOrgId,
+      });
+      if (!user) {
+        const err = new Error('User not authorized for this organization');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+
+    const patch = {};
+    const stringFields = [
+      'documentUrl',
+      'documentName',
+      'notes',
+      'source',
+      'status',
+    ];
+    for (const field of stringFields) {
+      if (Object.prototype.hasOwnProperty.call(planData, field)) {
+        const value = planData[field];
+        patch[`plan.${field}`] = value == null ? '' : String(value);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(planData, 'totalBudget')) {
+      const budget = Number(planData.totalBudget);
+      if (!Number.isFinite(budget) || budget < 0) {
+        const err = new Error('totalBudget must be a non-negative number');
+        err.statusCode = 400;
+        throw err;
+      }
+      patch['plan.totalBudget'] = budget;
+    }
+
+    for (const field of ['startDate', 'endDate']) {
+      if (Object.prototype.hasOwnProperty.call(planData, field)) {
+        if (planData[field] == null || planData[field] === '') {
+          patch[`plan.${field}`] = null;
+        } else {
+          const date = new Date(planData[field]);
+          if (Number.isNaN(date.getTime())) {
+            const err = new Error(`${field} must be a valid date`);
+            err.statusCode = 400;
+            throw err;
+          }
+          patch[`plan.${field}`] = date;
+        }
+      }
+    }
+
+    if (patch['plan.startDate'] || patch['plan.endDate']) {
+      const query = { _id: toSafeString(clientId), organizationId: safeOrgId };
+      const existing = await Client.findOne(query).select('plan').lean();
+      const start = patch['plan.startDate'] ?? existing?.plan?.startDate;
+      const end = patch['plan.endDate'] ?? existing?.plan?.endDate;
+      if (start && end && new Date(start) > new Date(end)) {
+        const err = new Error('plan startDate must be before endDate');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // Derive status when the caller did not set one.
+    if (!patch['plan.status']) {
+      const start = patch['plan.startDate'];
+      const end = patch['plan.endDate'];
+      if (start && end) {
+        patch['plan.status'] = new Date(end) < new Date() ? 'expired' : 'active';
+      }
+    }
+
+    patch['plan.updatedAt'] = new Date();
+    patch['plan.updatedBy'] = userEmail || 'system';
+
+    const query = {
+      _id: toSafeString(clientId),
+      organizationId: safeOrgId,
+    };
+    const updated = await Client.findOneAndUpdate(
+      query,
+      { $set: patch },
+      { new: true, runValidators: true },
+    ).select('plan fundingType');
+
+    if (!updated) {
+      const err = new Error('Client not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (userEmail) {
+      await this.logAuditSafe({
+        userEmail,
+        action: auditService.AUDIT_ACTIONS.UPDATE,
+        entityType: auditService.AUDIT_ENTITIES.CLIENT,
+        entityId: clientId,
+        organizationId,
+        newValues: { plan: updated.plan },
+        metadata: {
+          additionalInfo: { clientId, organizationId, updatedFields: ['plan'] },
+        },
+      }, 'updateClientPlan');
+    }
+
+    return { success: true, data: { plan: updated.plan, fundingType: updated.fundingType } };
+  }
+
   _extractRestorableFields(updateData = {}) {
     const allowedFields = [
       'clientFirstName',

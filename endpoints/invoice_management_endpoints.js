@@ -993,9 +993,11 @@ async function createInvoice(req, res) {
     } else {
       console.log('=== CREATE INVOICE FAILED ===');
       console.log('Service result:', result);
-      res.status(isDuplicateInvoiceNumberError(result) ? 409 : 500).json({
+      res.status(result.statusCode || (isDuplicateInvoiceNumberError(result) ? 409 : 500)).json({
         success: false,
-        error: result.error || 'Failed to create invoice'
+        error: result.error || 'Failed to create invoice',
+        ...(result.errorCode ? { code: result.errorCode } : {}),
+        ...(result.planValidation ? { planValidation: result.planValidation } : {}),
       });
     }
 

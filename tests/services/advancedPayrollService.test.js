@@ -89,15 +89,15 @@ describe('AdvancedPayrollService.calculatePayroll (shift-based)', () => {
     expect(casual.data.grossPay).toBeGreaterThan(perm.data.grossPay);
   });
 
-  test('splits a 3pm–9pm shift into base + afternoon', async () => {
+  test('treats a 3pm–9pm shift as one afternoon shift', async () => {
     const result = await advancedPayrollService.calculatePayroll({
       userId: 'u1',
       period: '2026-06',
       employee,
       shifts: [shift('2026-06-01T15:00:00+10:00', '2026-06-01T21:00:00+10:00')],
     });
-    expect(result.data.hoursBreakdown.baseHours).toBe(5);
-    expect(result.data.hoursBreakdown.afternoonShiftHours).toBe(1);
+    expect(result.data.hoursBreakdown.baseHours).toBe(0);
+    expect(result.data.hoursBreakdown.afternoonShiftHours).toBe(6);
   });
 
   test('honours effective-dated rate overrides', async () => {
@@ -115,6 +115,89 @@ describe('AdvancedPayrollService.calculatePayroll (shift-based)', () => {
       shifts: [shift('2026-06-01T09:00:00+10:00', '2026-06-01T17:00:00+10:00')],
     });
     expect(result.data.baseRate).toBe(40);
+  });
+
+  test('casual penalty reporting matches the additive gross pay', async () => {
+    const casual = {
+      ...employee,
+      award: { ...employee.award, employmentType: 'casual' },
+    };
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'c',
+      period: '2026-06',
+      employee: casual,
+      shifts: [shift('2026-06-06T09:00:00+10:00', '2026-06-06T17:00:00+10:00')],
+    });
+    // 25% casual loading is additive to the 150% Saturday penalty.
+    expect(result.data.penalties.saturday.amount).toBeCloseTo(
+      result.data.grossPay,
+      2,
+    );
+  });
+
+  test('pays the full-time first-aid allowance once per week', async () => {
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'u1',
+      period: '2026-12',
+      employee: { ...employee, award: { ...employee.award, firstAidAllowance: true } },
+      shifts: [
+        shift('2026-12-01T09:00:00+10:00', '2026-12-01T17:00:00+10:00', {
+          firstAidShift: true,
+        }),
+        shift('2026-12-02T09:00:00+10:00', '2026-12-02T17:00:00+10:00', {
+          firstAidShift: true,
+        }),
+      ],
+    });
+    expect(result.data.allowances.firstAid).toBe(21.43);
+  });
+
+  test('pays part-time first aid hourly up to the weekly cap', async () => {
+    const partTime = {
+      ...employee,
+      award: {
+        ...employee.award,
+        employmentType: 'permanent_pt',
+        firstAidAllowance: true,
+      },
+    };
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'u1',
+      period: '2026-12',
+      employee: partTime,
+      shifts: [
+        shift('2026-12-01T09:00:00+10:00', '2026-12-01T17:00:00+10:00', {
+          firstAidShift: true,
+        }),
+        shift('2026-12-02T09:00:00+10:00', '2026-12-02T17:00:00+10:00', {
+          firstAidShift: true,
+        }),
+      ],
+    });
+    // 16 hours * $0.56, under the $21.43 weekly cap.
+    expect(result.data.allowances.firstAid).toBe(8.96);
+  });
+
+  test('pays the meal allowance on overtime, with the extra after 4 hours', async () => {
+    const mealEmployee = {
+      ...employee,
+      award: { ...employee.award, mealAllowanceEligible: true },
+    };
+    const shortOt = await advancedPayrollService.calculatePayroll({
+      userId: 'u1',
+      period: '2026-12',
+      employee: mealEmployee,
+      shifts: [shift('2026-12-01T06:00:00+10:00', '2026-12-01T16:00:00+10:00')],
+    });
+    expect(shortOt.data.allowances.meal).toBe(17.3);
+
+    const longOt = await advancedPayrollService.calculatePayroll({
+      userId: 'u1',
+      period: '2026-12',
+      employee: mealEmployee,
+      shifts: [shift('2026-12-01T06:00:00+10:00', '2026-12-01T19:00:00+10:00')],
+    });
+    expect(longOt.data.allowances.meal).toBe(34.6);
   });
 });
 

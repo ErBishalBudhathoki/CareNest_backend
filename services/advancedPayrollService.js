@@ -18,9 +18,30 @@
 
 const schadsService = require('./schadsService');
 const schadsRates = require('../config/schadsRates');
+const weeklyOvertimeService = require('./weeklyOvertimeService');
 const logger = require('../config/logger');
 
 const CASUAL_LOADING_DEFAULT = 0.25;
+
+/** Monday-based week key in the award timezone for weekly allowance caps. */
+function weekKey(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return 'unknown';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: schadsRates.DEFAULTS.timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+  const map = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  }
+  const localDay = new Date(`${map.year}-${map.month}-${map.day}T00:00:00.000Z`);
+  const daysFromMonday = (localDay.getUTCDay() + 6) % 7;
+  localDay.setUTCDate(localDay.getUTCDate() - daysFromMonday);
+  return localDay.toISOString().slice(0, 10);
+}
 
 /** Map legacy frontend stream labels to award stream enums. */
 const STREAM_LABEL_MAP = {
@@ -129,6 +150,7 @@ class AdvancedPayrollService {
     return {
       baseRate,
       isCasual,
+      employmentType: employmentTypeRaw || 'full_time',
       categoryRates,
       multipliers: {
         ...multipliers,
@@ -175,9 +197,15 @@ class AdvancedPayrollService {
       const totals = this._emptyTotals();
       let shiftAmountTotal = 0;
       const allowanceTotals = { firstAid: 0, meal: 0, sleepover: 0 };
+      const firstAidByWeek = new Map();
+      const weeklyShifts = [];
 
       for (const shift of shifts) {
-        const { aggregates, amount } = schadsService.calculateShiftAmount(shift, {
+        const {
+          aggregates,
+          amount,
+          segments: pricedSegments,
+        } = schadsService.calculateShiftAmount(shift, {
           baseRate: profile.baseRate,
           isCasual: profile.isCasual,
           categoryRates: profile.categoryRates,
@@ -190,24 +218,80 @@ class AdvancedPayrollService {
         this._accumulateHours(totals, aggregates);
         shiftAmountTotal += amount.gross;
 
-        // Shift-type allowances.
+        if (Array.isArray(pricedSegments)) {
+          weeklyShifts.push({
+            startTime: shift.startTime,
+            segments: pricedSegments.map((segment) => ({
+              category: segment.category,
+              hours: segment.hours,
+              rate: segment.rate,
+            })),
+          });
+        }
+
+        // Shift-type allowances. Amounts are effective-dated data, resolved
+        // against the shift date so historical pay is reproducible.
+        const shiftAllowances = schadsRates.resolveAllowances(undefined, shift.startTime);
         const type = (shift.shiftType || '').toString().toLowerCase();
         if (type === 'sleepover') {
-          allowanceTotals.sleepover += schadsRates.DEFAULTS.sleepoverAllowance;
+          allowanceTotals.sleepover += shiftAllowances.sleepoverAllowance;
         }
         if (profile.allowances.firstAid && shift.firstAidShift) {
-          allowanceTotals.firstAid += schadsRates.DEFAULTS.firstAidAllowance;
+          const key = weekKey(shift.startTime);
+          const employmentType = String(profile.employmentType || '').toLowerCase();
+          const isPartTimeOrCasual =
+            employmentType.includes('casual') ||
+            employmentType.includes('part') ||
+            /(^|[_\s-])pt($|[_\s-])/.test(employmentType);
+          if (isPartTimeOrCasual && shiftAllowances.firstAidHourly != null) {
+            // Part-time/casual: $0.56 per hour, capped per week.
+            const maxWeekly =
+              shiftAllowances.firstAidMaxWeekly ?? shiftAllowances.firstAidAllowance;
+            const accrued =
+              (firstAidByWeek.get(key) || 0) +
+              shiftAllowances.firstAidHourly * (aggregates.totalHours || 0);
+            firstAidByWeek.set(key, Math.min(maxWeekly, accrued));
+          } else {
+            // Full-time: the weekly first-aid allowance, once per week.
+            firstAidByWeek.set(key, shiftAllowances.firstAidAllowance);
+          }
         }
-        if (profile.allowances.meal && (aggregates.totalHours || 0) > 5) {
-          allowanceTotals.meal += schadsRates.DEFAULTS.mealAllowance;
+        const overtimeHours =
+          (aggregates.overtimeFirst2h || 0) + (aggregates.overtimeAfter2h || 0);
+        if (profile.allowances.meal && overtimeHours > 0) {
+          allowanceTotals.meal += shiftAllowances.mealAllowance;
+          if (
+            overtimeHours > 4 &&
+            shiftAllowances.mealAdditionalAfter4hOvertime
+          ) {
+            allowanceTotals.meal += shiftAllowances.mealAdditionalAfter4hOvertime;
+          }
         }
       }
+
+      allowanceTotals.firstAid =
+        Math.round(
+          Array.from(firstAidByWeek.values()).reduce((sum, v) => sum + v, 0) * 100,
+        ) / 100;
 
       const allowancesTotal =
         allowanceTotals.firstAid + allowanceTotals.meal + allowanceTotals.sleepover;
 
-      const penalties = this._buildPenalties(totals, profile, shiftAmountTotal);
-      const grossPay = shiftAmountTotal + allowancesTotal;
+      // Weekly overtime is a separate SCHADS obligation from daily overtime.
+      // Only the premium is added, because the ordinary hours are already in
+      // shiftAmountTotal.
+      const weeklyOvertime = weeklyOvertimeService.calculateWeeklyOvertime({
+        shifts: weeklyShifts,
+        employmentType: profile.employmentType,
+        multipliers: profile.multipliers,
+        baseRate: profile.baseRate,
+      });
+      const grossFromShifts = shiftAmountTotal + weeklyOvertime.amount;
+
+      const penalties = this._buildPenalties(totals, profile, grossFromShifts);
+      penalties.weeklyOvertime = weeklyOvertime;
+      penalties.total = this._round(penalties.total + weeklyOvertime.amount);
+      const grossPay = grossFromShifts + allowancesTotal;
 
       return this._buildResult({
         userId,
@@ -215,6 +299,7 @@ class AdvancedPayrollService {
         profile,
         totals,
         penalties,
+        weeklyOvertime,
         allowances: {
           travel: 0,
           meal: allowanceTotals.meal,
@@ -277,11 +362,20 @@ class AdvancedPayrollService {
 
     const baseHours = hours.regular || 0;
     const baseAmount = baseHours * baseRate * loaded;
+    const allowanceDate =
+      payrollData.period?.endDate ||
+      payrollData.period?.end ||
+      payrollData.period?.startDate ||
+      payrollData.period?.start ||
+      payrollData.date;
+    const allowanceRates = schadsRates.resolveAllowances(undefined, allowanceDate);
     const allowances = {
       travel: payrollData.travelKm ? payrollData.travelKm * 0.85 : 0,
       meal: payrollData.mealAllowance || 0,
-      sleepover: payrollData.sleepovers ? payrollData.sleepovers * schadsRates.DEFAULTS.sleepoverAllowance : 0,
-      firstAid: payrollData.hasFirstAid ? schadsRates.DEFAULTS.firstAidAllowance : 0,
+      sleepover: payrollData.sleepovers
+        ? payrollData.sleepovers * allowanceRates.sleepoverAllowance
+        : 0,
+      firstAid: payrollData.hasFirstAid ? allowanceRates.firstAidAllowance : 0,
       total: 0,
     };
     allowances.total = this._round(
@@ -336,25 +430,25 @@ class AdvancedPayrollService {
     if (cr && cr[category] != null && cr[category] > 0) return cr[category];
     const baseRate = profile.baseRate;
     const mult = profile.multipliers;
-    const loaded = 1 + (profile.isCasual ? mult.casualLoading || 0 : 0);
+    const casual = profile.isCasual ? mult.casualLoading || 0 : 0;
     switch (category) {
       case 'afternoon':
-        return baseRate * (mult.afternoon || 1.125) * loaded;
+        return baseRate * ((mult.afternoon || 1.125) + casual);
       case 'night':
-        return baseRate * (mult.night || 1.15) * loaded;
+        return baseRate * ((mult.night || 1.15) + casual);
       case 'saturday':
-        return baseRate * (mult.saturday || 1.5) * loaded;
+        return baseRate * ((mult.saturday || 1.5) + casual);
       case 'sunday':
-        return baseRate * (mult.sunday || 1.75) * loaded;
+        return baseRate * ((mult.sunday || 2.0) + casual);
       case 'publicHoliday':
-        return baseRate * (mult.publicHoliday || 2.5) * loaded;
+        return baseRate * ((mult.publicHoliday || 2.5) + casual);
       case 'overtimeFirst2h':
         return baseRate * (mult.overtimeFirst2h || 1.5);
       case 'overtimeAfter2h':
         return baseRate * (mult.overtimeAfter2h || 2.0);
       case 'base':
       default:
-        return baseRate * (mult.base || 1) * loaded;
+        return baseRate * (mult.base || 1) * (1 + casual);
     }
   }
 
@@ -395,7 +489,7 @@ class AdvancedPayrollService {
     return { saturday, sunday, publicHoliday, overtime, total, grossFromShifts: this._round(grossFromShifts) };
   }
 
-  _buildResult({ userId, period, profile, totals, penalties, allowances, grossPay }) {
+  _buildResult({ userId, period, profile, totals, penalties, weeklyOvertime, allowances, grossPay }) {
     const baseHours = totals.baseHours + totals.afternoonShiftHours + totals.nightShiftHours;
     const baseAmount = this._round(
       totals.baseHours * this._categoryRate(profile, 'base') +
@@ -425,6 +519,7 @@ class AdvancedPayrollService {
           totalHours: this._round(totals.totalHours),
         },
         penalties,
+        weeklyOvertime: weeklyOvertime || null,
         allowances,
         leaveAccrual: this.calculateLeaveAccrual(baseHours, profile.baseRate),
         taxAndSuper,

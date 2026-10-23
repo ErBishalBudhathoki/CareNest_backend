@@ -60,6 +60,7 @@ class SILQuoteService {
     }
 
     const lines = await this._priceLines(data.lines || []);
+    this._assertNdiaManagedCaps(data.fundingType || 'plan_managed', lines);
     const totals = this._totals(lines);
 
     const quote = await SILQuote.create({
@@ -91,6 +92,10 @@ class SILQuoteService {
 
     if (Array.isArray(data.lines)) {
       quote.lines = await this._priceLines(data.lines);
+      this._assertNdiaManagedCaps(
+        data.fundingType || quote.fundingType,
+        quote.lines,
+      );
       quote.totals = this._totals(quote.lines);
     }
     if (data.fundingType !== undefined) quote.fundingType = data.fundingType;
@@ -214,6 +219,28 @@ class SILQuoteService {
     return { quote, rosterOfCare: roc };
   }
 
+  /**
+   * NDIA-managed quotes must never contain a price above the published cap:
+   * the NDIA will reject the claim, so fail at save time rather than after the
+   * participant has received the service. Plan/self-managed quotes may still
+   * be drafted with warnings and are blocked at acceptance.
+   */
+  _assertNdiaManagedCaps(fundingType, lines) {
+    if (fundingType !== 'ndia_managed' && fundingType !== 'combination') return;
+    const failing = lines.filter(
+      (line) => line.priceValidation && line.priceValidation.passed === false,
+    );
+    if (failing.length === 0) return;
+
+    const err = new Error(
+      'One or more support prices exceed the NDIS price cap and cannot be saved on an NDIA-managed quote.',
+    );
+    err.statusCode = 409;
+    err.code = 'PRICE_CAP_EXCEEDED';
+    err.details = { failing };
+    throw err;
+  }
+
   async _priceLines(lines) {
     const priced = [];
     for (const line of lines) {
@@ -237,8 +264,15 @@ class SILQuoteService {
           errors: result.isValid === false ? [result.message || 'Price validation failed'] : [],
         };
       } catch (error) {
-        // Catalog unavailable: keep the line but flag that it was not validated.
-        validation = { passed: true, capApplied: null, type: 'unvalidated', errors: [] };
+        // Fail closed. A quote priced while the NDIS catalog is unavailable
+        // could silently exceed the legal cap, so refuse to persist it with an
+        // unvalidated price. Callers can retry once the catalog is reachable.
+        const catalogError = new Error(
+          'NDIS price guide is unavailable, so this quote cannot be price-validated. Please retry shortly.',
+        );
+        catalogError.statusCode = 503;
+        catalogError.code = 'PRICE_CATALOG_UNAVAILABLE';
+        throw catalogError;
       }
 
       priced.push({

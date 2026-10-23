@@ -89,8 +89,20 @@ class ClientController {
     });
   });
 
-  deleteClient = catchAsync(async (req, res) => {
+  updateClientPlan = catchAsync(async (req, res) => {
     const { clientId } = req.params;
+    const { organizationId, userEmail, ...planData } = req.body;
+
+    const result = await clientService.updateClientPlan(
+      clientId,
+      planData,
+      organizationId,
+      userEmail,
+    );
+    res.status(200).json({ statusCode: 200, ...result });
+  });
+
+  deleteClient = catchAsync(async (req, res) => {    const { clientId } = req.params;
     const { organizationId, userEmail, forceDelete } = req.body;
     const forceDeleteFlag =
       forceDelete === true || String(forceDelete).toLowerCase() == 'true';

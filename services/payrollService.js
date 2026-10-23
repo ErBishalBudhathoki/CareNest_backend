@@ -3,6 +3,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const logger = require('../config/logger');
 const schadsService = require('./schadsService');
+const weeklyOvertimeService = require('./weeklyOvertimeService');
 const taxService = require('./taxService');
 const anomalyService = require('./anomalyService');
 const userService = require('./userService');
@@ -51,7 +52,10 @@ class PayrollService {
             let holidaySet = new Set();
             try {
                 const HolidayService = require('./holidayService');
-                holidaySet = await HolidayService.getHolidayDateKeys(safeOrgId);
+                holidaySet = await HolidayService.getHolidayDateKeys(safeOrgId, {
+                    startDate,
+                    endDate
+                });
             } catch (_) {
                 // No holiday data available; treat as none.
             }
@@ -75,7 +79,8 @@ class PayrollService {
                     sundayPenalties: 0,
                     publicHolidayPenalties: 0,
                     overtimeFirst2h: 0,
-                    overtimeAfter2h: 0
+                    overtimeAfter2h: 0,
+                    weeklyOvertime: 0
                 },
                 employees: [],
                 anomalies: []
@@ -107,6 +112,7 @@ class PayrollService {
                 payrollData.breakdown.publicHolidayPenalties += empResult.breakdown.publicHolidayEarnings || 0;
                 payrollData.breakdown.overtimeFirst2h += empResult.breakdown.overtimeFirst2hEarnings || 0;
                 payrollData.breakdown.overtimeAfter2h += empResult.breakdown.overtimeAfter2hEarnings || 0;
+                payrollData.breakdown.weeklyOvertime += empResult.breakdown.weeklyOvertimeEarnings || 0;
                 
                 if (empResult.anomalies && empResult.anomalies.length > 0) {
                     payrollData.anomalies.push(...empResult.anomalies.map(a => ({
@@ -163,8 +169,11 @@ class PayrollService {
             sundayEarnings: 0,
             publicHolidayEarnings: 0,
             overtimeFirst2hEarnings: 0,
-            overtimeAfter2hEarnings: 0
+            overtimeAfter2hEarnings: 0,
+            weeklyOvertimeEarnings: 0
         };
+
+        const weeklyShifts = [];
 
         const baseRate = parseFloat(employee.payRate) || 0;
         const employmentType = employee.employmentType || 'Permanent'; // Default to Perm if not set
@@ -220,6 +229,19 @@ class PayrollService {
             earningsBreakdown.publicHolidayEarnings += breakdown.publicHolidayHours * r.ph;
             earningsBreakdown.overtimeFirst2hEarnings += breakdown.overtimeFirst2h * r.ot1;
             earningsBreakdown.overtimeAfter2hEarnings += breakdown.overtimeAfter2h * r.ot2;
+
+            weeklyShifts.push({
+                startTime: shift.startTime || shift.shiftDate || shift.date,
+                segments: [
+                    { category: 'base', hours: breakdown.baseHours, rate: r.base },
+                    { category: 'afternoon', hours: breakdown.afternoonShiftHours || 0, rate: r.afternoon },
+                    { category: 'night', hours: breakdown.nightShiftHours || 0, rate: r.night },
+                    { category: 'saturday', hours: breakdown.saturdayHours || 0, rate: r.sat },
+                    { category: 'sunday', hours: breakdown.sundayHours || 0, rate: r.sun },
+                    // Public holiday and daily OT hours are deliberately
+                    // excluded from the weekly ordinary-hours count.
+                ]
+            });
             
             // Anomalies
             const shiftAnomalies = anomalyService.checkShift(shift);
@@ -227,6 +249,17 @@ class PayrollService {
                 result.anomalies.push(...shiftAnomalies);
             }
         }
+
+        const weeklyOvertime = weeklyOvertimeService.calculateWeeklyOvertime({
+            shifts: weeklyShifts,
+            employmentType,
+            baseRate,
+            multipliers: { overtimeFirst2h: 1.5, overtimeAfter2h: 2.0 }
+        });
+        earningsBreakdown.weeklyOvertimeEarnings += weeklyOvertime.amount;
+        hoursBreakdown.weeklyOvertimeHours = weeklyOvertime.hours;
+        hoursBreakdown.weeklyOvertimeFirst2h = weeklyOvertime.ot1Hours;
+        hoursBreakdown.weeklyOvertimeAfter2h = weeklyOvertime.ot2Hours;
 
         // Sum Gross Pay
         result.grossPay = Object.values(earningsBreakdown).reduce((a, b) => a + b, 0);

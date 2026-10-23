@@ -41,22 +41,47 @@ describe('SCHADS engine — boundary splitting', () => {
     expect(r.saturdayHours).toBe(0);
   });
 
-  test('Mon 15:00–21:00 splits 5h base + 1h afternoon at the 20:00 boundary', () => {
+  test('Mon 15:00–21:00 is a 6h afternoon shift (finishes after 18:00)', () => {
     const r = breakdown(
       shift('2026-06-01T15:00:00+10:00', '2026-06-01T21:00:00+10:00'),
     );
-    expect(r.baseHours).toBe(5);
-    expect(r.afternoonShiftHours).toBe(1);
+    expect(r.baseHours).toBe(0);
+    expect(r.afternoonShiftHours).toBe(6);
     expect(r.totalHours).toBe(6);
   });
 
-  test('Mon 14:00–22:00 splits 6h base + 2h afternoon at the 20:00 boundary', () => {
+  test('Mon 14:00–22:00 is an 8h afternoon shift (finishes after 18:00)', () => {
     const r = breakdown(
       shift('2026-06-01T14:00:00+10:00', '2026-06-01T22:00:00+10:00'),
     );
-    expect(r.baseHours).toBe(6);
-    expect(r.afternoonShiftHours).toBe(2);
+    expect(r.baseHours).toBe(0);
+    expect(r.afternoonShiftHours).toBe(8);
     expect(r.totalHours).toBe(8);
+  });
+
+  test('Mon 06:00–14:00 is an ordinary day shift (no night loading)', () => {
+    const r = breakdown(
+      shift('2026-06-01T06:00:00+10:00', '2026-06-01T14:00:00+10:00'),
+    );
+    expect(r.baseHours).toBe(8);
+    expect(r.nightShiftHours).toBe(0);
+  });
+
+  test('Mon 10:00–18:30 is an afternoon shift (finishes after 18:00)', () => {
+    const r = breakdown(
+      shift('2026-06-01T10:00:00+10:00', '2026-06-01T18:30:00+10:00'),
+    );
+    expect(r.baseHours).toBe(0);
+    expect(r.afternoonShiftHours).toBe(8);
+    expect(r.overtimeFirst2h).toBe(0.5);
+  });
+
+  test('a shift finishing exactly at 18:00 stays ordinary', () => {
+    const r = breakdown(
+      shift('2026-06-01T06:00:00+10:00', '2026-06-01T18:00:00+10:00'),
+    );
+    expect(r.baseHours).toBe(8);
+    expect(r.afternoonShiftHours).toBe(0);
   });
 
   test('Mon 22:00 → Tue 06:00 is 8h night', () => {
@@ -111,9 +136,33 @@ describe('SCHADS engine — boundary splitting', () => {
 });
 
 describe('SCHADS engine — overtime', () => {
-  test('12h weekday shift yields 8h base + 2h OT1 + 2h OT2', () => {
+  test('a shift crossing midnight and finishing after 06:00 is mixed', () => {
+    // 22:00–07:00: 22:00–06:00 is night, 06:00–07:00 ordinary (then OT).
     const r = breakdown(
-      shift('2026-06-01T07:00:00+10:00', '2026-06-01T19:00:00+10:00'),
+      shift('2026-06-01T22:00:00+10:00', '2026-06-02T07:00:00+10:00'),
+    );
+    expect(r.nightShiftHours).toBe(8);
+    expect(r.baseHours).toBe(0);
+    expect(r.overtimeFirst2h).toBe(1);
+    expect(r.totalHours).toBe(9);
+  });
+
+  test('a shift finishing after 06:00 pays the 18:00–06:00 portion as night', () => {
+    // 17:00–07:00: 17–18 ordinary day, 18–06 night, 06–07 ordinary.
+    const r = breakdown(
+      shift('2026-06-01T17:00:00+10:00', '2026-06-02T07:00:00+10:00'),
+    );
+    expect(r.baseHours).toBe(1);
+    expect(r.nightShiftHours).toBe(7);
+    expect(r.overtimeFirst2h).toBe(2);
+    expect(r.overtimeAfter2h).toBe(4);
+    expect(r.totalHours).toBe(14);
+  });
+
+  test('12h weekday shift yields 8h base + 2h OT1 + 2h OT2', () => {
+    // 06:00–18:00 finishes at 18:00 exactly, so no afternoon loading.
+    const r = breakdown(
+      shift('2026-06-01T06:00:00+10:00', '2026-06-01T18:00:00+10:00'),
     );
     expect(r.baseHours).toBe(8);
     expect(r.overtimeFirst2h).toBe(2);
@@ -170,8 +219,8 @@ describe('SCHADS engine — robustness', () => {
       shift('2026-06-01T15:00:00+10:00', '2026-06-01T21:00:00+10:00'),
     );
     expect(Array.isArray(r.segments)).toBe(true);
-    expect(r.segments.length).toBe(2);
-    expect(r.segments.map((s) => s.category)).toEqual(['base', 'afternoon']);
+    expect(r.segments.every((s) => s.category === 'afternoon')).toBe(true);
+    expect(r.segments.reduce((sum, s) => sum + s.minutes, 0)).toBe(360);
   });
 });
 
@@ -199,6 +248,55 @@ describe('SCHADS rate table', () => {
     expect(m.sunday).toBe(2.0);
     expect(m.publicHoliday).toBe(2.5);
     expect(m.casualLoading).toBe(0.25);
+  });
+
+  test('uses the 01/12/2026 pay guide rates from that date', () => {
+    expect(
+      schadsRates.resolveBaseRate({
+        level: 1,
+        stream: 'disability',
+        date: '2026-12-01',
+      }),
+    ).toBe(31.38);
+    expect(
+      schadsRates.resolveBaseRate({
+        level: 2,
+        stream: 'disability',
+        payPoint: '2.2',
+        date: '2026-12-01',
+      }),
+    ).toBe(33.41);
+    expect(
+      schadsRates.resolveBaseRate({
+        level: 8,
+        stream: 'social_community',
+        payPoint: '8.3',
+        date: '2026-12-01',
+      }),
+    ).toBe(71.19);
+  });
+
+  test('keeps historical rates before the new pay guide starts', () => {
+    expect(
+      schadsRates.resolveBaseRate({
+        level: 2,
+        stream: 'disability',
+        date: '2026-11-30',
+      }),
+    ).toBe(25.8);
+  });
+
+  test('allowances are effective-dated', () => {
+    const before = schadsRates.resolveAllowances(undefined, '2026-11-30');
+    expect(before.firstAidAllowance).toBe(1.5);
+    expect(before.mealAllowance).toBe(16.0);
+    expect(before.sleepoverAllowance).toBe(65.5);
+
+    const after = schadsRates.resolveAllowances(undefined, '2026-12-01');
+    expect(after.firstAidAllowance).toBe(21.43);
+    expect(after.firstAidHourly).toBe(0.56);
+    expect(after.mealAllowance).toBe(17.3);
+    expect(after.sleepoverAllowance).toBe(62.87);
   });
 });
 

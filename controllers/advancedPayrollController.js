@@ -29,6 +29,16 @@ class AdvancedPayrollController {
           );
           payrollData.holidaySet = await HolidayService.getHolidayDateKeys(
             organizationId || null,
+            {
+              startDate:
+                payrollData.period?.startDate ||
+                payrollData.period?.start ||
+                payrollData.startDate,
+              endDate:
+                payrollData.period?.endDate ||
+                payrollData.period?.end ||
+                payrollData.endDate,
+            },
           );
         } catch (_) {
           // Leave holidaySet unset; engine treats no dates as holidays.

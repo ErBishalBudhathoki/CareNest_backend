@@ -5,9 +5,10 @@
  * See docs/NDIS_DEPTH_ROADMAP.md section 1.2 for the evidence.
  *
  * The engine splits a shift at every rate boundary:
- *   - clock boundaries: 0600 (night->day), 2000 (day->afternoon), 2400
+ *   - shift class: afternoon (finishes after 1800) / night (finishes by 0600)
  *   - calendar: weekday->Saturday, Saturday->Sunday, Sunday->weekday
  *   - public-holiday entry/exit
+ *   - overnight mixed shifts: 1800/0600 split
  *   - overtime threshold (after standardHoursPerDay of ordinary work)
  *
  * All boundary arithmetic is performed on absolute instants (UTC ms) and only
@@ -121,7 +122,7 @@ function buildBoundaries(start, end, timeZone) {
   while (dayStartInstant.getTime() <= endMs && guard < 1000) {
     guard += 1;
     const dp = getZonedParts(dayStartInstant, timeZone);
-    for (const h of [0, 6, 20]) {
+    for (const h of [0, 6, 18, 20]) {
       const b = zonedWallClockToUtc(dp.year, dp.month, dp.day, h, 0, timeZone);
       const t = b.getTime();
       if (t > startMs && t < endMs) boundaries.push(t);
@@ -134,44 +135,63 @@ function buildBoundaries(start, end, timeZone) {
 }
 
 /**
- * Classify a segment.
+ * Resolve the weekday penalty category for a shift using the SCHADS shift
+ * definitions rather than clock boundaries:
  *
- * SCHADS loading windows (time-segmented interpretation):
- *   - 00:00–06:00                -> night
- *   - 06:00–20:00                -> base (day)
- *   - 20:00–24:00, shift does
- *     NOT cross midnight         -> afternoon
- *   - 20:00–24:00, shift DOES
- *     cross midnight             -> night (part of a night shift)
+ *  - Afternoon shift: finishes after 18:00 and at or before midnight.
+ *  - Night shift: finishes after midnight and at or before 06:00.
+ *  - A shift that crosses midnight but finishes after 06:00 is mixed: its
+ *    18:00–06:00 hours are night and the remainder is ordinary.
+ *  - Any other shift is an ordinary day shift.
  *
- * The midnight-crossing distinction matters because SCHADS defines a night
- * shift as one that finishes after midnight (or starts before 06:00). The
- * pre-midnight portion of such a shift therefore also attracts night loading.
+ * The finish-time rule is why a 10:00–18:30 shift is an afternoon shift for
+ * its whole duration, while a 06:00–14:00 shift attracts no night loading.
+ */
+function resolveShiftCategory(start, end, timeZone) {
+  const startParts = getZonedParts(start, timeZone);
+  const lastParts = getZonedParts(new Date(end.getTime() - 1), timeZone);
+  const crossesMidnight = startParts.dateKey !== lastParts.dateKey;
+  const lastMinuteOfDay = lastParts.hour * 60 + lastParts.minute;
+
+  if (!crossesMidnight) {
+    return lastMinuteOfDay >= 18 * 60 ? CATEGORIES.AFTERNOON : CATEGORIES.BASE;
+  }
+
+  if (lastMinuteOfDay < 6 * 60) return CATEGORIES.NIGHT;
+
+  // Crossed midnight and finishes after 06:00: classify per hour.
+  return 'mixed';
+}
+
+/**
+ * Classify one segment.
+ *
+ * Weekend and public-holiday rates always take precedence over the weekday
+ * shift loading. Weekday segments inherit the shift-level category resolved
+ * from the finish time (see resolveShiftCategory).
  *
  * @param {Date} segStart
  * @param {Date} segEnd
  * @param {string} timeZone
  * @param {Set<string>} holidaySet
- * @param {boolean} crossesMidnight
+ * @param {string} shiftCategory one of base/afternoon/night/'mixed'
  */
-function classifySegment(segStart, segEnd, timeZone, holidaySet, crossesMidnight) {
+function classifySegment(segStart, segEnd, timeZone, holidaySet, shiftCategory) {
   const p = getZonedParts(segStart, timeZone);
   if (holidaySet.has(p.dateKey)) return CATEGORIES.PUBLIC_HOLIDAY;
   if (p.weekday === 0) return CATEGORIES.SUNDAY;
   if (p.weekday === 6) return CATEGORIES.SATURDAY;
 
-  const startMinuteOfDay = p.hour * 60 + p.minute;
-
-  // Early morning is always night.
-  if (startMinuteOfDay < 6 * 60) return CATEGORIES.NIGHT;
-
-  // Evening window: afternoon unless the shift is a night shift (crosses
-  // midnight), in which case the whole pre-midnight evening is night.
-  if (startMinuteOfDay >= 20 * 60) {
-    return crossesMidnight ? CATEGORIES.NIGHT : CATEGORIES.AFTERNOON;
+  if (shiftCategory === 'mixed') {
+    const minuteOfDay = p.hour * 60 + p.minute;
+    // Night-shift hours are 18:00–06:00 for a shift that runs past midnight.
+    if (minuteOfDay < 6 * 60 || minuteOfDay >= 18 * 60) {
+      return CATEGORIES.NIGHT;
+    }
+    return CATEGORIES.BASE;
   }
 
-  return CATEGORIES.BASE;
+  return shiftCategory;
 }
 
 function zeroAggregates() {
@@ -216,12 +236,10 @@ function segmentShift(shift, config = {}) {
   const boundaries = buildBoundaries(start, end, timezone);
   const baseSegments = [];
 
-  // A night shift is defined (SCHADS) as one that finishes after midnight. If
-  // the shift spans more than one zoned calendar day, its evening hours are
-  // night rather than afternoon.
-  const startDateKey = getZonedParts(start, timezone).dateKey;
-  const endDateKey = getZonedParts(new Date(end.getTime() - 1), timezone).dateKey;
-  const crossesMidnight = startDateKey !== endDateKey;
+  // SCHADS classifies the weekday penalty by the shift's finish time, not by
+  // the clock time of each segment. Resolve it once for the whole shift; the
+  // overnight/mixed case is handled per segment inside classifySegment.
+  const shiftCategory = resolveShiftCategory(start, end, timezone);
 
   for (let i = 0; i < boundaries.length - 1; i += 1) {
     const segStart = new Date(boundaries[i]);
@@ -232,7 +250,7 @@ function segmentShift(shift, config = {}) {
       from: segStart.toISOString(),
       to: segEnd.toISOString(),
       minutes,
-      category: classifySegment(segStart, segEnd, timezone, holidaySet, crossesMidnight),
+      category: classifySegment(segStart, segEnd, timezone, holidaySet, shiftCategory),
     });
   }
 
@@ -347,19 +365,26 @@ class SCHADSService {
 
     const byCategory = {};
     let gross = 0;
+    const pricedSegments = [];
     for (const seg of segments) {
       const hours = seg.minutes / 60;
       const rate = rateFor(seg.category);
       const amt = hours * rate;
       byCategory[seg.category] = (byCategory[seg.category] || 0) + amt;
       gross += amt;
+      pricedSegments.push({
+        ...seg,
+        hours,
+        rate: parseFloat(rate.toFixed(4)),
+        amount: parseFloat(amt.toFixed(2)),
+      });
     }
     for (const k of Object.keys(byCategory)) {
       byCategory[k] = parseFloat(byCategory[k].toFixed(2));
     }
 
     return {
-      segments,
+      segments: pricedSegments,
       aggregates,
       amount: {
         baseRate,
@@ -378,6 +403,7 @@ module.exports._internal = {
   zonedWallClockToUtc,
   buildBoundaries,
   segmentShift,
+  resolveShiftCategory,
   classifySegment,
   CATEGORIES,
   HOURS_KEY,

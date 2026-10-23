@@ -29,6 +29,9 @@ jest.mock('../../models/Invoice', () => ({ Invoice: { find: jest.fn() } }));
 jest.mock('../../services/priceValidationService', () => ({
   priceValidationService: { validatePrice: jest.fn().mockResolvedValue({ isValid: true }) },
 }));
+jest.mock('../../services/planBudgetService', () => ({
+  validateInvoiceAgainstPlan: jest.fn().mockResolvedValue({ ok: true }),
+}));
 
 // Keep the R2 storage path hermetic — `.env` is loaded by tests/setup.js, so the
 // real utility would otherwise attempt a live upload during unit tests.

@@ -10,6 +10,8 @@ const Client = require('../models/Client');
 const AuditTrail = require('../models/AuditTrail');
 const InvoiceLineItem = require('../models/InvoiceLineItem');
 const { invoiceArtifactService } = require('./invoiceArtifactService');
+const planBudgetService = require('./planBudgetService');
+const { priceValidationService } = require('./priceValidationService');
 const { getCanonicalOrganizationCode } = require('../utils/organizationCodeUtils');
 const InputValidator = require('../utils/inputValidator');
 const logger = require('../config/logger');
@@ -639,6 +641,139 @@ class InvoiceManagementService {
    */
   async createInvoice(invoiceData) {
     try {
+      // NDIS plan-budget gate. NDIA-managed invoices must fit inside an active
+      // plan; SIL billing and the invoice API both pass through here, so the
+      // rule cannot be bypassed by using a different entry point.
+      const metadata = invoiceData.metadata || {};
+      const servicePeriod = metadata.servicePeriod || metadata.silPeriod || {};
+      const firstLine = Array.isArray(invoiceData.lineItems)
+        ? invoiceData.lineItems[0]
+        : null;
+      const serviceStart =
+        servicePeriod.from ||
+        metadata.serviceStart ||
+        firstLine?.serviceDate ||
+        firstLine?.date ||
+        invoiceData.auditTrail?.createdAt;
+      const serviceEnd = servicePeriod.to || metadata.serviceEnd || serviceStart;
+      const override = metadata.planOverride || {};
+      const amount =
+        Number(invoiceData.financialSummary?.totalAmount) ||
+        (invoiceData.lineItems || []).reduce(
+          (sum, item) => sum + (Number(item.totalPrice) || 0),
+          0,
+        );
+
+      const planValidation = await planBudgetService.validateInvoiceAgainstPlan({
+        organizationId: invoiceData.organizationId,
+        clientId: invoiceData.clientId,
+        amount,
+        serviceStart,
+        serviceEnd,
+        invoiceType: metadata.invoiceType || 'client',
+        allowOverride: override.allowed === true,
+        overrideReason: override.reason || '',
+      });
+
+      if (!planValidation.ok) {
+        return {
+          success: false,
+          statusCode: 422,
+          errorCode: planValidation.code,
+          error: planValidation.message,
+          planValidation,
+        };
+      }
+
+      // NDIA-managed claims cannot exceed the published price cap. The app
+      // validates too, but the API is the last line of defence: a missing or
+      // stale client-side cap must not produce an unclaimable invoice.
+      if (
+        String(metadata.invoiceType || 'client').toLowerCase() === 'client' &&
+        invoiceData.clientId
+      ) {
+        const client = await Client.findOne({
+          _id: invoiceData.clientId,
+          organizationId: invoiceData.organizationId,
+        })
+          .select('fundingType clientState')
+          .lean();
+        const funding = String(client?.fundingType || '').toLowerCase();
+        const ndiaManaged = funding === 'ndia_managed' || funding === 'combination';
+        const capOverride = metadata.priceCapOverride || {};
+        if (ndiaManaged && capOverride.allowed !== true) {
+          const violations = [];
+          for (const item of invoiceData.lineItems || []) {
+            const price = Number(item.price ?? item.unitPrice ?? item.rate ?? 0);
+            const providedCap = item.priceCap != null ? Number(item.priceCap) : null;
+            if (item.exceedsPriceCap === true) {
+              violations.push({
+                itemNumber: item.ndisItemNumber || item.itemCode || '',
+                price,
+                priceCap: providedCap,
+                reason: 'client_reported_over_cap',
+              });
+              continue;
+            }
+            if (providedCap != null && price > providedCap + 0.01) {
+              violations.push({
+                itemNumber: item.ndisItemNumber || item.itemCode || '',
+                price,
+                priceCap: providedCap,
+                reason: 'price_above_cap',
+              });
+              continue;
+            }
+            const supportNumber = item.ndisItemNumber || item.itemCode || '';
+            if (!supportNumber || providedCap != null || price <= 0) continue;
+            try {
+              const result = await priceValidationService.validatePrice(
+                supportNumber,
+                price,
+                client?.clientState || 'NSW',
+                item.providerType || 'standard',
+                item.serviceDate || item.date || serviceStart,
+              );
+              if (result.isValid === false && result.status === 'exceeds_cap') {
+                violations.push({
+                  itemNumber: supportNumber,
+                  price,
+                  priceCap: result.priceCap ?? null,
+                  reason: 'validated_over_cap',
+                });
+              }
+            } catch (_) {
+              return {
+                success: false,
+                statusCode: 503,
+                errorCode: 'PRICE_CATALOG_UNAVAILABLE',
+                error:
+                  'The NDIS price guide is unavailable, so this NDIA-managed invoice cannot be price-validated. Please retry shortly.',
+              };
+            }
+          }
+
+          if (violations.length > 0) {
+            return {
+              success: false,
+              statusCode: 422,
+              errorCode: 'PRICE_CAP_EXCEEDED',
+              error:
+                'One or more line items exceed the NDIS price cap and cannot be claimed on an NDIA-managed invoice.',
+              priceCapViolations: violations,
+            };
+          }
+        }
+      }
+
+      if (planValidation.overridden) {
+        metadata.planBudgetValidation = planValidation;
+        invoiceData.metadata = metadata;
+      } else if (!planValidation.skipped) {
+        metadata.planBudgetValidation = planValidation;
+        invoiceData.metadata = metadata;
+      }
+
       // Create new invoice document
       const newInvoice = new Invoice(invoiceData);
       const result = await newInvoice.save();

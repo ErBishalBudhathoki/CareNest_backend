@@ -94,6 +94,29 @@ const clientSchema = new mongoose.Schema({
     default: 'plan_managed',
     index: true
   },
+  // NDIS plan period and budget. The plan is the funding envelope an
+  // NDIA-managed invoice must fit inside; without it a claim cannot be
+  // reconciled against the participant's budget.
+  plan: {
+    startDate: Date,
+    endDate: Date,
+    totalBudget: { type: Number, min: 0 },
+    status: {
+      type: String,
+      enum: ['not_configured', 'active', 'expired'],
+      default: 'not_configured',
+    },
+    source: {
+      type: String,
+      enum: ['manual', 'upload'],
+      default: 'manual',
+    },
+    documentUrl: String,
+    documentName: String,
+    notes: String,
+    updatedAt: Date,
+    updatedBy: String,
+  },
   // Phase 5: linked care-network stakeholders (plan manager, support
   // coordinator, nominee, family). The Stakeholder collection is the source of
   // truth for contact/permissions; this is the participant-side link list.

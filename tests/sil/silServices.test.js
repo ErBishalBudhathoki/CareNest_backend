@@ -299,6 +299,56 @@ describe('SILQuoteService', () => {
     expect(quote.lines[0].priceValidation.errors.length).toBeGreaterThan(0);
   });
 
+  test('rejects an over-cap NDIA-managed quote at save time', async () => {
+    priceValidationService.validatePrice.mockResolvedValue({
+      isValid: false,
+      status: 'over_cap',
+      priceCap: 50,
+      message: 'Price exceeds cap',
+    });
+
+    await expect(
+      silQuoteService.buildQuote('org1', {
+        clientId: 'c1',
+        fundingType: 'ndia_managed',
+        lines: [{ supportNumber: 'x', hoursPerWeek: 1, unitPrice: 999 }],
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'PRICE_CAP_EXCEEDED',
+    });
+    expect(SILQuote.create).not.toHaveBeenCalled();
+  });
+
+  test('allows a within-cap NDIA-managed quote', async () => {
+    SILQuote.create.mockImplementation(async (doc) => ({ _id: 'q3', ...doc }));
+
+    const quote = await silQuoteService.buildQuote('org1', {
+      clientId: 'c1',
+      fundingType: 'ndia_managed',
+      lines: [{ supportNumber: 'x', hoursPerWeek: 1, unitPrice: 80 }],
+    });
+
+    expect(quote.lines[0].priceValidation.passed).toBe(true);
+  });
+
+  test('fails closed when the NDIS price catalog is unavailable', async () => {
+    priceValidationService.validatePrice.mockRejectedValue(
+      new Error('catalog offline'),
+    );
+
+    await expect(
+      silQuoteService.buildQuote('org1', {
+        clientId: 'c1',
+        lines: [{ supportNumber: 'x', hoursPerWeek: 1, unitPrice: 80 }],
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'PRICE_CATALOG_UNAVAILABLE',
+    });
+    expect(SILQuote.create).not.toHaveBeenCalled();
+  });
+
   test('acceptQuote blocks when a line failed validation', async () => {
     SILQuote.findOne.mockResolvedValue({
       _id: 'q1',

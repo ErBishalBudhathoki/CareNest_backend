@@ -5,6 +5,7 @@ const Client = require('../models/Client');
 const Organization = require('../models/Organization');
 const { Invoice } = require('../models/Invoice');
 const { priceValidationService } = require('./priceValidationService');
+const planBudgetService = require('./planBudgetService');
 const { uploadBufferToR2, isR2Configured } = require('../utils/cloudFunctionsUpload');
 const { formatBprDate, BPR_DATE_FORMAT, BPR_DATE_PATTERN } = require('../utils/dateHelpers');
 const logger = require('../config/logger');
@@ -169,6 +170,48 @@ class NDISClaimService {
 
     const batchHash = crypto.randomBytes(4).toString('hex');
     const shortOrg = String(organizationId).slice(-6);
+
+    // NDIS plan-budget gate: never submit a claim that would push a
+    // participant beyond their plan. Invoices are already gated at creation;
+    // this also catches legacy invoices or plans edited after invoicing.
+    if (lines.length > 0) {
+      const affectedClientIds = Array.from(
+        new Set(lines.map((line) => String(line.clientId))),
+      );
+      const planFailures = [];
+      for (const clientId of affectedClientIds) {
+        const check = await planBudgetService.validateInvoiceAgainstPlan({
+          organizationId,
+          clientId,
+          amount: 0, // spend is already recorded by the issued invoices
+          serviceStart: from,
+          serviceEnd: to,
+          invoiceType: 'client',
+          allowOverride: opts.allowPlanOverride === true,
+          overrideReason: opts.planOverrideReason || '',
+        });
+        if (!check.ok) {
+          const client = clientById.get(clientId);
+          planFailures.push({
+            clientId,
+            clientName: client
+              ? `${client.clientFirstName || ''} ${client.clientLastName || ''}`.trim()
+              : '',
+            ...check,
+          });
+        }
+      }
+
+      if (planFailures.length > 0) {
+        const err = new Error(
+          'One or more participants cannot be claimed because their NDIS plan budget is missing, expired, or exhausted.',
+        );
+        err.statusCode = 422;
+        err.code = 'PLAN_BUDGET_GATE';
+        err.details = { failures: planFailures };
+        throw err;
+      }
+    }
 
     // Assign unique claim references (checked against existing lines).
     const existingRefs = new Set(
