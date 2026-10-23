@@ -610,6 +610,25 @@ class SchedulerService {
                 if (!safeData.clientEmail && client.clientEmail) {
                     safeData.clientEmail = client.clientEmail;
                 }
+            } else if (safeData.clientEmail) {
+                // The schedule screen sends the participant email only.
+                const Client = require('../models/Client');
+                const email = String(safeData.clientEmail).trim().toLowerCase();
+                const client = await Client.findOne({
+                    clientEmail: email,
+                    organizationId: orgId
+                })
+                    .select('_id clientEmail')
+                    .lean();
+                if (!client) {
+                    return {
+                        success: false,
+                        error: 'Client not found in this organization',
+                        code: 403
+                    };
+                }
+                safeData.clientId = client._id;
+                safeData.clientEmail = client.clientEmail || email;
             }
 
             safeData.organizationId = orgId;
@@ -1086,6 +1105,29 @@ class SchedulerService {
                 }
                 safeUpdate.employeeEmail = email;
                 safeUpdate.employeeId = employee._id;
+            }
+
+            // A reassigned participant must belong to this organisation.
+            if (safeUpdate.clientId || safeUpdate.clientEmail) {
+                const Client = require('../models/Client');
+                const clientQuery = safeUpdate.clientId
+                    ? { _id: safeUpdate.clientId, organizationId: orgId }
+                    : {
+                        clientEmail: String(safeUpdate.clientEmail).trim().toLowerCase(),
+                        organizationId: orgId
+                    };
+                const client = await Client.findOne(clientQuery)
+                    .select('_id clientEmail')
+                    .lean();
+                if (!client) {
+                    return {
+                        success: false,
+                        error: 'Client not found in this organization',
+                        code: 403
+                    };
+                }
+                safeUpdate.clientId = client._id;
+                if (client.clientEmail) safeUpdate.clientEmail = client.clientEmail;
             }
 
             // Check conflicts if changing employee or time

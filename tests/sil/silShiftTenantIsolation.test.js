@@ -304,3 +304,49 @@ describe('schedulerService.bulkCreateShifts — tenant isolation', () => {
     }
   });
 });
+
+describe('schedulerService shift writes — client email validation', () => {
+  const baseShift = {
+    startTime: new Date('2026-10-28T22:00:00.000Z'),
+    endTime: new Date('2026-10-29T00:00:00.000Z'),
+  };
+
+  test('createShift rejects a clientEmail from another organisation', async () => {
+    Client.findOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
+
+    const result = await SchedulerService.createShift(
+      { ...baseShift, clientEmail: 'outside@other.com' },
+      ORG,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe(403);
+    expect(Shift.__save).not.toHaveBeenCalled();
+  });
+
+  test('createShift resolves clientId from a valid clientEmail', async () => {
+    const result = await SchedulerService.createShift(
+      { ...baseShift, clientEmail: 'Client@Org.com' },
+      ORG,
+    );
+
+    expect(result.success).toBe(true);
+    const stored = Shift.mock.calls[0][0];
+    expect(String(stored.clientId)).toBe('client-1');
+    expect(stored.clientEmail).toBe('client@org.com');
+  });
+
+  test('updateShift rejects a clientEmail from another organisation', async () => {
+    Client.findOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
+
+    const result = await SchedulerService.updateShift(
+      SHIFT_ID,
+      { clientEmail: 'outside@other.com' },
+      ORG,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe(403);
+    expect(Shift.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
