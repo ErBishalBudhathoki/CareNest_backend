@@ -17,15 +17,17 @@ class ScheduleController {
     static createShift = catchAsync(async (req, res) => {
         const shiftData = req.body;
 
-        // Validation (handled by route, but safety check)
-        if (!shiftData.organizationId) {
+        const organizationId =
+            req.organizationContext?.organizationId || req.user?.organizationId;
+        if (!organizationId) {
             return res.status(400).json({
                 success: false,
-                error: 'organizationId is required'
+                code: 'MISSING_ORGANIZATION',
+                error: 'Organization context is required'
             });
         }
 
-        const result = await SchedulerService.createShift(shiftData);
+        const result = await SchedulerService.createShift(shiftData, organizationId);
 
         if (!result.success) {
             return res.status(result.code || 400).json(result);
@@ -53,7 +55,20 @@ class ScheduleController {
             organizationId: s.organizationId || organizationId
         }));
 
-        const result = await SchedulerService.bulkCreateShifts(normalizedShifts);
+        const organizationContext =
+            req.organizationContext?.organizationId || req.user?.organizationId;
+        if (!organizationContext) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_ORGANIZATION',
+                error: 'Organization context is required'
+            });
+        }
+
+        const result = await SchedulerService.bulkCreateShifts(
+            normalizedShifts,
+            organizationContext
+        );
 
         res.status(result.success ? 201 : 207).json(result);
     });

@@ -645,3 +645,19 @@ describe('SILRosterService.buildRoster — org-local week window', () => {
     expect(query.startTime.$lt.toISOString()).toBe('2026-06-07T14:00:00.000Z');
   });
 });
+
+describe('SILController organisation resolution', () => {
+  test('prefers the request organisation context (multi-org header)', () => {
+    const req = {
+      organizationContext: { organizationId: 'org-header' },
+      user: { organizationId: 'org-primary' },
+    };
+    expect(silController._org(req)).toBe('org-header');
+  });
+
+  test('falls back to the user organisation when no context is set', () => {
+    expect(silController._org({ user: { organizationId: 'org-primary' } })).toBe(
+      'org-primary',
+    );
+  });
+});

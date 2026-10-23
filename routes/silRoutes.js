@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query, validationResult } = require('express-validator');
 const silController = require('../controllers/silController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
+const { requireOrgMembership } = require('../middleware/requireOrgMembership');
 const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
 
 const silReadLimiter = rateLimit({
@@ -39,6 +40,9 @@ const mongoId = (name, location = param) =>
 // properties, ratios, rosters, quotes or rosters-of-care directly.
 router.use(authenticateUser);
 router.use(requireRoles(['admin']));
+// Resolve and validate the active organisation (x-organization-id header when
+// a multi-org admin has switched orgs, otherwise the user's active org).
+router.use(requireOrgMembership);
 router.use(requireEntitlement('sil'));
 
 // ---- Properties ----

@@ -345,6 +345,55 @@ class ActiveTimerController {
     const formattedTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
     if (shouldPersistWorkedTime) {
+      // Older app versions stop the timer without sending shift details. Link
+      // the row to the SIL shift / client assignment it belongs to so payroll
+      // and NDIS claiming can trace it.
+      const Shift = require('../models/Shift');
+      const Client = require('../models/Client');
+      const ClientAssignment = require('../models/ClientAssignment');
+
+      let silShiftId;
+      let assignedClientId;
+      try {
+        const client = await Client.findOne({
+          clientEmail: String(timerDoc.clientEmail || '').toLowerCase(),
+        })
+          .select('_id')
+          .lean();
+
+        if (client) {
+          const silShift = await Shift.findOne({
+            employeeEmail: String(userEmail).toLowerCase(),
+            clientId: client._id,
+            silRosterOfCareId: { $ne: null },
+            status: { $ne: 'cancelled' },
+            startTime: { $lte: startTime },
+            endTime: { $gte: startTime },
+          })
+            .sort({ startTime: -1 })
+            .select('_id')
+            .lean();
+          if (silShift) silShiftId = silShift._id;
+        }
+
+        if (!silShiftId && timerDoc.clientEmail) {
+          const assignment = await ClientAssignment.findOne({
+            userEmail: String(userEmail).toLowerCase(),
+            clientEmail: String(timerDoc.clientEmail || '').toLowerCase(),
+            isActive: true,
+          })
+            .select('_id')
+            .lean();
+          if (assignment) assignedClientId = assignment._id;
+        }
+      } catch (linkError) {
+        // Linkage is best-effort; never block recording the worked time.
+        logger.warn('Worked-time shift linkage failed', {
+          error: linkError.message,
+          userEmail,
+        });
+      }
+
       await WorkedTime.create({
         userEmail,
         clientEmail: timerDoc.clientEmail,
@@ -359,6 +408,8 @@ class ActiveTimerController {
         totalHours: totalSeconds / 3600,
         // Keep shiftDate in legacy-friendly string format for downstream readers.
         shiftDate: startTime.toISOString().split('T')[0],
+        ...(silShiftId ? { silShiftId } : {}),
+        ...(assignedClientId ? { assignedClientId } : {}),
         createdAt: new Date(),
       });
 

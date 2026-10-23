@@ -13,7 +13,9 @@ const silBillingService = require('../services/silBillingService');
  */
 class SILController {
   _org(req) {
-    return req.user?.organizationId;
+    // Multi-org admins select an organisation through the x-organization-id
+    // header; requireOrgMembership validates it and exposes the resolved id.
+    return req.organizationContext?.organizationId || req.user?.organizationId;
   }
 
   _actor(req) {

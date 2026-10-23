@@ -8,6 +8,9 @@ const ActiveTimer = require('../models/ActiveTimer');
 const WorkedTime = require('../models/WorkedTime');
 const User = require('../models/User');
 const FcmToken = require('../models/FcmToken');
+const Shift = require('../models/Shift');
+const Client = require('../models/Client');
+const ClientAssignment = require('../models/ClientAssignment');
 
 // Mock catchAsync to allow awaiting in tests
 jest.mock('../utils/catchAsync', () => (fn) => (req, res, next) => {
@@ -18,6 +21,9 @@ jest.mock('../models/ActiveTimer');
 jest.mock('../models/WorkedTime');
 jest.mock('../models/User');
 jest.mock('../models/FcmToken');
+jest.mock('../models/Shift');
+jest.mock('../models/Client');
+jest.mock('../models/ClientAssignment');
 // Manual mock for firebase-admin-config
 jest.mock('../firebase-admin-config', () => ({
   messaging: {
@@ -57,6 +63,10 @@ describe('Active Timers Endpoints', () => {
     // Default mocks for Mongoose models
     ActiveTimer.find.mockImplementation(() => mockQuery([]));
     ActiveTimer.findOne.mockImplementation(() => mockQuery(null));
+    // Legacy timer-stop linkage lookups default to "no match".
+    Client.findOne.mockImplementation(() => mockQuery(null));
+    Shift.findOne.mockImplementation(() => mockQuery(null));
+    ClientAssignment.findOne.mockImplementation(() => mockQuery(null));
     
     // Ensure findOneAndDelete is mocked
     ActiveTimer.findOneAndDelete = jest.fn().mockImplementation(() => mockQuery(null));
@@ -198,6 +208,39 @@ describe('Active Timers Endpoints', () => {
       }));
       expect(res.status).toHaveBeenCalledWith(200);
       expect(messaging.sendEachForMulticast).toHaveBeenCalled();
+    });
+
+    it('links the timer row to the matching SIL shift (legacy clients)', async () => {
+      req.body = { userEmail: 'test@example.com', organizationId: 'org1' };
+      const shiftId = '55550000000000000000000a';
+      const timerDoc = {
+        userEmail: 'test@example.com',
+        clientEmail: 'sil.client@example.com',
+        startTime: new Date(Date.now() - 120000)
+      };
+      ActiveTimer.findOneAndDelete.mockImplementation(() => mockQuery(timerDoc));
+      User.findOne.mockImplementation(() => mockQuery(null));
+      User.find.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([])
+        })
+      });
+
+      Client.findOne.mockReturnValue({
+        select: () => ({ lean: async () => ({ _id: 'client-1' }) })
+      });
+      Shift.findOne.mockReturnValue({
+        sort: () => ({
+          select: () => ({ lean: async () => ({ _id: shiftId }) })
+        })
+      });
+
+      await ActiveTimerController.stopTimer(req, res);
+
+      expect(WorkedTime.create).toHaveBeenCalledWith(
+        expect.objectContaining({ silShiftId: shiftId })
+      );
+      expect(ClientAssignment.findOne).not.toHaveBeenCalled();
     });
 
     it('skips the worked-time row when the caller persists it (end-shift flow)', async () => {

@@ -528,15 +528,101 @@ class SchedulerService {
      * @param {Object} shiftData - Shift data
      * @returns {Promise<Object>} Created shift or error
      */
-    static async createShift(shiftData) {
+    static async createShift(shiftData, organizationId = null) {
         try {
+            const orgId = String(
+                organizationId || shiftData.organizationId || ''
+            );
+            if (!orgId) {
+                return {
+                    success: false,
+                    error: 'organizationId is required',
+                    code: 400
+                };
+            }
+
+            // Only fields a shift create legitimately sets; tenancy and roster
+            // linkage always come from the server context.
+            const ALLOWED_CREATE_FIELDS = [
+                'employeeEmail',
+                'clientId',
+                'clientEmail',
+                'startTime',
+                'endTime',
+                'supportItems',
+                'location',
+                'status',
+                'shiftType',
+                'notes',
+                'breakDuration',
+                'isRecurring',
+                'recurringTemplateId'
+            ];
+            const safeData = {};
+            for (const field of ALLOWED_CREATE_FIELDS) {
+                if (shiftData[field] !== undefined) {
+                    safeData[field] = shiftData[field];
+                }
+            }
+
+            // The assignee must be a member of this organisation.
+            if (safeData.employeeEmail) {
+                const email = String(safeData.employeeEmail).trim().toLowerCase();
+                const employee = await User.findOne({ email }).select('_id').lean();
+                if (!employee) {
+                    return { success: false, error: 'Employee not found', code: 404 };
+                }
+                const UserOrganization = require('../models/UserOrganization');
+                const membership = await UserOrganization.findOne({
+                    userId: employee._id,
+                    organizationId: orgId,
+                    isActive: true
+                }).lean();
+                const belongsToOrg =
+                    !!membership || String(employee.organizationId || '') === orgId;
+                if (!belongsToOrg) {
+                    return {
+                        success: false,
+                        error: 'Employee does not belong to this organization',
+                        code: 403
+                    };
+                }
+                safeData.employeeEmail = email;
+                safeData.employeeId = employee._id;
+            }
+
+            // The client must belong to this organisation.
+            if (safeData.clientId) {
+                const Client = require('../models/Client');
+                const client = await Client.findOne({
+                    _id: safeData.clientId,
+                    organizationId: orgId
+                })
+                    .select('_id clientEmail')
+                    .lean();
+                if (!client) {
+                    return {
+                        success: false,
+                        error: 'Client not found in this organization',
+                        code: 403
+                    };
+                }
+                if (!safeData.clientEmail && client.clientEmail) {
+                    safeData.clientEmail = client.clientEmail;
+                }
+            }
+
+            safeData.organizationId = orgId;
+
             // Check for conflicts if employee is assigned
-            if (shiftData.employeeId || shiftData.employeeEmail) {
+            if (safeData.employeeEmail) {
                 const conflictCheck = await this.detectConflicts(
-                    shiftData.employeeId,
-                    shiftData.employeeEmail,
-                    new Date(shiftData.startTime),
-                    new Date(shiftData.endTime)
+                    safeData.employeeId,
+                    safeData.employeeEmail,
+                    new Date(safeData.startTime),
+                    new Date(safeData.endTime),
+                    null,
+                    orgId
                 );
 
                 if (conflictCheck.hasConflict) {
@@ -549,7 +635,7 @@ class SchedulerService {
                 }
             }
 
-            const newShift = new Shift(shiftData);
+            const newShift = new Shift(safeData);
             const savedShift = await newShift.save();
 
             return {
@@ -576,7 +662,7 @@ class SchedulerService {
      * @param {Array} shiftsData - Array of shift data objects
      * @returns {Promise<Object>} Result with created shifts and any failures
      */
-    static async bulkCreateShifts(shiftsData) {
+    static async bulkCreateShifts(shiftsData, organizationId = null) {
         try {
             const results = {
                 created: [],
@@ -586,7 +672,7 @@ class SchedulerService {
 
             for (const shiftData of shiftsData) {
                 try {
-                    const result = await this.createShift(shiftData);
+                    const result = await this.createShift(shiftData, organizationId);
                     if (result.success) {
                         results.created.push(result.data);
                     } else {
