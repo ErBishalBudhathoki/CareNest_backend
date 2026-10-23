@@ -401,8 +401,12 @@ class ClientService {
         query.organizationId = toSafeString(organizationId);
       }
       
+      // NDIS plan changes must go through updateClientPlan so the period and
+      // budget are validated; strip it from the general update payload.
+      const { plan: _ignoredPlan, ...safeUpdateData } = updateData;
+
       const updateDoc = {
-        ...updateData,
+        ...safeUpdateData,
         updatedAt: new Date()
       };
       
@@ -424,12 +428,12 @@ class ClientService {
           entityType: auditService.AUDIT_ENTITIES.CLIENT,
           entityId: clientId,
           organizationId: organizationId || 'unknown',
-          newValues: updateData,
+          newValues: safeUpdateData,
           metadata: {
             additionalInfo: {
               clientId,
               organizationId,
-              updatedFields: Object.keys(updateData)
+              updatedFields: Object.keys(safeUpdateData)
             }
           }
         }, 'updateClient');
