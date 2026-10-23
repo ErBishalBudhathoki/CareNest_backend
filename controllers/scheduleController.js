@@ -97,12 +97,16 @@ class ScheduleController {
     static checkConflicts = catchAsync(async (req, res) => {
         const { employeeId, employeeEmail, startTime, endTime, excludeShiftId } = req.body;
 
+        const organizationId =
+            req.organizationContext?.organizationId || req.user?.organizationId;
+
         const result = await SchedulerService.detectConflicts(
             employeeId,
             employeeEmail,
             new Date(startTime),
             new Date(endTime),
-            excludeShiftId
+            excludeShiftId,
+            organizationId
         );
 
         res.json({ success: true, ...result });
