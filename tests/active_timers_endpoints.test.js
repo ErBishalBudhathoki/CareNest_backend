@@ -199,6 +199,37 @@ describe('Active Timers Endpoints', () => {
       expect(res.status).toHaveBeenCalledWith(200);
       expect(messaging.sendEachForMulticast).toHaveBeenCalled();
     });
+
+    it('skips the worked-time row when the caller persists it (end-shift flow)', async () => {
+      req.body = {
+        userEmail: 'test@example.com',
+        organizationId: 'org1',
+        persistWorkedTime: false
+      };
+      const timerDoc = {
+        userEmail: 'test@example.com',
+        clientEmail: 'client@example.com',
+        startTime: new Date(Date.now() - 60000)
+      };
+
+      ActiveTimer.findOneAndDelete.mockImplementation(() => mockQuery(timerDoc));
+      User.findOne.mockImplementation(() => mockQuery(null));
+      User.find.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([])
+        })
+      });
+
+      await ActiveTimerController.stopTimer(req, res);
+
+      // The end-shift flow calls setWorkedTime next, which writes the single,
+      // shift-linked row. Writing here as well double-counted the shift.
+      expect(WorkedTime.create).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true, totalSeconds: expect.any(Number) })
+      );
+    });
   });
 
   describe('getActiveTimers', () => {

@@ -298,7 +298,11 @@ class ActiveTimerController {
    * POST /api/active-timers/stop
    */
   stopTimer = catchAsync(async (req, res) => {
-    const { userEmail, organizationId } = req.body;
+    const { userEmail, organizationId, persistWorkedTime } = req.body;
+    // The end-shift flow saves worked time itself (with the shift linkage), so
+    // it asks the stop endpoint not to write a second row. Default stays true
+    // for older clients that rely on the timer record.
+    const shouldPersistWorkedTime = persistWorkedTime !== false;
     
     if (!userEmail || !organizationId) {
       return res.status(400).json({ 
@@ -340,31 +344,44 @@ class ActiveTimerController {
     const seconds = totalSeconds % 60;
     const formattedTime = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-    await WorkedTime.create({
-      userEmail,
-      clientEmail: timerDoc.clientEmail,
-      organizationId,
-      workDate: startTime,
-      date: startTime,
-      startTime,
-      endTime: stopTime,
-      timeWorked: formattedTime,
-      // Keep totalSeconds for compatibility with existing tests/reporting.
-      totalSeconds,
-      totalHours: totalSeconds / 3600,
-      // Keep shiftDate in legacy-friendly string format for downstream readers.
-      shiftDate: startTime.toISOString().split('T')[0],
-      createdAt: new Date(),
-    });
-    
-    logger.business('Timer stopped and worked time recorded', {
-      action: 'timer_stop',
-      userEmail,
-      clientEmail: timerDoc.clientEmail,
-      organizationId,
-      timeWorked: formattedTime,
-      totalSeconds
-    });
+    if (shouldPersistWorkedTime) {
+      await WorkedTime.create({
+        userEmail,
+        clientEmail: timerDoc.clientEmail,
+        organizationId,
+        workDate: startTime,
+        date: startTime,
+        startTime,
+        endTime: stopTime,
+        timeWorked: formattedTime,
+        // Keep totalSeconds for compatibility with existing tests/reporting.
+        totalSeconds,
+        totalHours: totalSeconds / 3600,
+        // Keep shiftDate in legacy-friendly string format for downstream readers.
+        shiftDate: startTime.toISOString().split('T')[0],
+        createdAt: new Date(),
+      });
+
+      logger.business('Timer stopped and worked time recorded', {
+        action: 'timer_stop',
+        userEmail,
+        clientEmail: timerDoc.clientEmail,
+        organizationId,
+        timeWorked: formattedTime,
+        totalSeconds
+      });
+    } else {
+      // The caller persists worked time through setWorkedTime, which links the
+      // record to the selected shift. Writing here too would double-count it.
+      logger.business('Timer stopped; worked time persisted by caller', {
+        action: 'timer_stop_deferred',
+        userEmail,
+        clientEmail: timerDoc.clientEmail,
+        organizationId,
+        timeWorked: formattedTime,
+        totalSeconds
+      });
+    }
 
     // --- NOTIFICATION LOGIC ---
     // 1. Notify the employee who stopped the timer.
