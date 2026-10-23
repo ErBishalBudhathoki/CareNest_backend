@@ -5,15 +5,13 @@ const Trip = require('../models/Trip');
 const TripService = require('./tripService');
 const OrganizationService = require('./organizationService');
 const { parseFlexibleDate } = require('../utils/dateHelpers');
+const { parseDurationToHours } = require('../utils/timeHelpers');
 
 class EarningsService {
 
-  // Helper: Parse "HH:MM:SS" to decimal hours
+  // Helper: Parse "HH:MM:SS" (or numeric hours) to decimal hours
   parseDurationToHours(timeString) {
-    if (!timeString) return 0;
-    const parts = timeString.split(':').map(Number);
-    if (parts.length !== 3) return 0;
-    return parts[0] + (parts[1] / 60) + (parts[2] / 3600);
+    return parseDurationToHours(timeString);
   }
 
   // Helper: Parse "9:00 AM" to minutes from midnight

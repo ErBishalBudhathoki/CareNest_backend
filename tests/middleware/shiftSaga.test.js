@@ -68,10 +68,19 @@ describe('shift activities', () => {
     const result = await upsertWorkedTimeActivity({ shift });
     expect(mockUpdateOne).toHaveBeenCalledWith(
       { shiftId: 'shift-1' },
-      { $set: expect.objectContaining({ shiftId: 'shift-1', status: 'verified' }) },
+      {
+        $set: expect.objectContaining({
+          shiftId: 'shift-1',
+          status: 'verified',
+          // WorkedTime.timeWorked must be "HH:mm:ss", not decimal hours.
+          timeWorked: '07:30:00',
+          totalHours: 7.5,
+          totalSeconds: 27000,
+        }),
+      },
       { upsert: true },
     );
-    expect(result).toEqual({ shiftId: 'shift-1', timeWorked: 7.5 });
+    expect(result).toEqual({ shiftId: 'shift-1', timeWorked: '07:30:00' });
   });
 
   test('voids WorkedTime and writes an audit trail', async () => {

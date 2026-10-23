@@ -16,6 +16,8 @@ const Organization = require('../models/Organization');
 const { priceValidationService } = require('./priceValidationService');
 const TripService = require('./tripService');
 const logger = require('../config/logger');
+const dateHelpers = require('../utils/dateHelpers');
+const { parseDurationToHours } = require('../utils/timeHelpers');
 
 class InvoiceGenerationService {
   /**
@@ -818,7 +820,7 @@ class InvoiceGenerationService {
         serviceLocationPostcode
       );
 
-      const hoursWorked = parseFloat(workEntry.timeWorked) || 0;
+      const hoursWorked = parseDurationToHours(workEntry.timeWorked);
       
       // Validate pricing before calculations
       if (!pricing || pricing.price === null || pricing.price === undefined || isNaN(pricing.price)) {
@@ -953,24 +955,27 @@ class InvoiceGenerationService {
    */
   async getWorkedTimeData(userEmail, clientEmail, startDate, endDate) {
     try {
-      // Normalize start/end to Date objects for reliable range queries
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-        logger.warn('getWorkedTimeData: Invalid date inputs, using raw values', {
+      // Parse day-first dates (the app's canonical format) and include the
+      // whole final day. Comparing against midnight of `endDate` dropped every
+      // entry logged on the last day of the billing period.
+      const start = dateHelpers.parseFlexibleDate(startDate);
+      const end = dateHelpers.parseFlexibleDate(endDate);
+      if (!start || !end) {
+        logger.warn('getWorkedTimeData: Invalid date inputs', {
           userEmail,
           clientEmail,
           startDate,
           endDate
         });
+        return [];
       }
 
       const workedTimeData = await WorkedTime.find({
         userEmail: userEmail,
         clientEmail: clientEmail,
         date: {
-          $gte: isNaN(start.getTime()) ? startDate : start,
-          $lte: isNaN(end.getTime()) ? endDate : end
+          $gte: dateHelpers.startOfDay(start),
+          $lte: dateHelpers.endOfDay(end)
         }
       });
 

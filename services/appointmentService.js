@@ -1,7 +1,7 @@
 const ClientAssignment = require('../models/ClientAssignment');
 const WorkedTime = require('../models/WorkedTime');
 const logger = require('../config/logger');
-const { parseFlexibleDate, normalizeToIsoDate, getZonedDateParts } = require('../utils/dateHelpers');
+const { parseFlexibleDate, normalizeToIsoDate, getZonedDateParts, zonedWallClockToUtc } = require('../utils/dateHelpers');
 
 // SIL roster shifts are stored in UTC; the mobile app renders card and detail
 // dates/times in the organisation's local zone (Australia/Sydney by default).
@@ -734,20 +734,41 @@ class AppointmentService {
         return (h * 3600) + (m * 60) + s;
       };
 
+      // Build the shift window in the organisation's local zone. Using
+      // `new Date(`${date}T${time}`)` reads the time in the *server's* zone
+      // (UTC in production), which shifted every worked-time start/end by the
+      // Sydney offset and broke overnight detection.
       const combineDateAndTime = (dateValue, timeValue) => {
         if (!dateValue || !timeValue) return null;
-        // Always build from an ISO date part so `new Date()` cannot re-read a
-        // DD/MM/YYYY string as US MM/DD.
         const datePart = normalizeToIsoDate(dateValue);
         if (!datePart) return null;
-        const timePart = timeValue.toString().trim();
-        const parsed = new Date(`${datePart}T${timePart}`);
-        if (!Number.isNaN(parsed.getTime())) return parsed;
-        return null;
+        const match = String(timeValue).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+        if (!match) return null;
+        const [year, month, day] = datePart.split('-').map(Number);
+        if (!year || !month || !day) return null;
+        return zonedWallClockToUtc(
+          year,
+          month,
+          day,
+          Number(match[1]),
+          Number(match[2]),
+          SIL_TIMEZONE
+        );
       };
 
-      const normalizedStartDateTime = combineDateAndTime(shiftDate, shiftStartTime);
-      const normalizedEndDateTime = combineDateAndTime(shiftDate, shiftEndTime);
+      let normalizedStartDateTime = combineDateAndTime(shiftDate, shiftStartTime);
+      let normalizedEndDateTime = combineDateAndTime(shiftDate, shiftEndTime);
+
+      // Overnight shifts end on the following day (e.g. 22:00 -> 01:00).
+      if (
+        normalizedStartDateTime &&
+        normalizedEndDateTime &&
+        normalizedEndDateTime <= normalizedStartDateTime
+      ) {
+        normalizedEndDateTime = new Date(
+          normalizedEndDateTime.getTime() + 24 * 60 * 60 * 1000
+        );
+      }
       const totalSeconds = parseTotalSeconds(timeList);
 
       // SIL shifts are backed by a Shift document, not a ClientAssignment; keep

@@ -110,6 +110,11 @@ describe('appointmentService.setWorkedTime — SIL shift fallback', () => {
     expect(doc.timeWorked).toBe('02:00:00');
     expect(doc.totalHours).toBeCloseTo(2);
     expect(doc.totalSeconds).toBe(7200);
+
+    // The shift window is built in the organisation's zone (Sydney AEDT,
+    // UTC+11 in October), not the server's local zone.
+    expect(doc.startTime.toISOString()).toBe('2026-10-22T22:00:00.000Z');
+    expect(doc.endTime.toISOString()).toBe('2026-10-23T00:00:00.000Z');
   });
 
   test('matches the selected date/time insteads of trusting a stale index', async () => {
@@ -136,7 +141,7 @@ describe('appointmentService.setWorkedTime — SIL shift fallback', () => {
     await AppointmentService.setWorkedTime({
       userEmail: USER_EMAIL,
       clientEmail: CLIENT_EMAIL,
-      timeList: '02:00:00',
+      timeList: '03:00:00',
       shiftIndex: 0,
       shiftDate: '2026-10-23',
       shiftStartTime: '22:00',
@@ -146,6 +151,11 @@ describe('appointmentService.setWorkedTime — SIL shift fallback', () => {
     const doc = WorkedTime.mock.calls[0][0];
     expect(String(doc.silShiftId)).toBe(String(nightShift._id));
     expect(doc.shiftIndex).toBe(1);
+
+    // Overnight: end must roll to the next day (Sydney 22:00 -> 01:00 = 3h).
+    expect(doc.startTime.toISOString()).toBe('2026-10-23T11:00:00.000Z');
+    expect(doc.endTime.toISOString()).toBe('2026-10-23T14:00:00.000Z');
+    expect(doc.endTime.getTime() - doc.startTime.getTime()).toBe(3 * 60 * 60 * 1000);
   });
 
   test('still prefers a real ClientAssignment when one exists', async () => {

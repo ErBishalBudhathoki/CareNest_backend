@@ -16,6 +16,8 @@ async function getDb() {
   return dbClient.db('Invoice');
 }
 
+const { formatDurationFromSeconds } = require('../../utils/timeHelpers');
+
 function calculateHours(start, end, breakMins) {
   const s = new Date(start);
   const e = new Date(end);
@@ -31,6 +33,8 @@ function calculateHours(start, end, breakMins) {
  */
 async function upsertWorkedTimeActivity({ shift }) {
   const shiftId = shift.id || shift._id;
+  const hours = calculateHours(shift.startTime, shift.endTime, shift.breakDuration);
+  const totalSeconds = Math.round(hours * 3600);
   const workedTimeEntry = {
     shiftId,
     userEmail: shift.employeeEmail,
@@ -38,7 +42,11 @@ async function upsertWorkedTimeActivity({ shift }) {
     date: new Date(shift.startTime),
     startTime: new Date(shift.startTime),
     endTime: new Date(shift.endTime),
-    timeWorked: calculateHours(shift.startTime, shift.endTime, shift.breakDuration),
+    // WorkedTime.timeWorked is "HH:mm:ss"; the saga used to write a number,
+    // which breaks every consumer that splits on ':'.
+    timeWorked: formatDurationFromSeconds(totalSeconds),
+    totalSeconds,
+    totalHours: hours,
     providerType: 'standard',
     organizationId: shift.organizationId,
     createdAt: new Date(),

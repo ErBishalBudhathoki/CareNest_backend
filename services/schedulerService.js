@@ -14,6 +14,7 @@ const Client = require('../models/Client');
 const ActiveTimer = require('../models/ActiveTimer');
 const ClientAssignment = require('../models/ClientAssignment');
 const aiSchedulerService = require('./aiSchedulerService');
+const dateHelpers = require('../utils/dateHelpers');
 
 /**
  * Scoring weights for employee matching algorithm
@@ -283,40 +284,62 @@ class SchedulerService {
 
             const assignments = await ClientAssignment.find(assignmentQuery);
 
-            // Format the proposed shift date for comparison
-            const proposedDate = startTime.toISOString().split('T')[0];
-            const proposedStartMinutes = startTime.getHours() * 60 + startTime.getMinutes();
-            const proposedEndMinutes = endTime.getHours() * 60 + endTime.getMinutes();
+            // Compare absolute instants so overnight shifts (22:00 -> 02:00)
+            // and DST boundaries are handled correctly. The previous version
+            // compared minute-of-day values, which made an overnight proposal
+            // look like it ended before it started.
+            const TZ = 'Australia/Sydney';
+            let proposedStart = new Date(startTime);
+            let proposedEnd = new Date(endTime);
+            if (proposedEnd <= proposedStart) {
+                proposedEnd = new Date(proposedEnd.getTime() + 24 * 60 * 60 * 1000);
+            }
+
+            const slotDateKey = (slot) => {
+                // Normalise DD-MM-YYYY / DD/MM/YYYY / ISO to YYYY-MM-DD.
+                return dateHelpers.normalizeToIsoDate(slot.date);
+            };
+
+            const parseSlotTime = (value) => {
+                const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+                if (!match) return null;
+                return { hours: Number(match[1]), minutes: Number(match[2]) };
+            };
 
             for (const assignment of assignments) {
                 const schedule = assignment.schedule || [];
 
                 for (const slot of schedule) {
-                    // Normalize the date
-                    let slotDate = slot.date;
-                    if (slot.date instanceof Date) {
-                        slotDate = slot.date.toISOString().split('T')[0];
-                    } else if (typeof slot.date === 'string') {
-                        // Handle DD-MM-YYYY or YYYY-MM-DD formats
-                        if (slot.date.includes('-') && slot.date.split('-')[0].length === 2) {
-                            const [dd, mm, yyyy] = slot.date.split('-');
-                            slotDate = `${yyyy}-${mm}-${dd}`;
-                        } else {
-                            slotDate = slot.date.split('T')[0];
-                        }
+                    const slotDate = slotDateKey(slot);
+                    if (!slotDate) continue;
+
+                    const startParts = parseSlotTime(slot.startTime);
+                    const endParts = parseSlotTime(slot.endTime);
+                    if (!startParts || !endParts) continue;
+
+                    const [year, month, day] = slotDate.split('-').map(Number);
+                    const slotStart = dateHelpers.zonedWallClockToUtc(
+                        year,
+                        month,
+                        day,
+                        startParts.hours,
+                        startParts.minutes,
+                        TZ
+                    );
+                    let slotEnd = dateHelpers.zonedWallClockToUtc(
+                        year,
+                        month,
+                        day,
+                        endParts.hours,
+                        endParts.minutes,
+                        TZ
+                    );
+                    if (slotEnd <= slotStart) {
+                        slotEnd = new Date(slotEnd.getTime() + 24 * 60 * 60 * 1000);
                     }
 
-                    // Check if dates match
-                    if (slotDate !== proposedDate) continue;
-
-                    // Parse slot times
-                    const [slotStartH, slotStartM] = (slot.startTime || '00:00').split(':').map(Number);
-                    const [slotEndH, slotEndM] = (slot.endTime || '23:59').split(':').map(Number);
-                    const slotStartMinutes = slotStartH * 60 + slotStartM;
-                    const slotEndMinutes = slotEndH * 60 + slotEndM;
-
-                    // Check for time overlap
-                    const hasOverlap = !(proposedEndMinutes <= slotStartMinutes || proposedStartMinutes >= slotEndMinutes);
+                    const hasOverlap =
+                        proposedStart < slotEnd && proposedEnd > slotStart;
 
                     if (hasOverlap) {
                         conflicts.push({
