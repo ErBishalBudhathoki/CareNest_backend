@@ -129,7 +129,17 @@ class ScheduleController {
         const { id } = req.params;
         const updateData = req.body;
 
-        const result = await SchedulerService.updateShift(id, updateData);
+        const organizationId =
+            req.organizationContext?.organizationId || req.user?.organizationId;
+        if (!organizationId) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_ORGANIZATION',
+                error: 'Organization context is required.'
+            });
+        }
+
+        const result = await SchedulerService.updateShift(id, updateData, organizationId);
 
         if (!result.success) {
             return res.status(result.code || 400).json(result);
@@ -145,7 +155,17 @@ class ScheduleController {
     static deleteShift = catchAsync(async (req, res) => {
         const { id } = req.params;
 
-        const result = await SchedulerService.deleteShift(id);
+        const organizationId =
+            req.organizationContext?.organizationId || req.user?.organizationId;
+        if (!organizationId) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_ORGANIZATION',
+                error: 'Organization context is required.'
+            });
+        }
+
+        const result = await SchedulerService.deleteShift(id, organizationId);
 
         if (!result.success) {
             return res.status(result.code || 400).json(result);

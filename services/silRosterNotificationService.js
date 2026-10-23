@@ -75,19 +75,35 @@ async function resolveRecipients(organizationId, staffUserIds = []) {
 
   // 1. Rostered staff.
   if (staffIds.length > 0) {
-    const staff = await User.find({
-      _id: { $in: staffIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) },
+    const candidateIds = staffIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    // Only members of *this* organisation may be notified: roster entries are
+    // client-supplied, so an id from another tenant must not receive the
+    // organisation's roster details.
+    const staffMemberships = await UserOrganization.find({
+      organizationId: orgId,
+      userId: { $in: candidateIds },
+      isActive: true,
     })
-      .select('_id email')
+      .select('userId')
       .lean();
-    for (const user of staff) {
-      const email = (user.email || '').toLowerCase();
-      if (!email) continue;
-      recipients.set(String(user._id), {
-        userId: user._id,
-        email,
-        compulsory: false,
-      });
+    const memberIds = staffMemberships
+      .map((m) => String(m.userId))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (memberIds.length > 0) {
+      const staff = await User.find({ _id: { $in: memberIds } })
+        .select('_id email')
+        .lean();
+      for (const user of staff) {
+        const email = (user.email || '').toLowerCase();
+        if (!email) continue;
+        recipients.set(String(user._id), {
+          userId: user._id,
+          email,
+          compulsory: false,
+        });
+      }
     }
   }
 

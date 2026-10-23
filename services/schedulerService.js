@@ -266,18 +266,22 @@ class SchedulerService {
      * @param {Date} endTime - Proposed end time
      * @returns {Promise<Object>} { hasConflict: boolean, conflicts: [] }
      */
-    static async checkAssignmentConflicts(employeeEmail, startTime, endTime) {
+    static async checkAssignmentConflicts(employeeEmail, startTime, endTime, organizationId = null) {
         try {
             const conflicts = [];
 
             const { toSafeString } = require('../utils/security');
             const safeEmail = toSafeString(employeeEmail);
 
-            // Get all active assignments for this employee
-            const assignments = await ClientAssignment.find({
+            // Get all active assignments for this employee (tenant-scoped when
+            // the caller's organisation is known).
+            const assignmentQuery = {
                 userEmail: safeEmail,
                 isActive: true
-            });
+            };
+            if (organizationId) assignmentQuery.organizationId = String(organizationId);
+
+            const assignments = await ClientAssignment.find(assignmentQuery);
 
             // Format the proposed shift date for comparison
             const proposedDate = startTime.toISOString().split('T')[0];
@@ -352,7 +356,7 @@ class SchedulerService {
      * @param {string} excludeShiftId - Shift ID to exclude (for updates)
      * @returns {Promise<Object>} { hasConflict: boolean, conflicts: [], message: string }
      */
-    static async detectConflicts(employeeId, employeeEmail, startTime, endTime, excludeShiftId = null) {
+    static async detectConflicts(employeeId, employeeEmail, startTime, endTime, excludeShiftId = null, organizationId = null) {
         try {
             const conflicts = [];
 
@@ -368,6 +372,13 @@ class SchedulerService {
                     }
                 ]
             };
+
+            // A worker can belong to more than one organisation; only shifts
+            // in the caller's tenant count as conflicts (and only those may be
+            // echoed back in the error payload).
+            if (organizationId) {
+                shiftQuery.organizationId = String(organizationId);
+            }
 
             // Filter by employee
             if (employeeId) {
@@ -402,7 +413,8 @@ class SchedulerService {
                 const assignmentConflicts = await this.checkAssignmentConflicts(
                     employeeEmail,
                     new Date(startTime),
-                    new Date(endTime)
+                    new Date(endTime),
+                    organizationId
                 );
                 if (assignmentConflicts.hasConflict) {
                     conflicts.push(...assignmentConflicts.conflicts);
@@ -928,17 +940,77 @@ class SchedulerService {
      * @param {Object} updateData - Fields to update
      * @returns {Promise<Object>} Updated shift
      */
-    static async updateShift(shiftId, updateData) {
+    static async updateShift(shiftId, updateData, organizationId = null) {
         try {
+            const orgId = organizationId ? String(organizationId) : null;
+            const shiftScope = orgId
+                ? { _id: shiftId, organizationId: orgId }
+                : { _id: shiftId };
+
+            // Only fields a roster edit legitimately changes. Without this a
+            // caller could move a shift to another tenant or rewrite its
+            // roster linkage.
+            const ALLOWED_UPDATE_FIELDS = [
+                'employeeEmail',
+                'status',
+                'startTime',
+                'endTime',
+                'shiftType',
+                'notes',
+                'breakDuration',
+                'supportItems',
+                'location',
+                'clientId',
+                'clientEmail',
+                'isActive'
+            ];
+            const safeUpdate = {};
+            for (const field of ALLOWED_UPDATE_FIELDS) {
+                if (updateData[field] !== undefined) safeUpdate[field] = updateData[field];
+            }
+
+            // Resolve the employee inside the caller's organization. Assigning
+            // a worker who is not a member would leak the roster (and its
+            // notifications) to another tenant.
+            if (safeUpdate.employeeEmail) {
+                const email = String(safeUpdate.employeeEmail).trim().toLowerCase();
+                if (!email) {
+                    return { success: false, error: 'Invalid employee email', code: 400 };
+                }
+                const employee = await User.findOne({ email }).select('_id email').lean();
+                if (!employee) {
+                    return { success: false, error: 'Employee not found', code: 404 };
+                }
+                if (orgId) {
+                    const UserOrganization = require('../models/UserOrganization');
+                    const membership = await UserOrganization.findOne({
+                        userId: employee._id,
+                        organizationId: orgId,
+                        isActive: true
+                    }).lean();
+                    const belongsToOrg =
+                        !!membership || String(employee.organizationId || '') === orgId;
+                    if (!belongsToOrg) {
+                        return {
+                            success: false,
+                            error: 'Employee does not belong to this organization',
+                            code: 403
+                        };
+                    }
+                }
+                safeUpdate.employeeEmail = email;
+                safeUpdate.employeeId = employee._id;
+            }
+
             // Check conflicts if changing employee or time
-            if (updateData.employeeEmail || updateData.startTime || updateData.endTime) {
-                const existingShift = await Shift.findById(shiftId);
+            if (safeUpdate.employeeEmail || safeUpdate.startTime || safeUpdate.endTime) {
+                const existingShift = await Shift.findOne(shiftScope);
 
                 if (existingShift) {
-                    const employeeEmail = updateData.employeeEmail || existingShift.employeeEmail;
-                    const employeeId = updateData.employeeId || existingShift.employeeId;
-                    const startTime = updateData.startTime || existingShift.startTime;
-                    const endTime = updateData.endTime || existingShift.endTime;
+                    const employeeEmail = safeUpdate.employeeEmail || existingShift.employeeEmail;
+                    const employeeId = safeUpdate.employeeId || existingShift.employeeId;
+                    const startTime = safeUpdate.startTime || existingShift.startTime;
+                    const endTime = safeUpdate.endTime || existingShift.endTime;
 
                     if (employeeEmail) {
                         const conflictCheck = await this.detectConflicts(
@@ -946,7 +1018,8 @@ class SchedulerService {
                             employeeEmail,
                             new Date(startTime),
                             new Date(endTime),
-                            shiftId
+                            shiftId,
+                            orgId
                         );
 
                         if (conflictCheck.hasConflict) {
@@ -961,22 +1034,12 @@ class SchedulerService {
                 }
             }
 
-            // Resolve the employee's user id from the email so downstream
-            // consumers that count assigned staff (e.g. SIL buildRoster, which
-            // reads shift.employeeId) treat the shift as assigned.
-            if (updateData.employeeEmail && !updateData.employeeId) {
-                const emp = await User.findOne({ email: updateData.employeeEmail })
-                    .select('_id')
-                    .lean();
-                if (emp) updateData.employeeId = emp._id;
-            }
-
             // Apply update
-            updateData.updatedAt = new Date();
+            safeUpdate.updatedAt = new Date();
 
             const result = await Shift.findOneAndUpdate(
-                { _id: shiftId },
-                { $set: updateData },
+                shiftScope,
+                { $set: safeUpdate },
                 { new: true }
             );
 
@@ -1009,10 +1072,15 @@ class SchedulerService {
      * @param {string} shiftId - Shift ID
      * @returns {Promise<Object>} Result
      */
-    static async deleteShift(shiftId) {
+    static async deleteShift(shiftId, organizationId = null) {
         try {
+            const orgId = organizationId ? String(organizationId) : null;
+            const shiftScope = orgId
+                ? { _id: shiftId, organizationId: orgId }
+                : { _id: shiftId };
+
             const result = await Shift.findOneAndUpdate(
-                { _id: shiftId },
+                shiftScope,
                 {
                     $set: {
                         status: 'cancelled',

@@ -72,9 +72,29 @@ const userFindImpl = (users) => (query = {}) => {
   return leanFind(docs);
 };
 
+/**
+ * Filter-aware `UserOrganization.find` stand-in. The service queries it twice:
+ * once for the rostered staff (userId filter) and once for owner/admins (role
+ * filter). Returning every row for both queries would treat an owner as a
+ * rostered staff member and hide the compulsory/optional split.
+ */
+const orgFindImpl = (rows) => (query = {}) => {
+  const ids = (query?.userId?.$in || []).map(String);
+  const docs = ids.length
+    ? rows.filter((row) => ids.includes(String(row.userId)))
+    : rows.filter((row) => {
+        const roles = Array.isArray(row.role) ? row.role : [row.role];
+        return roles.some((role) => ['owner', 'admin'].includes(role));
+      });
+  return {
+    select: () => ({ lean: async () => docs }),
+    lean: async () => docs,
+  };
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
-  UserOrganization.find.mockReturnValue({ lean: async () => [] });
+  UserOrganization.find.mockImplementation(orgFindImpl([]));
   User.find.mockImplementation(userFindImpl([]));
   // Actor-label lookup default: no user row -> the raw actor value is shown.
   User.findOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
@@ -94,11 +114,12 @@ beforeEach(() => {
 
 describe('resolveRecipients', () => {
   test('notifies rostered staff and marks owner/admin as compulsory', async () => {
-    UserOrganization.find.mockReturnValue({
-      lean: async () => [
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([
+        { userId: WORKER_A, role: 'employee' },
         { userId: OWNER, role: 'owner', permissions: ['*'] },
-      ],
-    });
+      ])
+    );
     User.find.mockImplementation(
       userFindImpl([
         { _id: WORKER_A, email: 'worker.a@org.com' },
@@ -118,9 +139,9 @@ describe('resolveRecipients', () => {
   });
 
   test('deduplicates a rosterer who is also the owner', async () => {
-    UserOrganization.find.mockReturnValue({
-      lean: async () => [{ userId: OWNER, role: 'admin', permissions: ['*'] }],
-    });
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([{ userId: OWNER, role: 'admin', permissions: ['*'] }])
+    );
     User.find.mockImplementation(
       userFindImpl([{ _id: OWNER, email: 'owner@org.com' }])
     );
@@ -147,9 +168,13 @@ describe('notifyRosterPublished', () => {
   };
 
   test('persists one notification per recipient and pushes to device tokens', async () => {
-    UserOrganization.find.mockReturnValue({
-      lean: async () => [{ userId: OWNER, role: 'owner', permissions: ['*'] }],
-    });
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([
+        { userId: WORKER_A, role: 'employee' },
+        { userId: WORKER_B, role: 'employee' },
+        { userId: OWNER, role: 'owner', permissions: ['*'] },
+      ])
+    );
     User.find.mockImplementation(
       userFindImpl([
         { _id: WORKER_A, email: 'worker.a@org.com' },
@@ -208,9 +233,12 @@ describe('notifyRosterPublished', () => {
   });
 
   test('owner/admin still receives it when they opted out of shift-change alerts', async () => {
-    UserOrganization.find.mockReturnValue({
-      lean: async () => [{ userId: OWNER, role: 'admin', permissions: ['*'] }],
-    });
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([
+        { userId: WORKER_A, role: 'employee' },
+        { userId: OWNER, role: 'admin', permissions: ['*'] },
+      ])
+    );
     User.find.mockImplementation(
       userFindImpl([
         { _id: OWNER, email: 'owner@org.com' },
@@ -242,6 +270,9 @@ describe('notifyRosterPublished', () => {
   });
 
   test('never throws when push delivery fails (history is still written)', async () => {
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([{ userId: WORKER_A, role: 'employee' }])
+    );
     User.find.mockImplementation(
       userFindImpl([{ _id: WORKER_A, email: 'worker.a@org.com' }])
     );
@@ -270,10 +301,41 @@ describe('notifyRosterPublished', () => {
     expect(Notification.insertMany).not.toHaveBeenCalled();
   });
 
-  test('falls back to the raw actor value when no user row matches the email', async () => {
-    UserOrganization.find.mockReturnValue({
-      lean: async () => [{ userId: OWNER, role: 'owner', permissions: ['*'] }],
+  test('does not notify staff ids that are not members of this organisation', async () => {
+    // Roster entries are client-supplied: WORKER_B is a valid user id but has
+    // no membership in ORG, so publishing must not leak the roster to them.
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([
+        { userId: WORKER_A, role: 'employee' },
+        { userId: OWNER, role: 'owner', permissions: ['*'] },
+      ])
+    );
+    User.find.mockImplementation(
+      userFindImpl([
+        { _id: WORKER_A, email: 'worker.a@org.com' },
+        { _id: WORKER_B, email: 'worker.b@org.com' },
+        { _id: OWNER, email: 'owner@org.com' },
+      ])
+    );
+
+    const result = await notificationService.notifyRosterPublished({
+      organizationId: ORG,
+      roster,
     });
+
+    expect(result.delivered).toBe(2);
+    const recipientIds = Notification.insertMany.mock.calls[0][0].map((n) =>
+      String(n.userId),
+    );
+    expect(recipientIds).not.toContain(String(WORKER_B));
+    expect(recipientIds).toContain(String(WORKER_A));
+    expect(recipientIds).toContain(String(OWNER));
+  });
+
+  test('falls back to the raw actor value when no user row matches the email', async () => {
+    UserOrganization.find.mockImplementation(
+      orgFindImpl([{ userId: OWNER, role: 'owner', permissions: ['*'] }])
+    );
     User.find.mockImplementation(
       userFindImpl([{ _id: OWNER, email: 'owner@org.com' }])
     );

@@ -33,6 +33,9 @@ const workedTimeSchema = new mongoose.Schema({
   shiftIndex: { type: Number, default: 0 },
   shiftKey: { type: String },
   assignedClientId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientAssignment' },
+  // SIL roster shifts are not ClientAssignments; link the saved hours to the
+  // Shift document instead so payroll/rostering can trace them.
+  silShiftId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shift', index: true },
   ndisItem: { type: mongoose.Schema.Types.Mixed },
   highIntensity: { type: Boolean, default: false },
   startTime: { type: Date },

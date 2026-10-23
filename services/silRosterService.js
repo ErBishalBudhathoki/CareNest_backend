@@ -247,6 +247,56 @@ class SILRosterService {
     if (!roster) return null;
 
     if (Array.isArray(entries)) {
+      // Entries are client-supplied: reject any that reference shifts or staff
+      // outside this organisation, otherwise a roster could be pointed at
+      // another tenant's data and leak it through publish notifications.
+      const mongoose = require('mongoose');
+      const UserOrganization = require('../models/UserOrganization');
+
+      const shiftIds = entries
+        .map((entry) => entry && entry.shiftId)
+        .filter((value) => value && mongoose.Types.ObjectId.isValid(String(value)))
+        .map(String);
+      if (shiftIds.length > 0) {
+        const ownedShifts = await Shift.find({
+          _id: { $in: shiftIds },
+          organizationId: String(organizationId),
+        })
+          .select('_id')
+          .lean();
+        const ownedIds = new Set(ownedShifts.map((shift) => String(shift._id)));
+        const foreign = shiftIds.filter((shiftId) => !ownedIds.has(shiftId));
+        if (foreign.length > 0) {
+          const err = new Error('Roster entries contain shifts from another organization.');
+          err.statusCode = 403;
+          err.code = 'CROSS_ORG_SHIFT';
+          throw err;
+        }
+      }
+
+      const staffIds = entries.flatMap((entry) =>
+        Array.isArray(entry && entry.staffUserIds) ? entry.staffUserIds : [],
+      )
+        .filter((value) => value && mongoose.Types.ObjectId.isValid(String(value)))
+        .map(String);
+      if (staffIds.length > 0) {
+        const memberships = await UserOrganization.find({
+          organizationId: String(organizationId),
+          userId: { $in: staffIds },
+          isActive: true,
+        })
+          .select('userId')
+          .lean();
+        const memberIds = new Set(memberships.map((m) => String(m.userId)));
+        const foreignStaff = staffIds.filter((staffId) => !memberIds.has(staffId));
+        if (foreignStaff.length > 0) {
+          const err = new Error('Roster entries contain staff from another organization.');
+          err.statusCode = 403;
+          err.code = 'CROSS_ORG_STAFF';
+          throw err;
+        }
+      }
+
       roster.entries = entries.map((entry) => ({
         ...entry,
         compliance: this._complianceFor(entry),

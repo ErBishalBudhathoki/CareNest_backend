@@ -619,15 +619,27 @@ class AppointmentService {
         throw new Error('Missing required fields: userEmail, clientEmail, timeList');
       }
 
-      // Find the assigned client record
-      const assignedClient = await ClientAssignment.findOne({
+      // Find the assigned client record. SIL roster shifts have no
+      // ClientAssignment row, so fall back to the worker's SIL shifts for the
+      // participant (same source the details screen reads).
+      let assignedClient = await ClientAssignment.findOne({
         userEmail: safeUserEmail,
         clientEmail: safeClientEmail,
         isActive: true
       });
 
+      // buildSilAppointmentDetails returns the assignment-shaped object
+      // (schedule + clientDetails) for the worker's SIL shifts.
+      let silAssignment = null;
       if (!assignedClient) {
-        throw new Error('Assigned client not found');
+        silAssignment = await this.buildSilAppointmentDetails(
+          safeUserEmail,
+          safeClientEmail
+        );
+        if (!silAssignment) {
+          throw new Error('Assigned client not found');
+        }
+        assignedClient = silAssignment;
       }
 
       // Get shift details from the assigned client record
@@ -639,22 +651,42 @@ class AppointmentService {
       let shiftHighIntensity = false;
 
       // Extract shift details based on shiftIndex
-      if (assignedClient.schedule && assignedClient.schedule.length > shiftIndex) {
+      let effectiveShiftIndex = shiftIndex || 0;
+
+      // SIL clients: prefer the explicit date/time the caller selected. The
+      // details payload is rebuilt from live shifts, so an index captured
+      // earlier can drift if another shift was materialised in between.
+      if (silAssignment && _shiftDateFromRequest) {
+        const requestedDate = normalizeToIsoDate(_shiftDateFromRequest);
+        const requestedStart = _shiftStartTimeFromRequest
+          ? String(_shiftStartTimeFromRequest).slice(0, 5)
+          : null;
+        if (requestedDate) {
+          const matchIndex = (assignedClient.schedule || []).findIndex(
+            (entry) =>
+              entry.date === requestedDate &&
+              (!requestedStart || entry.startTime === requestedStart)
+          );
+          if (matchIndex >= 0) effectiveShiftIndex = matchIndex;
+        }
+      }
+
+      if (assignedClient.schedule && assignedClient.schedule.length > effectiveShiftIndex) {
         // Use new schedule array format
-        const shift = assignedClient.schedule[shiftIndex];
+        const shift = assignedClient.schedule[effectiveShiftIndex];
         shiftDate = shift.date;
         shiftStartTime = shift.startTime;
         shiftEndTime = shift.endTime;
         shiftBreak = shift.break;
         shiftNdisItem = shift.ndisItem || null;
         shiftHighIntensity = !!shift.highIntensity;
-      } else if (assignedClient.dateList && assignedClient.dateList.length > shiftIndex) {
+      } else if (assignedClient.dateList && assignedClient.dateList.length > effectiveShiftIndex) {
         // Fallback to legacy format - though schema might not have these if strict
         // But assuming mixed usage or migration
-        shiftDate = assignedClient.dateList[shiftIndex];
-        shiftStartTime = assignedClient.startTimeList ? assignedClient.startTimeList[shiftIndex] : null;
-        shiftEndTime = assignedClient.endTimeList ? assignedClient.endTimeList[shiftIndex] : null;
-        shiftBreak = assignedClient.breakList ? assignedClient.breakList[shiftIndex] : null;
+        shiftDate = assignedClient.dateList[effectiveShiftIndex];
+        shiftStartTime = assignedClient.startTimeList ? assignedClient.startTimeList[effectiveShiftIndex] : null;
+        shiftEndTime = assignedClient.endTimeList ? assignedClient.endTimeList[effectiveShiftIndex] : null;
+        shiftBreak = assignedClient.breakList ? assignedClient.breakList[effectiveShiftIndex] : null;
       }
 
       // Strict behavior: selected shift index must resolve to an actual shift.
@@ -718,6 +750,17 @@ class AppointmentService {
       const normalizedEndDateTime = combineDateAndTime(shiftDate, shiftEndTime);
       const totalSeconds = parseTotalSeconds(timeList);
 
+      // SIL shifts are backed by a Shift document, not a ClientAssignment; keep
+      // the link so payroll/rostering can trace the saved hours to the shift.
+      const mongoose = require('mongoose');
+      const selectedSilShiftId = silAssignment
+        ? (assignedClient.schedule?.[effectiveShiftIndex]?.shiftId || null)
+        : null;
+      const silShiftId =
+        selectedSilShiftId && mongoose.Types.ObjectId.isValid(selectedSilShiftId)
+          ? new mongoose.Types.ObjectId(selectedSilShiftId)
+          : undefined;
+
       // Create worked time record with specific shift details
       const workedTimeRecord = new WorkedTime({
         userEmail: userEmail,
@@ -728,8 +771,9 @@ class AppointmentService {
         timeWorked: timeList,
         totalSeconds: totalSeconds,
         totalHours: parseTotalHours(timeList),
-        shiftIndex: shiftIndex || 0,
-        assignedClientId: assignedClient._id,
+        shiftIndex: effectiveShiftIndex,
+        assignedClientId: silAssignment ? undefined : assignedClient._id,
+        silShiftId,
         // Add specific shift details for better linking
         shiftDate: shiftDateKey,
         shiftStartTime: shiftStartTime,
