@@ -95,7 +95,7 @@ router.get('/:organizationId', async (req, res) => {
     }
     
     // Get worked time records for the organization (including both active and completed shifts)
-    let workedTimeRecords = await db.collection("workedTime").aggregate([
+    let workedTimeRecords = await db.collection("worked_times").aggregate([
       {
         $lookup: {
           from: "clientAssignments",

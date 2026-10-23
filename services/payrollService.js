@@ -44,7 +44,7 @@ class PayrollService {
                 isActive: true
             };
 
-            const shifts = await db.collection('workedTime').find(query).toArray();
+            const shifts = await db.collection('worked_times').find(query).toArray();
 
             // Phase 1: resolve public holidays for the org so the SCHADS engine
             // classifies holiday hours correctly. Best-effort.

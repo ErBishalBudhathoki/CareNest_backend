@@ -142,7 +142,7 @@ async function seed() {
 
             // Create Worked Time Records for these shifts
             for (const shift of schedule) {
-                await db.collection('workedTime').updateOne(
+                await db.collection('worked_times').updateOne(
                     {
                         userEmail: pair.user,
                         clientEmail: pair.client,

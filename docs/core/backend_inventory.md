@@ -224,8 +224,7 @@ backend/
 - `controllers/invoiceController.js` (via services)
 - `services/invoiceGenerationService.js`
 - `routes/invoiceGeneration.js`
-- `invoice_generation_endpoints.js`
-- `invoice_generation_service.js`
+- `services/invoiceGenerationService.js` (active; the old root-level duplicate was removed)
 
 **Capabilities:**
 - Client assignment-based invoice generation

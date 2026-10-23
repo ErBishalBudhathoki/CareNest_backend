@@ -1,7 +1,14 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const logger = require('../../config/logger');
+const { getZonedDateParts } = require('../../utils/dateHelpers');
 
 const uri = process.env.MONGODB_URI;
+
+// Canonical collection (see models/WorkedTime.js). The saga used to write to
+// the legacy `workedTime` collection, which no reader looks at, so completed
+// shifts disappeared from earnings and invoicing.
+const WORKED_TIME_COLLECTION = 'worked_times';
+const TIMEZONE = 'Australia/Sydney';
 
 let dbClient = null;
 
@@ -17,6 +24,26 @@ async function getDb() {
 }
 
 const { formatDurationFromSeconds } = require('../../utils/timeHelpers');
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function zonedDateKey(date) {
+  const p = getZonedDateParts(date, TIMEZONE);
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+function zonedTimeKey(date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value || '00';
+  let hour = parseInt(get('hour'), 10);
+  if (hour === 24) hour = 0;
+  return `${pad2(hour)}:${get('minute')}`;
+}
 
 function calculateHours(start, end, breakMins) {
   const s = new Date(start);
@@ -54,7 +81,44 @@ async function upsertWorkedTimeActivity({ shift }) {
   };
 
   const db = await getDb();
-  await db.collection('workedTime').updateOne(
+
+  // Deduplicate against a clock-in for the same shift. Workers who clock in
+  // through the app already have a worked_times row (linked by silShiftId or
+  // by date + start); writing the saga row too would double-pay the shift.
+  const shiftStart = new Date(shift.startTime);
+  const shiftIdValue = String(shiftId);
+  const objectId = ObjectId.isValid(shiftIdValue)
+    ? new ObjectId(shiftIdValue)
+    : null;
+  const duplicateQuery = {
+    isActive: { $ne: false },
+    $or: [
+      { shiftId: shiftIdValue },
+      ...(objectId ? [{ shiftId: objectId }, { silShiftId: objectId }] : []),
+      {
+        userEmail: String(shift.employeeEmail || '').toLowerCase(),
+        clientEmail: String(shift.clientEmail || '').toLowerCase(),
+        shiftDate: zonedDateKey(shiftStart),
+        shiftStartTime: zonedTimeKey(shiftStart),
+      },
+    ],
+  };
+
+  const existing = await db
+    .collection(WORKED_TIME_COLLECTION)
+    .findOne(duplicateQuery);
+  if (existing) {
+    logger.info(
+      `[Temporal] WorkedTime already exists for shift ${shiftId}; skipping saga write`,
+    );
+    return {
+      shiftId,
+      timeWorked: existing.timeWorked ?? workedTimeEntry.timeWorked,
+      skipped: true,
+    };
+  }
+
+  await db.collection(WORKED_TIME_COLLECTION).updateOne(
     { shiftId: workedTimeEntry.shiftId },
     { $set: workedTimeEntry },
     { upsert: true },
@@ -72,11 +136,11 @@ async function upsertWorkedTimeActivity({ shift }) {
 async function voidShiftArtifactsActivity({ shiftId, organizationId }) {
   const db = await getDb();
   const result = await db
-    .collection('workedTime')
+    .collection(WORKED_TIME_COLLECTION)
     .deleteMany({ shiftId, organizationId });
   await db.collection('auditLogs').insertOne({
     action: 'SHIFT_CANCEL_COMPENSATION',
-    entityType: 'workedTime',
+    entityType: WORKED_TIME_COLLECTION,
     entityId: String(shiftId),
     organizationId,
     details: { deletedCount: result.deletedCount || 0 },

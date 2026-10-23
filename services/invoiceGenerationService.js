@@ -505,38 +505,71 @@ class InvoiceGenerationService {
     const lineItems = [];
     const start = new Date(startDate);
     const end = new Date(endDate);
+    const workedEntries = Array.isArray(workedTimeData) ? workedTimeData : [];
 
-    // Process assignment schedule data
+    const timeKey = (value) => {
+      if (!value) return null;
+      const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+      if (!match) return null;
+      return `${String(Number(match[1])).padStart(2, '0')}:${match[2]}`;
+    };
+
+    // Actual clocked hours take precedence: billing should follow what the
+    // worker actually worked, matching the Flutter enhanced-invoice processor.
+    for (const workEntry of workedEntries) {
+      const workedDate = dateHelpers.parseFlexibleDate(
+        workEntry.shiftDate || workEntry.date || workEntry.workDate
+      );
+      if (!workedDate || workedDate < start || workedDate > end) continue;
+
+      const lineItem = await this.createLineItemFromWorkedTime(
+        workEntry,
+        assignment,
+        client
+      );
+
+      if (lineItem) {
+        lineItems.push(lineItem);
+      }
+    }
+
+    // Fall back to the assigned schedule only for shifts that were not clocked.
     if (assignment.schedule && Array.isArray(assignment.schedule)) {
+      const isClocked = (scheduleItem) => {
+        const scheduleDate = dateHelpers.normalizeToIsoDate(scheduleItem.date);
+        if (!scheduleDate) return false;
+        const scheduleStart = timeKey(scheduleItem.startTime);
+
+        return workedEntries.some((workEntry) => {
+          const workedDate = dateHelpers.normalizeToIsoDate(
+            workEntry.shiftDate || workEntry.date || workEntry.workDate
+          );
+          if (workedDate !== scheduleDate) return false;
+          const workedStart = timeKey(workEntry.shiftStartTime);
+          // If the clock-in has no start time, treat the day as covered so the
+          // shift is never billed twice.
+          if (!workedStart || !scheduleStart) return true;
+          return workedStart === scheduleStart;
+        });
+      };
+
       for (const scheduleItem of assignment.schedule) {
-        const scheduleDate = new Date(scheduleItem.date);
-        
+        const scheduleDate = dateHelpers.parseFlexibleDate(scheduleItem.date);
+        if (!scheduleDate) continue;
+
         // Check if schedule date falls within the invoice period
         if (scheduleDate >= start && scheduleDate <= end) {
+          if (isClocked(scheduleItem)) continue;
+
           const lineItem = await this.createLineItemFromSchedule(
             scheduleItem,
             assignment,
             client
           );
-          
+
           if (lineItem) {
             lineItems.push(lineItem);
           }
-        }
-      }
-    }
-
-    // If no schedule data, fall back to worked time data
-    if (lineItems.length === 0 && workedTimeData.length > 0) {
-      for (const workEntry of workedTimeData) {
-        const lineItem = await this.createLineItemFromWorkedTime(
-          workEntry,
-          assignment,
-          client
-        );
-        
-        if (lineItem) {
-          lineItems.push(lineItem);
         }
       }
     }

@@ -53,7 +53,7 @@ const MULTIPLIER_TABLES = [
       night: 1.15, // 15% loading
       // Weekend
       saturday: 1.5, // 150%
-      sunday: 1.75, // 175%
+      sunday: 2.0, // 200% (casual: 225% via additive casual loading)
       // Public holiday
       publicHoliday: 2.5, // 250%
       // Overtime (first 2h, thereafter)

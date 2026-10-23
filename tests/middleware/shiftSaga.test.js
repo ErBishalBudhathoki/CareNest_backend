@@ -4,6 +4,7 @@
  * (idempotent IDs) instead of doing inline DB work.
  */
 const mockUpdateOne = jest.fn();
+const mockFindOne = jest.fn();
 const mockDeleteMany = jest.fn();
 const mockInsertOne = jest.fn();
 const mockConnect = jest.fn();
@@ -14,14 +15,29 @@ jest.mock('mongodb', () => ({
     topology: { isConnected: () => true },
     db: jest.fn(() => ({
       collection: jest.fn((name) => {
-        if (name === 'workedTime') {
-          return { updateOne: mockUpdateOne, deleteMany: mockDeleteMany };
+        if (name === 'worked_times') {
+          return {
+            updateOne: mockUpdateOne,
+            deleteMany: mockDeleteMany,
+            findOne: mockFindOne,
+          };
         }
         return { insertOne: mockInsertOne };
       }),
     })),
   })),
   ServerApiVersion: { v1: '1' },
+  ObjectId: class ObjectId {
+    constructor(value) {
+      this.value = value;
+    }
+    static isValid(value) {
+      return /^[a-f0-9]{24}$/i.test(String(value || ''));
+    }
+    toString() {
+      return String(this.value);
+    }
+  },
 }));
 
 jest.mock('../../config/logger', () => ({
@@ -61,6 +77,7 @@ const shift = {
 describe('shift activities', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockFindOne.mockResolvedValue(null);
   });
 
   test('upserts WorkedTime keyed by shiftId', async () => {
@@ -81,6 +98,20 @@ describe('shift activities', () => {
       { upsert: true },
     );
     expect(result).toEqual({ shiftId: 'shift-1', timeWorked: '07:30:00' });
+  });
+
+
+  test('does not double-write when a clock-in already exists for the shift', async () => {
+    mockFindOne.mockResolvedValue({ timeWorked: '06:00:00' });
+
+    const result = await upsertWorkedTimeActivity({ shift });
+
+    expect(mockUpdateOne).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      shiftId: 'shift-1',
+      timeWorked: '06:00:00',
+      skipped: true,
+    });
   });
 
   test('voids WorkedTime and writes an audit trail', async () => {

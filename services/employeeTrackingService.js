@@ -248,7 +248,7 @@ class EmployeeTrackingService {
       }
       
       // Get worked time records for the organization
-      const workedTimeRecords = await db.collection("workedTime").aggregate([
+      const workedTimeRecords = await db.collection("worked_times").aggregate([
         {
           $lookup: {
             from: "clientAssignments",

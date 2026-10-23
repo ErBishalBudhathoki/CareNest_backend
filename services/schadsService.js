@@ -308,7 +308,11 @@ class SCHADSService {
     const baseRate = profile.baseRate || 0;
     const mult = profile.multipliers || schadsRates.resolveMultipliers();
     const casualLoading = profile.isCasual ? mult.casualLoading || 0 : 0;
-    const loaded = 1 + casualLoading;
+    // SCHADS casual rates add the 25% loading to the *penalty percentage*
+    // (e.g. Saturday 150% -> 175%, Sunday 200% -> 225%, PH 250% -> 275%).
+    // Applying it multiplicatively produced 187.5% / 250% / 312.5%, which
+    // disagreed with the rate editor and the legacy payroll table.
+    const penaltyRate = (penalty) => baseRate * ((penalty || 1) + casualLoading);
 
     // Legacy mode: `categoryRates` supplies fully-resolved dollar rates per
     // category (already including casual loading / penalties). When present we
@@ -322,22 +326,22 @@ class SCHADSService {
       }
       switch (category) {
         case CATEGORIES.AFTERNOON:
-          return baseRate * (mult.afternoon || 1) * loaded;
+          return penaltyRate(mult.afternoon);
         case CATEGORIES.NIGHT:
-          return baseRate * (mult.night || 1) * loaded;
+          return penaltyRate(mult.night);
         case CATEGORIES.SATURDAY:
-          return baseRate * (mult.saturday || 1) * loaded;
+          return penaltyRate(mult.saturday);
         case CATEGORIES.SUNDAY:
-          return baseRate * (mult.sunday || 1) * loaded;
+          return penaltyRate(mult.sunday);
         case CATEGORIES.PUBLIC_HOLIDAY:
-          return baseRate * (mult.publicHoliday || 1) * loaded;
+          return penaltyRate(mult.publicHoliday);
         case CATEGORIES.OVERTIME_1:
           return baseRate * (mult.overtimeFirst2h || 1.5);
         case CATEGORIES.OVERTIME_AFTER:
           return baseRate * (mult.overtimeAfter2h || 2.0);
         case CATEGORIES.BASE:
         default:
-          return baseRate * (mult.base || 1) * loaded;
+          return baseRate * (mult.base || 1) * (1 + casualLoading);
       }
     };
 

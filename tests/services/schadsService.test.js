@@ -196,8 +196,59 @@ describe('SCHADS rate table', () => {
   test('multipliers are effective-dated and include casual loading', () => {
     const m = schadsRates.resolveMultipliers('MA000100', '2026-01-01');
     expect(m.saturday).toBe(1.5);
-    expect(m.sunday).toBe(1.75);
+    expect(m.sunday).toBe(2.0);
     expect(m.publicHoliday).toBe(2.5);
     expect(m.casualLoading).toBe(0.25);
+  });
+});
+
+describe('SCHADS casual loading is additive', () => {
+  const profile = (isCasual) => ({
+    timezone: TZ,
+    baseRate: 25,
+    isCasual,
+  });
+
+  test('casual Saturday is 175% (not 187.5%)', () => {
+    const shiftData = shift(
+      '2026-06-06T09:00:00+10:00', // Saturday
+      '2026-06-06T17:00:00+10:00',
+    );
+    const permanent = schadsService.calculateShiftAmount(shiftData, profile(false));
+    const casual = schadsService.calculateShiftAmount(shiftData, profile(true));
+    expect(permanent.amount.gross).toBe(300); // 8h * 25 * 1.5
+    expect(casual.amount.gross).toBe(350); // 8h * 25 * 1.75
+  });
+
+  test('casual Sunday is 225% (not 250%)', () => {
+    const shiftData = shift(
+      '2026-06-07T09:00:00+10:00', // Sunday
+      '2026-06-07T17:00:00+10:00',
+    );
+    const permanent = schadsService.calculateShiftAmount(shiftData, profile(false));
+    const casual = schadsService.calculateShiftAmount(shiftData, profile(true));
+    expect(permanent.amount.gross).toBe(400); // 8h * 25 * 2.0
+    expect(casual.amount.gross).toBe(450); // 8h * 25 * 2.25
+  });
+
+  test('casual public holiday is 275% (not 312.5%)', () => {
+    const shiftData = shift(
+      '2026-06-08T09:00:00+10:00',
+      '2026-06-08T17:00:00+10:00',
+    );
+    const casual = schadsService.calculateShiftAmount(shiftData, {
+      ...profile(true),
+      holidaySet: new Set(['2026-06-08']),
+    });
+    expect(casual.amount.gross).toBe(550); // 8h * 25 * 2.75
+  });
+
+  test('casual night loading stays 140%', () => {
+    const shiftData = shift(
+      '2026-06-01T22:00:00+10:00',
+      '2026-06-02T06:00:00+10:00',
+    );
+    const casual = schadsService.calculateShiftAmount(shiftData, profile(true));
+    expect(casual.amount.gross).toBe(280); // 8h * 25 * 1.4
   });
 });
