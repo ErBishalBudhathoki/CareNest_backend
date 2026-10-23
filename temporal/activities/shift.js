@@ -82,6 +82,9 @@ async function upsertWorkedTimeActivity({ shift }) {
     organizationId: shift.organizationId,
     createdAt: new Date(),
     status: 'verified',
+    // Raw writes bypass Mongoose defaults, and every reader filters on
+    // isActive: true. Without it the row is invisible to earnings/invoicing.
+    isActive: true,
   };
 
   const db = await getDb();

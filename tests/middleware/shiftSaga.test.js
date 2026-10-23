@@ -89,6 +89,7 @@ describe('shift activities', () => {
         $set: expect.objectContaining({
           shiftId: 'shift-1',
           status: 'verified',
+          isActive: true,
           // WorkedTime.timeWorked must be "HH:mm:ss", not decimal hours.
           timeWorked: '07:30:00',
           totalHours: 7.5,
