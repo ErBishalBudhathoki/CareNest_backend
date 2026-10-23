@@ -25,6 +25,40 @@ class SILQuoteService {
    * @param {Object} data - { clientId, propertyId?, fundingType?, validUntil?, lines:[...] }
    */
   async buildQuote(organizationId, data, actor = '') {
+    // A quote may only reference a participant (and property) in this
+    // organisation; otherwise it creates a cross-tenant reference that later
+    // fails billing and confuses the roster-of-care screen.
+    const Client = require('../models/Client');
+    const SILProperty = require('../models/SILProperty');
+
+    const client = await Client.findOne({
+      _id: data.clientId,
+      organizationId,
+    })
+      .select('_id')
+      .lean();
+    if (!client) {
+      const err = new Error('Client not found in this organization.');
+      err.statusCode = 403;
+      err.code = 'CROSS_ORG_CLIENT';
+      throw err;
+    }
+
+    if (data.propertyId) {
+      const property = await SILProperty.findOne({
+        _id: data.propertyId,
+        organizationId,
+      })
+        .select('_id')
+        .lean();
+      if (!property) {
+        const err = new Error('Property not found in this organization.');
+        err.statusCode = 403;
+        err.code = 'CROSS_ORG_PROPERTY';
+        throw err;
+      }
+    }
+
     const lines = await this._priceLines(data.lines || []);
     const totals = this._totals(lines);
 

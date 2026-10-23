@@ -64,6 +64,18 @@ const silRosterService = require('../../services/silRosterService');
 const silQuoteService = require('../../services/silQuoteService');
 const silController = require('../../controllers/silController');
 
+/** Default tenant lookups: the client/property exist in the caller's org. */
+const orgExists = (value = { _id: 'c1' }) => ({
+  select: () => ({ lean: async () => value }),
+});
+
+beforeEach(() => {
+  // `buildQuote` and `createOccupancy` now verify the referenced participant
+  // belongs to the organisation before writing.
+  Client.findOne.mockReturnValue(orgExists());
+  SILProperty.findOne.mockReturnValue(orgExists({ _id: 'p1' }));
+});
+
 describe('SILPropertyService.getVacancies', () => {
   test('computes vacant rooms from active occupancy', async () => {
     SILProperty.findOne.mockResolvedValue({
@@ -126,6 +138,20 @@ describe('SILOccupancyService.createOccupancy', () => {
         clientId: 'c1',
       }),
     ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('rejects a participant from another organisation', async () => {
+    SILProperty.findOne.mockResolvedValue({ _id: 'p1', rooms: [{ roomId: 'r1' }] });
+    Client.findOne.mockReturnValue(orgExists(null));
+
+    await expect(
+      silOccupancyService.createOccupancy('org1', {
+        propertyId: 'p1',
+        roomId: 'r1',
+        clientId: 'foreign-client',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'CROSS_ORG_CLIENT' });
+    expect(SILOccupancy.create).not.toHaveBeenCalled();
   });
 });
 
@@ -228,6 +254,31 @@ describe('SILQuoteService', () => {
     expect(quote.totals.weeklyAmount).toBe(1100);
     expect(quote.totals.annualAmount).toBe(57200);
     expect(quote.lines[0].priceValidation.passed).toBe(true);
+  });
+
+  test('rejects a participant from another organisation', async () => {
+    Client.findOne.mockReturnValue(orgExists(null));
+
+    await expect(
+      silQuoteService.buildQuote('org1', {
+        clientId: 'foreign-client',
+        lines: [{ supportNumber: 'x', hoursPerWeek: 1, unitPrice: 80 }],
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'CROSS_ORG_CLIENT' });
+    expect(SILQuote.create).not.toHaveBeenCalled();
+  });
+
+  test('rejects a property from another organisation', async () => {
+    SILProperty.findOne.mockReturnValue(orgExists(null));
+
+    await expect(
+      silQuoteService.buildQuote('org1', {
+        clientId: 'c1',
+        propertyId: 'foreign-property',
+        lines: [{ supportNumber: 'x', hoursPerWeek: 1, unitPrice: 80 }],
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'CROSS_ORG_PROPERTY' });
+    expect(SILQuote.create).not.toHaveBeenCalled();
   });
 
   test('flags a line that fails price validation', async () => {

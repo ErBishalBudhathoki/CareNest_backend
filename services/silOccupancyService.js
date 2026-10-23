@@ -39,6 +39,21 @@ class SILOccupancyService {
       throw err;
     }
 
+    // Participants, like rooms, must belong to this organisation.
+    const Client = require('../models/Client');
+    const client = await Client.findOne({
+      _id: data.clientId,
+      organizationId,
+    })
+      .select('_id')
+      .lean();
+    if (!client) {
+      const err = new Error('Client not found in this organization.');
+      err.statusCode = 403;
+      err.code = 'CROSS_ORG_CLIENT';
+      throw err;
+    }
+
     // §8.2: occupancy date ranges must not overlap for the same room, across
     // active AND pending rows (not just a single active row).
     const start = data.startDate ? new Date(data.startDate) : new Date();
