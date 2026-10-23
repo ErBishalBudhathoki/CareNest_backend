@@ -74,6 +74,10 @@ async function upsertWorkedTimeActivity({ shift }) {
     timeWorked: formatDurationFromSeconds(totalSeconds),
     totalSeconds,
     totalHours: hours,
+    // Shift linkage keys used by invoice matching and the app's visit history.
+    shiftDate: zonedDateKey(new Date(shift.startTime)),
+    shiftStartTime: zonedTimeKey(new Date(shift.startTime)),
+    shiftEndTime: zonedTimeKey(new Date(shift.endTime)),
     providerType: 'standard',
     organizationId: shift.organizationId,
     createdAt: new Date(),
