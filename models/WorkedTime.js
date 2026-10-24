@@ -32,6 +32,9 @@ const workedTimeSchema = new mongoose.Schema({
   shiftBreak: { type: mongoose.Schema.Types.Mixed },
   shiftIndex: { type: Number, default: 0 },
   shiftKey: { type: String },
+  // Idempotency key for offline replay: a retried save returns the original
+  // row instead of creating a duplicate worked-time record.
+  clientRequestId: { type: String, default: null, index: true },
   assignedClientId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientAssignment' },
   // SIL roster shifts are not ClientAssignments; link the saved hours to the
   // Shift document instead so payroll/rostering can trace them.
@@ -118,5 +121,11 @@ workedTimeSchema.index(
 );
 // Cross-tenant reporting scans by date only.
 workedTimeSchema.index({ shiftDate: 1 }, { name: 'shiftDate_idx' });
+// Offline replay idempotency. Sparse so existing rows without the key are
+// unaffected; unique so a retry cannot insert a second row.
+workedTimeSchema.index(
+  { userEmail: 1, clientRequestId: 1 },
+  { unique: true, sparse: true, name: 'user_request_id_unique' }
+);
 
 module.exports = mongoose.model('WorkedTime', workedTimeSchema);

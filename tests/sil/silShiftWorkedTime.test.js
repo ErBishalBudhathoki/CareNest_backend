@@ -26,6 +26,7 @@ jest.mock('../../models/WorkedTime', () => {
   });
   WorkedTime.__save = save;
   WorkedTime.find = jest.fn();
+  WorkedTime.findOne = jest.fn();
   return WorkedTime;
 });
 
@@ -86,6 +87,7 @@ beforeEach(() => {
   });
   Shift.find.mockReturnValue(chain([dayShift, nightShift]));
   WorkedTime.__save.mockResolvedValue({ _id: 'worked-time-1' });
+  WorkedTime.findOne.mockResolvedValue(null);
 });
 
 describe('appointmentService.setWorkedTime — SIL shift fallback', () => {
@@ -115,6 +117,37 @@ describe('appointmentService.setWorkedTime — SIL shift fallback', () => {
     // UTC+11 in October), not the server's local zone.
     expect(doc.startTime.toISOString()).toBe('2026-10-22T22:00:00.000Z');
     expect(doc.endTime.toISOString()).toBe('2026-10-23T00:00:00.000Z');
+  });
+
+  test('replays the same clientRequestId without creating a duplicate', async () => {
+    WorkedTime.findOne.mockResolvedValue({
+      _id: 'existing-worked-time',
+      timeWorked: '02:00:00',
+    });
+
+    const result = await AppointmentService.setWorkedTime({
+      userEmail: USER_EMAIL,
+      clientEmail: CLIENT_EMAIL,
+      timeList: '02:00:00',
+      shiftIndex: 0,
+      clientRequestId: 'offline-request-1',
+    });
+
+    expect(result).toMatchObject({ success: true, idempotent: true });
+    expect(WorkedTime.__save).not.toHaveBeenCalled();
+  });
+
+  test('stores the clientRequestId on a new row', async () => {
+    await AppointmentService.setWorkedTime({
+      userEmail: USER_EMAIL,
+      clientEmail: CLIENT_EMAIL,
+      timeList: '02:00:00',
+      shiftIndex: 0,
+      clientRequestId: 'offline-request-2',
+    });
+
+    const doc = WorkedTime.mock.calls[0][0];
+    expect(doc.clientRequestId).toBe('offline-request-2');
   });
 
   test('matches the selected date/time insteads of trusting a stale index', async () => {

@@ -56,7 +56,8 @@ const workedTimeValidation = [
   body('date').isISO8601().withMessage('Valid date is required'),
   body('startTime').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Valid start time is required (HH:MM)'),
   body('endTime').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Valid end time is required (HH:MM)'),
-  body('breakDuration').optional().isInt({ min: 0 }).withMessage('Break duration must be a positive integer (minutes)')
+  body('breakDuration').optional().isInt({ min: 0 }).withMessage('Break duration must be a positive integer (minutes)'),
+  body('clientRequestId').optional().isString().isLength({ max: 120 })
 ];
 
 // Protected routes

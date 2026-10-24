@@ -608,7 +608,8 @@ class AppointmentService {
         shiftDate: _shiftDateFromRequest,
         shiftStartTime: _shiftStartTimeFromRequest,
         shiftEndTime: _shiftEndTimeFromRequest,
-        shiftBreak: _shiftBreakFromRequest
+        shiftBreak: _shiftBreakFromRequest,
+        clientRequestId
       } = workedTimeData;
 
       const safeUserEmail = toSafeString(userEmail);
@@ -617,6 +618,23 @@ class AppointmentService {
       // Validate required fields
       if (!safeUserEmail || !safeClientEmail || !timeList) {
         throw new Error('Missing required fields: userEmail, clientEmail, timeList');
+      }
+
+      // Offline replay idempotency: if this exact save already landed, return
+      // the original row rather than inserting a duplicate.
+      if (clientRequestId) {
+        const existing = await WorkedTime.findOne({
+          userEmail: safeUserEmail,
+          clientRequestId: String(clientRequestId),
+        });
+        if (existing) {
+          return {
+            success: true,
+            message: 'Worked time already saved',
+            idempotent: true,
+            data: { id: existing._id, timeWorked: existing.timeWorked },
+          };
+        }
       }
 
       // Find the assigned client record. SIL roster shifts have no
@@ -806,6 +824,7 @@ class AppointmentService {
         endTime: normalizedEndDateTime,
         // Create a unique shift identifier
         shiftKey: shiftDateKey && shiftStartTime ? `${shiftDateKey}_${shiftStartTime}` : null,
+        clientRequestId: clientRequestId ? String(clientRequestId) : null,
         createdAt: new Date(),
         isActive: true
       });

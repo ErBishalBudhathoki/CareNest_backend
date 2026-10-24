@@ -154,7 +154,8 @@ class AppointmentController {
       shiftDate: date,
       shiftStartTime: startTime,
       shiftEndTime: endTime,
-      shiftBreak: breakDuration
+      shiftBreak: breakDuration,
+      clientRequestId: req.body.clientRequestId
     };
     
     const result = await appointmentService.setWorkedTime(workedTimeData);
