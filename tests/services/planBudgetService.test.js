@@ -2,7 +2,7 @@ jest.mock('../../models/Client', () => ({
   findOne: jest.fn(),
 }));
 jest.mock('../../models/Invoice', () => ({
-  Invoice: { aggregate: jest.fn() },
+  Invoice: { aggregate: jest.fn(), find: jest.fn() },
 }));
 
 const Client = require('../../models/Client');
@@ -160,5 +160,81 @@ describe('planBudgetService', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.code).toBe('PLAN_BUDGET_UNAVAILABLE');
+  });
+});
+
+describe('plan category budgets', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Invoice.aggregate.mockResolvedValue([{ _id: null, total: 400 }]);
+  });
+
+  function mockCategoryClient() {
+    mockClient(
+      {
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        totalBudget: 1000,
+        categories: [
+          { categoryNumber: '01', name: 'Core Supports', budget: 500 },
+        ],
+      },
+      'ndia_managed',
+    );
+  }
+
+  test('blocks a line that exceeds its category envelope', async () => {
+    mockCategoryClient();
+    Invoice.find.mockReturnValue({
+      lean: async () => [
+        {
+          lineItems: [
+            { supportItemNumber: '01_011_0107_1_1', totalPrice: 400 },
+          ],
+        },
+      ],
+    });
+
+    const result = await planBudgetService.validateInvoiceAgainstPlan({
+      organizationId: 'org1',
+      clientId: 'c1',
+      amount: 200,
+      serviceStart: '2026-06-01',
+      serviceEnd: '2026-06-30',
+      lineItems: [
+        { supportItemNumber: '01_015_0107_1_1', totalPrice: 200 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('INSUFFICIENT_CATEGORY_BUDGET');
+    expect(result.categoryFailures[0].categoryNumber).toBe('01');
+  });
+
+  test('allows a line within its category envelope', async () => {
+    mockCategoryClient();
+    Invoice.find.mockReturnValue({
+      lean: async () => [
+        {
+          lineItems: [
+            { supportItemNumber: '01_011_0107_1_1', totalPrice: 200 },
+          ],
+        },
+      ],
+    });
+
+    const result = await planBudgetService.validateInvoiceAgainstPlan({
+      organizationId: 'org1',
+      clientId: 'c1',
+      amount: 100,
+      serviceStart: '2026-06-01',
+      serviceEnd: '2026-06-30',
+      lineItems: [
+        { supportItemNumber: '01_015_0107_1_1', totalPrice: 100 },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.categoryRemaining['01']).toBe(200);
   });
 });

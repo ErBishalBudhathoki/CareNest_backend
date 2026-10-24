@@ -35,6 +35,16 @@ const claimLineSchema = new mongoose.Schema(
       index: true,
     },
     rejectionReason: { type: String, default: '' },
+    // Remittance details for this line (parsed from the BPRF when present).
+    paidAmount: { type: Number, default: 0 },
+    paidAt: { type: Date, default: null },
+    remittanceReference: { type: String, default: '' },
+    // Set on the original rejected line when a replacement batch is created.
+    resubmittedInBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ClaimBatch',
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -48,7 +58,11 @@ const claimLineSchema = new mongoose.Schema(
         if (ret.clientId) ret.clientId = ret.clientId.toString();
         if (ret.invoiceId) ret.invoiceId = ret.invoiceId.toString();
         if (ret.shiftId) ret.shiftId = ret.shiftId.toString();
+        if (ret.resubmittedInBatchId) {
+          ret.resubmittedInBatchId = ret.resubmittedInBatchId.toString();
+        }
         if (ret.serviceDate) ret.serviceDate = ret.serviceDate.toISOString();
+        if (ret.paidAt) ret.paidAt = new Date(ret.paidAt).toISOString();
         if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
         if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
         return ret;

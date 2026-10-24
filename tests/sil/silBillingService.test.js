@@ -106,6 +106,38 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
     expect(payload.clientEmail).toBe('ada@example.com');
   });
 
+  test('bills a sleepover as a fixed fee per shift, not hours', async () => {
+    mockRocFindOne.mockResolvedValue({
+      ...activeRoc,
+      supports: [
+        {
+          supportNumber: '01_002_0107_1_1',
+          supportName: 'Sleepover',
+          shiftType: 'sleepover',
+          hoursPerWeek: 56,
+          unitPrice: 311.79,
+          days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        },
+      ],
+    });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14' },
+      'admin@org.com',
+    );
+
+    const payload = mockCreateInvoice.mock.calls[0][0];
+    expect(payload.lineItems[0]).toMatchObject({
+      quantity: 14, // 7 sleepovers × 2 weeks
+      unit: 'E',
+      price: 311.79,
+      totalPrice: 4365.06,
+    });
+    expect(payload.financialSummary.totalAmount).toBe(4365.06);
+  });
+
   test('surfaces the funding route stamped on the created invoice', async () => {
     const result = await silBillingService.generateInvoiceFromRosterOfCare(
       'org1',

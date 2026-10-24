@@ -101,6 +101,18 @@ const clientSchema = new mongoose.Schema({
     startDate: Date,
     endDate: Date,
     totalBudget: { type: Number, min: 0 },
+    // Optional per-category envelopes. Category numbers are the two-digit
+    // NDIS support category prefix (e.g. "01", "04", "07").
+    categories: {
+      type: [
+        {
+          categoryNumber: { type: String, required: true, trim: true },
+          name: { type: String, default: '', trim: true },
+          budget: { type: Number, min: 0, default: 0 },
+        },
+      ],
+      default: [],
+    },
     status: {
       type: String,
       enum: ['not_configured', 'active', 'expired'],

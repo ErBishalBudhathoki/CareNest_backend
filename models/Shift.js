@@ -39,6 +39,18 @@ const shiftSchema = new mongoose.Schema({
   notes: { type: String, default: '' },
   breakDuration: { type: Number, default: 0 }, // in minutes
   isActive: { type: Boolean, default: true },
+  // Cancellation evidence and NDIS short-notice billing outcome. Kept on the
+  // shift so the original booking is never destroyed for audit purposes.
+  cancellation: {
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: String, default: '' },
+    reason: { type: String, enum: ['NSCC', 'NSDH', ''], default: '' },
+    noticeHours: { type: Number, default: null },
+    shortNotice: { type: Boolean, default: false },
+    billable: { type: Boolean, default: false },
+    feeAmount: { type: Number, default: 0 },
+    invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
+  },
   createdBy: String
 }, {
   timestamps: true,
@@ -54,6 +66,12 @@ const shiftSchema = new mongoose.Schema({
       if (ret.employeeId) ret.employeeId = ret.employeeId.toString();
       if (ret.clientId) ret.clientId = ret.clientId.toString();
       if (ret.recurringTemplateId) ret.recurringTemplateId = ret.recurringTemplateId.toString();
+      if (ret.cancellation?.invoiceId) {
+        ret.cancellation.invoiceId = ret.cancellation.invoiceId.toString();
+      }
+      if (ret.cancellation?.cancelledAt) {
+        ret.cancellation.cancelledAt = new Date(ret.cancellation.cancelledAt).toISOString();
+      }
       
       // Transform dates to ISO 8601 strings
       if (ret.startTime) ret.startTime = ret.startTime.toISOString();

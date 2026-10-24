@@ -495,6 +495,38 @@ class ClientService {
       patch['plan.totalBudget'] = budget;
     }
 
+    if (Array.isArray(planData.categories)) {
+      const seen = new Set();
+      const categories = [];
+      for (const raw of planData.categories) {
+        if (!raw || typeof raw !== 'object') continue;
+        const categoryNumber = String(raw.categoryNumber || '').trim();
+        if (!categoryNumber || !/^\d{2,4}$/.test(categoryNumber)) {
+          const err = new Error(
+            'Each plan category requires a 2–4 digit categoryNumber',
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+        if (seen.has(categoryNumber)) continue;
+        seen.add(categoryNumber);
+        const budget = Number(raw.budget) || 0;
+        if (!Number.isFinite(budget) || budget < 0) {
+          const err = new Error(
+            `Category ${categoryNumber} budget must be a non-negative number`,
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+        categories.push({
+          categoryNumber,
+          name: String(raw.name || '').trim().slice(0, 120),
+          budget,
+        });
+      }
+      patch['plan.categories'] = categories;
+    }
+
     for (const field of ['startDate', 'endDate']) {
       if (Object.prototype.hasOwnProperty.call(planData, field)) {
         if (planData[field] == null || planData[field] === '') {

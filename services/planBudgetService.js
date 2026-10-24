@@ -30,6 +30,32 @@ function isNdiaManaged(fundingType) {
   return funding === 'ndia_managed' || funding === 'combination';
 }
 
+/** NDIS category is the two-digit prefix of the support item number. */
+function categoryOf(line = {}) {
+  const explicit =
+    line.supportCategoryNumber || line.categoryNumber || line.category;
+  if (explicit != null && String(explicit).trim() !== '') {
+    const digits = String(explicit).replace(/\D/g, '');
+    if (digits) return digits.slice(0, 2).padStart(2, '0');
+  }
+  const support =
+    line.supportItemNumber ||
+    line.ndisItemNumber ||
+    line.itemCode ||
+    line.supportNumber ||
+    '';
+  const match = String(support).match(/^(\d{2})_/);
+  return match ? match[1] : '';
+}
+
+function lineAmount(line = {}) {
+  const total = Number(line.totalPrice);
+  if (Number.isFinite(total) && total !== 0) return total;
+  const quantity = Number(line.quantity ?? line.hours ?? 0);
+  const price = Number(line.price ?? line.unitPrice ?? line.rate ?? 0);
+  return round2(quantity * price);
+}
+
 class PlanBudgetService {
   async getPlan(clientId, organizationId) {
     if (!clientId) return null;
@@ -37,7 +63,6 @@ class PlanBudgetService {
       .select('fundingType plan clientFirstName clientLastName')
       .lean();
   }
-
   /**
    * @param {Object} opts
    * @param {string} opts.organizationId
@@ -79,7 +104,20 @@ class PlanBudgetService {
     const planStart = toDate(plan.startDate);
     const planEnd = toDate(plan.endDate);
     const totalBudget = Number(plan.totalBudget) || 0;
-    const hasPlan = planStart && planEnd && totalBudget > 0;
+    const categoryBudgets = (Array.isArray(plan.categories) ? plan.categories : [])
+      .map((category) => ({
+        categoryNumber: String(category.categoryNumber || '').trim(),
+        name: category.name || '',
+        budget: Number(category.budget) || 0,
+      }))
+      .filter((category) => category.categoryNumber && category.budget > 0);
+    const categoryBudgetTotal = round2(
+      categoryBudgets.reduce((sum, category) => sum + category.budget, 0),
+    );
+    // A plan may be expressed as a single envelope, category envelopes, or
+    // both. Categories are additive when no total was entered.
+    const effectiveBudget = totalBudget > 0 ? totalBudget : categoryBudgetTotal;
+    const hasPlan = Boolean(planStart && planEnd && effectiveBudget > 0);
     const ndiaManaged = isNdiaManaged(client.fundingType);
 
     const override = (code, message, extra = {}) => {
@@ -159,21 +197,89 @@ class PlanBudgetService {
       );
     }
 
-    const remaining = round2(totalBudget - consumed);
+    const remaining = round2(effectiveBudget - consumed);
     const amount = round2(opts.amount);
     if (amount > remaining + 0.01) {
       return override(
         'INSUFFICIENT_PLAN_BUDGET',
         `Invoice amount $${amount.toFixed(2)} exceeds the remaining plan budget of $${remaining.toFixed(2)}.`,
-        { totalBudget: round2(totalBudget), consumed: round2(consumed), remaining },
+        { totalBudget: round2(effectiveBudget), consumed: round2(consumed), remaining },
       );
+    }
+
+    // Category-level envelopes. This is checked before returning so an
+    // invoice cannot hide an over-category line inside a healthy total.
+    let categoryRemaining = null;
+    const lineItems = Array.isArray(opts.lineItems) ? opts.lineItems : [];
+    if (categoryBudgets.length > 0 && lineItems.length > 0) {
+      try {
+        const existingInvoices = await Invoice.find(match, { lineItems: 1 }).lean();
+        const consumedByCategory = {};
+        for (const invoice of existingInvoices || []) {
+          for (const line of invoice.lineItems || []) {
+            const category = categoryOf(line);
+            if (!category) continue;
+            consumedByCategory[category] =
+              (consumedByCategory[category] || 0) + lineAmount(line);
+          }
+        }
+
+        const requestedByCategory = {};
+        for (const line of lineItems) {
+          const category = categoryOf(line);
+          if (!category) continue;
+          requestedByCategory[category] =
+            (requestedByCategory[category] || 0) + lineAmount(line);
+        }
+
+        const categoryFailures = [];
+        categoryRemaining = {};
+        for (const category of categoryBudgets) {
+          const spent = round2(consumedByCategory[category.categoryNumber]);
+          const requested = round2(requestedByCategory[category.categoryNumber]);
+          const left = round2(category.budget - spent);
+          categoryRemaining[category.categoryNumber] = round2(left - requested);
+          if (requested > left + 0.01) {
+            categoryFailures.push({
+              categoryNumber: category.categoryNumber,
+              name: category.name,
+              budget: round2(category.budget),
+              consumed: spent,
+              requested,
+              remaining: left,
+            });
+          }
+        }
+
+        if (categoryFailures.length > 0) {
+          return override(
+            'INSUFFICIENT_CATEGORY_BUDGET',
+            `One or more NDIS support categories exceed their plan budget: ${categoryFailures
+              .map((failure) => `${failure.categoryNumber} (remaining $${failure.remaining.toFixed(2)})`)
+              .join(', ')}.`,
+            {
+              totalBudget: round2(effectiveBudget),
+              consumed: round2(consumed),
+              remaining: round2(remaining - amount),
+              categoryFailures,
+              categoryRemaining,
+            },
+          );
+        }
+      } catch (_) {
+        return override(
+          'PLAN_BUDGET_UNAVAILABLE',
+          'Could not calculate the remaining NDIS category budgets. Please retry.',
+        );
+      }
     }
 
     return {
       ok: true,
-      totalBudget: round2(totalBudget),
+      totalBudget: round2(effectiveBudget),
       consumed: round2(consumed),
       remaining: round2(remaining - amount),
+      categoryRemaining,
       planStart,
       planEnd,
     };

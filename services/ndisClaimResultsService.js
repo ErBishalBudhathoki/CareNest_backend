@@ -54,6 +54,23 @@ function normalizeStatus(raw) {
   return 'accepted';
 }
 
+function round2(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  // DD/MM/YYYY (portal format) or ISO.
+  const dmy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    const date = new Date(Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1])));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 class NDISClaimResultsService {
   /**
    * Import a BPRF and update claim lines.
@@ -61,7 +78,7 @@ class NDISClaimResultsService {
    * @param {string} batchId
    * @param {string} fileContent - raw CSV (or base64 CSV)
    */
-  async importResults(organizationId, batchId, fileContent) {
+  async importResults(organizationId, batchId, fileContent, actor = '') {
     const batch = await ClaimBatch.findOne({ _id: batchId, organizationId });
     if (!batch) return { notFound: true };
 
@@ -79,6 +96,22 @@ class NDISClaimResultsService {
     const refIndex = this._findColumn(header, ['claimreference', 'claim reference', 'reference']);
     const statusIndex = this._findColumn(header, ['status', 'result', 'outcome']);
     const reasonIndex = this._findColumn(header, ['reason', 'error', 'message', 'rejectionreason']);
+    const paidIndex = this._findColumn(header, [
+      'paidamount',
+      'amountpaid',
+      'paid',
+      'paymentamount',
+    ]);
+    const paidDateIndex = this._findColumn(header, [
+      'paiddate',
+      'paymentdate',
+      'datepaid',
+    ]);
+    const remittanceRefIndex = this._findColumn(header, [
+      'remittancereference',
+      'paymentreference',
+      'receipt',
+    ]);
     const hasHeader = refIndex !== -1;
 
     const dataRows = hasHeader ? rows.slice(1) : rows;
@@ -88,6 +121,8 @@ class NDISClaimResultsService {
 
     const summary = { accepted: 0, rejected: 0, unmatched: 0 };
     const results = [];
+    let totalPaid = 0;
+    let paidAt = null;
 
     for (const row of dataRows) {
       const fields = splitCsvRow(row);
@@ -106,6 +141,26 @@ class NDISClaimResultsService {
 
       line.status = status === 'rejected' ? 'rejected' : 'reconciled';
       line.rejectionReason = status === 'rejected' ? reason : '';
+
+      if (paidIndex >= 0) {
+        const rawPaid = String(fields[paidIndex] || '').replace(/[^0-9.-]/g, '');
+        const amount = Number(rawPaid);
+        if (Number.isFinite(amount) && amount >= 0) {
+          line.paidAmount = round2(amount);
+          totalPaid = round2(totalPaid + line.paidAmount);
+        }
+      }
+      if (paidDateIndex >= 0) {
+        const parsed = parseDate(fields[paidDateIndex]);
+        if (parsed) {
+          line.paidAt = parsed;
+          paidAt = paidAt || parsed;
+        }
+      }
+      if (remittanceRefIndex >= 0) {
+        line.remittanceReference = String(fields[remittanceRefIndex] || '').slice(0, 120);
+      }
+
       await line.save();
 
       if (status === 'rejected') summary.rejected += 1;
@@ -115,12 +170,35 @@ class NDISClaimResultsService {
 
     // Determine batch status.
     if (summary.rejected === 0 && summary.accepted > 0) {
-      batch.status = 'reconciled';
+      const total = round2(batch.totals?.amount);
+      if (paidIndex >= 0 && total > 0 && totalPaid >= total - 0.01) {
+        batch.status = 'paid';
+      } else {
+        batch.status = 'reconciled';
+      }
     } else if (summary.accepted === 0 && summary.rejected > 0) {
       batch.status = 'failed';
     } else if (summary.rejected > 0 && summary.accepted > 0) {
       batch.status = 'partial';
     }
+
+    if (paidIndex >= 0) {
+      const total = round2(batch.totals?.amount);
+      batch.remittance = {
+        ...(batch.remittance?.toObject?.() || batch.remittance || {}),
+        status:
+          totalPaid >= total - 0.01 && total > 0
+            ? 'paid'
+            : totalPaid > 0
+              ? 'part_paid'
+              : 'unpaid',
+        paidAmount: totalPaid,
+        paidAt: paidAt || new Date(),
+        importedBy: actor || '',
+        importedAt: new Date(),
+      };
+    }
+
     batch.reconciledAt = new Date();
     await batch.save();
 

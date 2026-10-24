@@ -299,6 +299,29 @@ describe('SILQuoteService', () => {
     expect(quote.lines[0].priceValidation.errors.length).toBeGreaterThan(0);
   });
 
+  test('prices a sleepover as a fixed fee per shift', async () => {
+    SILQuote.create.mockImplementation(async (doc) => ({ _id: 'qs', ...doc }));
+
+    const quote = await silQuoteService.buildQuote('org1', {
+      clientId: 'c1',
+      fundingType: 'ndia_managed',
+      lines: [
+        {
+          supportNumber: '01_002_0107_1_1',
+          shiftType: 'sleepover',
+          hoursPerWeek: 56,
+          unitPrice: 311.79,
+          days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        },
+      ],
+    });
+
+    expect(quote.lines[0].amount).toBe(2182.53);
+    expect(quote.totals.weeklyAmount).toBe(2182.53);
+    // Sleepover hours are not ordinary support hours.
+    expect(quote.totals.weeklyHours).toBe(0);
+  });
+
   test('rejects an over-cap NDIA-managed quote at save time', async () => {
     priceValidationService.validatePrice.mockResolvedValue({
       isValid: false,

@@ -94,8 +94,25 @@ class SILBillingService {
     const lineItems = [];
     let subtotal = 0;
     for (const support of roc.supports || []) {
-      const quantity = round2((Number(support.hoursPerWeek) || 0) * weeks);
+      const shiftType = String(support.shiftType || 'day').toLowerCase();
+      const isSleepover = shiftType === 'sleepover';
+      const daysPerWeek =
+        Array.isArray(support.days) && support.days.length > 0
+          ? support.days.length
+          : 0;
+
+      // A sleepover is a fixed fee per shift, not hours × rate. Prefer the
+      // explicit weekly pattern; fall back to an 8-hour-per-shift assumption
+      // for legacy quotes that only stored hours.
+      const quantity = isSleepover
+        ? round2(
+            (daysPerWeek ||
+              Math.max(1, Math.round((Number(support.hoursPerWeek) || 0) / 8))) *
+              weeks,
+          )
+        : round2((Number(support.hoursPerWeek) || 0) * weeks);
       if (quantity <= 0) continue;
+
       const unitPrice = round2(support.unitPrice);
       const totalPrice = round2(quantity * unitPrice);
       subtotal = round2(subtotal + totalPrice);
@@ -104,7 +121,7 @@ class SILBillingService {
         supportItemName: support.supportName,
         price: unitPrice,
         quantity,
-        unit: 'H',
+        unit: isSleepover ? 'E' : 'H',
         totalPrice,
         date: periodFrom,
         organizationId,

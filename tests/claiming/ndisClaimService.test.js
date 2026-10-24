@@ -20,6 +20,7 @@ jest.mock('../../models/ClaimLine', () => ({
   find: jest.fn(),
   findOne: jest.fn(),
   insertMany: jest.fn(),
+  updateMany: jest.fn(),
 }));
 jest.mock('../../models/Client', () => ({ find: jest.fn() }));
 jest.mock('../../models/Organization', () => ({ findOne: jest.fn() }));
@@ -525,5 +526,178 @@ describe('NDISClaimService.validateLines — support item in catalogue', () => {
       },
     ]);
     expect(r.errors.some((e) => e.field === 'SupportNumber')).toBe(true);
+  });
+});
+
+describe('NDIS claim lifecycle', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Organization.findOne.mockResolvedValue({
+      ndisRegistration: { registrationNumber: '405000123' },
+      abn: VALID_ABN,
+    });
+    Client.find.mockReturnValue(lean([]));
+    Invoice.find.mockReturnValue(lean([]));
+    ClaimLine.find.mockReturnValue(lean([]));
+    ClaimLine.insertMany.mockResolvedValue([]);
+    ClaimLine.updateMany.mockResolvedValue({ modifiedCount: 1 });
+    ClaimBatch.create.mockImplementation(async (doc) => ({
+      _id: 'b2',
+      ...doc,
+      save: jest.fn(),
+    }));
+    isR2Configured.mockReturnValue(false);
+  });
+
+  test('submitBatch marks a generated batch submitted with evidence', async () => {
+    const save = jest.fn();
+    ClaimBatch.findOne.mockResolvedValue({
+      _id: 'b1',
+      status: 'generated',
+      save,
+    });
+
+    const result = await ndisClaimService.submitBatch(
+      'org1',
+      'b1',
+      { portalReference: 'PACE-123' },
+      'admin@org.com',
+    );
+
+    expect(result.batch.status).toBe('submitted');
+    expect(result.batch.submittedBy).toBe('admin@org.com');
+    expect(result.batch.portalReference).toBe('PACE-123');
+    expect(save).toHaveBeenCalled();
+  });
+
+  test('submitBatch refuses a paid batch', async () => {
+    ClaimBatch.findOne.mockResolvedValue({ _id: 'b1', status: 'paid', save: jest.fn() });
+    const result = await ndisClaimService.submitBatch('org1', 'b1');
+    expect(result).toMatchObject({ invalidState: true, status: 'paid' });
+  });
+
+  test('recordRemittance records a partial payment and outstanding balance', async () => {
+    const save = jest.fn();
+    ClaimBatch.findOne.mockResolvedValue({
+      _id: 'b1',
+      status: 'submitted',
+      totals: { amount: 100 },
+      remittance: {},
+      save,
+    });
+
+    const result = await ndisClaimService.recordRemittance(
+      'org1',
+      'b1',
+      { paidAmount: 60, reference: 'REM-1' },
+      'admin@org.com',
+    );
+
+    expect(result.batch.status).toBe('partial');
+    expect(result.batch.remittance.status).toBe('part_paid');
+    expect(result.batch.remittance.paidAmount).toBe(60);
+    expect(result.outstanding).toBe(40);
+    expect(save).toHaveBeenCalled();
+  });
+
+  test('recordRemittance marks a fully paid batch paid', async () => {
+    ClaimBatch.findOne.mockResolvedValue({
+      _id: 'b1',
+      status: 'submitted',
+      totals: { amount: 100 },
+      remittance: {},
+      save: jest.fn(),
+    });
+
+    const result = await ndisClaimService.recordRemittance('org1', 'b1', {
+      paidAmount: 100,
+    });
+    expect(result.batch.status).toBe('paid');
+    expect(result.batch.remittance.status).toBe('paid');
+    expect(result.outstanding).toBe(0);
+  });
+
+  test('resubmitRejected creates a new batch and links the rejected lines', async () => {
+    const originalSave = jest.fn();
+    const original = {
+      _id: 'b1',
+      period: { from: new Date('2026-04-01'), to: new Date('2026-04-30') },
+      registrationNumber: '405000123',
+      abn: VALID_ABN,
+      resubmittedBatchId: null,
+      save: originalSave,
+    };
+    ClaimBatch.findOne.mockResolvedValue(original);
+
+    ClaimLine.find
+      .mockReturnValueOnce(
+        lean([
+          {
+            _id: 'l1',
+            status: 'rejected',
+            clientId: 'c1',
+            ndisNumber: '430123456',
+            invoiceId: 'inv1',
+            supportNumber: '01_011_0107_1_1',
+            serviceDate: new Date('2026-04-01'),
+            quantity: 0,
+            hours: 8,
+            unitPrice: 81.27,
+            gstCode: 'P2',
+            claimType: 'STANDARD',
+            cancellationReason: '',
+            authorisedBy: '',
+            participantApproved: 'Y',
+            inKindFundingProgramCode: '',
+            requestedAmount: 650.16,
+          },
+        ]),
+      )
+      .mockReturnValue(lean([]));
+
+    const result = await ndisClaimService.resubmitRejected('org1', 'b1', 'admin');
+
+    expect(result.lineCount).toBe(1);
+    expect(result.batch.resubmissionOf).toBe('b1');
+    expect(result.csv).toContain('CN-org1-');
+    expect(ClaimLine.insertMany).toHaveBeenCalled();
+    expect(ClaimLine.updateMany).toHaveBeenCalledWith(
+      { _id: { $in: ['l1'] } },
+      { $set: { resubmittedInBatchId: 'b2' } },
+    );
+    expect(original.resubmittedBatchId).toBe('b2');
+    expect(originalSave).toHaveBeenCalled();
+  });
+});
+
+describe('NDISClaimResultsService remittance parsing', () => {
+  test('stores paid amounts and marks the batch paid', async () => {
+    const batchSave = jest.fn();
+    ClaimBatch.findOne.mockResolvedValue({
+      _id: 'b1',
+      status: 'submitted',
+      totals: { amount: 100 },
+      remittance: {},
+      save: batchSave,
+    });
+    const lineSave = jest.fn();
+    ClaimLine.findOne.mockResolvedValue({
+      claimReference: 'r1',
+      status: 'pending',
+      save: lineSave,
+    });
+
+    const result = await ndisClaimResultsService.importResults(
+      'org1',
+      'b1',
+      'ClaimReference,Status,PaidAmount,PaidDate\nr1,paid,100,01/05/2026',
+      'admin',
+    );
+
+    expect(result.summary.accepted).toBe(1);
+    expect(result.batch.status).toBe('paid');
+    expect(result.batch.remittance.paidAmount).toBe(100);
+    expect(result.batch.remittance.status).toBe('paid');
+    expect(lineSave).toHaveBeenCalled();
   });
 });

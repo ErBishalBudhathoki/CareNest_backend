@@ -39,6 +39,18 @@ router.use(requireEntitlement('ndis_claiming'));
 
 router.get('/batches', readLimiter, ndisClaimController.listBatches);
 router.post(
+  '/cancellations',
+  writeLimiter,
+  body('shiftId').isMongoId(),
+  body('reason').isIn(['NSCC', 'NSDH']),
+  body('cancelledAt').optional().isISO8601(),
+  body('noticeHours').optional().isFloat({ min: 0 }),
+  body('unitPrice').optional().isFloat({ min: 0 }),
+  body('supportNumber').optional().isString().isLength({ max: 40 }),
+  handleValidationErrors,
+  ndisClaimController.createCancellationCharge,
+);
+router.post(
   '/generate',
   writeLimiter,
   [
@@ -49,6 +61,33 @@ router.post(
   ndisClaimController.generateBatch,
 );
 router.get('/batches/:id', readLimiter, param('id').isMongoId(), handleValidationErrors, ndisClaimController.getBatch);
+router.post(
+  '/batches/:id/submit',
+  writeLimiter,
+  param('id').isMongoId(),
+  body('portalReference').optional().isString().isLength({ max: 120 }),
+  body('submittedAt').optional().isISO8601(),
+  handleValidationErrors,
+  ndisClaimController.submitBatch,
+);
+router.post(
+  '/batches/:id/remittance',
+  writeLimiter,
+  param('id').isMongoId(),
+  body('paidAmount').isFloat({ min: 0 }),
+  body('paidAt').optional().isISO8601(),
+  body('reference').optional().isString().isLength({ max: 120 }),
+  body('notes').optional().isString().isLength({ max: 1000 }),
+  handleValidationErrors,
+  ndisClaimController.recordRemittance,
+);
+router.post(
+  '/batches/:id/resubmit',
+  writeLimiter,
+  param('id').isMongoId(),
+  handleValidationErrors,
+  ndisClaimController.resubmitRejected,
+);
 router.post(
   '/batches/:id/results/import',
   writeLimiter,

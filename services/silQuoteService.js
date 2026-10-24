@@ -246,7 +246,15 @@ class SILQuoteService {
     for (const line of lines) {
       const hours = Number(line.hoursPerWeek) || 0;
       const unitPrice = Number(line.unitPrice) || 0;
-      const amount = Math.round(hours * unitPrice * 100) / 100;
+      const shiftType = String(line.shiftType || 'day').toLowerCase();
+      // Sleepovers are fixed-fee per shift; hours are not multiplied by rate.
+      const billableUnits =
+        shiftType === 'sleepover'
+          ? Array.isArray(line.days) && line.days.length > 0
+            ? line.days.length
+            : Math.max(1, Math.round(hours / 8))
+          : hours;
+      const amount = Math.round(billableUnits * unitPrice * 100) / 100;
 
       let validation = { passed: true, capApplied: null, type: null, errors: [] };
       try {
@@ -293,7 +301,11 @@ class SILQuoteService {
   }
 
   _totals(lines) {
-    const weeklyHours = lines.reduce((sum, l) => sum + (l.hoursPerWeek || 0), 0);
+    const weeklyHours = lines.reduce(
+      (sum, l) =>
+        sum + (String(l.shiftType || '').toLowerCase() === 'sleepover' ? 0 : l.hoursPerWeek || 0),
+      0,
+    );
     const weeklyAmount = lines.reduce((sum, l) => sum + (l.amount || 0), 0);
     return {
       weeklyHours: Math.round(weeklyHours * 100) / 100,

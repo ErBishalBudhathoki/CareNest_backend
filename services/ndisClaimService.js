@@ -156,13 +156,17 @@ class NDISClaimService {
             quantity: hourly ? 0 : quantity,
             hours: hourly ? quantity : 0,
             unitPrice: round2(item.price),
-            gstCode: 'P2',
-            claimType: 'STANDARD',
-            cancellationReason: '',
-            authorisedBy: '',
-            participantApproved: 'Y',
-            inKindFundingProgramCode: '',
-            requestedAmount: round2((item.quantity || 0) * (item.price || 0)),
+            gstCode: item.gstCode || 'P2',
+            claimType: item.claimType || 'STANDARD',
+            cancellationReason: item.cancellationReason || '',
+            authorisedBy: item.authorisedBy || '',
+            participantApproved: item.participantApproved || 'Y',
+            inKindFundingProgramCode: item.inKindFundingProgramCode || '',
+            requestedAmount: round2(
+              item.totalPrice != null
+                ? item.totalPrice
+                : (item.quantity || 0) * (item.price || 0),
+            ),
           });
         }
       }
@@ -459,6 +463,250 @@ class NDISClaimService {
 
   async listBatches(organizationId) {
     return ClaimBatch.find({ organizationId }).sort({ createdAt: -1 });
+  }
+
+  /**
+   * Record that the generated BPR was uploaded to the portal.
+   * The portal has no public API, so this is the human/automation evidence
+   * that the batch left the building, plus the portal receipt reference.
+   */
+  async submitBatch(organizationId, batchId, opts = {}, actor = '') {
+    const batch = await ClaimBatch.findOne({ _id: batchId, organizationId });
+    if (!batch) return { notFound: true };
+
+    if (!['generated', 'partial', 'failed'].includes(batch.status)) {
+      return { invalidState: true, status: batch.status };
+    }
+
+    const submittedAt = opts.submittedAt ? new Date(opts.submittedAt) : new Date();
+    if (Number.isNaN(submittedAt.getTime())) {
+      const err = new Error('submittedAt must be a valid date.');
+      err.statusCode = 400;
+      err.code = 'INVALID_SUBMITTED_AT';
+      throw err;
+    }
+
+    batch.status = 'submitted';
+    batch.submittedBy = actor || '';
+    batch.submittedAt = submittedAt;
+    batch.portalReference = String(opts.portalReference || '').slice(0, 120);
+    await batch.save();
+
+    logger.business('NDIS Claim Batch Submitted', {
+      event: 'ndis_claim_batch_submitted',
+      organizationId,
+      batchId: String(batch._id),
+      portalReference: batch.portalReference,
+    });
+
+    return { batch };
+  }
+
+  /**
+   * Record a remittance/payment against a submitted batch.
+   * `paidAmount` is the amount actually paid by the NDIA for this batch.
+   */
+  async recordRemittance(organizationId, batchId, opts = {}, actor = '') {
+    const batch = await ClaimBatch.findOne({ _id: batchId, organizationId });
+    if (!batch) return { notFound: true };
+
+    if (!['submitted', 'reconciled', 'partial', 'failed', 'paid'].includes(batch.status)) {
+      return { invalidState: true, status: batch.status };
+    }
+
+    const paidAmount = round2(opts.paidAmount);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      const err = new Error('paidAmount must be a non-negative number.');
+      err.statusCode = 400;
+      err.code = 'INVALID_PAID_AMOUNT';
+      throw err;
+    }
+
+    const paidAt = opts.paidAt ? new Date(opts.paidAt) : new Date();
+    if (Number.isNaN(paidAt.getTime())) {
+      const err = new Error('paidAt must be a valid date.');
+      err.statusCode = 400;
+      err.code = 'INVALID_PAID_AT';
+      throw err;
+    }
+
+    const total = round2(batch.totals?.amount);
+    const status =
+      paidAmount >= total - 0.01 && total > 0
+        ? 'paid'
+        : paidAmount > 0
+          ? 'part_paid'
+          : 'unpaid';
+
+    batch.remittance = {
+      ...(batch.remittance?.toObject?.() || batch.remittance || {}),
+      status,
+      paidAmount,
+      paidAt,
+      reference: String(opts.reference || '').slice(0, 120),
+      notes: String(opts.notes || '').slice(0, 1000),
+      importedBy: actor || '',
+      importedAt: new Date(),
+    };
+
+    if (status === 'paid') {
+      batch.status = 'paid';
+    } else if (batch.status !== 'failed') {
+      batch.status = 'partial';
+    }
+    await batch.save();
+
+    logger.business('NDIS Claim Remittance Recorded', {
+      event: 'ndis_claim_remittance_recorded',
+      organizationId,
+      batchId: String(batch._id),
+      paidAmount,
+      status,
+    });
+
+    return {
+      batch,
+      outstanding: round2(Math.max(0, total - paidAmount)),
+    };
+  }
+
+  /**
+   * Create a replacement batch from rejected lines, with fresh claim
+   * references. The original rejected lines are linked to the new batch so the
+   * same rejection cannot be resubmitted twice.
+   */
+  async resubmitRejected(organizationId, batchId, actor = '') {
+    const original = await ClaimBatch.findOne({ _id: batchId, organizationId });
+    if (!original) return { notFound: true };
+    if (original.resubmittedBatchId) {
+      return {
+        alreadyResubmitted: true,
+        batchId: original.resubmittedBatchId.toString(),
+      };
+    }
+
+    const rejected = await ClaimLine.find({
+      batchId: original._id,
+      organizationId,
+      status: 'rejected',
+    }).lean();
+    if (rejected.length === 0) return { noRejected: true };
+
+    const batchHash = crypto.randomBytes(4).toString('hex');
+    const shortOrg = String(organizationId).slice(-6);
+    const existingRefs = new Set(
+      (await ClaimLine.find({ organizationId }, 'claimReference').lean()).map(
+        (l) => l.claimReference,
+      ),
+    );
+
+    let seq = 1;
+    const lines = rejected.map((line) => {
+      let ref;
+      do {
+        ref = `CN-${shortOrg}-${batchHash}-R${String(seq).padStart(5, '0')}`;
+        seq += 1;
+      } while (existingRefs.has(ref));
+      existingRefs.add(ref);
+      return {
+        clientId: line.clientId,
+        ndisNumber: line.ndisNumber,
+        invoiceId: line.invoiceId,
+        shiftId: line.shiftId,
+        supportNumber: line.supportNumber,
+        serviceDate: line.serviceDate,
+        quantity: line.quantity,
+        hours: line.hours,
+        unitPrice: line.unitPrice,
+        gstCode: line.gstCode,
+        claimType: line.claimType,
+        cancellationReason: line.cancellationReason,
+        authorisedBy: line.authorisedBy,
+        participantApproved: line.participantApproved,
+        inKindFundingProgramCode: line.inKindFundingProgramCode,
+        claimReference: ref,
+        requestedAmount: line.requestedAmount,
+        isHourly: Number(line.hours) > 0,
+      };
+    });
+
+    const validation = await this.validateLines(lines, {
+      registrationNumber: original.registrationNumber,
+      abn: original.abn,
+    });
+    if (validation.errors.length > 0) {
+      const err = new Error('Rejected-line resubmission failed pre-export validation.');
+      err.statusCode = 422;
+      err.code = 'CLAIM_VALIDATION_FAILED';
+      err.validation = validation;
+      throw err;
+    }
+
+    const totalAmount = round2(
+      lines.reduce((sum, line) => sum + line.requestedAmount, 0),
+    );
+
+    const batch = await ClaimBatch.create({
+      organizationId,
+      period: original.period,
+      status: 'generated',
+      fundingType: 'ndia_managed',
+      registrationNumber: original.registrationNumber,
+      abn: original.abn,
+      totals: { lines: lines.length, amount: totalAmount },
+      generatedBy: actor,
+      generatedAt: new Date(),
+      createdBy: actor,
+      resubmissionOf: original._id,
+    });
+
+    await ClaimLine.insertMany(
+      lines.map((line) => ({
+        batchId: batch._id,
+        organizationId,
+        clientId: line.clientId,
+        ndisNumber: line.ndisNumber,
+        invoiceId: line.invoiceId,
+        shiftId: line.shiftId,
+        supportNumber: line.supportNumber,
+        serviceDate: line.serviceDate,
+        quantity: line.quantity,
+        hours: line.hours,
+        unitPrice: line.unitPrice,
+        gstCode: line.gstCode,
+        claimType: line.claimType,
+        cancellationReason: line.cancellationReason,
+        authorisedBy: line.authorisedBy,
+        participantApproved: line.participantApproved,
+        inKindFundingProgramCode: line.inKindFundingProgramCode,
+        claimReference: line.claimReference,
+        requestedAmount: line.requestedAmount,
+      })),
+    );
+
+    const csv = this.buildCsv(lines, {
+      registrationNumber: original.registrationNumber,
+      abn: original.abn,
+    });
+    await this._storeCsv(batch, csv, organizationId);
+    await batch.save();
+
+    await ClaimLine.updateMany(
+      { _id: { $in: rejected.map((line) => line._id) } },
+      { $set: { resubmittedInBatchId: batch._id } },
+    );
+    original.resubmittedBatchId = batch._id;
+    await original.save();
+
+    logger.business('NDIS Claim Rejected Lines Resubmitted', {
+      event: 'ndis_claim_resubmitted',
+      organizationId,
+      originalBatchId: String(original._id),
+      newBatchId: String(batch._id),
+      lines: lines.length,
+    });
+
+    return { batch, csv, lineCount: lines.length, validation };
   }
 
   async getBatch(organizationId, batchId) {

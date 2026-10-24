@@ -673,6 +673,7 @@ class InvoiceManagementService {
         invoiceType: metadata.invoiceType || 'client',
         allowOverride: override.allowed === true,
         overrideReason: override.reason || '',
+        lineItems: invoiceData.lineItems || [],
       });
 
       if (!planValidation.ok) {
