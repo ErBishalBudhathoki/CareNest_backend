@@ -228,15 +228,15 @@ describe('SCHADS rate table', () => {
   test('resolves base rate by level and stream', () => {
     expect(
       schadsRates.resolveBaseRate({ level: 2, stream: 'disability', date: '2026-01-01' }),
-    ).toBe(25.8);
+    ).toBe(27.55);
   });
 
-  test('payPoint progression adds the configured step', () => {
+  test('pay points resolve to their explicit rate', () => {
     const base = schadsRates.resolveBaseRate({ level: 2, stream: 'disability', date: '2026-01-01' });
     const stepped = schadsRates.resolveBaseRate({
       level: 2,
       stream: 'disability',
-      payPoint: '1.2',
+      payPoint: '2.2',
       date: '2026-01-01',
     });
     expect(stepped).toBeGreaterThan(base);
@@ -276,23 +276,34 @@ describe('SCHADS rate table', () => {
     ).toBe(71.19);
   });
 
-  test('keeps historical rates before the new pay guide starts', () => {
+  test('keeps historical rates before the 2026-27 table', () => {
     expect(
       schadsRates.resolveBaseRate({
-        level: 2,
-        stream: 'disability',
-        date: '2026-11-30',
+        level: 1,
+        stream: 'social_community',
+        date: '2026-06-30',
       }),
-    ).toBe(25.8);
+    ).toBe(26.3);
+  });
+
+  test('applies the latest figures from 01/07/2026', () => {
+    expect(
+      schadsRates.resolveBaseRate({
+        level: 1,
+        stream: 'social_community',
+        date: '2026-07-01',
+      }),
+    ).toBe(27.55);
   });
 
   test('allowances are effective-dated', () => {
-    const before = schadsRates.resolveAllowances(undefined, '2026-11-30');
-    expect(before.firstAidAllowance).toBe(1.5);
-    expect(before.mealAllowance).toBe(16.0);
-    expect(before.sleepoverAllowance).toBe(65.5);
+    const before = schadsRates.resolveAllowances(undefined, '2026-06-30');
+    expect(before.firstAidAllowance).toBe(20.46);
+    expect(before.firstAidHourly).toBe(0.54);
+    expect(before.mealAllowance).toBe(16.62);
+    expect(before.sleepoverAllowance).toBe(60.02);
 
-    const after = schadsRates.resolveAllowances(undefined, '2026-12-01');
+    const after = schadsRates.resolveAllowances(undefined, '2026-07-01');
     expect(after.firstAidAllowance).toBe(21.43);
     expect(after.firstAidHourly).toBe(0.56);
     expect(after.mealAllowance).toBe(17.3);

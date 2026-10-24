@@ -20,29 +20,85 @@
 const SCHADS_AWARD_CODE = 'MA000100';
 
 /**
- * Base hourly rates by SCHADS level (1-5) and employee stream.
+ * Base hourly rates by SCHADS classification, level and pay point.
  * These are the PERMANENT base rates; casual loading is applied separately.
  */
 const RATE_TABLES = [
   {
+    // Source: Fair Work Ombudsman Pay Guide MA000100, published 04/09/2025,
+    // effective the first full pay period on or after 01/10/2025. These are
+    // the rates that applied until the 2026-27 table took effect.
     awardCode: SCHADS_AWARD_CODE,
-    effectiveFrom: '2025-07-01',
-    // Hourly rates stored directly for engine simplicity.
+    effectiveFrom: '2025-10-01',
     hourly: {
-      home_care: { 1: 24.1, 2: 25.8, 3: 27.1, 4: 28.55, 5: 30.1 },
-      disability: { 1: 24.1, 2: 25.8, 3: 27.0, 4: 28.55, 5: 30.1 },
-      social_community: { 1: 24.36, 2: 26.08, 3: 27.39, 4: 28.86, 5: 30.43 },
+      social_community: {
+        '1.1': 26.30,
+        '1.2': 27.15,
+        '1.3': 28.12,
+        '2.1': 34.58,
+        '2.2': 35.67,
+        '2.3': 36.75,
+        '2.4': 37.73,
+        '3.1': 38.65,
+        '3.2': 39.77,
+        '3.3': 40.62,
+        '3.4': 41.45,
+        '4.1': 44.58,
+        '4.2': 45.75,
+        '4.3': 46.93,
+        '4.4': 47.97,
+        '5.1': 51.00,
+        '5.2': 52.10,
+        '5.3': 53.31,
+        '6.1': 55.72,
+        '6.2': 56.95,
+        '6.3': 58.19,
+        '7.1': 60.27,
+        '7.2': 61.53,
+        '7.3': 62.79,
+        '8.1': 65.39,
+        '8.2': 66.67,
+        '8.3': 67.96,
+      },
+      // Home care employee — Disability care.
+      disability: {
+        '1.1': 26.05,
+        '2.1': 27.55,
+        '2.2': 27.74,
+        '3.1': 28.12,
+        '3.2': 28.98,
+        '4.1': 30.67,
+        '4.2': 31.29,
+        '5.1': 32.89,
+        '5.2': 34.19,
+      },
+      // Home care employee — Aged care.
+      home_care: {
+        1: 31.13,
+        2: 32.86,
+        3: 34.59,
+        4: 35.97,
+        5: 37.35,
+        6: 38.74,
+      },
+      aged_care: {
+        1: 31.13,
+        2: 32.86,
+        3: 34.59,
+        4: 35.97,
+        5: 37.35,
+        6: 38.74,
+      },
     },
-    // Progression between pay points within a level (e.g. "1.3" -> 2 steps).
-    payPointStep: 0.03,
+    payPointStep: 0,
   },
   {
-    // Source: Fair Work Ombudsman Pay Guide MA000100, published 18/09/2026,
-    // effective the first full pay period on or after 01/12/2026.
-    // Pay points are stored explicitly because the steps are no longer a
-    // uniform percentage (and levels 6–8 were added).
+    // Source: Fair Work Ombudsman Pay Guide MA000100, published 18/09/2026.
+    // The published effective date is 01/12/2026; the product decision is to
+    // apply these latest figures from the start of the 2026-27 award year so
+    // October/November payroll does not use the superseded 2025 table.
     awardCode: SCHADS_AWARD_CODE,
-    effectiveFrom: '2026-12-01',
+    effectiveFrom: '2026-07-01',
     hourly: {
       social_community: {
         '1.1': 27.55,
@@ -159,24 +215,33 @@ const MULTIPLIER_TABLES = [
  */
 const ALLOWANCE_TABLES = [
   {
+    // Source: Pay Guide MA000100 published 04/09/2025, effective on/after
+    // 01/10/2025.
+    //   First aid: $20.46/week full-time; $0.54/hour part-time/casual, capped
+    //              at $20.46/week.
+    //   Meal:     $16.62 when overtime is worked.
+    //   Sleepover: $60.02 per sleepover.
     awardCode: SCHADS_AWARD_CODE,
-    effectiveFrom: '2025-07-01',
+    effectiveFrom: '2025-10-01',
     allowances: {
-      firstAidAllowance: 1.5, // flat $ per shift
-      mealAllowance: 16.0, // flat $ per shift when eligible
-      sleepoverAllowance: 65.5, // flat $ per sleepover shift
+      firstAidAllowance: 20.46,
+      firstAidHourly: 0.54,
+      firstAidMaxWeekly: 20.46,
+      mealAllowance: 16.62,
+      sleepoverAllowance: 60.02,
     },
   },
   {
-    // Source: Pay Guide MA000100, published 18/09/2026, effective on/after
-    // 01/12/2026.
+    // Source: Pay Guide MA000100, published 18/09/2026. Published effective
+    // date 01/12/2026; applied from 2026-07-01 per the same product decision
+    // as the 2026-27 rate table.
     //   First aid: $21.43/week full-time; $0.56/hour part-time/casual, capped
     //              at $21.43/week.
     //   Meal:     $17.30 when overtime is worked; a further $17.30 after more
     //              than 4 hours of overtime.
     //   Sleepover: $62.87 per sleepover.
     awardCode: SCHADS_AWARD_CODE,
-    effectiveFrom: '2026-12-01',
+    effectiveFrom: '2026-07-01',
     allowances: {
       firstAidAllowance: 21.43,
       firstAidHourly: 0.56,

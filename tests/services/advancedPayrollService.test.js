@@ -72,7 +72,7 @@ describe('AdvancedPayrollService.calculatePayroll (shift-based)', () => {
       employee,
       shifts: [shift('2026-06-01T09:00:00+10:00', '2026-06-01T17:00:00+10:00')],
     });
-    expect(result.data.baseRate).toBe(25.8);
+    expect(result.data.baseRate).toBe(27.55);
   });
 
   test('casual employment loads gross pay above permanent', async () => {
@@ -223,7 +223,7 @@ describe('AdvancedPayrollService legacy label + resolved-rate compatibility', ()
       stream: 'Home Care (Disability)',
       employmentType: 'Permanent',
     });
-    expect(profile.baseRate).toBe(25.8);
+    expect(profile.baseRate).toBe(33.19);
     expect(profile.isCasual).toBe(false);
   });
 
