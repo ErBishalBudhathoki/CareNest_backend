@@ -79,6 +79,70 @@ class NDISClaimController {
     res.json({ success: true, data: result });
   });
 
+  createProviderTravelFromTrips = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    try {
+      const result = await providerTravelService.createTravelChargeFromTrips(
+        org,
+        {
+          shiftId: req.body.shiftId,
+          minutes: req.body.minutes,
+          labourSupportNumber: req.body.labourSupportNumber,
+          labourSupportName: req.body.labourSupportName,
+          labourUnitPrice: req.body.labourUnitPrice,
+          nonLabourSupportNumber: req.body.nonLabourSupportNumber,
+          nonLabourSupportName: req.body.nonLabourSupportName,
+          kmUnitPrice: req.body.kmUnitPrice,
+        },
+        this._actor(req),
+      );
+      if (result.notFound) {
+        return res.status(404).json({
+          success: false,
+          code: 'NOT_FOUND',
+          message: 'Shift not found.',
+        });
+      }
+      if (result.missingWorker) {
+        return res.status(422).json({
+          success: false,
+          code: 'MISSING_WORKER',
+          message: 'Assign a worker before billing travel.',
+        });
+      }
+      if (result.noTrips) {
+        return res.status(409).json({
+          success: false,
+          code: 'NO_APPROVED_TRIPS',
+          message: 'No approved, reimbursable mileage trips were found for this shift.',
+          data: { km: 0, tripCount: result.tripCount },
+        });
+      }
+      if (result.missingSupportItem) {
+        return res.status(422).json({
+          success: false,
+          code: 'MISSING_TRAVEL_SUPPORT_ITEM',
+          message:
+            'No provider-travel support item matched this shift. Select the NDIS travel item manually.',
+          data: { km: result.km, tripCount: result.tripCount },
+        });
+      }
+      res.status(201).json({
+        success: true,
+        message: `Provider travel invoiced from ${result.tripCount} approved trip(s).`,
+        data: result,
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        code: error.code || 'PROVIDER_TRAVEL_BILLING_FAILED',
+        message: error.message,
+        data: error.details || undefined,
+      });
+    }
+  });
+
   createProviderTravelCharge = catchAsync(async (req, res) => {
     const org = this._requireOrg(req, res);
     if (!org) return;

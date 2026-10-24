@@ -1,5 +1,7 @@
 const Shift = require('../models/Shift');
 const Client = require('../models/Client');
+const Trip = require('../models/Trip');
+const SupportItem = require('../models/SupportItem');
 const {
   InvoiceManagementService: invoiceManagementService,
 } = require('./invoiceManagementService');
@@ -22,8 +24,90 @@ function round2(value) {
  * agreed price below the cap can be supplied.
  */
 class ProviderTravelService {
-  async createTravelCharge(organizationId, input = {}, actor = '') {
+  /**
+   * Build a travel charge automatically from approved mileage trips linked to
+   * the shift's worker/participant. The km total is the sum of approved,
+   * reimbursable trips in the shift window (one day either side).
+   */
+  async createTravelChargeFromTrips(organizationId, input = {}, actor = '') {
     const shift = await Shift.findOne({
+      _id: input.shiftId,
+      organizationId,
+      isActive: { $ne: false },
+    });
+    if (!shift) return { notFound: true };
+    if (!shift.employeeId) return { missingWorker: true };
+
+    const start = new Date(new Date(shift.startTime).getTime() - 24 * 60 * 60 * 1000);
+    const end = new Date(new Date(shift.endTime).getTime() + 24 * 60 * 60 * 1000);
+    const query = {
+      organizationId,
+      userId: shift.employeeId,
+      status: 'APPROVED',
+      isReimbursable: true,
+      date: { $gte: start, $lte: end },
+    };
+    if (shift.clientId) query.clientId = shift.clientId;
+
+    const trips = await Trip.find(query).lean();
+    const km = round2(
+      (trips || []).reduce((sum, trip) => sum + (Number(trip.distance) || 0), 0),
+    );
+    if (km <= 0) {
+      return { noTrips: true, km: 0, tripCount: trips?.length || 0 };
+    }
+
+    let nonLabourSupportNumber = input.nonLabourSupportNumber;
+    if (!nonLabourSupportNumber) {
+      nonLabourSupportNumber = await this._findNonLabourTravelItem(shift);
+    }
+    if (!nonLabourSupportNumber) {
+      return { missingSupportItem: true, km, tripCount: trips.length };
+    }
+
+    const result = await this.createTravelCharge(
+      organizationId,
+      {
+        ...input,
+        shiftId: shift._id,
+        km,
+        minutes: input.minutes || 0,
+        nonLabourSupportNumber,
+      },
+      actor,
+    );
+    return { ...result, km, tripCount: trips.length };
+  }
+
+  /**
+   * Find the non-labour provider-travel item that matches the shift's support
+   * category and registration group (e.g. 01 + 0107 → 01_799_0107_*).
+   */
+  async _findNonLabourTravelItem(shift) {
+    const supportNumber = shift.supportItems?.[0]?.itemNumber || '';
+    const parts = String(supportNumber).split('_');
+    const category = parts[0];
+    const registrationGroup = parts[2];
+
+    if (category && registrationGroup) {
+      const match = await SupportItem.findOne({
+        supportItemNumber: new RegExp(
+          `^${category}_799_${registrationGroup}_`,
+        ),
+      }).lean();
+      if (match?.supportItemNumber) return match.supportItemNumber;
+    }
+
+    if (category) {
+      const fallback = await SupportItem.findOne({
+        supportItemNumber: new RegExp(`^${category}_799_`),
+      }).lean();
+      if (fallback?.supportItemNumber) return fallback.supportItemNumber;
+    }
+    return null;
+  }
+
+  async createTravelCharge(organizationId, input = {}, actor = '') {    const shift = await Shift.findOne({
       _id: input.shiftId,
       organizationId,
       isActive: { $ne: false },

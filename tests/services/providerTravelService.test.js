@@ -15,6 +15,16 @@ jest.mock('../../models/Client', () => ({
   findOne: (...args) => mockClientFindOne(...args),
 }));
 
+const mockTripFind = jest.fn();
+jest.mock('../../models/Trip', () => ({
+  find: (...args) => mockTripFind(...args),
+}));
+
+const mockSupportItemFindOne = jest.fn();
+jest.mock('../../models/SupportItem', () => ({
+  findOne: (...args) => mockSupportItemFindOne(...args),
+}));
+
 const mockGenerateInvoiceNumber = jest.fn();
 const mockCreateInvoice = jest.fn();
 jest.mock('../../services/invoiceManagementService', () => ({
@@ -37,7 +47,9 @@ const shift = {
   _id: 's1',
   organizationId: 'org1',
   clientId: 'c1',
+  employeeId: 'u1',
   status: 'approved',
+  supportItems: [{ itemNumber: '01_011_0107_1_1', itemName: 'Daily living' }],
   startTime: new Date('2026-06-10T09:00:00+10:00'),
   endTime: new Date('2026-06-10T11:00:00+10:00'),
   isActive: true,
@@ -62,7 +74,7 @@ describe('ProviderTravelService', () => {
       data: { ...data, _id: 'inv1' },
     }));
     mockValidatePrice.mockImplementation(async (supportNumber) => ({
-      priceCap: supportNumber === '01_799_0107_2_1' ? 1.05 : 70,
+      priceCap: String(supportNumber).startsWith('01_799_') ? 1.05 : 70,
     }));
   });
 
@@ -73,7 +85,7 @@ describe('ProviderTravelService', () => {
         shiftId: 's1',
         minutes: 30,
         km: 20,
-        labourSupportNumber: '01_799_0107_1_1',
+        labourSupportNumber: '01_011_0107_1_1',
         nonLabourSupportNumber: '01_799_0107_2_1',
       },
       'admin',
@@ -93,6 +105,32 @@ describe('ProviderTravelService', () => {
       unit: 'KM',
       price: 1.05,
       totalPrice: 21,
+    });
+  });
+
+  test('builds the charge automatically from approved trips', async () => {
+    mockTripFind.mockReturnValue({
+      lean: async () => [{ distance: 10 }, { distance: 5.5 }],
+    });
+    mockSupportItemFindOne.mockReturnValue({
+      lean: async () => ({ supportItemNumber: '01_799_0107_1_1' }),
+    });
+
+    const result = await providerTravelService.createTravelChargeFromTrips(
+      'org1',
+      { shiftId: 's1' },
+      'admin',
+    );
+
+    expect(result.km).toBe(15.5);
+    expect(result.tripCount).toBe(2);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+    expect(payload.lineItems[0]).toMatchObject({
+      supportItemNumber: '01_799_0107_1_1',
+      quantity: 15.5,
+      unit: 'KM',
+      price: 1.05,
+      totalPrice: 16.28,
     });
   });
 
