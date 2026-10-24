@@ -53,11 +53,15 @@ const shift = {
   startTime: new Date('2026-06-10T09:00:00+10:00'),
   endTime: new Date('2026-06-10T11:00:00+10:00'),
   isActive: true,
+  providerTravel: {},
+  save: jest.fn(),
 };
 
 describe('ProviderTravelService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    shift.providerTravel = {};
+    shift.save = jest.fn();
     mockShiftFindOne.mockResolvedValue(shift);
     mockClientFindOne.mockReturnValue({
       lean: async () => ({
@@ -132,6 +136,20 @@ describe('ProviderTravelService', () => {
       price: 1.05,
       totalPrice: 16.28,
     });
+  });
+
+  test('never bills provider travel twice for the same shift', async () => {
+    mockShiftFindOne.mockResolvedValue({
+      ...shift,
+      providerTravel: { invoiceId: 'inv-existing' },
+    });
+    const result = await providerTravelService.createTravelCharge(
+      'org1',
+      { shiftId: 's1', km: 5, nonLabourSupportNumber: '01_799_0107_2_1' },
+      'admin',
+    );
+    expect(result).toMatchObject({ alreadyBilled: true, invoiceId: 'inv-existing' });
+    expect(mockCreateInvoice).not.toHaveBeenCalled();
   });
 
   test('requires the matching support item when a dimension is billed', async () => {

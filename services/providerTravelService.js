@@ -116,6 +116,12 @@ class ProviderTravelService {
     if (shift.status === 'completed') {
       return { invalidState: true, status: shift.status };
     }
+    if (shift.providerTravel?.invoiceId) {
+      return {
+        alreadyBilled: true,
+        invoiceId: shift.providerTravel.invoiceId.toString(),
+      };
+    }
 
     const minutes = Number(input.minutes) || 0;
     const km = Number(input.km) || 0;
@@ -299,6 +305,15 @@ class ProviderTravelService {
       err.details = result.planValidation || null;
       throw err;
     }
+
+    shift.providerTravel = {
+      invoiceId: result.data._id,
+      km,
+      minutes,
+      amount: subtotal,
+      billedAt: new Date(),
+    };
+    await shift.save();
 
     logger.business('NDIS Provider Travel Billed', {
       event: 'ndis_provider_travel_billed',

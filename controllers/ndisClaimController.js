@@ -128,6 +128,28 @@ class NDISClaimController {
           data: { km: result.km, tripCount: result.tripCount },
         });
       }
+      if (result.clientNotFound) {
+        return res.status(404).json({
+          success: false,
+          code: 'CLIENT_NOT_FOUND',
+          message: 'Participant not found for this shift.',
+        });
+      }
+      if (result.alreadyBilled) {
+        return res.status(409).json({
+          success: false,
+          code: 'ALREADY_BILLED',
+          message: 'Provider travel has already been invoiced for this shift.',
+          data: { invoiceId: result.invoiceId },
+        });
+      }
+      if (result.invalidState) {
+        return res.status(409).json({
+          success: false,
+          code: 'INVALID_STATE',
+          message: `Shift is ${result.status}; provider travel cannot be billed.`,
+        });
+      }
       res.status(201).json({
         success: true,
         message: `Provider travel invoiced from ${result.tripCount} approved trip(s).`,
@@ -174,6 +196,14 @@ class NDISClaimController {
           success: false,
           code: 'CLIENT_NOT_FOUND',
           message: 'Participant not found for this shift.',
+        });
+      }
+      if (result.alreadyBilled) {
+        return res.status(409).json({
+          success: false,
+          code: 'ALREADY_BILLED',
+          message: 'Provider travel has already been invoiced for this shift.',
+          data: { invoiceId: result.invoiceId },
         });
       }
       if (result.invalidState) {

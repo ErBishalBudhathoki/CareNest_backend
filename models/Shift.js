@@ -51,6 +51,14 @@ const shiftSchema = new mongoose.Schema({
     feeAmount: { type: Number, default: 0 },
     invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
   },
+  // Provider travel billed against this shift, so a retry cannot double-charge.
+  providerTravel: {
+    invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
+    km: { type: Number, default: 0 },
+    minutes: { type: Number, default: 0 },
+    amount: { type: Number, default: 0 },
+    billedAt: { type: Date, default: null },
+  },
   createdBy: String
 }, {
   timestamps: true,
@@ -71,6 +79,12 @@ const shiftSchema = new mongoose.Schema({
       }
       if (ret.cancellation?.cancelledAt) {
         ret.cancellation.cancelledAt = new Date(ret.cancellation.cancelledAt).toISOString();
+      }
+      if (ret.providerTravel?.invoiceId) {
+        ret.providerTravel.invoiceId = ret.providerTravel.invoiceId.toString();
+      }
+      if (ret.providerTravel?.billedAt) {
+        ret.providerTravel.billedAt = new Date(ret.providerTravel.billedAt).toISOString();
       }
       
       // Transform dates to ISO 8601 strings
