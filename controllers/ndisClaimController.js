@@ -2,6 +2,7 @@ const catchAsync = require('../utils/catchAsync');
 const ndisClaimService = require('../services/ndisClaimService');
 const ndisClaimResultsService = require('../services/ndisClaimResultsService');
 const cancellationBillingService = require('../services/cancellationBillingService');
+const providerTravelService = require('../services/providerTravelService');
 
 /**
  * NDIS claiming API (Phase 6). Org-scoped.
@@ -76,6 +77,61 @@ class NDISClaimController {
       return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Claim batch not found.' });
     }
     res.json({ success: true, data: result });
+  });
+
+  createProviderTravelCharge = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    try {
+      const result = await providerTravelService.createTravelCharge(
+        org,
+        {
+          shiftId: req.body.shiftId,
+          minutes: req.body.minutes,
+          km: req.body.km,
+          labourSupportNumber: req.body.labourSupportNumber,
+          labourSupportName: req.body.labourSupportName,
+          labourUnitPrice: req.body.labourUnitPrice,
+          nonLabourSupportNumber: req.body.nonLabourSupportNumber,
+          nonLabourSupportName: req.body.nonLabourSupportName,
+          kmUnitPrice: req.body.kmUnitPrice,
+        },
+        this._actor(req),
+      );
+      if (result.notFound) {
+        return res.status(404).json({
+          success: false,
+          code: 'NOT_FOUND',
+          message: 'Shift not found.',
+        });
+      }
+      if (result.clientNotFound) {
+        return res.status(404).json({
+          success: false,
+          code: 'CLIENT_NOT_FOUND',
+          message: 'Participant not found for this shift.',
+        });
+      }
+      if (result.invalidState) {
+        return res.status(409).json({
+          success: false,
+          code: 'INVALID_STATE',
+          message: `Shift is ${result.status}; provider travel cannot be billed.`,
+        });
+      }
+      res.status(201).json({
+        success: true,
+        message: 'Provider travel invoiced.',
+        data: result,
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        code: error.code || 'PROVIDER_TRAVEL_BILLING_FAILED',
+        message: error.message,
+        data: error.details || undefined,
+      });
+    }
   });
 
   createCancellationCharge = catchAsync(async (req, res) => {

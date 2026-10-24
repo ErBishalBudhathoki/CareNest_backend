@@ -39,6 +39,19 @@ router.use(requireEntitlement('ndis_claiming'));
 
 router.get('/batches', readLimiter, ndisClaimController.listBatches);
 router.post(
+  '/provider-travel',
+  writeLimiter,
+  body('shiftId').isMongoId(),
+  body('minutes').optional().isFloat({ min: 0 }),
+  body('km').optional().isFloat({ min: 0 }),
+  body('labourSupportNumber').optional().isString().isLength({ max: 40 }),
+  body('nonLabourSupportNumber').optional().isString().isLength({ max: 40 }),
+  body('labourUnitPrice').optional().isFloat({ min: 0 }),
+  body('kmUnitPrice').optional().isFloat({ min: 0 }),
+  handleValidationErrors,
+  ndisClaimController.createProviderTravelCharge,
+);
+router.post(
   '/cancellations',
   writeLimiter,
   body('shiftId').isMongoId(),
