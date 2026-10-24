@@ -33,11 +33,15 @@ const Client = require('../../models/Client');
 const Stakeholder = require('../../models/Stakeholder');
 const SupportItem = require('../../models/SupportItem');
 const SILRosterOfCare = require('../../models/SILRosterOfCare');
+const SILQuote = require('../../models/SILQuote');
+const Shift = require('../../models/Shift');
 const { Invoice } = require('../../models/Invoice');
 const InvoiceLineItem = require('../../models/InvoiceLineItem');
 const ClaimBatch = require('../../models/ClaimBatch');
 const ClaimLine = require('../../models/ClaimLine');
 const silBillingService = require('../../services/silBillingService');
+const silQuoteService = require('../../services/silQuoteService');
+const silRosterService = require('../../services/silRosterService');
 const ndisClaimService = require('../../services/ndisClaimService');
 
 const ABN = '53004085616'; // ATO-checksum-valid test ABN
@@ -144,6 +148,8 @@ describe('E2E: SIL roster of care → invoice → NDIS claim', () => {
         InvoiceLineItem.deleteMany({ organizationId: orgId }),
         Invoice.deleteMany({ organizationId: orgId }),
         SILRosterOfCare.deleteMany({ organizationId: orgId }),
+        SILQuote.deleteMany({ organizationId: orgId }),
+        Shift.deleteMany({ organizationId: orgId }),
         Stakeholder.deleteMany({ organizationId: orgId }),
         Client.deleteMany({ organizationId: orgId }),
       ]);
@@ -154,6 +160,90 @@ describe('E2E: SIL roster of care → invoice → NDIS claim', () => {
       await mongoose.connection.close();
     }
   }, 30000);
+
+  test('quote → roster of care → materialized shift → assigned worker → invoice', async () => {
+    const loopClient = await Client.create({
+      organizationId: orgId,
+      clientFirstName: 'E2E Loop',
+      clientLastName: 'Participant',
+      clientEmail: `e2e-loop-${runStamp}@example.com`,
+      clientPhone: '0400000000',
+      clientAddress: '1 Loop St',
+      clientCity: 'Sydney',
+      clientState: 'NSW',
+      clientZip: '2000',
+      fundingType: 'plan_managed',
+      ndisNumber: NDIS_NUMBER,
+    });
+
+    const quote = await silQuoteService.buildQuote(
+      orgId,
+      {
+        clientId: loopClient._id,
+        fundingType: 'plan_managed',
+        lines: [
+          {
+            supportNumber: SUPPORT_NUMBER,
+            supportName: 'E2E SIL support',
+            shiftType: 'day',
+            hoursPerWeek: 3,
+            unitPrice: 67.56,
+            days: ['Mon'],
+            startTime: '09:00',
+            endTime: '12:00',
+          },
+        ],
+      },
+      'e2e',
+    );
+    expect(quote.lines[0].priceValidation.passed).toBe(true);
+
+    const accepted = await silQuoteService.acceptQuote(orgId, quote._id, 'e2e');
+    expect(accepted.quote.status).toBe('accepted');
+
+    const converted = await silQuoteService.convertToRosterOfCare(
+      orgId,
+      quote._id,
+      { effectiveFrom: utcDay(2026, 3, 16), cadence: 'quarterly' },
+      'e2e',
+    );
+    expect(converted.rosterOfCare).toBeTruthy();
+
+    const materialized = await silRosterService.materializeRocShifts(
+      orgId,
+      converted.rosterOfCare._id.toString(),
+      { weekStarting: utcDay(2026, 3, 16) },
+      'e2e',
+    );
+    expect(materialized.created.length).toBeGreaterThan(0);
+
+    const shift = await Shift.findOne({
+      organizationId: orgId,
+      silRosterOfCareId: converted.rosterOfCare._id,
+    });
+    expect(shift).toBeTruthy();
+    await Shift.updateOne(
+      { _id: shift._id },
+      {
+        $set: {
+          employeeId: new mongoose.Types.ObjectId(),
+          employeeEmail: `worker-${runStamp}@example.com`,
+          status: 'approved',
+        },
+      },
+    );
+
+    const billed = await silBillingService.generateInvoiceFromRosterOfCare(
+      orgId,
+      converted.rosterOfCare._id.toString(),
+      { from: utcDay(2026, 3, 16), to: utcDay(2026, 3, 22) },
+      'e2e',
+    );
+    expect(billed.invoice).toBeTruthy();
+    expect(billed.invoice.invoiceNumber).toBeTruthy();
+    // 3 support hours for the one-week period × $67.56.
+    expect(billed.invoice.financialSummary.totalAmount).toBeCloseTo(3 * 67.56, 2);
+  });
 
   test('a plan-managed participant is billed as a plan-manager PDF', async () => {
     const result = await silBillingService.generateInvoiceFromRosterOfCare(
