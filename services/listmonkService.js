@@ -287,6 +287,38 @@ class ListmonkService {
     return this._dispatchTx(toOrOptions, subject, html, extraData);
   }
 
+  /**
+   * Plain-text alternative for an HTML email.
+   *
+   * Two reasons this is always sent:
+   *  1. `multipart/alternative` needs a text part; without one some relays and
+   *     clients show an empty body.
+   *  2. The SMTP hop in front of Listmonk (`sendpulse-relay`) drops the
+   *     `text/html` part of outgoing mail — every HTML-only message arrives with
+   *     an empty body. With this alternative the recipient still gets the
+   *     content (the code, the amount, the message) until that hop is fixed.
+   */
+  _toPlainText(html) {
+    return String(html || '')
+      .replace(/<(head|style|script)[\s\S]*?<\/\1>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|h[1-6]|li|tr|table)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '• ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .join('\n')
+      .trim();
+  }
+
   async _dispatchTx(to, subject, html, extraData = {}) {
     if (!to) {
       logger.warn('[Listmonk] sendEmail called with empty recipient — skipping');
@@ -300,6 +332,7 @@ class ListmonkService {
     await this.ensureTxTemplate();
 
     try {
+      const altBody = this._toPlainText(html);
       const result = await listmonkRequest('POST', '/tx', {
         subscriber_email: to,
         // `fallback` renders and sends even when the recipient is not a
@@ -314,6 +347,7 @@ class ListmonkService {
           ...extraData,
         },
         content_type: 'html',
+        ...(altBody ? { altbody: altBody } : {}),
       });
       logger.info('[Listmonk] Transactional email sent', { to, subject });
       return result;
