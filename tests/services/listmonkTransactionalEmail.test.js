@@ -62,15 +62,23 @@ describe('Listmonk transactional email dispatch', () => {
   let service;
   let originalNodeEnv;
   let originalTemplateId;
+  let originalApiKey;
+  let originalUsername;
 
   beforeEach(() => {
     calls.length = 0;
     responses = [];
     originalNodeEnv = process.env.NODE_ENV;
     originalTemplateId = process.env.LISTMONK_TEMPLATE_ID;
+    originalApiKey = process.env.listmonk_api_key;
+    originalUsername = process.env.LISTMONK_USERNAME;
     // _dispatchTx is a no-op under NODE_ENV=test (jest default).
     process.env.NODE_ENV = 'development';
     process.env.LISTMONK_TEMPLATE_ID = String(TEMPLATE_ID);
+    // CI has no .env, and authHeader() throws without a key, which would make
+    // every send short-circuit to null before reaching the mocked https layer.
+    process.env.listmonk_api_key = 'test-api-key';
+    process.env.LISTMONK_USERNAME = 'test-user';
     jest.resetModules();
     // resetModules() rebuilds the mocked core module, so grab the live instance
     // before the service requires it.
@@ -81,12 +89,18 @@ describe('Listmonk transactional email dispatch', () => {
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
-    if (originalTemplateId === undefined) {
-      delete process.env.LISTMONK_TEMPLATE_ID;
-    } else {
-      process.env.LISTMONK_TEMPLATE_ID = originalTemplateId;
-    }
+    restoreEnv('LISTMONK_TEMPLATE_ID', originalTemplateId);
+    restoreEnv('listmonk_api_key', originalApiKey);
+    restoreEnv('LISTMONK_USERNAME', originalUsername);
   });
+
+  function restoreEnv(key, value) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
 
   it('rewrites a tx template that never outputs data.body', async () => {
     queueResponse(200, {
