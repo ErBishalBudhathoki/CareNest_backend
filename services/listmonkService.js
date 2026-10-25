@@ -19,17 +19,7 @@ const LISTMONK_BASE_URL    = process.env.LISTMONK_BASE_URL    || 'https://listmo
 const LISTMONK_API_KEY     = process.env.listmonk_api_key;
 const LISTMONK_USERNAME    = process.env.LISTMONK_USERNAME    || 'carenest';
 const ONBOARDING_LIST_ID   = parseInt(process.env.LISTMONK_ONBOARDING_LIST_ID || '3', 10);
-// Preferred tx template. Treated as a hint: if it is missing or is not a
-// type=tx template, the service finds (or creates) a usable one instead.
 const LISTMONK_TEMPLATE_ID = parseInt(process.env.LISTMONK_TEMPLATE_ID || '1', 10);
-
-// Listmonk renders /tx through a transactional (type=tx) template. The HTML we
-// pass in `data.body` only reaches the recipient if the template prints it and
-// marks it safe (Listmonk compiles tx templates with html/template). A template
-// without this expression sends a blank body while still returning HTTP 200.
-const TX_TEMPLATE_BODY   = '{{ .Tx.Data.body | Safe }}';
-const TX_TEMPLATE_NAME   = 'CareNest Transactional';
-const TX_BODY_SAFE_REGEX = /\.Tx\.Data\.body\s*\|\s*Safe/;
 
 function authHeader() {
   if (!LISTMONK_API_KEY) {
@@ -84,163 +74,6 @@ function listmonkRequest(method, path, body) {
 }
 
 class ListmonkService {
-  constructor() {
-    // Template id actually used for sends. Seeded from the env var and replaced
-    // with the id Listmonk assigns if the template has to be created.
-    this._txTemplateId = LISTMONK_TEMPLATE_ID;
-    this._txTemplateCheck = null;
-  }
-
-  /**
-   * Resolve and, if needed, repair the transactional template used for sends.
-   *
-   * Runs once per process (memoised), so a misconfigured template is repaired
-   * on the first email instead of silently producing blank emails forever.
-   * Never throws: a failure here must not block the send itself.
-   */
-  ensureTxTemplate() {
-    if (!this._txTemplateCheck) {
-      this._txTemplateCheck = this._syncTxTemplate().catch((err) => {
-        this._txTemplateCheck = null; // retry on the next send
-        logger.error('[Listmonk] Could not verify the transactional template', {
-          templateId: this._txTemplateId,
-          error: err.message,
-          statusCode: err.statusCode,
-        });
-      });
-    }
-    return this._txTemplateCheck;
-  }
-
-  async _syncTxTemplate() {
-    const configuredId = LISTMONK_TEMPLATE_ID;
-    const configured = await this._getTemplate(configuredId);
-
-    if (configured && configured.type === 'tx') {
-      if (TX_BODY_SAFE_REGEX.test(configured.body || '')) {
-        this._txTemplateId = configured.id || configuredId;
-        return;
-      }
-
-      await this._writeTxTemplate(configured);
-      logger.warn(
-        '[Listmonk] Transactional template did not output the email body — rewrote it',
-        {
-          templateId: this._txTemplateId,
-          reason: configured.body
-            ? 'missing {{ .Tx.Data.body | Safe }}'
-            : 'empty template body',
-        }
-      );
-      return;
-    }
-
-    // `LISTMONK_TEMPLATE_ID` is wrong: it is missing, or it points at a campaign
-    // template (Listmonk's default seed is id 1 = "Default campaign template").
-    // `/tx` only accepts type=tx templates — a campaign id is rejected with
-    // 400 "template 1 not found" — and a campaign record must never be
-    // rewritten. So fall back to a real tx template and leave the campaign alone.
-    if (configured) {
-      logger.error(
-        '[Listmonk] LISTMONK_TEMPLATE_ID does not point at a transactional template — ignoring it',
-        { templateId: configuredId, type: configured.type, name: configured.name }
-      );
-    } else {
-      logger.warn('[Listmonk] LISTMONK_TEMPLATE_ID does not exist', {
-        templateId: configuredId,
-      });
-    }
-
-    const txTemplates = await this._listTxTemplates();
-    const usable =
-      txTemplates.find((t) => TX_BODY_SAFE_REGEX.test(t.body || '')) ||
-      txTemplates[0];
-
-    if (!usable) {
-      await this._createTxTemplate();
-      return;
-    }
-
-    if (!TX_BODY_SAFE_REGEX.test(usable.body || '')) {
-      await this._writeTxTemplate(usable);
-      logger.warn(
-        '[Listmonk] Transactional template did not output the email body — rewrote it',
-        { templateId: this._txTemplateId, configuredId }
-      );
-      return;
-    }
-
-    this._txTemplateId = usable.id;
-    logger.warn(
-      '[Listmonk] LISTMONK_TEMPLATE_ID is not usable — using an existing transactional template',
-      { templateId: usable.id, name: usable.name, configuredId }
-    );
-  }
-
-  async _getTemplate(id) {
-    try {
-      const res = await listmonkRequest('GET', `/templates/${id}`);
-      return (res && res.data) || null;
-    } catch (err) {
-      // Listmonk answers a missing template with 400 {"message":"Template not
-      // found"}, not 404, so treat both as "absent" instead of an outage.
-      const message = String(
-        (err.body && err.body.message) || err.message || ''
-      ).toLowerCase();
-
-      if (err.statusCode === 404 || (err.statusCode === 400 && message.includes('not found'))) {
-        return null;
-      }
-      throw err;
-    }
-  }
-
-  /**
-   * All templates of type=tx. Only these are cached by Listmonk for `/tx`;
-   * campaign and campaign_visual templates are not accepted there.
-   */
-  async _listTxTemplates() {
-    const txTemplates = [];
-
-    for (let page = 1; page <= 5; page += 1) {
-      const res = await listmonkRequest('GET', `/templates?page=${page}&per_page=100`);
-      const rows = res && Array.isArray(res.data) ? res.data : [];
-      txTemplates.push(...rows.filter((row) => row && row.type === 'tx'));
-
-      const total = res && typeof res.total === 'number' ? res.total : rows.length;
-      if (rows.length < 100 || page * 100 >= total) break;
-    }
-
-    return txTemplates;
-  }
-
-  async _writeTxTemplate(tpl) {
-    await listmonkRequest('PUT', `/templates/${tpl.id}`, {
-      name: tpl.name || TX_TEMPLATE_NAME,
-      subject: tpl.subject || '',
-      type: 'tx',
-      body: TX_TEMPLATE_BODY,
-    });
-    this._txTemplateId = tpl.id;
-  }
-
-  async _createTxTemplate() {
-    const created = await listmonkRequest('POST', '/templates', {
-      name: TX_TEMPLATE_NAME,
-      subject: '',
-      type: 'tx',
-      body: TX_TEMPLATE_BODY,
-    });
-
-    const createdId = created && created.data && created.data.id;
-    if (createdId) {
-      this._txTemplateId = createdId;
-    }
-    logger.warn('[Listmonk] Transactional template was missing — created it', {
-      templateId: this._txTemplateId,
-    });
-  }
-
   /**
    * Universal CareNest Email Wrapper
    * Ensures consistent branding, header, body, and footer across ALL emails.
@@ -276,50 +109,18 @@ class ListmonkService {
 </html>`;
   }
 
-  async sendEmail(toOrOptions, subject, html, _attachments, extraData = {}) {
+  async sendEmail(toOrOptions, subject, html, _attachments) {
     if (toOrOptions && typeof toOrOptions === 'object' && !Array.isArray(toOrOptions)) {
       const opts = toOrOptions;
       const recipient = opts.to;
       const subj = opts.subject || '(no subject)';
       const body = opts.html || this._buildGenericHtml(opts.subject, opts.context);
-      return this._dispatchTx(recipient, subj, body, opts.data || extraData);
+      return this._dispatchTx(recipient, subj, body);
     }
-    return this._dispatchTx(toOrOptions, subject, html, extraData);
+    return this._dispatchTx(toOrOptions, subject, html);
   }
 
-  /**
-   * Plain-text alternative for an HTML email.
-   *
-   * Two reasons this is always sent:
-   *  1. `multipart/alternative` needs a text part; without one some relays and
-   *     clients show an empty body.
-   *  2. The SMTP hop in front of Listmonk (`sendpulse-relay`) drops the
-   *     `text/html` part of outgoing mail — every HTML-only message arrives with
-   *     an empty body. With this alternative the recipient still gets the
-   *     content (the code, the amount, the message) until that hop is fixed.
-   */
-  _toPlainText(html) {
-    return String(html || '')
-      .replace(/<(head|style|script)[\s\S]*?<\/\1>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(p|div|h[1-6]|li|tr|table)>/gi, '\n')
-      .replace(/<li[^>]*>/gi, '• ')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .split('\n')
-      .map((line) => line.trim())
-      .join('\n')
-      .trim();
-  }
-
-  async _dispatchTx(to, subject, html, extraData = {}) {
+  async _dispatchTx(to, subject, html) {
     if (!to) {
       logger.warn('[Listmonk] sendEmail called with empty recipient — skipping');
       return null;
@@ -329,36 +130,27 @@ class ListmonkService {
       return { skipped: true };
     }
 
-    await this.ensureTxTemplate();
-
     try {
-      const altBody = this._toPlainText(html);
       const result = await listmonkRequest('POST', '/tx', {
         subscriber_email: to,
-        // `fallback` renders and sends even when the recipient is not a
-        // registered Listmonk subscriber (e.g. accounts created before the
-        // signup flow started calling addSubscriber). The default mode drops
-        // those recipients with a 400 that used to be swallowed below.
-        subscriber_mode: 'fallback',
-        template_id: this._txTemplateId,
+        template_id: LISTMONK_TEMPLATE_ID,
         subject,
+        // Listmonk tx templates are customisable and different instances read
+        // different keys from .Tx.Data. Send the same HTML under the common
+        // names so a template that reads .content/.html/.message is not blank.
         data: {
           body: html,
-          ...extraData,
+          content: html,
+          html,
+          message: html,
         },
         content_type: 'html',
-        ...(altBody ? { altbody: altBody } : {}),
       });
       logger.info('[Listmonk] Transactional email sent', { to, subject });
       return result;
     } catch (err) {
       logger.error('[Listmonk] Failed to send transactional email', {
-        to,
-        subject,
-        templateId: this._txTemplateId,
-        error: err.message,
-        statusCode: err.statusCode,
-        response: err.body && (err.body.message || err.body),
+        to, subject, error: err.message, statusCode: err.statusCode,
       });
       return null;
     }
@@ -441,7 +233,7 @@ class ListmonkService {
       <p style="margin-top: 30px; font-size: 14px; color: #666;">If you didn't create an account, you can safely ignore this email.</p>
     `;
     const html = this._wrapCareNestEmail('Welcome to CareNest', content);
-    return this.sendEmail(email, subject, html, null, { otp, code: otp, token: otp, firstName });
+    return this.sendEmail(email, subject, html);
   }
 
   async sendPasswordResetEmail(email, otp) {
@@ -457,7 +249,7 @@ class ListmonkService {
       <p style="margin-top: 30px; font-size: 14px; color: #666;">If you didn't request a password reset, please secure your account immediately.</p>
     `;
     const html = this._wrapCareNestEmail('Password Reset Request', content);
-    return this.sendEmail(email, subject, html, null, { otp, code: otp, token: otp });
+    return this.sendEmail(email, subject, html);
   }
 
   async sendPasswordChangeNotification(email, firstName) {

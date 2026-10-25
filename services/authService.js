@@ -501,15 +501,6 @@ class AuthService {
         }
       );
 
-      // Listmonk's default subscriber mode rejects recipients that are not
-      // registered subscribers. Signup registers the address (createUser), but
-      // accounts created before that did not, and they got no reset email at
-      // all. Register here too, before the worker dispatches the email.
-      await emailService.addSubscriber(
-        normalizedEmail,
-        [user.firstName, user.lastName].filter(Boolean).join(' ') || normalizedEmail
-      );
-
       // Trigger Temporal Workflow
       await TemporalManager.startWorkflow('authNotificationWorkflow', {
         workflowId: `auth-reset-${normalizedEmail.replace(/[@.]/g, '-')}-${Date.now()}`,
@@ -636,20 +627,7 @@ class AuthService {
       }
 
       await admin.auth().updateUser(firebaseUid, { password: newPassword });
-      await admin.auth().revokeRefreshTokens(firebaseUid);
       const now = new Date();
-
-      const refreshTokensUpdate = {};
-      if (Array.isArray(user.refreshTokens) && user.refreshTokens.length > 0) {
-        user.refreshTokens.forEach(t => {
-          if (!t.revoked) {
-            t.revoked = now;
-            t.revokedByIp = 'PASSWORD_RESET';
-            t.replacedByToken = 'REVOKED_AFTER_RESET';
-          }
-        });
-        refreshTokensUpdate.refreshTokens = user.refreshTokens;
-      }
 
       await User.updateOne(
         { email: normalizedEmail },
@@ -657,8 +635,7 @@ class AuthService {
           $set: {
             passwordUpdatedAt: now,
             firebaseUid,
-            firebaseSyncedAt: now,
-            ...refreshTokensUpdate
+            firebaseSyncedAt: now
           },
           $unset: {
             password: '',

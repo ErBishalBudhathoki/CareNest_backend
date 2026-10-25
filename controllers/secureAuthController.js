@@ -1446,27 +1446,13 @@ class SecureAuthController {
       );
     }
 
-    const now = new Date();
-    const refreshTokensUpdate = {};
-    if (Array.isArray(user.refreshTokens) && user.refreshTokens.length > 0) {
-      user.refreshTokens.forEach(t => {
-        if (!t.revoked) {
-          t.revoked = now;
-          t.revokedByIp = req.ip || 'PASSWORD_CHANGE';
-          t.replacedByToken = 'REVOKED_AFTER_CHANGE';
-        }
-      });
-      refreshTokensUpdate.refreshTokens = user.refreshTokens;
-    }
-
     await User.updateOne(
       { _id: userId },
       {
         $set: {
           firebaseUid,
-          passwordUpdatedAt: now,
-          firebaseSyncedAt: now,
-          ...refreshTokensUpdate
+          passwordUpdatedAt: new Date(),
+          firebaseSyncedAt: new Date()
         },
         $unset: {
           password: ''
