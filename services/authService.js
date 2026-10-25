@@ -627,7 +627,20 @@ class AuthService {
       }
 
       await admin.auth().updateUser(firebaseUid, { password: newPassword });
+      await admin.auth().revokeRefreshTokens(firebaseUid);
       const now = new Date();
+
+      const refreshTokensUpdate = {};
+      if (Array.isArray(user.refreshTokens) && user.refreshTokens.length > 0) {
+        user.refreshTokens.forEach(t => {
+          if (!t.revoked) {
+            t.revoked = now;
+            t.revokedByIp = 'PASSWORD_RESET';
+            t.replacedByToken = 'REVOKED_AFTER_RESET';
+          }
+        });
+        refreshTokensUpdate.refreshTokens = user.refreshTokens;
+      }
 
       await User.updateOne(
         { email: normalizedEmail },
@@ -635,7 +648,8 @@ class AuthService {
           $set: {
             passwordUpdatedAt: now,
             firebaseUid,
-            firebaseSyncedAt: now
+            firebaseSyncedAt: now,
+            ...refreshTokensUpdate
           },
           $unset: {
             password: '',

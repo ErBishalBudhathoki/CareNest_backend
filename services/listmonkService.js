@@ -109,18 +109,18 @@ class ListmonkService {
 </html>`;
   }
 
-  async sendEmail(toOrOptions, subject, html, _attachments) {
+  async sendEmail(toOrOptions, subject, html, _attachments, extraData = {}) {
     if (toOrOptions && typeof toOrOptions === 'object' && !Array.isArray(toOrOptions)) {
       const opts = toOrOptions;
       const recipient = opts.to;
       const subj = opts.subject || '(no subject)';
       const body = opts.html || this._buildGenericHtml(opts.subject, opts.context);
-      return this._dispatchTx(recipient, subj, body);
+      return this._dispatchTx(recipient, subj, body, opts.data || extraData);
     }
-    return this._dispatchTx(toOrOptions, subject, html);
+    return this._dispatchTx(toOrOptions, subject, html, extraData);
   }
 
-  async _dispatchTx(to, subject, html) {
+  async _dispatchTx(to, subject, html, extraData = {}) {
     if (!to) {
       logger.warn('[Listmonk] sendEmail called with empty recipient — skipping');
       return null;
@@ -135,7 +135,13 @@ class ListmonkService {
         subscriber_email: to,
         template_id: LISTMONK_TEMPLATE_ID,
         subject,
-        data: { body: html },
+        data: {
+          body: html,
+          content: html,
+          html: html,
+          message: html,
+          ...extraData,
+        },
         content_type: 'html',
       });
       logger.info('[Listmonk] Transactional email sent', { to, subject });
@@ -225,7 +231,7 @@ class ListmonkService {
       <p style="margin-top: 30px; font-size: 14px; color: #666;">If you didn't create an account, you can safely ignore this email.</p>
     `;
     const html = this._wrapCareNestEmail('Welcome to CareNest', content);
-    return this.sendEmail(email, subject, html);
+    return this.sendEmail(email, subject, html, null, { otp, code: otp, token: otp, firstName });
   }
 
   async sendPasswordResetEmail(email, otp) {
@@ -241,7 +247,7 @@ class ListmonkService {
       <p style="margin-top: 30px; font-size: 14px; color: #666;">If you didn't request a password reset, please secure your account immediately.</p>
     `;
     const html = this._wrapCareNestEmail('Password Reset Request', content);
-    return this.sendEmail(email, subject, html);
+    return this.sendEmail(email, subject, html, null, { otp, code: otp, token: otp });
   }
 
   async sendPasswordChangeNotification(email, firstName) {
