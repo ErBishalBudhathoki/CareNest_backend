@@ -114,9 +114,11 @@ jobs:
         working-directory: .
     services:
       mongodb:
-        # Use AWS Public ECR mirrors to avoid Docker Hub auth/rate-limit issues
-        # on GitHub-hosted runners during service container startup.
-        image: public.ecr.aws/docker/library/mongo:7
+        # Google's pull-through mirror of Docker Hub. Public ECR was used to
+        # dodge Docker Hub rate limits, but its monthly data quota now fails
+        # with "toomanyrequests: Data limit exceeded" and blocks every run
+        # before the build stage.
+        image: mirror.gcr.io/library/mongo:7
         ports:
           - 27017:27017
       redis:
@@ -235,7 +237,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: build
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # always() keeps the deploy eligible after a skipped or extended dependency
+    # chain; the explicit build check stops it deploying a failed image.
+    if: always() && needs.build.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     environment:
       name: development
     steps:
