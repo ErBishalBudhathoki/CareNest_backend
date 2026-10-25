@@ -58,9 +58,11 @@ Docker containers on Oracle Cloud often encounter `Network is unreachable` error
 
 ### 3. Internal gRPC Gateway (mTLS Bridge)
 The self-hosted Temporal server strictly requires mTLS for security. Managing client certificates inside every Dokploy container is difficult and brittle.
-- **Solution:** Created an Nginx gateway on port `7236`.
-- **Internal Workers:** Connect to `172.17.0.1:7236` (Host IP) via plain gRPC. Nginx handles the mTLS handshake to the Temporal server on their behalf.
-- **External Clients (GCP):** Connect via `temporal.bishalbudhathoki.com:443`. Cloudflare Tunnel routes this to the same Nginx gateway.
+- **Solution:** Created an Nginx gateway exposing two ports (see `/home/ubuntu/services/temporal/nginx.conf` on the VPS):
+  - `7237` — **plaintext** (`listen 7237 http2`, `grpc_pass temporal-server:7233`). This is the port **internal workers** use. No mTLS.
+  - `7236` — **mTLS** (`listen 7236 ssl http2` + `ssl_verify_client on`). Only **external clients** (GCP Cloud Run API) that present a client certificate can use this port.
+- **Internal Workers:** Connect to `172.17.0.1:7237` (Host IP) via plain gRPC. They must use **7237, never 7236** — Nginx does NOT terminate mTLS for them; sending plaintext to 7236 is rejected with `GOAWAY(FRAME_SIZE_ERROR)` (observed in the dev-worker crash).
+- **External Clients (GCP):** Connect via `temporal.bishalbudhathoki.com:443`. Cloudflare Tunnel routes this to the same Nginx gateway (7236 mTLS).
 
 ### 4. Cloudflare gRPC Support
 - **Issue:** Cloudflare Tunnel defaulted to HTTP/1.1, causing `502 Bad Gateway` for gRPC traffic.
@@ -73,9 +75,10 @@ The self-hosted Temporal server strictly requires mTLS for security. Managing cl
 ### Worker Environment Variables (Dokploy)
 To ensure the worker connects correctly to the local VPS gateway:
 ```env
-TEMPORAL_ADDRESS=172.17.0.1:7236
+TEMPORAL_ADDRESS=172.17.0.1:7237
 TEMPORAL_TLS=false
 ```
+> **Do not use `172.17.0.1:7236` here.** 7236 is the mTLS-only external port; a plaintext worker pointing at it crashes at startup with `h2 protocol error ... FRAME_SIZE_ERROR` (regression observed 2026-10-25 on the dev worker). 7237 is the plaintext internal worker port.
 
 ### API Environment Variables (GCP Cloud Run)
 To connect securely from external internet (GCP Cloud Run) to the Oracle VPS mTLS gateway:
