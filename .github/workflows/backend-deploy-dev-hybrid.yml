@@ -160,7 +160,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [security-scan, test]
-    if: needs.security-scan.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    # always() is required: a skipped dependency (skip_tests=true) otherwise
+    # skips this job too, so the emergency bypass silently deployed nothing.
+    if: always() && needs.security-scan.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
       image-uri: ${{ steps.set_image_uri.outputs.image-uri }}
