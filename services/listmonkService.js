@@ -120,6 +120,33 @@ class ListmonkService {
     return this._dispatchTx(toOrOptions, subject, html);
   }
 
+  /**
+   * Reduce the CareNest HTML body to a readable plain-text version.
+   *
+   * The sendpulse-relay SMTP hop rewrites Listmonk /tx mail and can drop the
+   * HTML part entirely (observed: password-reset emails arriving with a
+   * completely empty body). Every transactional message therefore also carries
+   * this text alternative via /tx `altbody`, so the OTP is never lost even if
+   * the HTML part is stripped downstream.
+   */
+  _toPlainText(html) {
+    if (!html) return '';
+    return String(html)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(?:p|div|h[1-6]|li|tr|table)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n[ \t]+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
   async _dispatchTx(to, subject, html) {
     if (!to) {
       logger.warn('[Listmonk] sendEmail called with empty recipient — skipping');
@@ -135,6 +162,11 @@ class ListmonkService {
         subscriber_email: to,
         template_id: LISTMONK_TEMPLATE_ID,
         subject,
+        // Plain-text alternative → Listmonk sends multipart/alternative. The
+        // sendpulse-relay SMTP hop can drop the HTML part of /tx mail
+        // (observed: reset emails arriving with a completely empty body), so
+        // the OTP must also be present in the text part to survive delivery.
+        altbody: this._toPlainText(html),
         // Listmonk tx templates are customisable and different instances read
         // different keys from .Tx.Data. Send the same HTML under the common
         // names so a template that reads .content/.html/.message is not blank.
