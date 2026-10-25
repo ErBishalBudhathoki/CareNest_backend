@@ -501,6 +501,15 @@ class AuthService {
         }
       );
 
+      // Listmonk's default subscriber mode rejects recipients that are not
+      // registered subscribers. Signup registers the address (createUser), but
+      // accounts created before that did not, and they got no reset email at
+      // all. Register here too, before the worker dispatches the email.
+      await emailService.addSubscriber(
+        normalizedEmail,
+        [user.firstName, user.lastName].filter(Boolean).join(' ') || normalizedEmail
+      );
+
       // Trigger Temporal Workflow
       await TemporalManager.startWorkflow('authNotificationWorkflow', {
         workflowId: `auth-reset-${normalizedEmail.replace(/[@.]/g, '-')}-${Date.now()}`,

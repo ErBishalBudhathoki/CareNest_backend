@@ -94,8 +94,9 @@ services:
       - LISTMONK_USERNAME=${LISTMONK_USERNAME}
       - listmonk_api_key=${listmonk_api_key}
       - LISTMONK_ONBOARDING_LIST_ID=${LISTMONK_ONBOARDING_LIST_ID}
-      # Not defined in secrets.json; listmonkService falls back to 1 when unset.
-      - LISTMONK_TEMPLATE_ID=${LISTMONK_TEMPLATE_ID:-1}
+      # Must match the template the API process uses, otherwise the worker
+      # renders a different tx template than the API. Defined in secrets.json.
+      - LISTMONK_TEMPLATE_ID=${LISTMONK_TEMPLATE_ID:-3}
 
       # ── Misc ─────────────────────────────────────────────────────────────
       - HOLIDAY_CSV=${HOLIDAY_CSV}
