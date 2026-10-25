@@ -1,0 +1,36 @@
+# sendpulse-relay (SMTP -> SendPulse REST relay)
+#
+# IMPORTANT: This file is the SANITISED template committed to git. The real
+# SENDPULSE_CLIENT_ID / SENDPULSE_CLIENT_SECRET are NOT stored in git — they
+# are provided via environment on the VPS (the deployed copy at
+# /home/ubuntu/services/smtp-relay/docker-compose.yml holds the actual values).
+#
+# Deploy on the VPS (Dokploy host):
+#   cd /home/ubuntu/services/smtp-relay
+#   SENDPULSE_CLIENT_ID=... SENDPULSE_CLIENT_SECRET=... \
+#     docker compose up -d --build
+#
+# The relay listens on 587 and is used by Listmonk as its SMTP outbound
+# (sendpulse-relay:587 on the dokploy-network / selfhosted overlay).
+
+services:
+  sendpulse-relay:
+    build: .
+    container_name: sendpulse-relay
+    restart: unless-stopped
+    ports:
+      - "587:587"
+    environment:
+      - SENDPULSE_CLIENT_ID=${SENDPULSE_CLIENT_ID}
+      - SENDPULSE_CLIENT_SECRET=${SENDPULSE_CLIENT_SECRET}
+      - VERIFIED_SENDER=noreply@bishalbudhathoki.com
+      - LISTEN_PORT=587
+    networks:
+      - dokploy-network
+      - selfhosted
+
+networks:
+  dokploy-network:
+    external: true
+  selfhosted:
+    external: true
