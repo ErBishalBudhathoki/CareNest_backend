@@ -21,6 +21,19 @@ const LISTMONK_USERNAME    = process.env.LISTMONK_USERNAME    || 'carenest';
 const ONBOARDING_LIST_ID   = parseInt(process.env.LISTMONK_ONBOARDING_LIST_ID || '3', 10);
 const LISTMONK_TEMPLATE_ID = parseInt(process.env.LISTMONK_TEMPLATE_ID || '1', 10);
 
+/**
+ * Publicly reachable CareNest mark rendered in the header of every email.
+ *
+ * Served straight off the Listmonk instance (bind-mounted
+ * /home/ubuntu/services/listmonk/data/uploads) because that host is already
+ * public, brand-neutral and shared by dev and prod sending. Email clients
+ * block unreachable images, so the wrapper always keeps the text wordmark as
+ * the fallback. Source asset: backend/assets/brand/carenest-mark.png
+ */
+const EMAIL_LOGO_URL =
+  process.env.EMAIL_LOGO_URL ||
+  'https://listmonk.bishalbudhathoki.com/uploads/carenest-mark.png';
+
 function authHeader() {
   if (!LISTMONK_API_KEY) {
     throw new Error('listmonk_api_key env var is not set');
@@ -90,6 +103,9 @@ class ListmonkService {
   <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
     <!-- Header -->
     <div style="background-color: #1A3BA0; padding: 30px 20px; text-align: center;">
+      <!-- Logo sits above the wordmark; the wordmark stays visible when images are blocked. -->
+      <img src="${EMAIL_LOGO_URL}" width="64" height="64" alt="CareNest"
+           style="display: block; width: 64px; height: 64px; margin: 0 auto 14px auto; border: 0; outline: none; text-decoration: none; border-radius: 14px;">
       <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600; letter-spacing: 1px;">CareNest</h1>
     </div>
     <!-- Body -->
