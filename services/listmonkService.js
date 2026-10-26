@@ -29,10 +29,16 @@ const LISTMONK_TEMPLATE_ID = parseInt(process.env.LISTMONK_TEMPLATE_ID || '1', 1
  * public, brand-neutral and shared by dev and prod sending. Email clients
  * block unreachable images, so the wrapper always keeps the text wordmark as
  * the fallback. Source asset: backend/assets/brand/carenest-mark.png
+ *
+ * The filename is versioned (-v2) on purpose: uploads are served through
+ * Cloudflare with a 4h max-age, and Gmail proxies remote images, so a stable
+ * name keeps showing the old art after a swap. Bump the version when the art
+ * changes and leave the previous file published so already-delivered mail
+ * keeps resolving.
  */
 const EMAIL_LOGO_URL =
   process.env.EMAIL_LOGO_URL ||
-  'https://listmonk.bishalbudhathoki.com/uploads/carenest-mark.png';
+  'https://listmonk.bishalbudhathoki.com/uploads/carenest-mark-v2.png';
 
 function authHeader() {
   if (!LISTMONK_API_KEY) {
