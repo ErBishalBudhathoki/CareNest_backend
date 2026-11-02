@@ -259,23 +259,63 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
 
     // Should have 3 line items:
     // 1) Planned Daily Living: 20h @ $70 = $1400
-    // 2) Variance Daily Living: 5h @ $70 = $350
-    // 3) Planned Community: 10h @ $60 = $600
+    // 2) Planned Community: 10h @ $60 = $600
+    // 3) Variance Daily Living (appended): 5h @ $70 = $350
     expect(payload.lineItems).toHaveLength(3);
-    const varianceLine = payload.lineItems.find((l) => l.supportItemName.includes('Variance Hours'));
-    expect(varianceLine).toBeDefined();
+    const varianceLine = payload.lineItems[2];
     expect(varianceLine).toMatchObject({
       supportItemNumber: '01_011_0107_1_1',
+      supportItemName: 'Daily living (Unplanned / Variance Hours)',
       quantity: 5,
+      unit: 'H',
       price: 70,
       totalPrice: 350,
     });
-    expect(payload.financialSummary.totalAmount).toBe(2350); // 1400 + 350 + 600
+    expect(payload.financialSummary.totalAmount).toBe(2350); // 1400 + 600 + 350
     expect(payload.metadata.silBillingMode).toBe('reconciled');
     expect(payload.metadata.silReconciliation).toEqual({
       plannedHours: 30, // 20 + 10
       actualHours: 25,
       varianceHours: 5,
+    });
+  });
+
+  test('mode: reconciled — adds no variance items when actual hours do not exceed planned', async () => {
+    const shift1Id = 'shift-sil-1';
+    mockShiftFind.mockReturnValue({
+      lean: async () => [
+        {
+          _id: shift1Id,
+          silRosterOfCareId: 'roc1',
+          supportItems: [{ itemNumber: '01_011_0107_1_1', itemName: 'Daily living' }],
+        },
+      ],
+    });
+
+    mockWorkedTimeFind.mockReturnValue({
+      lean: async () => [
+        {
+          silShiftId: shift1Id,
+          totalHours: 18, // Planned was 20h, so no variance
+          isActive: true,
+        },
+      ],
+    });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'reconciled' },
+      'admin@org.com',
+    );
+
+    const payload = mockCreateInvoice.mock.calls[0][0];
+    expect(payload.lineItems).toHaveLength(2); // Only the planned items
+    expect(payload.financialSummary.totalAmount).toBe(2000);
+    expect(payload.metadata.silReconciliation).toEqual({
+      plannedHours: 30,
+      actualHours: 18,
+      varianceHours: 0,
     });
   });
 
@@ -291,8 +331,8 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
 
     mockWorkedTimeFind.mockReturnValue({
       lean: async () => [
-        { silShiftId: shift1Id, totalHours: 12 },
-        { silShiftId: shift2Id, totalHours: 6 },
+        { shiftId: shift1Id, totalHours: 12 }, // links via shiftId
+        { silShiftId: shift2Id, timeWorked: '06:00:00' }, // 6h via timeWorked string
       ],
     });
 
@@ -310,16 +350,49 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
       supportItemNumber: '01_011_0107_1_1',
       quantity: 12,
       price: 70,
+      unit: 'H',
       totalPrice: 840,
     });
     expect(payload.lineItems[1]).toMatchObject({
       supportItemNumber: '01_015_0107_1_1',
       quantity: 6,
       price: 60,
+      unit: 'H',
       totalPrice: 360,
     });
     expect(payload.financialSummary.totalAmount).toBe(1200); // 840 + 360
     expect(payload.metadata.silBillingMode).toBe('verified_timesheet');
+    expect(payload.metadata.silReconciliation).toBeUndefined();
+
+    // Verify exact queries used to find shifts and worked times
+    expect(mockShiftFind).toHaveBeenCalledWith({
+      organizationId: 'org1',
+      silRosterOfCareId: 'roc1',
+      startTime: {
+        $gte: new Date(Date.UTC(2026, 3, 1)),
+        $lte: new Date(Date.UTC(2026, 3, 14)),
+      },
+      isActive: { $ne: false },
+    });
+    expect(mockWorkedTimeFind).toHaveBeenCalledWith({
+      $or: [
+        { silShiftId: { $in: [shift1Id, shift2Id] } },
+        { shiftId: { $in: [shift1Id, shift2Id] } },
+      ],
+      isActive: { $ne: false },
+    });
+  });
+
+  test('mode: roc_quota — does not query Shift or WorkedTime', async () => {
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'roc_quota' },
+      'admin@org.com',
+    );
+
+    expect(mockShiftFind).not.toHaveBeenCalled();
+    expect(mockWorkedTimeFind).not.toHaveBeenCalled();
   });
 });
 
