@@ -41,6 +41,22 @@ const workedTimeSchema = new mongoose.Schema({
   silShiftId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shift', index: true },
   ndisItem: { type: mongoose.Schema.Types.Mixed },
   highIntensity: { type: Boolean, default: false },
+  // Milestone 3.3: Sleepover shift disturbance tracking (SCHADS Clause 25.7)
+  // When a worker on a sleepover is disturbed for > 60 minutes, the shift converts to active night
+  shiftType: {
+    type: String,
+    enum: ['standard', 'sleepover', 'active_night', 'day', 'evening'],
+    default: 'standard'
+  },
+  disturbances: [
+    {
+      startTime: { type: Date, required: true },
+      endTime: { type: Date, required: true },
+      reason: { type: String, default: '' },
+      durationMinutes: { type: Number, default: 0 }
+    }
+  ],
+  convertedToActiveNight: { type: Boolean, default: false },
   startTime: { type: Date },
   endTime: { type: Date },
   totalSeconds: { type: Number, default: 0 },

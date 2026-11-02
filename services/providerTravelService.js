@@ -327,6 +327,89 @@ class ProviderTravelService {
 
     return { invoice: result.data, amount: subtotal, shift };
   }
+
+  /**
+   * Evenly split activity transport mileage across co-transported SIL participants (Milestone 3.2).
+   *
+   * Under NDIS activity-based transport guidelines (Item 01_799_0107_1_1):
+   * When multiple participants in a group home share a vehicle (e.g. 3 residents driven 30 km to a program),
+   * the travel distance is split evenly (30 km / 3 = 10 km per participant).
+   *
+   * @param {Object} params
+   * @param {number} params.totalKm - Total trip distance
+   * @param {Array<string>} [params.clientIds] - Array of participant IDs
+   * @returns {Array<{ clientId: string, km: number, share: number }>}
+   */
+  splitMileageAmongParticipants({ totalKm = 0, clientIds = [] } = {}) {
+    const km = Math.max(0, Number(totalKm) || 0);
+    const validClientIds = Array.isArray(clientIds) ? clientIds.filter(Boolean) : [];
+    if (validClientIds.length === 0) {
+      return [{ clientId: null, km: round2(km), share: 1.0 }];
+    }
+
+    const count = validClientIds.length;
+    const kmPerClient = round2(km / count);
+
+    return validClientIds.map((clientId) => ({
+      clientId: String(clientId),
+      km: kmPerClient,
+      share: round2(1 / count),
+      totalTripKm: km,
+    }));
+  }
+
+  /**
+   * Create activity transport charges for a shared SIL trip, splitting kilometres across all participants (Milestone 3.2).
+   *
+   * @param {string} organizationId
+   * @param {Object} input - { tripId?, totalKm?, clientIds: Array<string>, supportItemNumber?, date? }
+   * @param {string} actor
+   * @returns {Promise<Array<Object>>} List of generated travel charges / invoice line specifications per client
+   */
+  async createActivityTransportCharges(organizationId, input = {}, actor = '') {
+    let clientIds = input.clientIds || [];
+    let totalKm = Number(input.totalKm) || 0;
+
+    if (input.tripId) {
+      const trip = await Trip.findOne({ _id: input.tripId, organizationId });
+      if (!trip) {
+        const err = new Error('Trip not found.');
+        err.statusCode = 404;
+        throw err;
+      }
+      totalKm = Number(trip.distance) || 0;
+      if (Array.isArray(trip.clientIds) && trip.clientIds.length > 0) {
+        clientIds = trip.clientIds.map((id) => id.toString());
+      } else if (trip.clientId) {
+        clientIds = [trip.clientId.toString()];
+      }
+    }
+
+    if (clientIds.length === 0) {
+      const err = new Error('At least one participant must be specified for activity transport.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const splits = this.splitMileageAmongParticipants({ totalKm, clientIds });
+    const charges = [];
+
+    for (const split of splits) {
+      charges.push({
+        organizationId,
+        clientId: split.clientId,
+        km: split.km,
+        supportItemNumber: input.supportItemNumber || '01_799_0107_1_1',
+        supportItemName: input.supportItemName || 'Activity Based Transport',
+        date: input.date ? new Date(input.date) : new Date(),
+        unit: 'KM',
+        share: split.share,
+        totalTripKm: totalKm,
+      });
+    }
+
+    return charges;
+  }
 }
 
 module.exports = new ProviderTravelService();

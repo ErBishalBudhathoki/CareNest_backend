@@ -11,6 +11,14 @@ const lineItemSchema = new mongoose.Schema({
   organizationId: String,
   providerType: String,
   serviceLocationPostcode: String,
+  claimType: String,
+  cancellationReason: String,
+  // Milestone 3.4: Line-level funding route for combination-funded participants
+  // Allows mixed service deliveries to route items to NDIA claim CSV or plan manager PDF
+  fundingRoute: {
+    type: String,
+    enum: ['ndia_managed', 'plan_managed', 'self_managed'],
+  },
   pricingMetadata: {
     timeBand: String,
     mmmRating: Number,

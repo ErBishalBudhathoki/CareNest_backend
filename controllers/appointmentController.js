@@ -143,7 +143,11 @@ class AppointmentController {
       date,
       startTime,
       endTime,
-      breakDuration
+      breakDuration,
+      // Milestone 3.3: Sleepover disturbance and active night conversion payload
+      shiftType,
+      disturbances,
+      convertedToActiveNight
     } = req.body;
     
     const workedTimeData = {
@@ -155,7 +159,11 @@ class AppointmentController {
       shiftStartTime: startTime,
       shiftEndTime: endTime,
       shiftBreak: breakDuration,
-      clientRequestId: req.body.clientRequestId
+      clientRequestId: req.body.clientRequestId,
+      // Milestone 3.3: Pass disturbance information to appointmentService
+      shiftType,
+      disturbances,
+      convertedToActiveNight
     };
     
     const result = await appointmentService.setWorkedTime(workedTimeData);

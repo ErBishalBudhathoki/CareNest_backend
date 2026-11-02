@@ -57,7 +57,15 @@ const workedTimeValidation = [
   body('startTime').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Valid start time is required (HH:MM)'),
   body('endTime').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Valid end time is required (HH:MM)'),
   body('breakDuration').optional().isInt({ min: 0 }).withMessage('Break duration must be a positive integer (minutes)'),
-  body('clientRequestId').optional().isString().isLength({ max: 120 })
+  body('clientRequestId').optional().isString().isLength({ max: 120 }),
+  // Milestone 3.3: SCHADS Clause 25.7 sleepover disturbance & active night conversion
+  body('shiftType').optional().isString().trim(),
+  body('disturbances').optional().isArray(),
+  body('disturbances.*.startTime').optional().isISO8601(),
+  body('disturbances.*.endTime').optional().isISO8601(),
+  body('disturbances.*.durationMinutes').optional().isNumeric(),
+  body('disturbances.*.reason').optional().isString(),
+  body('convertedToActiveNight').optional().isBoolean()
 ];
 
 // Protected routes

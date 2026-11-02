@@ -16,6 +16,20 @@ const tripSchema = new mongoose.Schema({
     ref: 'Client',
     default: null
   },
+  // Milestone 3.2: Multi-participant activity transport in SIL
+  // Allows linking a trip to a SIL group home property or multiple transported residents
+  propertyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'SILProperty',
+    default: null,
+    index: true,
+  },
+  clientIds: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Client',
+    },
+  ],
   date: {
     type: Date,
     required: true

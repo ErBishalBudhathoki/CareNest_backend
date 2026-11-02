@@ -609,7 +609,11 @@ class AppointmentService {
         shiftStartTime: _shiftStartTimeFromRequest,
         shiftEndTime: _shiftEndTimeFromRequest,
         shiftBreak: _shiftBreakFromRequest,
-        clientRequestId
+        clientRequestId,
+        // Milestone 3.3: Sleepover disturbance and active night conversion payload
+        shiftType: rawShiftType,
+        disturbances: rawDisturbances,
+        convertedToActiveNight: rawConvertedToActiveNight
       } = workedTimeData;
 
       const safeUserEmail = toSafeString(userEmail);
@@ -800,6 +804,42 @@ class AppointmentService {
           ? new mongoose.Types.ObjectId(selectedSilShiftId)
           : undefined;
 
+      // Milestone 3.3: Sleepover disturbance tracking and active night conversion (SCHADS Award Clause 25.7)
+      // When a worker on a sleepover is disturbed for > 60 cumulative minutes, the shift
+      // converts from a flat sleepover allowance to active night hourly billing/payroll.
+      const parsedDisturbances = Array.isArray(rawDisturbances)
+        ? rawDisturbances.map((d) => {
+            let dur = Number(d.durationMinutes) || 0;
+            if (!dur && d.startTime && d.endTime) {
+              dur = Math.max(0, Math.round((new Date(d.endTime) - new Date(d.startTime)) / (60 * 1000)));
+            }
+            return {
+              startTime: d.startTime ? new Date(d.startTime) : new Date(),
+              endTime: d.endTime ? new Date(d.endTime) : new Date(),
+              reason: typeof d.reason === 'string' ? d.reason : '',
+              durationMinutes: dur,
+            };
+          })
+        : [];
+
+      const totalDisturbanceMinutes = parsedDisturbances.reduce(
+        (sum, d) => sum + (d.durationMinutes || 0),
+        0
+      );
+
+      // Determine shift type from payload or schedule
+      const scheduleShiftType = assignedClient.schedule?.[effectiveShiftIndex]?.shiftType || 'standard';
+      const declaredShiftType = String(rawShiftType || scheduleShiftType || 'standard').toLowerCase();
+
+      // SCHADS Clause 25.7: > 60 cumulative disturbance minutes converts sleepover to active night
+      const isSleepover = declaredShiftType === 'sleepover';
+      const shouldConvertToActiveNight =
+        Boolean(rawConvertedToActiveNight) || (isSleepover && totalDisturbanceMinutes > 60);
+
+      const effectiveShiftType = shouldConvertToActiveNight
+        ? 'active_night'
+        : declaredShiftType;
+
       // Create worked time record with specific shift details
       const workedTimeRecord = new WorkedTime({
         userEmail: userEmail,
@@ -822,6 +862,10 @@ class AppointmentService {
         highIntensity: shiftHighIntensity,
         startTime: normalizedStartDateTime,
         endTime: normalizedEndDateTime,
+        // Milestone 3.3 fields: Shift type, disturbance log, and active night conversion
+        shiftType: effectiveShiftType,
+        disturbances: parsedDisturbances,
+        convertedToActiveNight: shouldConvertToActiveNight,
         // Create a unique shift identifier
         shiftKey: shiftDateKey && shiftStartTime ? `${shiftDateKey}_${shiftStartTime}` : null,
         clientRequestId: clientRequestId ? String(clientRequestId) : null,
@@ -837,7 +881,10 @@ class AppointmentService {
         message: 'Worked time saved successfully',
         data: {
           id: result._id,
-          timeWorked: timeList
+          timeWorked: timeList,
+          shiftType: effectiveShiftType,
+          convertedToActiveNight: shouldConvertToActiveNight,
+          totalDisturbanceMinutes,
         }
       };
     } catch (error) {
