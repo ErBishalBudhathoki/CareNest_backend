@@ -135,6 +135,13 @@ const silRoutes = [
   ['POST', `/api/sil/rosters-of-care/${RESOURCE_ID}/review`],
   ['POST', `/api/sil/rosters-of-care/${RESOURCE_ID}/materialize-shifts`],
   ['POST', `/api/sil/rosters-of-care/${RESOURCE_ID}/invoice`],
+
+  // Milestone 4.2: Service Agreements & Consent Gate
+  ['GET', '/api/sil/service-agreements'],
+  ['POST', '/api/sil/service-agreements'],
+  ['GET', `/api/sil/service-agreements/check/${RESOURCE_ID}`],
+  ['GET', `/api/sil/service-agreements/${RESOURCE_ID}`],
+  ['POST', `/api/sil/service-agreements/${RESOURCE_ID}/sign`],
 ];
 
 function adminToken() {

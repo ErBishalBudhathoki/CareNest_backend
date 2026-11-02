@@ -1,5 +1,6 @@
 const SILRosterOfCare = require('../models/SILRosterOfCare');
 const logger = require('../config/logger');
+const serviceAgreementService = require('./serviceAgreementService');
 
 /**
  * Roster-of-care lifecycle (Phase 4).
@@ -20,6 +21,51 @@ class SILRosterOfCareService {
   async update(organizationId, id, data, actor = '') {
     const roc = await SILRosterOfCare.findOne({ _id: id, organizationId });
     if (!roc) return null;
+
+    // Milestone 4.2 Consent Gate:
+    // Require an active signed Service Agreement before transitioning an RoC from 'draft' (or any non-active status) to 'active'.
+    // If no signed agreement exists and bypassConsent is not explicitly true, block the transition.
+    if (data.status === 'active' && roc.status !== 'active') {
+      if (!data.bypassConsent) {
+        const agreementCheck = await serviceAgreementService.checkActiveAgreement(
+          organizationId,
+          roc.clientId,
+          roc.effectiveFrom || new Date(),
+        );
+
+        if (!agreementCheck.hasActiveAgreement) {
+          logger.warn('SIL RoC activation blocked by Consent Gate: Missing signed Service Agreement', {
+            organizationId,
+            rosterOfCareId: String(roc._id),
+            clientId: String(roc.clientId),
+            reason: agreementCheck.reason,
+          });
+
+          return {
+            consentRequired: true,
+            code: 'SERVICE_AGREEMENT_REQUIRED',
+            message:
+              agreementCheck.reason ||
+              'A signed Service Agreement is required before activating a SIL Roster of Care.',
+            agreement: agreementCheck.agreement || null,
+          };
+        }
+      } else {
+        // Milestone 4.2: Auditable Emergency Consent Bypass
+        roc.history.push({
+          changedAt: new Date(),
+          changedBy: actor,
+          change: `Consent Gate bypassed: ${data.bypassReason || 'Administrative emergency override'}`,
+        });
+        logger.business('SIL RoC Consent Gate Bypassed', {
+          event: 'sil_roc_consent_bypassed',
+          organizationId,
+          rosterOfCareId: String(roc._id),
+          bypassedBy: actor,
+          reason: data.bypassReason || 'Administrative emergency override',
+        });
+      }
+    }
 
     if (data.supports !== undefined) roc.supports = data.supports;
     if (data.effectiveTo !== undefined) roc.effectiveTo = data.effectiveTo;

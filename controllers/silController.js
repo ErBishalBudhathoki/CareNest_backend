@@ -6,6 +6,7 @@ const silRosterService = require('../services/silRosterService');
 const silQuoteService = require('../services/silQuoteService');
 const silRosterOfCareService = require('../services/silRosterOfCareService');
 const silBillingService = require('../services/silBillingService');
+const serviceAgreementService = require('../services/serviceAgreementService');
 
 /**
  * SIL management API (Phase 4). All handlers are org-scoped via the
@@ -383,6 +384,16 @@ class SILController {
     if (!roc) {
       return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Roster of care not found.' });
     }
+    // Milestone 4.2 Consent Gate:
+    // If activation is blocked due to missing signed service agreement, return 409 Conflict.
+    if (roc.consentRequired) {
+      return res.status(409).json({
+        success: false,
+        code: 'SERVICE_AGREEMENT_REQUIRED',
+        message: roc.message,
+        data: roc,
+      });
+    }
     res.json({ success: true, message: 'Roster of care updated.', data: roc });
   });
 
@@ -494,6 +505,53 @@ class SILController {
         billing: result.billing,
       },
     });
+  });
+
+  // ---- Service Agreements (Milestone 4.2) -----------------------------
+
+  listServiceAgreements = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const agreements = await serviceAgreementService.list(org, {
+      clientId: req.query.clientId,
+      status: req.query.status,
+      agreementType: req.query.agreementType,
+    });
+    res.json({ success: true, data: { serviceAgreements: agreements } });
+  });
+
+  getServiceAgreement = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const agreement = await serviceAgreementService.get(org, req.params.id);
+    if (!agreement) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Service agreement not found.' });
+    }
+    res.json({ success: true, data: agreement });
+  });
+
+  createServiceAgreement = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const agreement = await serviceAgreementService.create(org, req.body, this._actor(req));
+    res.status(201).json({ success: true, message: 'Service agreement created.', data: agreement });
+  });
+
+  signServiceAgreement = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const agreement = await serviceAgreementService.sign(org, req.params.id, req.body, this._actor(req));
+    if (!agreement) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Service agreement not found.' });
+    }
+    res.json({ success: true, message: 'Service agreement signed.', data: agreement });
+  });
+
+  checkServiceAgreement = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const result = await serviceAgreementService.checkActiveAgreement(org, req.params.clientId, req.query.atDate);
+    res.json({ success: true, data: result });
   });
 }
 

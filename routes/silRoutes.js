@@ -139,4 +139,38 @@ router.post(
   silController.generateRosterOfCareInvoice,
 );
 
+// ---- Service Agreements (Milestone 4.2 Consent Gate) ----
+router.get('/service-agreements', silReadLimiter, silController.listServiceAgreements);
+router.post(
+  '/service-agreements',
+  silWriteLimiter,
+  [
+    mongoId('clientId', body),
+    body('effectiveFrom').notEmpty().withMessage('effectiveFrom is required'),
+  ],
+  handleValidationErrors,
+  silController.createServiceAgreement,
+);
+router.get(
+  '/service-agreements/check/:clientId',
+  silReadLimiter,
+  mongoId('clientId'),
+  handleValidationErrors,
+  silController.checkServiceAgreement,
+);
+router.get(
+  '/service-agreements/:id',
+  silReadLimiter,
+  mongoId('id'),
+  handleValidationErrors,
+  silController.getServiceAgreement,
+);
+router.post(
+  '/service-agreements/:id/sign',
+  silWriteLimiter,
+  mongoId('id'),
+  handleValidationErrors,
+  silController.signServiceAgreement,
+);
+
 module.exports = router;

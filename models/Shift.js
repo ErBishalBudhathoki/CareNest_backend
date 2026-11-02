@@ -59,6 +59,17 @@ const shiftSchema = new mongoose.Schema({
     amount: { type: Number, default: 0 },
     billedAt: { type: Date, default: null },
   },
+  // Milestone 4.3: Irregular SIL, Crisis Staffing & PRN Support Billing
+  // Allows providers to claim ad-hoc/unplanned crisis supports beyond agreed RoC quota
+  // with mandatory NDIA PACE crisis justification notes and incident report references.
+  isIrregularSil: { type: Boolean, default: false, index: true },
+  irregularSilReason: {
+    type: String,
+    enum: ['crisis', 'hospital_discharge', 'prn_behavioral', 'unplanned_absence_cover', 'other', ''],
+    default: '',
+  },
+  crisisJustificationNotes: { type: String, default: '' },
+  incidentReportReference: { type: String, default: '' },
   createdBy: String
 }, {
   timestamps: true,

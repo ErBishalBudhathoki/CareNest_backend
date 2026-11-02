@@ -57,6 +57,12 @@ const workedTimeSchema = new mongoose.Schema({
     }
   ],
   convertedToActiveNight: { type: Boolean, default: false },
+  // Milestone 4.3: Irregular SIL, Crisis Staffing & PRN Support Billing
+  // Propagated to timesheet records to evidence crisis justification notes for NDIA audits
+  isIrregularSil: { type: Boolean, default: false, index: true },
+  irregularSilReason: { type: String, default: '' },
+  crisisJustificationNotes: { type: String, default: '' },
+  incidentReportReference: { type: String, default: '' },
   startTime: { type: Date },
   endTime: { type: Date },
   totalSeconds: { type: Number, default: 0 },

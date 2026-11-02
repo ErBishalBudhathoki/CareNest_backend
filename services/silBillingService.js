@@ -3,7 +3,9 @@ const Client = require('../models/Client');
 const Shift = require('../models/Shift');
 const WorkedTime = require('../models/WorkedTime');
 const SILOccupancy = require('../models/SILOccupancy');
+const SILProperty = require('../models/SILProperty');
 const silRatioService = require('./silRatioService');
+const { mmmService } = require('./mmmService');
 const { Invoice } = require('../models/Invoice');
 const {
   InvoiceManagementService: invoiceManagementService,
@@ -330,9 +332,46 @@ class SILBillingService {
     }
     const weeks = billableDays / 7;
 
+    // Milestone 4.1: Regional MMM Price Loading in SIL Billing
+    // Look up property postcode (or client address postcode as fallback).
+    // If MMM 6 (Remote) apply 1.4x multiplier; if MMM 7 (Very Remote) apply 1.5x multiplier.
+    let servicePostcode = null;
+    if (roc.propertyId) {
+      try {
+        const property = await safeFindOne(SILProperty, { _id: roc.propertyId, organizationId });
+        servicePostcode = property?.address?.postcode || null;
+      } catch (propErr) {
+        logger.warn('Failed to query SILProperty for postcode during billing', {
+          error: propErr.message,
+          propertyId: String(roc.propertyId),
+        });
+      }
+    }
+    if (!servicePostcode && client) {
+      servicePostcode = client.clientZip || client.address?.postcode || null;
+    }
+
+    let mmmRating = null;
+    let mmmMultiplier = 1.0;
+    if (servicePostcode) {
+      try {
+        const mmmInfo = await mmmService.getMmmByPostcode(servicePostcode);
+        if (mmmInfo && typeof mmmInfo.mmm === 'number') {
+          mmmRating = mmmInfo.mmm;
+          mmmMultiplier = mmmService.getMultiplierForMmm(mmmRating);
+        }
+      } catch (mmmErr) {
+        logger.warn('Failed to resolve MMM rating during SIL billing', {
+          error: mmmErr.message,
+          postcode: servicePostcode,
+        });
+      }
+    }
+
     const lineItems = [];
     let subtotal = 0;
     let silReconciliation = null;
+    let irregularSilEvents = [];
 
     if (mode === 'verified_timesheet' || mode === 'reconciled') {
       const shifts = await safeFind(Shift, {
@@ -399,21 +438,30 @@ class SILBillingService {
           const actualHours = round2(actualHoursBySupport.get(supportNum) || 0);
           if (actualHours <= 0) continue;
 
-          const unitPrice = round2(support.unitPrice);
+          // Milestone 4.1: Regional MMM Price Loading
+          const baseUnitPrice = round2(support.unitPrice);
+          const effectiveUnitPrice = mmmMultiplier > 1.0 ? round2(baseUnitPrice * mmmMultiplier) : baseUnitPrice;
           const quantity = isSleepover
             ? Math.max(1, Math.round(actualHours / 8))
             : actualHours;
-          const totalPrice = round2(quantity * unitPrice);
+          const totalPrice = round2(quantity * effectiveUnitPrice);
           subtotal = round2(subtotal + totalPrice);
           lineItems.push({
             supportItemNumber: support.supportNumber || support.itemNumber,
             supportItemName: support.supportName || support.itemName || 'SIL Support',
-            price: unitPrice,
+            price: effectiveUnitPrice,
             quantity,
             unit: isSleepover ? 'E' : 'H',
             totalPrice,
             date: periodFrom,
             organizationId,
+            ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
+            pricingMetadata: {
+              mmmRating,
+              mmmMultiplier,
+              baseUnitPrice,
+              appliedUnitPrice: effectiveUnitPrice,
+            },
           });
         }
       } else if (mode === 'reconciled') {
@@ -439,18 +487,27 @@ class SILBillingService {
             : round2((Number(support.hoursPerWeek) || 0) * weeks);
           if (quantity <= 0) continue;
 
-          const unitPrice = round2(support.unitPrice);
-          const totalPrice = round2(quantity * unitPrice);
+          // Milestone 4.1: Regional MMM Price Loading
+          const baseUnitPrice = round2(support.unitPrice);
+          const effectiveUnitPrice = mmmMultiplier > 1.0 ? round2(baseUnitPrice * mmmMultiplier) : baseUnitPrice;
+          const totalPrice = round2(quantity * effectiveUnitPrice);
           subtotal = round2(subtotal + totalPrice);
           lineItems.push({
             supportItemNumber: support.supportNumber || support.itemNumber,
             supportItemName: support.supportName || support.itemName || 'SIL Support',
-            price: unitPrice,
+            price: effectiveUnitPrice,
             quantity,
             unit: isSleepover ? 'E' : 'H',
             totalPrice,
             date: periodFrom,
             organizationId,
+            ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
+            pricingMetadata: {
+              mmmRating,
+              mmmMultiplier,
+              baseUnitPrice,
+              appliedUnitPrice: effectiveUnitPrice,
+            },
           });
         }
 
@@ -474,19 +531,28 @@ class SILBillingService {
           if (actualHours > plannedHours) {
             const varianceHours = round2(actualHours - plannedHours);
             totalVarianceHours = round2(totalVarianceHours + varianceHours);
-            const unitPrice = round2(support.unitPrice);
-            const varianceTotal = round2(varianceHours * unitPrice);
+            // Milestone 4.1: Regional MMM Price Loading
+            const baseUnitPrice = round2(support.unitPrice);
+            const effectiveUnitPrice = mmmMultiplier > 1.0 ? round2(baseUnitPrice * mmmMultiplier) : baseUnitPrice;
+            const varianceTotal = round2(varianceHours * effectiveUnitPrice);
             subtotal = round2(subtotal + varianceTotal);
 
             lineItems.push({
               supportItemNumber: support.supportNumber || support.itemNumber,
               supportItemName: `${support.supportName || support.itemName || 'SIL Support'} (Unplanned / Variance Hours)`,
-              price: unitPrice,
+              price: effectiveUnitPrice,
               quantity: varianceHours,
               unit: 'H',
               totalPrice: varianceTotal,
               date: periodFrom,
               organizationId,
+              ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
+              pricingMetadata: {
+                mmmRating,
+                mmmMultiplier,
+                baseUnitPrice,
+                appliedUnitPrice: effectiveUnitPrice,
+              },
             });
           }
         }
@@ -516,18 +582,133 @@ class SILBillingService {
           : round2((Number(support.hoursPerWeek) || 0) * weeks);
         if (quantity <= 0) continue;
 
-        const unitPrice = round2(support.unitPrice);
-        const totalPrice = round2(quantity * unitPrice);
+        // Milestone 4.1: Regional MMM Price Loading
+        const baseUnitPrice = round2(support.unitPrice);
+        const effectiveUnitPrice = mmmMultiplier > 1.0 ? round2(baseUnitPrice * mmmMultiplier) : baseUnitPrice;
+        const totalPrice = round2(quantity * effectiveUnitPrice);
         subtotal = round2(subtotal + totalPrice);
         lineItems.push({
           supportItemNumber: support.supportNumber || support.itemNumber,
           supportItemName: support.supportName || support.itemName || 'SIL Support',
-          price: unitPrice,
+          price: effectiveUnitPrice,
           quantity,
           unit: isSleepover ? 'E' : 'H',
           totalPrice,
           date: periodFrom,
           organizationId,
+          ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
+          pricingMetadata: {
+            mmmRating,
+            mmmMultiplier,
+            baseUnitPrice,
+            appliedUnitPrice: effectiveUnitPrice,
+          },
+        });
+      }
+    }
+
+    // Milestone 4.3: Irregular SIL, Crisis Staffing & PRN Support Billing
+    // In timesheet/reconciliation billing, providers claim ad-hoc/unplanned crisis supports beyond agreed RoC quota
+    // with mandatory NDIA PACE crisis justification notes and incident report references.
+    if (mode === 'verified_timesheet' || mode === 'reconciled') {
+      try {
+        const irregularShifts = await safeFind(Shift, {
+          organizationId,
+          $or: [
+            { silRosterOfCareId: roc._id, isIrregularSil: true },
+            { clientId: roc.clientId, isIrregularSil: true },
+          ],
+          startTime: { $gte: periodFrom, $lt: periodEndExclusive },
+          isActive: { $ne: false },
+        });
+
+        const irregularShiftList = Array.isArray(irregularShifts) ? irregularShifts : [];
+        const irregularShiftIds = irregularShiftList.map((s) => s._id).filter(Boolean);
+
+        let irregularWorkedTimes = [];
+        if (irregularShiftIds.length > 0) {
+          irregularWorkedTimes = await safeFind(WorkedTime, {
+            organizationId,
+            $or: [{ silShiftId: { $in: irregularShiftIds } }, { shiftId: { $in: irregularShiftIds } }],
+            isActive: { $ne: false },
+          });
+        }
+
+        const wtByIrregularShiftId = new Map();
+        for (const wt of Array.isArray(irregularWorkedTimes) ? irregularWorkedTimes : []) {
+          const sId = String(wt.silShiftId || wt.shiftId || '');
+          if (sId) {
+            if (!wtByIrregularShiftId.has(sId)) wtByIrregularShiftId.set(sId, []);
+            wtByIrregularShiftId.get(sId).push(wt);
+          }
+        }
+
+        // Default base crisis rate from RoC daytime support or NDIS weekday standard cap ($65.47)
+        const baseCrisisRate = (roc.supports && roc.supports.length > 0 && Number(roc.supports[0].unitPrice)) || 65.47;
+        const effectiveCrisisRate = mmmMultiplier > 1.0 ? round2(baseCrisisRate * mmmMultiplier) : round2(baseCrisisRate);
+
+        for (const irrShift of irregularShiftList) {
+          if (!irrShift || irrShift.isIrregularSil !== true) continue;
+          let shiftHours = 0;
+          const associatedWts = wtByIrregularShiftId.get(String(irrShift._id)) || [];
+          if (associatedWts.length > 0) {
+            for (const wt of associatedWts) {
+              shiftHours = round2(shiftHours + parseWorkedHours(wt));
+            }
+          } else if (irrShift.startTime && irrShift.endTime) {
+            const start = new Date(irrShift.startTime).getTime();
+            const end = new Date(irrShift.endTime).getTime();
+            const breakMins = Number(irrShift.breakDuration) || 0;
+            const grossHours = Math.max(0, (end - start) / (1000 * 60 * 60));
+            shiftHours = round2(Math.max(0, grossHours - breakMins / 60));
+          }
+
+          if (shiftHours > 0) {
+            const lineTotal = round2(shiftHours * effectiveCrisisRate);
+            subtotal = round2(subtotal + lineTotal);
+
+            const justification = irrShift.crisisJustificationNotes || irrShift.notes || 'NDIA PACE Crisis Support';
+            const incidentRef = irrShift.incidentReportReference || '';
+            const reason = irrShift.irregularSilReason || 'crisis';
+
+            lineItems.push({
+              supportItemNumber: '01_451_0107_1_1',
+              supportItemName: `Irregular SIL / Crisis Staffing (${reason.toUpperCase()})`,
+              price: effectiveCrisisRate,
+              quantity: shiftHours,
+              unit: 'H',
+              totalPrice: lineTotal,
+              date: irrShift.startTime ? new Date(irrShift.startTime) : periodFrom,
+              organizationId,
+              ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
+              claimType: 'irregular_sil',
+              pricingMetadata: {
+                isIrregularSil: true,
+                irregularSilReason: reason,
+                crisisJustificationNotes: justification,
+                incidentReportReference: incidentRef,
+                mmmRating,
+                mmmMultiplier,
+                baseUnitPrice: baseCrisisRate,
+                appliedUnitPrice: effectiveCrisisRate,
+              },
+            });
+
+            irregularSilEvents.push({
+              shiftId: String(irrShift._id),
+              hours: shiftHours,
+              reason,
+              crisisJustificationNotes: justification,
+              incidentReportReference: incidentRef,
+              effectiveRate: effectiveCrisisRate,
+              totalPrice: lineTotal,
+            });
+          }
+        }
+      } catch (irrErr) {
+        logger.warn('Failed querying irregular SIL shifts during billing generation', {
+          error: irrErr.message,
+          rocId: String(roc._id),
         });
       }
     }
@@ -585,6 +766,12 @@ class SILBillingService {
         ...(roc.propertyId ? { silPropertyId: roc.propertyId } : {}),
         silPeriod: { from: periodFrom, to: periodTo },
         silBillingMode: mode,
+        // Milestone 4.1: Regional MMM metadata on invoice
+        ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
+        ...(mmmRating !== null ? { mmmRating } : {}),
+        ...(mmmMultiplier !== 1.0 ? { mmmMultiplier } : {}),
+        // Milestone 4.3: Irregular SIL events on invoice
+        ...(irregularSilEvents.length > 0 ? { irregularSilEvents } : {}),
         ...(silReconciliation ? { silReconciliation } : {}),
         ...(absenceDeductionsInfo ? { silAbsenceDeductions: absenceDeductionsInfo } : {}),
         internalNotes: `SIL roster of care ${roc._id} billed ${periodFrom
@@ -593,6 +780,8 @@ class SILBillingService {
           unclaimableAbsenceDays > 0
             ? ` (${unclaimableAbsenceDays} unclaimable absence days deducted per NDIS hospital leave rules)`
             : ''
+        }${mmmMultiplier > 1.0 ? ` (MMM ${mmmRating} regional multiplier: ${mmmMultiplier}x)` : ''}${
+          irregularSilEvents.length > 0 ? ` (${irregularSilEvents.length} irregular SIL crisis events billed)` : ''
         }`,
       },
       workflow: {

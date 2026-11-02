@@ -26,6 +26,20 @@ jest.mock('../../models/Invoice', () => ({
   Invoice: { findOne: (...args) => mockInvoiceFindOne(...args) },
 }));
 
+const mockPropertyFindOne = jest.fn();
+jest.mock('../../models/SILProperty', () => ({
+  findOne: (...args) => mockPropertyFindOne(...args),
+}));
+
+const mockGetMmmByPostcode = jest.fn();
+const mockGetMultiplierForMmm = jest.fn();
+jest.mock('../../services/mmmService', () => ({
+  mmmService: {
+    getMmmByPostcode: (...args) => mockGetMmmByPostcode(...args),
+    getMultiplierForMmm: (...args) => mockGetMultiplierForMmm(...args),
+  },
+}));
+
 const mockShiftFind = jest.fn();
 jest.mock('../../models/Shift', () => ({
   find: (...args) => mockShiftFind(...args),
@@ -74,6 +88,11 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
       }),
     });
     noExistingInvoice();
+    mockPropertyFindOne.mockReturnValue({
+      lean: async () => null,
+    });
+    mockGetMmmByPostcode.mockResolvedValue(null);
+    mockGetMultiplierForMmm.mockImplementation((mmm) => (mmm === 6 ? 1.4 : mmm === 7 ? 1.5 : 1.0));
     mockShiftFind.mockReturnValue({
       lean: async () => [],
     });
@@ -420,6 +439,202 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
 
     expect(mockShiftFind).not.toHaveBeenCalled();
     expect(mockWorkedTimeFind).not.toHaveBeenCalled();
+  });
+
+  // Milestone 4.1: Regional MMM Price Loading
+  test('applies MMM 6 regional loading (1.4x) when property is in Remote location', async () => {
+    mockRocFindOne.mockResolvedValue({
+      ...activeRoc,
+      propertyId: 'propRemote1',
+    });
+    mockPropertyFindOne.mockReturnValue({
+      lean: async () => ({
+        _id: 'propRemote1',
+        name: 'Broome SIL House',
+        address: { postcode: '6725', suburb: 'Broome', state: 'WA' },
+      }),
+    });
+    mockGetMmmByPostcode.mockResolvedValue({ mmm: 6, source: 'NDIA MMM' });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'roc_quota' },
+      'admin@org.com',
+    );
+
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(1);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+
+    // Daily living: base $70 * 1.4 = $98.00; Community: base $60 * 1.4 = $84.00
+    expect(payload.lineItems[0].price).toBe(98);
+    expect(payload.lineItems[0].totalPrice).toBe(1960); // 20h * $98
+    expect(payload.lineItems[0].serviceLocationPostcode).toBe('6725');
+    expect(payload.lineItems[0].pricingMetadata).toMatchObject({
+      mmmRating: 6,
+      mmmMultiplier: 1.4,
+      baseUnitPrice: 70,
+      appliedUnitPrice: 98,
+    });
+
+    expect(payload.lineItems[1].price).toBe(84);
+    expect(payload.lineItems[1].totalPrice).toBe(840); // 10h * $84
+
+    expect(payload.financialSummary.totalAmount).toBe(2800);
+    expect(payload.metadata.serviceLocationPostcode).toBe('6725');
+    expect(payload.metadata.mmmRating).toBe(6);
+    expect(payload.metadata.mmmMultiplier).toBe(1.4);
+    expect(payload.metadata.internalNotes).toContain('MMM 6 regional multiplier: 1.4x');
+  });
+
+  test('applies MMM 7 regional loading (1.5x) when participant address postcode falls back', async () => {
+    mockRocFindOne.mockResolvedValue({
+      ...activeRoc,
+      propertyId: null, // No property
+    });
+    mockClientFindOne.mockReturnValue({
+      lean: async () => ({
+        clientFirstName: 'Bessie',
+        clientLastName: 'Barker',
+        clientEmail: 'bessie@example.com',
+        clientZip: '0872', // Very remote NT
+      }),
+    });
+    mockGetMmmByPostcode.mockResolvedValue({ mmm: 7, source: 'NDIA MMM' });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'roc_quota' },
+      'admin@org.com',
+    );
+
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(1);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+
+    // Daily living: base $70 * 1.5 = $105.00
+    expect(payload.lineItems[0].price).toBe(105);
+    expect(payload.lineItems[0].totalPrice).toBe(2100); // 20h * $105
+    expect(payload.lineItems[0].serviceLocationPostcode).toBe('0872');
+    expect(payload.lineItems[0].pricingMetadata).toMatchObject({
+      mmmRating: 7,
+      mmmMultiplier: 1.5,
+      baseUnitPrice: 70,
+      appliedUnitPrice: 105,
+    });
+
+    expect(payload.financialSummary.totalAmount).toBe(3000); // (20*105) + (10*90) = 2100 + 900
+    expect(payload.metadata.serviceLocationPostcode).toBe('0872');
+    expect(payload.metadata.mmmRating).toBe(7);
+    expect(payload.metadata.mmmMultiplier).toBe(1.5);
+  });
+
+  // Milestone 4.3: Irregular SIL, Crisis Staffing & PRN Support Billing
+  test('mode: verified_timesheet — generates irregular SIL claim lines with PACE crisis justification notes and incident report reference', async () => {
+    mockRocFindOne.mockResolvedValue(activeRoc);
+
+    // Regular shifts and worked times:
+    const regularShift = { _id: 's1', silRosterOfCareId: 'roc1', isActive: true, isIrregularSil: false };
+    const irregularShift = {
+      _id: 'sCrisis1',
+      silRosterOfCareId: 'roc1',
+      clientId: 'c1',
+      isActive: true,
+      isIrregularSil: true,
+      irregularSilReason: 'crisis',
+      crisisJustificationNotes: 'Participant experienced acute behavioral escalation requiring emergency 1:1 staffing',
+      incidentReportReference: 'INC-2026-04-0012',
+      startTime: new Date('2026-04-05T10:00:00.000Z'),
+      endTime: new Date('2026-04-05T14:00:00.000Z'),
+      breakDuration: 0,
+    };
+
+    mockShiftFind.mockImplementation((query) => {
+      if (query.isIrregularSil || (Array.isArray(query.$or) && query.$or.some((c) => c.isIrregularSil))) {
+        return {
+          lean: async () => [irregularShift],
+        };
+      }
+      return {
+        lean: async () => [regularShift],
+      };
+    });
+
+    const regularWt = {
+      _id: 'wt1',
+      silShiftId: 's1',
+      supportNumber: '01_011_0107_1_1',
+      totalHours: 10,
+      isActive: true,
+      isIrregularSil: false,
+    };
+
+    const irregularWt = {
+      _id: 'wtCrisis1',
+      silShiftId: 'sCrisis1',
+      totalHours: 4,
+      isActive: true,
+      isIrregularSil: true,
+    };
+
+    mockWorkedTimeFind.mockImplementation((query) => {
+      if (Array.isArray(query.$or) && query.$or.some((c) => c.silShiftId?.$in?.includes('sCrisis1'))) {
+        return {
+          lean: async () => [irregularWt],
+        };
+      }
+      return {
+        lean: async () => [regularWt],
+      };
+    });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'verified_timesheet' },
+      'admin@org.com',
+    );
+
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(1);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+
+    // 1 regular line + 1 irregular crisis line
+    expect(payload.lineItems).toHaveLength(2);
+
+    const regularItem = payload.lineItems[0];
+    expect(regularItem).toMatchObject({
+      supportItemNumber: '01_011_0107_1_1',
+      quantity: 10,
+      price: 70,
+      totalPrice: 700,
+    });
+
+    const irregularItem = payload.lineItems[1];
+    expect(irregularItem).toMatchObject({
+      supportItemNumber: '01_451_0107_1_1',
+      supportItemName: 'Irregular SIL / Crisis Staffing (CRISIS)',
+      quantity: 4,
+      unit: 'H',
+      claimType: 'irregular_sil',
+      totalPrice: 280, // 4h @ $70
+    });
+    expect(irregularItem.pricingMetadata).toMatchObject({
+      isIrregularSil: true,
+      irregularSilReason: 'crisis',
+      crisisJustificationNotes: 'Participant experienced acute behavioral escalation requiring emergency 1:1 staffing',
+      incidentReportReference: 'INC-2026-04-0012',
+    });
+
+    expect(payload.metadata.irregularSilEvents).toHaveLength(1);
+    expect(payload.metadata.irregularSilEvents[0]).toMatchObject({
+      shiftId: 'sCrisis1',
+      hours: 4,
+      reason: 'crisis',
+      crisisJustificationNotes: 'Participant experienced acute behavioral escalation requiring emergency 1:1 staffing',
+      incidentReportReference: 'INC-2026-04-0012',
+      totalPrice: 280,
+    });
+    expect(payload.metadata.internalNotes).toContain('1 irregular SIL crisis events billed');
   });
 });
 
