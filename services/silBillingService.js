@@ -2,6 +2,8 @@ const SILRosterOfCare = require('../models/SILRosterOfCare');
 const Client = require('../models/Client');
 const Shift = require('../models/Shift');
 const WorkedTime = require('../models/WorkedTime');
+const SILOccupancy = require('../models/SILOccupancy');
+const silRatioService = require('./silRatioService');
 const { Invoice } = require('../models/Invoice');
 const {
   InvoiceManagementService: invoiceManagementService,
@@ -63,6 +65,83 @@ async function safeFind(model, filter) {
     logger.warn('safeFind query failed', { error: err.message, filter });
     return [];
   }
+}
+
+/**
+ * Safely find a single document, handling mocks and errors gracefully (Milestone 2.1).
+ */
+async function safeFindOne(model, filter, opts = {}) {
+  if (!model || typeof model.findOne !== 'function') return null;
+  try {
+    let query = model.findOne(filter);
+    if (!query) return null;
+    if (opts.sort && typeof query.sort === 'function') {
+      query = query.sort(opts.sort);
+    }
+    if (typeof query.lean === 'function') {
+      return (await query.lean()) || null;
+    }
+    return (await query) || null;
+  } catch (err) {
+    logger.warn('safeFindOne query failed', { error: err.message, filter });
+    return null;
+  }
+}
+
+/**
+ * Calculate unclaimable absence days falling within a billing period (Milestone 2.1).
+ * Under NDIA guidelines:
+ *  - When a participant is admitted to hospital, claims may continue for up to 28 consecutive days.
+ *  - Days exceeding maxClaimableDays (default 28) are non-claimable and must be deducted from the billing period.
+ *  - Non-hospital absences (e.g. holidays or family leave) also deduct any days exceeding allowable leave limits.
+ *
+ * @param {Array} absences - Array of absence records from SILOccupancy
+ * @param {Date} periodFrom - Start of billing period (UTC midnight)
+ * @param {Date} periodTo - End of billing period (UTC midnight)
+ * @returns {{ totalUnclaimableDays: number, deductions: Array }}
+ */
+function calculateUnclaimableAbsenceDays(absences = [], periodFrom, periodTo) {
+  let totalUnclaimableDays = 0;
+  const deductions = [];
+
+  for (const abs of absences) {
+    if (!abs || !abs.startDate) continue;
+    const absStart = startOfUtcDay(new Date(abs.startDate));
+    const absEnd = abs.endDate ? startOfUtcDay(new Date(abs.endDate)) : periodTo;
+
+    // Check if absence overlaps billing window
+    if (absEnd < periodFrom || absStart > periodTo) continue;
+
+    const maxClaimable =
+      typeof abs.maxClaimableDays === 'number' ? abs.maxClaimableDays : 28;
+
+    // The claimable portion of the absence spans from absStart for maxClaimable days:
+    // [absStart, absStart + (maxClaimable - 1) days].
+    // Unclaimable days begin after maxClaimable days of absence:
+    const unclaimableStart = new Date(absStart.getTime() + maxClaimable * MS_PER_DAY);
+
+    // If the absence lasted longer than maxClaimable days:
+    if (unclaimableStart <= absEnd) {
+      // Find overlap of [unclaimableStart, absEnd] with [periodFrom, periodTo]:
+      const overlapStart = unclaimableStart > periodFrom ? unclaimableStart : periodFrom;
+      const overlapEnd = absEnd < periodTo ? absEnd : periodTo;
+
+      if (overlapStart <= overlapEnd) {
+        const unclaimableCount = inclusiveDays(overlapStart, overlapEnd);
+        totalUnclaimableDays += unclaimableCount;
+        deductions.push({
+          absenceId: abs._id?.toString() || abs.id,
+          reason: abs.reason || 'hospital',
+          unclaimableDays: unclaimableCount,
+          from: overlapStart.toISOString().slice(0, 10),
+          to: overlapEnd.toISOString().slice(0, 10),
+          maxClaimableDays: maxClaimable,
+        });
+      }
+    }
+  }
+
+  return { totalUnclaimableDays, deductions };
 }
 
 function parseWorkedHours(entry) {
@@ -197,7 +276,59 @@ class SILBillingService {
     }
 
     const days = inclusiveDays(periodFrom, periodTo);
-    const weeks = days / 7;
+
+    // Milestone 2.1: Check for temporary absences and hospital leave exceeding 28 days.
+    // Under NDIA guidelines, SIL hospital leave is claimable for up to 28 consecutive days.
+    // Any days exceeding 28 are non-claimable and deducted from the billable period.
+    let unclaimableAbsenceDays = 0;
+    let absenceDeductionsInfo = null;
+
+    try {
+      const occupancy = await safeFindOne(
+        SILOccupancy,
+        {
+          organizationId,
+          clientId: roc.clientId,
+          status: { $in: ['active', 'ended'] },
+          ...(roc.propertyId ? { propertyId: roc.propertyId } : {}),
+        },
+        { sort: { startDate: -1 } },
+      );
+
+      if (occupancy && Array.isArray(occupancy.absences) && occupancy.absences.length > 0) {
+        const { totalUnclaimableDays, deductions } = calculateUnclaimableAbsenceDays(
+          occupancy.absences,
+          periodFrom,
+          periodTo,
+        );
+        if (totalUnclaimableDays > 0) {
+          unclaimableAbsenceDays = totalUnclaimableDays;
+          absenceDeductionsInfo = {
+            totalUnclaimableDays,
+            nominalPeriodDays: days,
+            billableDays: Math.max(0, days - totalUnclaimableDays),
+            deductions,
+          };
+        }
+      }
+    } catch (occupancyErr) {
+      // Non-fatal: log warning and continue with nominal days
+      logger.warn('Failed to evaluate SIL occupancy absences during billing', {
+        error: occupancyErr.message,
+        organizationId,
+        clientId: String(roc.clientId),
+      });
+    }
+
+    const billableDays = Math.max(0, days - unclaimableAbsenceDays);
+    if (billableDays === 0) {
+      return {
+        invalidState: true,
+        status: roc.status,
+        message: 'All days in this period were non-claimable absence days under NDIS rules.',
+      };
+    }
+    const weeks = billableDays / 7;
 
     const lineItems = [];
     let subtotal = 0;
@@ -236,7 +367,24 @@ class SILBillingService {
         const shiftId = String(wt.silShiftId || wt.shiftId || '');
         const shift = shiftById.get(shiftId);
         const supportNum = resolveSupportNumber(wt, shift, roc.supports);
-        const hours = parseWorkedHours(wt);
+        let hours = parseWorkedHours(wt);
+
+        // Milestone 2.3: Dynamic ratio cost splitting for shared SIL shifts
+        // Participant Billable Hours = (Shift Duration × Staff Count) / Present Residents Count
+        if (shift && hours > 0) {
+          const presentResidentsCount = Number(shift.presentResidentsCount) || 1;
+          const staffCount = Number(shift.staffCount || shift.requiredStaff) || 1;
+          if (presentResidentsCount > 1 || staffCount > 1) {
+            const split = silRatioService.calculateParticipantShare({
+              shiftHours: hours,
+              staffCount,
+              presentResidentsCount,
+              baseSupportItemNumber: supportNum,
+            });
+            hours = split.billableHoursPerParticipant;
+          }
+        }
+
         if (supportNum && hours > 0) {
           const current = actualHoursBySupport.get(supportNum) || 0;
           actualHoursBySupport.set(supportNum, round2(current + hours));
@@ -438,9 +586,14 @@ class SILBillingService {
         silPeriod: { from: periodFrom, to: periodTo },
         silBillingMode: mode,
         ...(silReconciliation ? { silReconciliation } : {}),
+        ...(absenceDeductionsInfo ? { silAbsenceDeductions: absenceDeductionsInfo } : {}),
         internalNotes: `SIL roster of care ${roc._id} billed ${periodFrom
           .toISOString()
-          .slice(0, 10)}..${periodTo.toISOString().slice(0, 10)}`,
+          .slice(0, 10)}..${periodTo.toISOString().slice(0, 10)}${
+          unclaimableAbsenceDays > 0
+            ? ` (${unclaimableAbsenceDays} unclaimable absence days deducted per NDIS hospital leave rules)`
+            : ''
+        }`,
       },
       workflow: {
         status: 'generated',

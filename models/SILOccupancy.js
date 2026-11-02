@@ -1,6 +1,27 @@
 const mongoose = require('mongoose');
 
 /**
+ * Absence subdocument tracking hospital stays, holidays, and temporary leaves (Milestone 2.1).
+ * Under NDIA rules, hospital leave can be claimed for up to 28 consecutive days.
+ */
+const silAbsenceSchema = new mongoose.Schema(
+  {
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, default: null }, // null indicates ongoing absence
+    reason: {
+      type: String,
+      enum: ['hospital', 'family_leave', 'holiday', 'transition', 'other'],
+      default: 'hospital',
+    },
+    notes: { type: String, default: '' },
+    maxClaimableDays: { type: Number, default: 28 }, // 28 days for hospital under NDIS guidelines
+    claimedDays: { type: Number, default: 0 },
+    createdBy: { type: String, default: '' },
+  },
+  { _id: true, timestamps: true },
+);
+
+/**
  * A participant's residence at a SIL property for a period.
  * See docs/SIL_MANAGEMENT_SPEC.md section 3.2.
  *
@@ -37,6 +58,8 @@ const silOccupancySchema = new mongoose.Schema(
       default: 'plan_managed',
     },
     vacatedReason: { type: String, default: '' },
+    // Milestone 2.1: Temporary absences (hospital, holidays, family leave)
+    absences: { type: [silAbsenceSchema], default: [] },
     createdBy: { type: String, default: '' },
     updatedBy: { type: String, default: '' },
   },
@@ -54,6 +77,18 @@ const silOccupancySchema = new mongoose.Schema(
         if (ret.endDate) ret.endDate = ret.endDate.toISOString();
         if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
         if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
+        // Milestone 2.1: Ensure serialized absence IDs and dates are clean ISO strings
+        if (Array.isArray(ret.absences)) {
+          ret.absences = ret.absences.map((abs) => {
+            if (abs && abs._id) {
+              abs.id = abs._id.toString();
+              delete abs._id;
+            }
+            if (abs && abs.startDate instanceof Date) abs.startDate = abs.startDate.toISOString();
+            if (abs && abs.endDate instanceof Date) abs.endDate = abs.endDate.toISOString();
+            return abs;
+          });
+        }
         return ret;
       },
     },

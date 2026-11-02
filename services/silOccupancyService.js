@@ -138,6 +138,147 @@ class SILOccupancyService {
     await occupancy.save();
     return occupancy;
   }
+
+  /**
+   * Record a temporary absence (e.g. hospital admission, family leave, holiday) for an occupancy (Milestone 2.1).
+   * Under NDIS guidelines, hospital stays are claimable up to 28 consecutive days before billing must pause.
+   *
+   * @param {string} organizationId
+   * @param {string} id - Occupancy ID
+   * @param {Object} data - { startDate, endDate?, reason?: 'hospital'|'family_leave'|'holiday'|'transition'|'other', notes?, maxClaimableDays? }
+   * @param {string} actor
+   * @returns {Promise<Object>} the created absence subdocument
+   */
+  async recordAbsence(organizationId, id, data, actor = '') {
+    const occupancy = await SILOccupancy.findOne({ _id: id, organizationId });
+    if (!occupancy) {
+      const err = new Error('Occupancy not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (!data.startDate) {
+      const err = new Error('Absence startDate is required.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const startDate = new Date(data.startDate);
+    const endDate = data.endDate ? new Date(data.endDate) : null;
+    if (endDate && endDate < startDate) {
+      const err = new Error('Absence endDate must be on or after startDate.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const reason = data.reason || 'hospital';
+    const maxClaimableDays =
+      typeof data.maxClaimableDays === 'number'
+        ? data.maxClaimableDays
+        : 28; // Default 28 days under NDIS hospital leave rules
+
+    const absence = {
+      startDate,
+      endDate,
+      reason,
+      notes: data.notes || '',
+      maxClaimableDays,
+      claimedDays: 0,
+      createdBy: actor,
+    };
+
+    occupancy.absences.push(absence);
+    occupancy.updatedBy = actor;
+    await occupancy.save();
+
+    const created = occupancy.absences[occupancy.absences.length - 1];
+
+    logger.business('SIL Absence Recorded', {
+      event: 'sil_absence_recorded',
+      organizationId,
+      occupancyId: occupancy._id.toString(),
+      absenceId: created._id?.toString(),
+      reason,
+      startDate: startDate.toISOString(),
+      maxClaimableDays,
+    });
+
+    return created;
+  }
+
+  /**
+   * End an ongoing absence or update its return date (Milestone 2.1).
+   *
+   * @param {string} organizationId
+   * @param {string} id - Occupancy ID
+   * @param {string} absenceId - Absence subdocument ID
+   * @param {Object} opts - { endDate }
+   * @param {string} actor
+   */
+  async endAbsence(organizationId, id, absenceId, { endDate } = {}, actor = '') {
+    const occupancy = await SILOccupancy.findOne({ _id: id, organizationId });
+    if (!occupancy) {
+      const err = new Error('Occupancy not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const absence = (occupancy.absences || []).id(absenceId);
+    if (!absence) {
+      const err = new Error('Absence record not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const effectiveEnd = endDate ? new Date(endDate) : new Date();
+    if (effectiveEnd < absence.startDate) {
+      const err = new Error('Absence endDate cannot be earlier than startDate.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    absence.endDate = effectiveEnd;
+    occupancy.updatedBy = actor;
+    await occupancy.save();
+
+    logger.business('SIL Absence Ended', {
+      event: 'sil_absence_ended',
+      organizationId,
+      occupancyId: occupancy._id.toString(),
+      absenceId: absence._id?.toString(),
+      endDate: effectiveEnd.toISOString(),
+    });
+
+    return absence;
+  }
+
+  /**
+   * List all absences across an organisation or scoped to an occupancy, client, or property (Milestone 2.1).
+   */
+  async listAbsences(organizationId, { occupancyId, clientId, propertyId } = {}) {
+    const filter = { organizationId };
+    if (occupancyId) filter._id = occupancyId;
+    if (clientId) filter.clientId = clientId;
+    if (propertyId) filter.propertyId = propertyId;
+
+    const occupancies = await SILOccupancy.find(filter).lean();
+    const absences = [];
+
+    for (const occ of occupancies) {
+      for (const abs of occ.absences || []) {
+        absences.push({
+          ...abs,
+          id: abs._id?.toString(),
+          occupancyId: occ._id.toString(),
+          clientId: occ.clientId?.toString(),
+          propertyId: occ.propertyId?.toString(),
+          roomId: occ.roomId,
+        });
+      }
+    }
+
+    return absences.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+  }
 }
 
 module.exports = new SILOccupancyService();

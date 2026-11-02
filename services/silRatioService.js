@@ -109,6 +109,41 @@ class SILRatioService {
       { new: true },
     );
   }
+
+  /**
+   * Calculate dynamic cost splitting for a shared SIL shift across present residents (Milestone 2.3).
+   *
+   * Under NDIS shared living guidelines:
+   *  Billable Hours Per Participant = (Shift Hours × Staff Count) / Present Residents Count
+   *
+   * When one or more residents are absent (e.g. hospital or holiday), the present resident count
+   * drops, dynamically adjusting each remaining participant's billable proportion and ratio.
+   *
+   * @param {Object} params
+   * @param {number} params.shiftHours - duration of the delivered shift in hours
+   * @param {number} [params.staffCount=1] - number of staff delivering support
+   * @param {number} [params.presentResidentsCount=1] - active residents in the house not on leave
+   * @param {string} [params.baseSupportItemNumber=null] - optional original support item number
+   * @returns {{ billableHoursPerParticipant: number, effectiveRatio: string, staffCount: number, presentResidentsCount: number, totalShiftHours: number }}
+   */
+  calculateParticipantShare({ shiftHours, staffCount = 1, presentResidentsCount = 1, baseSupportItemNumber = null } = {}) {
+    const present = Math.max(1, Number(presentResidentsCount) || 1);
+    const staff = Math.max(1, Number(staffCount) || 1);
+    const hours = Math.max(0, Number(shiftHours) || 0);
+
+    // Billable hours per participant = (Shift Duration × Staff Count) / Present Residents Count
+    const billableHoursPerParticipant = Math.round(((hours * staff) / present) * 100) / 100;
+    const effectiveRatio = `${staff}:${present}`;
+
+    return {
+      billableHoursPerParticipant,
+      effectiveRatio,
+      staffCount: staff,
+      presentResidentsCount: present,
+      totalShiftHours: hours,
+      baseSupportItemNumber: baseSupportItemNumber || null,
+    };
+  }
 }
 
 module.exports = new SILRatioService();
