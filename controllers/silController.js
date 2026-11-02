@@ -453,7 +453,12 @@ class SILController {
     const result = await silBillingService.generateInvoiceFromRosterOfCare(
       org,
       req.params.id,
-      { from: req.body.from, to: req.body.to, dueDate: req.body.dueDate },
+      {
+        from: req.body.from,
+        to: req.body.to,
+        dueDate: req.body.dueDate,
+        mode: req.body.mode,
+      },
       this._actor(req),
     );
     if (result.notFound) {

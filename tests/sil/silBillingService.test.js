@@ -370,17 +370,44 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
       silRosterOfCareId: 'roc1',
       startTime: {
         $gte: new Date(Date.UTC(2026, 3, 1)),
-        $lte: new Date(Date.UTC(2026, 3, 14)),
+        $lt: new Date(Date.UTC(2026, 3, 15)),
       },
       isActive: { $ne: false },
     });
     expect(mockWorkedTimeFind).toHaveBeenCalledWith({
+      organizationId: 'org1',
       $or: [
         { silShiftId: { $in: [shift1Id, shift2Id] } },
         { shiftId: { $in: [shift1Id, shift2Id] } },
       ],
       isActive: { $ne: false },
     });
+  });
+
+  test('parses Australian DD/MM/YYYY date strings correctly without swapping day/month', async () => {
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '01/04/2026', to: '14/04/2026', mode: 'roc_quota' },
+      'admin@org.com',
+    );
+
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(1);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+    expect(payload.metadata.silPeriod.from.toISOString()).toBe('2026-04-01T00:00:00.000Z');
+    expect(payload.metadata.silPeriod.to.toISOString()).toBe('2026-04-14T00:00:00.000Z');
+  });
+
+  test('rejects an invalid billing mode', async () => {
+    const result = await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'invalid_mode' },
+      'admin@org.com',
+    );
+
+    expect(result.invalidPeriod).toBe(true);
+    expect(result.message).toContain("Invalid billing mode 'invalid_mode'");
   });
 
   test('mode: roc_quota — does not query Shift or WorkedTime', async () => {

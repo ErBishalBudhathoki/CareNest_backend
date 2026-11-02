@@ -7,6 +7,7 @@ const {
   InvoiceManagementService: invoiceManagementService,
 } = require('./invoiceManagementService');
 const logger = require('../config/logger');
+const { normalizeToIsoDate } = require('../utils/dateHelpers');
 
 /**
  * SIL → billing wiring (Phase 4 → Phase 6).
@@ -41,6 +42,14 @@ function startOfUtcDay(value) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+function parseDateInput(value) {
+  if (!value) return null;
+  const iso = normalizeToIsoDate(value);
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
 async function safeFind(model, filter) {
   if (!model || typeof model.find !== 'function') return [];
   try {
@@ -58,19 +67,28 @@ async function safeFind(model, filter) {
 
 function parseWorkedHours(entry) {
   if (!entry) return 0;
-  if (typeof entry.totalHours === 'number' && !Number.isNaN(entry.totalHours) && entry.totalHours > 0) {
-    return entry.totalHours;
+  const numHours = Number(entry.totalHours);
+  if (!Number.isNaN(numHours) && numHours > 0) {
+    return round2(numHours);
   }
-  if (typeof entry.totalSeconds === 'number' && !Number.isNaN(entry.totalSeconds) && entry.totalSeconds > 0) {
-    return round2(entry.totalSeconds / 3600);
+  const numSec = Number(entry.totalSeconds);
+  if (!Number.isNaN(numSec) && numSec > 0) {
+    return round2(numSec / 3600);
   }
   if (typeof entry.timeWorked === 'string') {
-    const parts = entry.timeWorked.split(':').map(Number);
-    if (parts.length >= 2 && !parts.some(Number.isNaN)) {
-      const h = parts[0] || 0;
-      const m = parts[1] || 0;
-      const s = parts[2] || 0;
-      return round2(h + m / 60 + s / 3600);
+    const trimmed = entry.timeWorked.trim();
+    if (trimmed.includes(':')) {
+      const parts = trimmed.split(':').map(Number);
+      if (parts.length >= 2 && !parts.some(Number.isNaN)) {
+        const h = parts[0] || 0;
+        const m = parts[1] || 0;
+        const s = parts[2] || 0;
+        return round2(h + m / 60 + s / 3600);
+      }
+    }
+    const parsedTime = parseFloat(trimmed);
+    if (!Number.isNaN(parsedTime) && parsedTime > 0) {
+      return round2(parsedTime);
     }
   }
   if (entry.startTime && entry.endTime) {
@@ -80,8 +98,7 @@ function parseWorkedHours(entry) {
       return round2((end - start) / (1000 * 60 * 60));
     }
   }
-  const fallback = Number(entry.totalHours);
-  return !Number.isNaN(fallback) && fallback > 0 ? fallback : 0;
+  return 0;
 }
 
 function resolveSupportNumber(wt, shift, rocSupports = []) {
@@ -134,13 +151,21 @@ class SILBillingService {
    *   { clientNotFound } | { conflict, existingInvoiceId } | { invoice, billing }
    */
   async generateInvoiceFromRosterOfCare(organizationId, rosterOfCareId, opts = {}, actor = '') {
-    const from = opts.from ? new Date(opts.from) : null;
-    const to = opts.to ? new Date(opts.to) : null;
+    const from = parseDateInput(opts.from);
+    const to = parseDateInput(opts.to);
 
-    if (!from || !to || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
+    if (!from || !to || to < from) {
       return {
         invalidPeriod: true,
         message: 'Invalid period: from/to are required and to >= from.',
+      };
+    }
+
+    const mode = String(opts.mode || 'roc_quota').toLowerCase();
+    if (!['roc_quota', 'verified_timesheet', 'reconciled'].includes(mode)) {
+      return {
+        invalidPeriod: true,
+        message: `Invalid billing mode '${opts.mode}'. Allowed: roc_quota, verified_timesheet, reconciled.`,
       };
     }
 
@@ -155,6 +180,7 @@ class SILBillingService {
 
     const periodFrom = startOfUtcDay(from);
     const periodTo = startOfUtcDay(to);
+    const periodEndExclusive = new Date(periodTo.getTime() + MS_PER_DAY);
 
     // Idempotency: never bill the same RoC for the same period twice.
     const existing = await Invoice.findOne({
@@ -172,7 +198,6 @@ class SILBillingService {
 
     const days = inclusiveDays(periodFrom, periodTo);
     const weeks = days / 7;
-    const mode = opts.mode || 'roc_quota';
 
     const lineItems = [];
     let subtotal = 0;
@@ -182,7 +207,7 @@ class SILBillingService {
       const shifts = await safeFind(Shift, {
         organizationId,
         silRosterOfCareId: roc._id,
-        startTime: { $gte: periodFrom, $lte: periodTo },
+        startTime: { $gte: periodFrom, $lt: periodEndExclusive },
         isActive: { $ne: false },
       });
 
@@ -199,6 +224,7 @@ class SILBillingService {
       let workedTimes = [];
       if (shiftIds.length > 0) {
         workedTimes = await safeFind(WorkedTime, {
+          organizationId,
           $or: [{ silShiftId: { $in: shiftIds } }, { shiftId: { $in: shiftIds } }],
           isActive: { $ne: false },
         });
@@ -226,13 +252,16 @@ class SILBillingService {
           if (actualHours <= 0) continue;
 
           const unitPrice = round2(support.unitPrice);
-          const totalPrice = round2(actualHours * unitPrice);
+          const quantity = isSleepover
+            ? Math.max(1, Math.round(actualHours / 8))
+            : actualHours;
+          const totalPrice = round2(quantity * unitPrice);
           subtotal = round2(subtotal + totalPrice);
           lineItems.push({
-            supportItemNumber: support.supportNumber,
-            supportItemName: support.supportName,
+            supportItemNumber: support.supportNumber || support.itemNumber,
+            supportItemName: support.supportName || support.itemName || 'SIL Support',
             price: unitPrice,
-            quantity: actualHours,
+            quantity,
             unit: isSleepover ? 'E' : 'H',
             totalPrice,
             date: periodFrom,
@@ -266,8 +295,8 @@ class SILBillingService {
           const totalPrice = round2(quantity * unitPrice);
           subtotal = round2(subtotal + totalPrice);
           lineItems.push({
-            supportItemNumber: support.supportNumber,
-            supportItemName: support.supportName,
+            supportItemNumber: support.supportNumber || support.itemNumber,
+            supportItemName: support.supportName || support.itemName || 'SIL Support',
             price: unitPrice,
             quantity,
             unit: isSleepover ? 'E' : 'H',
@@ -302,8 +331,8 @@ class SILBillingService {
             subtotal = round2(subtotal + varianceTotal);
 
             lineItems.push({
-              supportItemNumber: support.supportNumber,
-              supportItemName: `${support.supportName} (Unplanned / Variance Hours)`,
+              supportItemNumber: support.supportNumber || support.itemNumber,
+              supportItemName: `${support.supportName || support.itemName || 'SIL Support'} (Unplanned / Variance Hours)`,
               price: unitPrice,
               quantity: varianceHours,
               unit: 'H',
@@ -343,8 +372,8 @@ class SILBillingService {
         const totalPrice = round2(quantity * unitPrice);
         subtotal = round2(subtotal + totalPrice);
         lineItems.push({
-          supportItemNumber: support.supportNumber,
-          supportItemName: support.supportName,
+          supportItemNumber: support.supportNumber || support.itemNumber,
+          supportItemName: support.supportName || support.itemName || 'SIL Support',
           price: unitPrice,
           quantity,
           unit: isSleepover ? 'E' : 'H',
@@ -364,7 +393,7 @@ class SILBillingService {
     }
 
     const dueDate = opts.dueDate
-      ? new Date(opts.dueDate)
+      ? parseDateInput(opts.dueDate) || new Date(periodTo.getTime() + 30 * MS_PER_DAY)
       : new Date(periodTo.getTime() + 30 * MS_PER_DAY);
 
     // Client stores the participant name in `clientFirstName`/`clientLastName`
@@ -405,6 +434,7 @@ class SILBillingService {
         generationMethod: 'sil_roster_of_care',
         category: 'SIL',
         silRosterOfCareId: roc._id,
+        ...(roc.propertyId ? { silPropertyId: roc.propertyId } : {}),
         silPeriod: { from: periodFrom, to: periodTo },
         silBillingMode: mode,
         ...(silReconciliation ? { silReconciliation } : {}),
@@ -466,3 +496,4 @@ module.exports.round2 = round2;
 module.exports.inclusiveDays = inclusiveDays;
 module.exports.parseWorkedHours = parseWorkedHours;
 module.exports.resolveSupportNumber = resolveSupportNumber;
+module.exports.parseDateInput = parseDateInput;
