@@ -1,5 +1,7 @@
 const SILRosterOfCare = require('../models/SILRosterOfCare');
 const Client = require('../models/Client');
+const Shift = require('../models/Shift');
+const WorkedTime = require('../models/WorkedTime');
 const { Invoice } = require('../models/Invoice');
 const {
   InvoiceManagementService: invoiceManagementService,
@@ -37,6 +39,26 @@ function inclusiveDays(from, to) {
 function startOfUtcDay(value) {
   const d = new Date(value);
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function parseWorkedHours(entry) {
+  if (!entry) return 0;
+  if (typeof entry.totalHours === 'number' && !isNaN(entry.totalHours) && entry.totalHours > 0) {
+    return entry.totalHours;
+  }
+  if (typeof entry.totalSeconds === 'number' && !isNaN(entry.totalSeconds) && entry.totalSeconds > 0) {
+    return round2(entry.totalSeconds / 3600);
+  }
+  if (typeof entry.timeWorked === 'string') {
+    const parts = entry.timeWorked.split(':').map(Number);
+    if (parts.length >= 2 && !parts.some(isNaN)) {
+      const h = parts[0] || 0;
+      const m = parts[1] || 0;
+      const s = parts[2] || 0;
+      return round2(h + m / 60 + s / 3600);
+    }
+  }
+  return 0;
 }
 
 class SILBillingService {
@@ -90,42 +112,160 @@ class SILBillingService {
 
     const days = inclusiveDays(periodFrom, periodTo);
     const weeks = days / 7;
+    const mode = String(opts.mode || 'roc_quota').toLowerCase();
+
+    // Actual clocked hours retrieval for verified_timesheet and reconciled modes
+    const actualHoursBySupport = new Map();
+    let totalPlannedHours = 0;
+    let totalActualHours = 0;
+    let totalVarianceHours = 0;
+
+    if (mode === 'verified_timesheet' || mode === 'reconciled') {
+      const periodEndWithDay = new Date(periodTo.getTime() + MS_PER_DAY);
+      let shifts = [];
+      try {
+        if (Shift && typeof Shift.find === 'function') {
+          const query = Shift.find({
+            organizationId,
+            silRosterOfCareId: roc._id,
+            startTime: { $gte: periodFrom, $lt: periodEndWithDay },
+            status: { $ne: 'cancelled' },
+            isActive: { $ne: false },
+          });
+          shifts = typeof query.lean === 'function' ? await query.lean() : await query;
+        }
+      } catch (err) {
+        logger.warn('Failed to query shifts for SIL RoC billing', { error: err.message, rosterOfCareId });
+      }
+
+      const shiftList = Array.isArray(shifts) ? shifts : [];
+      const shiftIds = shiftList.map((s) => s._id).filter(Boolean);
+      const shiftSupportMap = new Map();
+      for (const shift of shiftList) {
+        const supportNum =
+          shift.supportItems?.[0]?.itemNumber ||
+          shift.supportItems?.[0]?.supportNumber ||
+          shift.supportItems?.[0]?.supportItemNumber;
+        if (supportNum && shift._id) {
+          shiftSupportMap.set(String(shift._id), supportNum);
+        }
+      }
+
+      let workedTimes = [];
+      if (shiftIds.length > 0 && WorkedTime && typeof WorkedTime.find === 'function') {
+        try {
+          const query = WorkedTime.find({
+            organizationId,
+            $or: [{ silShiftId: { $in: shiftIds } }, { shiftId: { $in: shiftIds } }],
+            isActive: { $ne: false },
+          });
+          workedTimes = typeof query.lean === 'function' ? await query.lean() : await query;
+        } catch (err) {
+          logger.warn('Failed to query worked times for SIL RoC billing', { error: err.message, rosterOfCareId });
+        }
+      }
+
+      for (const wt of Array.isArray(workedTimes) ? workedTimes : []) {
+        const hours = parseWorkedHours(wt);
+        if (hours <= 0) continue;
+        const supportNum =
+          wt.ndisItem?.itemNumber ||
+          wt.ndisItem?.supportItemNumber ||
+          wt.ndisItem?.supportNumber ||
+          wt.ndisItemNumber ||
+          (wt.silShiftId && shiftSupportMap.get(String(wt.silShiftId))) ||
+          (wt.shiftId && shiftSupportMap.get(String(wt.shiftId)));
+        if (supportNum) {
+          const current = actualHoursBySupport.get(supportNum) || 0;
+          actualHoursBySupport.set(supportNum, round2(current + hours));
+        }
+      }
+    }
 
     const lineItems = [];
     let subtotal = 0;
-    for (const support of roc.supports || []) {
-      const shiftType = String(support.shiftType || 'day').toLowerCase();
-      const isSleepover = shiftType === 'sleepover';
-      const daysPerWeek =
-        Array.isArray(support.days) && support.days.length > 0
-          ? support.days.length
-          : 0;
 
-      // A sleepover is a fixed fee per shift, not hours × rate. Prefer the
-      // explicit weekly pattern; fall back to an 8-hour-per-shift assumption
-      // for legacy quotes that only stored hours.
-      const quantity = isSleepover
-        ? round2(
-            (daysPerWeek ||
-              Math.max(1, Math.round((Number(support.hoursPerWeek) || 0) / 8))) *
-              weeks,
-          )
-        : round2((Number(support.hoursPerWeek) || 0) * weeks);
-      if (quantity <= 0) continue;
+    if (mode === 'verified_timesheet') {
+      for (const support of roc.supports || []) {
+        const shiftType = String(support.shiftType || 'day').toLowerCase();
+        const isSleepover = shiftType === 'sleepover';
+        const actualHours = actualHoursBySupport.get(support.supportNumber) || 0;
+        const quantity = isSleepover ? round2(actualHours / 8) : round2(actualHours);
+        if (quantity <= 0) continue;
 
-      const unitPrice = round2(support.unitPrice);
-      const totalPrice = round2(quantity * unitPrice);
-      subtotal = round2(subtotal + totalPrice);
-      lineItems.push({
-        supportItemNumber: support.supportNumber,
-        supportItemName: support.supportName,
-        price: unitPrice,
-        quantity,
-        unit: isSleepover ? 'E' : 'H',
-        totalPrice,
-        date: periodFrom,
-        organizationId,
-      });
+        totalActualHours = round2(totalActualHours + actualHours);
+        const unitPrice = round2(support.unitPrice);
+        const totalPrice = round2(quantity * unitPrice);
+        subtotal = round2(subtotal + totalPrice);
+        lineItems.push({
+          supportItemNumber: support.supportNumber,
+          supportItemName: support.supportName,
+          price: unitPrice,
+          quantity,
+          unit: isSleepover ? 'E' : 'H',
+          totalPrice,
+          date: periodFrom,
+          organizationId,
+        });
+      }
+    } else {
+      // 'roc_quota' or 'reconciled'
+      for (const support of roc.supports || []) {
+        const shiftType = String(support.shiftType || 'day').toLowerCase();
+        const isSleepover = shiftType === 'sleepover';
+        const daysPerWeek =
+          Array.isArray(support.days) && support.days.length > 0
+            ? support.days.length
+            : 0;
+
+        const quantity = isSleepover
+          ? round2(
+              (daysPerWeek ||
+                Math.max(1, Math.round((Number(support.hoursPerWeek) || 0) / 8))) *
+                weeks,
+            )
+          : round2((Number(support.hoursPerWeek) || 0) * weeks);
+        if (quantity <= 0) continue;
+
+        const plannedHours = isSleepover ? quantity * 8 : quantity;
+        totalPlannedHours = round2(totalPlannedHours + plannedHours);
+
+        const unitPrice = round2(support.unitPrice);
+        const totalPrice = round2(quantity * unitPrice);
+        subtotal = round2(subtotal + totalPrice);
+        lineItems.push({
+          supportItemNumber: support.supportNumber,
+          supportItemName: support.supportName,
+          price: unitPrice,
+          quantity,
+          unit: isSleepover ? 'E' : 'H',
+          totalPrice,
+          date: periodFrom,
+          organizationId,
+        });
+
+        // Reconciled variance check: if delivered hours exceed planned quota
+        if (mode === 'reconciled') {
+          const actualHours = actualHoursBySupport.get(support.supportNumber) || 0;
+          totalActualHours = round2(totalActualHours + actualHours);
+          if (actualHours > plannedHours) {
+            const varianceHours = round2(actualHours - plannedHours);
+            totalVarianceHours = round2(totalVarianceHours + varianceHours);
+            const varianceTotal = round2(varianceHours * unitPrice);
+            subtotal = round2(subtotal + varianceTotal);
+            lineItems.push({
+              supportItemNumber: support.supportNumber,
+              supportItemName: `${support.supportName} (Unplanned / Variance Hours)`,
+              price: unitPrice,
+              quantity: varianceHours,
+              unit: 'H',
+              totalPrice: varianceTotal,
+              date: periodFrom,
+              organizationId,
+            });
+          }
+        }
+      }
     }
 
     if (lineItems.length === 0) {
@@ -179,7 +319,13 @@ class SILBillingService {
         category: 'SIL',
         silRosterOfCareId: roc._id,
         silPeriod: { from: periodFrom, to: periodTo },
-        internalNotes: `SIL roster of care ${roc._id} billed ${periodFrom
+        silBillingMode: mode,
+        silReconciliation: {
+          plannedHours: totalPlannedHours,
+          actualHours: totalActualHours,
+          varianceHours: totalVarianceHours,
+        },
+        internalNotes: `SIL roster of care ${roc._id} billed (${mode}) ${periodFrom
           .toISOString()
           .slice(0, 10)}..${periodTo.toISOString().slice(0, 10)}`,
       },

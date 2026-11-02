@@ -26,6 +26,16 @@ jest.mock('../../models/Invoice', () => ({
   Invoice: { findOne: (...args) => mockInvoiceFindOne(...args) },
 }));
 
+const mockShiftFind = jest.fn();
+jest.mock('../../models/Shift', () => ({
+  find: (...args) => mockShiftFind(...args),
+}));
+
+const mockWorkedTimeFind = jest.fn();
+jest.mock('../../models/WorkedTime', () => ({
+  find: (...args) => mockWorkedTimeFind(...args),
+}));
+
 const mockGenerateInvoiceNumber = jest.fn();
 const mockCreateInvoice = jest.fn();
 // Mirror the real module shape: it exports the instance under
@@ -64,6 +74,12 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
       }),
     });
     noExistingInvoice();
+    mockShiftFind.mockReturnValue({
+      lean: async () => [],
+    });
+    mockWorkedTimeFind.mockReturnValue({
+      lean: async () => [],
+    });
     mockGenerateInvoiceNumber.mockResolvedValue('INVORG6101AN');
     mockCreateInvoice.mockImplementation(async (data) => ({
       success: true,
@@ -205,6 +221,105 @@ describe('SILBillingService.generateInvoiceFromRosterOfCare', () => {
       { from: '2026-04-01', to: '2026-04-14' },
     );
     expect(result.invalidState).toBe(true);
+  });
+
+  test('reconciles actual WorkedTime hours against RoC quota and appends variance line item when actual > planned', async () => {
+    const shift1Id = 'shift-sil-1';
+    mockShiftFind.mockReturnValue({
+      lean: async () => [
+        {
+          _id: shift1Id,
+          silRosterOfCareId: 'roc1',
+          supportItems: [{ itemNumber: '01_011_0107_1_1', itemName: 'Daily living' }],
+        },
+      ],
+    });
+
+    // Planned: 10h/week × 2 weeks = 20h.
+    // Actual worked: 25 hours (5h variance).
+    mockWorkedTimeFind.mockReturnValue({
+      lean: async () => [
+        {
+          silShiftId: shift1Id,
+          ndisItemNumber: '01_011_0107_1_1',
+          totalHours: 25,
+        },
+      ],
+    });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'reconciled' },
+      'admin@org.com',
+    );
+
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(1);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+
+    // Should have 3 line items:
+    // 1) Planned Daily Living: 20h @ $70 = $1400
+    // 2) Variance Daily Living: 5h @ $70 = $350
+    // 3) Planned Community: 10h @ $60 = $600
+    expect(payload.lineItems).toHaveLength(3);
+    const varianceLine = payload.lineItems.find((l) => l.supportItemName.includes('Variance Hours'));
+    expect(varianceLine).toBeDefined();
+    expect(varianceLine).toMatchObject({
+      supportItemNumber: '01_011_0107_1_1',
+      quantity: 5,
+      price: 70,
+      totalPrice: 350,
+    });
+    expect(payload.financialSummary.totalAmount).toBe(2350); // 1400 + 350 + 600
+    expect(payload.metadata.silBillingMode).toBe('reconciled');
+    expect(payload.metadata.silReconciliation).toEqual({
+      plannedHours: 30, // 20 + 10
+      actualHours: 25,
+      varianceHours: 5,
+    });
+  });
+
+  test('bills exact clocked hours in verified_timesheet mode', async () => {
+    const shift1Id = 'shift-sil-1';
+    const shift2Id = 'shift-sil-2';
+    mockShiftFind.mockReturnValue({
+      lean: async () => [
+        { _id: shift1Id, supportItems: [{ itemNumber: '01_011_0107_1_1' }] },
+        { _id: shift2Id, supportItems: [{ itemNumber: '01_015_0107_1_1' }] },
+      ],
+    });
+
+    mockWorkedTimeFind.mockReturnValue({
+      lean: async () => [
+        { silShiftId: shift1Id, totalHours: 12 },
+        { silShiftId: shift2Id, totalHours: 6 },
+      ],
+    });
+
+    await silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'verified_timesheet' },
+      'admin@org.com',
+    );
+
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(1);
+    const payload = mockCreateInvoice.mock.calls[0][0];
+    expect(payload.lineItems).toHaveLength(2);
+    expect(payload.lineItems[0]).toMatchObject({
+      supportItemNumber: '01_011_0107_1_1',
+      quantity: 12,
+      price: 70,
+      totalPrice: 840,
+    });
+    expect(payload.lineItems[1]).toMatchObject({
+      supportItemNumber: '01_015_0107_1_1',
+      quantity: 6,
+      price: 60,
+      totalPrice: 360,
+    });
+    expect(payload.financialSummary.totalAmount).toBe(1200); // 840 + 360
+    expect(payload.metadata.silBillingMode).toBe('verified_timesheet');
   });
 });
 

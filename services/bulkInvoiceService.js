@@ -65,6 +65,14 @@ async function generateInvoicesFromAppointments({
         subtotal: 0,
         tax: 0,
         total: 0,
+        financialSummary: {
+          subtotal: 0,
+          taxAmount: 0,
+          discountAmount: 0,
+          expenseAmount: 0,
+          totalAmount: 0,
+          currency: 'AUD',
+        },
       });
 
       let subtotal = 0;
@@ -83,8 +91,16 @@ async function generateInvoicesFromAppointments({
       });
 
       invoice.subtotal = subtotal;
-      invoice.tax = subtotal * 0.1; // 10% tax
-      invoice.total = subtotal + invoice.tax;
+      invoice.tax = 0; // NDIS supports are GST-free under Australian tax law
+      invoice.total = subtotal;
+      invoice.financialSummary = {
+        subtotal,
+        taxAmount: 0,
+        discountAmount: 0,
+        expenseAmount: 0,
+        totalAmount: subtotal,
+        currency: 'AUD',
+      };
       invoices.push(invoice);
     }
   } else {
@@ -99,8 +115,16 @@ async function generateInvoicesFromAppointments({
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         status: 'pending',
         subtotal: amount,
-        tax: amount * 0.1,
-        total: amount * 1.1,
+        tax: 0, // NDIS supports are GST-free under Australian tax law
+        total: amount,
+        financialSummary: {
+          subtotal: amount,
+          taxAmount: 0,
+          discountAmount: 0,
+          expenseAmount: 0,
+          totalAmount: amount,
+          currency: 'AUD',
+        },
       });
 
       lineItems.push({

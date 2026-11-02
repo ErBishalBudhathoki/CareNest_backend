@@ -70,9 +70,18 @@ describe('generateInvoicesFromAppointments', () => {
     expect(summary).toEqual({
       invoiceCount: 2,
       appointmentCount: 3,
-      totalAmount: expect.closeTo(660, 5),
+      totalAmount: expect.closeTo(600, 5),
     });
     expect(MockInvoice).toHaveBeenCalledTimes(2);
+    expect(mockInvoiceInsertMany).toHaveBeenCalledTimes(1);
+    const savedInvoices = mockInvoiceInsertMany.mock.calls[0][0];
+    expect(savedInvoices).toHaveLength(2);
+    savedInvoices.forEach((inv) => {
+      expect(inv.tax).toBe(0);
+      expect(inv.financialSummary.taxAmount).toBe(0);
+      expect(inv.financialSummary.totalAmount).toBe(inv.subtotal);
+      expect(inv.total).toBe(inv.subtotal);
+    });
     expect(mockUpdateMany).toHaveBeenCalledWith(
       { _id: { $in: ['a1', 'a2', 'a3'] } },
       { $set: { invoiced: true } },
@@ -87,7 +96,16 @@ describe('generateInvoicesFromAppointments', () => {
       groupByClient: false,
     });
     expect(summary.invoiceCount).toBe(2);
-    expect(summary.totalAmount).toBeCloseTo(440, 5);
+    expect(summary.totalAmount).toBeCloseTo(400, 5);
+    expect(mockInvoiceInsertMany).toHaveBeenCalledTimes(1);
+    const savedInvoices = mockInvoiceInsertMany.mock.calls[0][0];
+    expect(savedInvoices).toHaveLength(2);
+    savedInvoices.forEach((inv) => {
+      expect(inv.tax).toBe(0);
+      expect(inv.financialSummary.taxAmount).toBe(0);
+      expect(inv.financialSummary.totalAmount).toBe(inv.subtotal);
+      expect(inv.total).toBe(inv.subtotal);
+    });
   });
 
   test('throws 404 error when nothing is eligible', async () => {

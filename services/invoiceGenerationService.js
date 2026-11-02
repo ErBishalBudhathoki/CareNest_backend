@@ -254,7 +254,7 @@ class InvoiceGenerationService {
         lineItems: validLineItems,
         validation,
         metadata: {
-          assignmentId: assignment._id,
+          assignmentId: assignment ? assignment._id : null,
           clientId: client._id,
           generatedAt: new Date(),
           extractionMethod: 'bulk generation with pre-configured pricing',
@@ -382,18 +382,7 @@ class InvoiceGenerationService {
       const safeUserEmail = toSafeString(userEmail);
       const safeClientEmail = toSafeString(clientEmail);
 
-      // Get client assignment data
-      const assignment = await ClientAssignment.findOne({
-        userEmail: safeUserEmail,
-        clientEmail: safeClientEmail,
-        isActive: true
-      });
-
-      if (!assignment) {
-        throw new Error('No active assignment found for the specified user and client');
-      }
-
-      // Get client details for additional context
+      // First look up the client
       const client = await Client.findOne({
         clientEmail: safeClientEmail,
         isActive: true
@@ -403,8 +392,35 @@ class InvoiceGenerationService {
         throw new Error('Client not found or inactive');
       }
 
+      // Get client assignment data (optional now)
+      const assignment = await ClientAssignment.findOne({
+        userEmail: safeUserEmail,
+        clientEmail: safeClientEmail,
+        isActive: true
+      });
+
       // Get worked time data for the specified period
       const workedTimeData = await this.getWorkedTimeData(userEmail, clientEmail, startDate, endDate);
+
+      // If no assignment and no worked time data, check for shifts
+      if (!assignment && (!workedTimeData || workedTimeData.length === 0)) {
+        const Shift = require('../models/Shift');
+        const parsedStart = dateHelpers.parseFlexibleDate(startDate);
+        const parsedEnd = dateHelpers.parseFlexibleDate(endDate);
+        const start = parsedStart ? dateHelpers.startOfDay(parsedStart) : new Date(startDate);
+        const end = parsedEnd ? dateHelpers.endOfDay(parsedEnd) : new Date(endDate);
+
+        const shifts = await Shift.find({
+          organizationId: client.organizationId,
+          clientId: client._id,
+          startTime: { $gte: start, $lte: end },
+          isActive: { $ne: false }
+        });
+
+        if (shifts.length === 0) {
+          throw new Error('No active assignment or shifts found for the specified user and client');
+        }
+      }
 
       // Generate line items based on assignment schedule and worked time
       const lineItems = await this.extractLineItemsFromAssignment(
@@ -445,7 +461,7 @@ class InvoiceGenerationService {
         lineItems: validLineItems,
         validation,
         metadata: {
-          assignmentId: assignment._id,
+          assignmentId: assignment ? assignment._id : null,
           clientId: client._id,
           organizationId: client.organizationId,
           generatedAt: new Date(),
@@ -534,7 +550,7 @@ class InvoiceGenerationService {
     }
 
     // Fall back to the assigned schedule only for shifts that were not clocked.
-    if (assignment.schedule && Array.isArray(assignment.schedule)) {
+    if (assignment && assignment.schedule && Array.isArray(assignment.schedule)) {
       const isClocked = (scheduleItem) => {
         const scheduleDate = dateHelpers.normalizeToIsoDate(scheduleItem.date);
         if (!scheduleDate) return false;
@@ -604,13 +620,13 @@ class InvoiceGenerationService {
   async createLineItemFromSchedule(scheduleItem, assignment, client) {
     try {
       // Get NDIS item information
-      const ndisItem = scheduleItem.ndisItem || assignment.ndisItem;
+      const ndisItem = scheduleItem.ndisItem || (assignment && assignment.ndisItem);
       
       if (!ndisItem || !ndisItem.itemNumber) {
         logger.warn('No NDIS item found for schedule', {
           scheduleDate: scheduleItem.date,
-          userEmail: assignment.userEmail,
-          clientEmail: assignment.clientEmail
+          userEmail: assignment ? assignment.userEmail : null,
+          clientEmail: assignment ? assignment.clientEmail : (client ? client.clientEmail : null)
         });
         return null;
       }
@@ -635,7 +651,7 @@ class InvoiceGenerationService {
       const serviceLocationPostcode = (
         scheduleItem.serviceLocationPostcode ||
         scheduleItem.postcode ||
-        assignment.serviceLocationPostcode ||
+        (assignment && assignment.serviceLocationPostcode) ||
         client.clientZip ||
         null
       );
@@ -662,7 +678,8 @@ class InvoiceGenerationService {
       }
 
       let quantity, unitPrice;
-      if (ndisItem.unit && ndisItem.unit.toUpperCase() === 'H') {
+      const unit = (ndisItem.unit || 'H').toUpperCase();
+      if (unit === 'H') {
         // Hourly service
         quantity = hoursWorked;
         unitPrice = pricing.price;
@@ -692,7 +709,7 @@ class InvoiceGenerationService {
           source: 'clientAssignment',
           organizationId: client.organizationId,
           clientId: client._id,
-          assignmentId: assignment._id,
+          assignmentId: assignment ? assignment._id : null,
           providerType: providerTypeUsed,
           serviceLocationPostcode: serviceLocationPostcode,
           pricingStatus: 'missing',
@@ -766,7 +783,7 @@ class InvoiceGenerationService {
         source: 'clientAssignment',
         organizationId: client.organizationId,
         clientId: client._id,
-        assignmentId: assignment._id,
+        assignmentId: assignment ? assignment._id : null,
         providerType: providerTypeUsed,
         serviceLocationPostcode: serviceLocationPostcode,
         region: pricing.region ?? null,
@@ -815,7 +832,7 @@ class InvoiceGenerationService {
   async createLineItemFromWorkedTime(workEntry, assignment, client) {
     try {
       // Use assigned NDIS item or default
-      const ndisItemNumber = assignment.assignedNdisItemNumber || '01_001_0107_1_1'; // Default support item
+      const ndisItemNumber = (assignment && assignment.assignedNdisItemNumber) || (workEntry.ndisItem && workEntry.ndisItem.itemNumber) || (workEntry.ndisItemNumber) || '01_001_0107_1_1';
       
       // Get NDIS item details
       const ndisItem = await this.getNdisItemDetails(ndisItemNumber);
@@ -838,7 +855,7 @@ class InvoiceGenerationService {
       const serviceLocationPostcode = (
         workEntry.serviceLocationPostcode ||
         workEntry.postcode ||
-        assignment.serviceLocationPostcode ||
+        (assignment && assignment.serviceLocationPostcode) ||
         client.clientZip ||
         null
       );
@@ -863,7 +880,7 @@ class InvoiceGenerationService {
     });
         // Return a line item with zero pricing for manual review
         return {
-          date: workEntry.date,
+          date: workEntry.date || workEntry.shiftDate || workEntry.workDate,
           description: `${ndisItemNumber} - ${ndisItem.itemName}`,
           quantity: parseFloat(hoursWorked.toFixed(2)),
           unitPrice: 0,
@@ -875,7 +892,7 @@ class InvoiceGenerationService {
           source: 'workedTime',
           organizationId: client.organizationId,
           clientId: client._id,
-          assignmentId: assignment._id,
+          assignmentId: assignment ? assignment._id : null,
           pricingStatus: 'invalid',
           promptRequired: true,
           providerType: providerTypeUsed,
@@ -890,7 +907,8 @@ class InvoiceGenerationService {
       }
 
       let quantity, unitPrice;
-      if (ndisItem.unit && ndisItem.unit.toUpperCase() === 'H') {
+      const unit = (ndisItem.unit || 'H').toUpperCase();
+      if (unit === 'H') {
         quantity = hoursWorked;
         unitPrice = pricing.price;
       } else {
@@ -902,7 +920,7 @@ class InvoiceGenerationService {
       if (pricing.source === 'missing') {
         const safeQuantity = isNaN(quantity) ? 0 : quantity;
         return {
-          date: workEntry.date,
+          date: workEntry.date || workEntry.shiftDate || workEntry.workDate,
           description: `${ndisItemNumber} - ${ndisItem.itemName}`,
           quantity: parseFloat(safeQuantity.toFixed(2)),
           unitPrice: 0,
@@ -914,7 +932,7 @@ class InvoiceGenerationService {
           source: 'workedTime',
           organizationId: client.organizationId,
           clientId: client._id,
-          assignmentId: assignment._id,
+          assignmentId: assignment ? assignment._id : null,
           pricingStatus: 'missing',
           promptRequired: true,
           providerType: providerTypeUsed,
@@ -943,7 +961,7 @@ class InvoiceGenerationService {
       const safeTotalPrice = safeQuantity * safeUnitPrice;
 
       return {
-        date: workEntry.date,
+        date: workEntry.date || workEntry.shiftDate || workEntry.workDate,
         description: `${ndisItemNumber} - ${ndisItem.itemName}`,
         quantity: parseFloat(safeQuantity.toFixed(2)),
         unitPrice: parseFloat(safeUnitPrice.toFixed(2)),
@@ -955,7 +973,7 @@ class InvoiceGenerationService {
         source: 'workedTime',
         organizationId: client.organizationId,
         clientId: client._id,
-        assignmentId: assignment._id,
+        assignmentId: assignment ? assignment._id : null,
         providerType: providerTypeUsed,
         serviceLocationPostcode: serviceLocationPostcode,
         region: pricing.region ?? null,
