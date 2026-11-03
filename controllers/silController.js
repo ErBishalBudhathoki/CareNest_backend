@@ -478,6 +478,9 @@ class SILController {
   generateRosterOfCareInvoice = catchAsync(async (req, res) => {
     const org = this._requireOrg(req, res);
     if (!org) return;
+    // Milestone 7.1: Support client-supplied idempotency key via header or body
+    const idempotencyKey = req.headers['x-idempotency-key'] || req.body.idempotencyKey || null;
+
     const result = await silBillingService.generateInvoiceFromRosterOfCare(
       org,
       req.params.id,
@@ -486,6 +489,7 @@ class SILController {
         to: req.body.to,
         dueDate: req.body.dueDate,
         mode: req.body.mode,
+        idempotencyKey,
       },
       this._actor(req),
     );
@@ -513,6 +517,22 @@ class SILController {
         data: { invoiceId: result.existingInvoiceId },
       });
     }
+    // Milestone 7.1: Return 200 on idempotent replay with isIdempotentReplay flag
+    if (result.isIdempotentReplay) {
+      return res.status(200).json({
+        success: true,
+        isIdempotentReplay: true,
+        message: 'Roster of care invoice retrieved (idempotent replay).',
+        data: {
+          invoiceId: result.invoice?._id,
+          invoiceNumber: result.invoice?.invoiceNumber,
+          billing: result.billing,
+          budgetWarning: result.invoice?.metadata?.planBudgetValidation?.budgetWarning || null,
+          budgetDrawdown: result.invoice?.metadata?.planBudgetValidation?.budgetDrawdown || null,
+        },
+      });
+    }
+
     res.status(201).json({
       success: true,
       message: 'Roster of care invoiced.',
@@ -524,6 +544,29 @@ class SILController {
         budgetWarning: result.invoice?.metadata?.planBudgetValidation?.budgetWarning || null,
         budgetDrawdown: result.invoice?.metadata?.planBudgetValidation?.budgetDrawdown || null,
       },
+    });
+  });
+
+  /**
+   * Milestone 7.3: Dispatch a SIL invoice PDF to the plan manager or participant.
+   * Updates workflow status to 'sent' and logs dispatch metadata.
+   */
+  dispatchInvoice = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const invoiceId = req.params.id;
+    const result = await silBillingService.dispatchInvoice(org, invoiceId, {
+      actor: this._actor(req),
+      dispatchMethod: req.body.dispatchMethod || 'email',
+      recipientEmail: req.body.recipientEmail,
+    });
+    if (result.notFound) {
+      return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Invoice not found.' });
+    }
+    res.json({
+      success: true,
+      message: result.message || 'Invoice dispatched successfully.',
+      data: result.data,
     });
   });
 

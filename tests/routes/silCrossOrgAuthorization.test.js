@@ -135,6 +135,8 @@ const silRoutes = [
   ['POST', `/api/sil/rosters-of-care/${RESOURCE_ID}/review`],
   ['POST', `/api/sil/rosters-of-care/${RESOURCE_ID}/materialize-shifts`],
   ['POST', `/api/sil/rosters-of-care/${RESOURCE_ID}/invoice`],
+  // Milestone 7.3: Plan Manager / Recipient automated dispatch
+  ['POST', `/api/sil/invoices/${RESOURCE_ID}/dispatch`],
 
   // Milestone 4.2: Service Agreements & Consent Gate
   ['GET', '/api/sil/service-agreements'],

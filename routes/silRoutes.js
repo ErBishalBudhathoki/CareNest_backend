@@ -138,6 +138,14 @@ router.post(
   handleValidationErrors,
   silController.generateRosterOfCareInvoice,
 );
+// Milestone 7.3: Plan Manager / Recipient automated invoice dispatch
+router.post(
+  '/invoices/:id/dispatch',
+  silWriteLimiter,
+  mongoId('id'),
+  handleValidationErrors,
+  silController.dispatchInvoice,
+);
 
 // ---- Service Agreements (Milestone 4.2 Consent Gate) ----
 router.get('/service-agreements', silReadLimiter, silController.listServiceAgreements);

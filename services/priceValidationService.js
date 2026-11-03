@@ -95,10 +95,25 @@ class PriceValidationService {
         };
       }
 
-      // Find support item
-      const supportItem = await SupportItem.findOne({
-        supportItemNumber: supportItemNumber
-      });
+      // Milestone 7.2: Effective-dated SupportItem lookup
+      // Query the catalogue version active on serviceDate (startDate <= serviceDate <= endDate).
+      // If outside exact range or serviceDate is unparseable, gracefully fallback to the latest version by startDate descending.
+      const svcDate = serviceDate instanceof Date ? serviceDate : (serviceDate ? new Date(serviceDate) : new Date());
+      let supportItem = null;
+      if (!Number.isNaN(svcDate.getTime())) {
+        const query = SupportItem.findOne({
+          supportItemNumber: supportItemNumber,
+          startDate: { $lte: svcDate },
+          $or: [{ endDate: null }, { endDate: { $gte: svcDate } }],
+        });
+        supportItem = query && typeof query.sort === 'function' ? await query.sort({ startDate: -1 }) : await query;
+      }
+      if (!supportItem) {
+        const fallbackQuery = SupportItem.findOne({
+          supportItemNumber: supportItemNumber
+        });
+        supportItem = fallbackQuery && typeof fallbackQuery.sort === 'function' ? await fallbackQuery.sort({ startDate: -1 }) : await fallbackQuery;
+      }
 
       if (!supportItem) {
         return {
@@ -343,9 +358,12 @@ class PriceValidationService {
         reason: 'price_validation_caps',
       });
 
-      const supportItem = await SupportItem.findOne(
-        { supportItemNumber }
-      ).select('priceCaps supportItemName supportType quoteRequired');
+      // Milestone 7.2: Resolve the latest catalogue pricing caps version with defensive mock chaining
+      const query = SupportItem.findOne({ supportItemNumber });
+      const sorted = query && typeof query.sort === 'function' ? query.sort({ startDate: -1 }) : query;
+      const supportItem = sorted && typeof sorted.select === 'function'
+        ? await sorted.select('priceCaps supportItemName supportType quoteRequired')
+        : await sorted;
       
       return supportItem;
     } catch (error) {
@@ -369,9 +387,12 @@ class PriceValidationService {
         reason: 'price_validation_quote_required',
       });
 
-      const supportItem = await SupportItem.findOne(
-        { supportItemNumber }
-      ).select('quoteRequired supportType');
+      // Milestone 7.2: Resolve quote requirement using the latest catalogue version with defensive mock chaining
+      const query = SupportItem.findOne({ supportItemNumber });
+      const sorted = query && typeof query.sort === 'function' ? query.sort({ startDate: -1 }) : query;
+      const supportItem = sorted && typeof sorted.select === 'function'
+        ? await sorted.select('quoteRequired supportType')
+        : await sorted;
       
       if (!supportItem) return false;
       

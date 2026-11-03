@@ -14,6 +14,9 @@ class OfflineSyncController {
   async queueOfflineData(req, res) {
     try {
       const data = req.body;
+      // Milestone 7.1: Resolve tenant organization context for persistent offline queue
+      const organizationId = req.headers['x-organization-id'] || req.user?.organizationId || req.organizationId || data.organizationId || 'default_org';
+      data.organizationId = organizationId;
       
       if (!data.userId || !data.dataType || !data.action || !data.payload) {
         return res.status(400).json({

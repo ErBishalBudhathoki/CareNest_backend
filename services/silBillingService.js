@@ -232,6 +232,22 @@ class SILBillingService {
    *   { clientNotFound } | { conflict, existingInvoiceId } | { invoice, billing }
    */
   async generateInvoiceFromRosterOfCare(organizationId, rosterOfCareId, opts = {}, actor = '') {
+    // Milestone 7.1: Explicit idempotency token check for network retries and offline replay
+    if (opts.idempotencyKey) {
+      const existingByIdempotency = await Invoice.findOne({
+        organizationId,
+        'metadata.idempotencyKey': opts.idempotencyKey,
+        'deletion.isDeleted': { $ne: true },
+      });
+      if (existingByIdempotency) {
+        return {
+          invoice: existingByIdempotency,
+          billing: existingByIdempotency.billing || null,
+          isIdempotentReplay: true,
+        };
+      }
+    }
+
     const from = parseDateInput(opts.from);
     const to = parseDateInput(opts.to);
 
@@ -264,16 +280,37 @@ class SILBillingService {
     const periodEndExclusive = new Date(periodTo.getTime() + MS_PER_DAY);
 
     // Idempotency: never bill the same RoC for the same period twice.
-    const existing = await Invoice.findOne({
+    let existing = null;
+    const existingQuery = Invoice.findOne({
       organizationId,
       'metadata.silRosterOfCareId': roc._id,
       'metadata.silPeriod.from': periodFrom,
       'metadata.silPeriod.to': periodTo,
       'deletion.isDeleted': { $ne: true },
-    })
-      .select('_id invoiceNumber')
-      .lean();
+    });
+    if (existingQuery && typeof existingQuery.select === 'function') {
+      const sel = existingQuery.select('_id invoiceNumber');
+      existing = sel && typeof sel.lean === 'function' ? await sel.lean() : await sel;
+    } else {
+      const resolved = await existingQuery;
+      if (resolved && typeof resolved.select === 'function') {
+        const sel = resolved.select('_id invoiceNumber');
+        existing = sel && typeof sel.lean === 'function' ? await sel.lean() : await sel;
+      } else if (resolved && typeof resolved.lean === 'function') {
+        existing = await resolved.lean();
+      } else {
+        existing = resolved;
+      }
+    }
+
     if (existing) {
+      if (opts.idempotencyKey) {
+        return {
+          invoice: existing,
+          billing: existing.billing || null,
+          isIdempotentReplay: true,
+        };
+      }
       return { conflict: true, existingInvoiceId: existing._id?.toString?.() || null };
     }
 
@@ -739,6 +776,14 @@ class SILBillingService {
       clientEmail,
     });
 
+    // Milestone 7.3: Resolve Plan Manager / Participant recipient details for automated dispatch
+    const billingRoutingService = require('./billingRoutingService');
+    const recipientDetails = await billingRoutingService.resolveBillingRecipient(client);
+    const billingBlock = {
+      ...billingRoutingService.buildInvoiceBilling(client),
+      recipientDetails,
+    };
+
     const invoiceData = {
       organizationId,
       invoiceNumber,
@@ -746,6 +791,8 @@ class SILBillingService {
       clientEmail,
       clientName,
       lineItems,
+      // Milestone 7.3: Pre-stamped funding route and recipient contact details
+      billing: billingBlock,
       // NDIS supports are GST-free; no tax is added here.
       financialSummary: {
         subtotal,
@@ -766,6 +813,8 @@ class SILBillingService {
         ...(roc.propertyId ? { silPropertyId: roc.propertyId } : {}),
         silPeriod: { from: periodFrom, to: periodTo },
         silBillingMode: mode,
+        // Milestone 7.1: Explicit idempotency token on invoice metadata
+        ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
         // Milestone 4.1: Regional MMM metadata on invoice
         ...(servicePostcode ? { serviceLocationPostcode: servicePostcode } : {}),
         ...(mmmRating !== null ? { mmmRating } : {}),
@@ -809,7 +858,35 @@ class SILBillingService {
       deletion: { isDeleted: false, canRestore: true },
     };
 
-    const result = await invoiceManagementService.createInvoice(invoiceData);
+    let result;
+    try {
+      result = await invoiceManagementService.createInvoice(invoiceData);
+    } catch (createErr) {
+      if (createErr.code === 11000) {
+        // Milestone 7.1: Concurrent race recovery on partial unique compound index sil_roc_period_unique or idempotencyKey
+        const winningInvoice = await Invoice.findOne({
+          organizationId,
+          $or: [
+            ...(opts.idempotencyKey ? [{ 'metadata.idempotencyKey': opts.idempotencyKey }] : []),
+            {
+              'metadata.silRosterOfCareId': roc._id,
+              'metadata.silPeriod.from': periodFrom,
+              'metadata.silPeriod.to': periodTo,
+            },
+          ],
+          'deletion.isDeleted': { $ne: true },
+        });
+        if (winningInvoice) {
+          return {
+            invoice: winningInvoice,
+            billing: winningInvoice.billing || null,
+            isIdempotentReplay: true,
+          };
+        }
+      }
+      throw createErr;
+    }
+
     if (!result.success) {
       const err = new Error(result.error || 'Failed to create SIL invoice');
       err.statusCode = result.statusCode || 500;
@@ -829,6 +906,117 @@ class SILBillingService {
     return {
       invoice: result.data,
       billing: result.data.billing || null,
+    };
+  }
+
+  /**
+   * Milestone 7.3: Automated invoice dispatch workflow.
+   * Dispatches the invoice to the participant or primary plan manager stakeholder,
+   * stamps dispatch metadata, updates workflow status to 'sent', and sends email if configured.
+   *
+   * @param {string} organizationId
+   * @param {string} invoiceId
+   * @param {Object} opts - { actor, dispatchMethod, recipientEmail }
+   * @returns {Promise<Object>}
+   */
+  async dispatchInvoice(organizationId, invoiceId, opts = {}) {
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      organizationId,
+      'deletion.isDeleted': { $ne: true },
+    });
+    if (!invoice) return { notFound: true };
+
+    const client = await Client.findOne({ _id: invoice.clientId, organizationId }).lean();
+    const billingRoutingService = require('./billingRoutingService');
+    let recipient = invoice.billing?.recipientDetails;
+    if (!recipient || !recipient.email) {
+      recipient = await billingRoutingService.resolveBillingRecipient(client);
+    }
+
+    const targetEmail = opts.recipientEmail || recipient?.email || invoice.clientEmail || '';
+    const dispatchMethod = opts.dispatchMethod || 'email';
+
+    // Attempt sending email notification
+    let emailSent = false;
+    let emailError = null;
+    if (targetEmail && dispatchMethod === 'email') {
+      try {
+        const emailService = require('./emailService');
+        const subject = `Invoice ${invoice.invoiceNumber || invoice._id} for ${invoice.clientName || 'NDIS Participant'}`;
+        const html = `
+          <p>Dear ${recipient?.name || invoice.clientName || 'Recipient'},</p>
+          <p>Please find attached the invoice <strong>${invoice.invoiceNumber}</strong> for the billing period 
+          ${invoice.metadata?.silPeriod?.from ? new Date(invoice.metadata.silPeriod.from).toLocaleDateString() : ''} to 
+          ${invoice.metadata?.silPeriod?.to ? new Date(invoice.metadata.silPeriod.to).toLocaleDateString() : ''}.</p>
+          <p><strong>Total Amount:</strong> $${invoice.financialSummary?.totalAmount?.toFixed(2) || '0.00'}</p>
+          <p>Thank you.</p>
+        `;
+        if (emailService && typeof emailService.sendEmail === 'function') {
+          await emailService.sendEmail(targetEmail, subject, html);
+          emailSent = true;
+        }
+      } catch (mailErr) {
+        logger.warn('Email dispatch failed, recording dispatch status nonetheless', { error: mailErr.message });
+        emailError = mailErr.message;
+      }
+    }
+
+    // Update workflow status to 'sent'
+    invoice.workflow = invoice.workflow || {};
+    invoice.workflow.status = 'sent';
+    invoice.workflow.currentStep = 'sent';
+    invoice.workflow.nextAction = 'paid';
+
+    invoice.billing = invoice.billing || {};
+    invoice.billing.recipientDetails = {
+      type: recipient?.type || 'participant',
+      name: recipient?.name || invoice.clientName || '',
+      email: targetEmail || '',
+      company: recipient?.company || '',
+      phone: recipient?.phone || '',
+      stakeholderId: recipient?.stakeholderId || null,
+      dispatchedAt: new Date(),
+      dispatchedBy: opts.actor || 'system',
+      dispatchMethod,
+    };
+
+    invoice.auditTrail = invoice.auditTrail || { changeHistory: [] };
+    invoice.auditTrail.changeHistory.push({
+      timestamp: new Date(),
+      userId: opts.actor || 'system',
+      action: 'dispatched',
+      changes: { recipient: targetEmail, method: dispatchMethod },
+      reason: `Invoice dispatched to ${recipient?.type || 'recipient'} (${targetEmail})`,
+    });
+
+    if (typeof invoice.save === 'function') {
+      await invoice.save();
+    } else if (typeof Invoice.updateOne === 'function') {
+      await Invoice.updateOne({ _id: invoice._id }, invoice);
+    }
+
+    logger.business('SIL Invoice Dispatched', {
+      event: 'sil_invoice_dispatched',
+      organizationId,
+      invoiceId: invoice._id.toString(),
+      recipientEmail: targetEmail,
+      recipientType: recipient?.type,
+    });
+
+    return {
+      success: true,
+      message: `Invoice dispatched to ${targetEmail || 'recipient'}.`,
+      data: {
+        invoiceId: invoice._id,
+        invoiceNumber: invoice.invoiceNumber,
+        status: invoice.workflow.status,
+        recipientEmail: targetEmail,
+        recipientType: recipient?.type,
+        dispatchedAt: invoice.billing.recipientDetails.dispatchedAt,
+        emailSent,
+        emailError,
+      },
     };
   }
 }

@@ -3,6 +3,13 @@
  * Manages offline data synchronization and conflict resolution
  */
 
+// Milestone 7.1: Persistent queue and state models
+const OfflineSyncQueue = require('../models/OfflineSyncQueue');
+const WorkedTime = require('../models/WorkedTime');
+const Shift = require('../models/Shift');
+const Appointment = require('../models/Appointment');
+const logger = require('../config/logger');
+
 class OfflineSyncService {
   /**
    * Queue offline data for later sync
@@ -11,7 +18,7 @@ class OfflineSyncService {
    */
   async queueOfflineData(data) {
     try {
-      const { userId, dataType, action, payload, timestamp } = data;
+      const { userId, dataType, action, payload, timestamp, organizationId, idempotencyKey } = data;
       
       if (!userId || !dataType || !action || !payload) {
         return {
@@ -20,26 +27,55 @@ class OfflineSyncService {
         };
       }
       
-      // In production, store in database queue table
-      // For now, return mock success
-      
-      const queueItem = {
-        queueId: `QUEUE-${Date.now()}`,
-        userId,
-        dataType,
-        action,
-        payload,
-        timestamp: timestamp || new Date().toISOString(),
-        status: 'queued',
-        retryCount: 0
-      };
+      const orgId = organizationId || 'default_org';
+      const qId = data.queueId || `QUEUE-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // Milestone 7.1: Idempotency token check on queue item
+      if (idempotencyKey) {
+        const existing = await OfflineSyncQueue.findOne({
+          organizationId: orgId,
+          idempotencyKey,
+        });
+        if (existing) {
+          return {
+            success: true,
+            data: existing,
+            isIdempotentReplay: true,
+          };
+        }
+      }
+
+      // Milestone 7.1: Persist in MongoDB OfflineSyncQueue collection
+      let queueItem;
+      try {
+        queueItem = await OfflineSyncQueue.create({
+          organizationId: orgId,
+          userId,
+          queueId: qId,
+          idempotencyKey: idempotencyKey || '',
+          dataType,
+          action,
+          payload,
+          status: 'queued',
+          retryCount: 0,
+          deviceTimestamp: timestamp ? new Date(timestamp) : new Date(),
+        });
+      } catch (err) {
+        if (err.code === 11000 && idempotencyKey) {
+          const existing = await OfflineSyncQueue.findOne({ organizationId: orgId, idempotencyKey });
+          if (existing) {
+            return { success: true, data: existing, isIdempotentReplay: true };
+          }
+        }
+        throw err;
+      }
       
       return {
         success: true,
         data: queueItem
       };
     } catch (error) {
-      console.error('Error queueing offline data:', error);
+      logger.error('Error queueing offline data:', { error: error.message });
       return {
         success: false,
         message: 'Failed to queue data',
@@ -96,6 +132,12 @@ class OfflineSyncService {
               status: 'conflict',
               conflictData: conflict.data
             });
+            if (item.queueId) {
+              await OfflineSyncQueue.updateOne(
+                { queueId: item.queueId },
+                { $set: { status: 'conflict' } }
+              );
+            }
             continue;
           }
           
@@ -109,6 +151,12 @@ class OfflineSyncService {
               status: 'synced',
               syncedAt: new Date().toISOString()
             });
+            if (item.queueId) {
+              await OfflineSyncQueue.updateOne(
+                { queueId: item.queueId },
+                { $set: { status: 'synced', syncedAt: new Date() } }
+              );
+            }
           } else {
             results.failed++;
             results.items.push({
@@ -116,6 +164,12 @@ class OfflineSyncService {
               status: 'failed',
               reason: syncResult.message
             });
+            if (item.queueId) {
+              await OfflineSyncQueue.updateOne(
+                { queueId: item.queueId },
+                { $set: { status: 'failed', error: syncResult.message }, $inc: { retryCount: 1 } }
+              );
+            }
           }
         } catch (itemError) {
           results.failed++;
@@ -217,30 +271,43 @@ class OfflineSyncService {
     try {
       const { dataType, action, payload } = item;
       
-      // In production, check database for conflicts
-      // For now, simulate conflict detection
-      
-      // Mock: 5% chance of conflict
-      const hasConflict = Math.random() < 0.05;
-      
-      if (hasConflict) {
-        return {
-          hasConflict: true,
-          data: {
-            conflictType: 'version_mismatch',
-            localVersion: payload.version || 1,
-            serverVersion: (payload.version || 1) + 1,
-            conflictFields: ['updatedAt'],
-            resolution: 'manual'
+      // Milestone 7.1: Deterministic conflict detection against persistent state
+      // If updating or deleting an existing record, verify that server version is not newer
+      if ((action === 'update' || action === 'delete') && payload && (payload.id || payload._id)) {
+        const recordId = payload.id || payload._id;
+        let existingDoc = null;
+        if (dataType === 'worked_time' || dataType === 'timesheet') {
+          existingDoc = await WorkedTime.findById(recordId).lean();
+        } else if (dataType === 'shift') {
+          existingDoc = await Shift.findById(recordId).lean();
+        } else if (dataType === 'appointment') {
+          existingDoc = await Appointment.findById(recordId).lean();
+        }
+
+        if (existingDoc && payload.updatedAt && existingDoc.updatedAt) {
+          const clientTime = new Date(payload.updatedAt).getTime();
+          const serverTime = new Date(existingDoc.updatedAt).getTime();
+          if (serverTime > clientTime) {
+            return {
+              hasConflict: true,
+              data: {
+                conflictType: 'version_mismatch',
+                localVersion: payload.version || payload.updatedAt,
+                serverVersion: existingDoc.version || existingDoc.updatedAt,
+                conflictFields: ['updatedAt'],
+                resolution: 'manual',
+                serverDoc: existingDoc,
+              }
+            };
           }
-        };
+        }
       }
       
       return {
         hasConflict: false
       };
     } catch (error) {
-      console.error('Error detecting conflict:', error);
+      logger.error('Error detecting conflict:', { error: error.message });
       return {
         hasConflict: false
       };

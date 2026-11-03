@@ -69,6 +69,13 @@ const claimBatchSchema = new mongoose.Schema(
     },
     reconciledAt: { type: Date, default: null },
     createdBy: { type: String, default: '' },
+    // Milestone 7.1: Explicit idempotency token to prevent duplicate BPR batch generation on retry
+    idempotencyKey: {
+      type: String,
+      default: null,
+      sparse: true,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -100,5 +107,10 @@ const claimBatchSchema = new mongoose.Schema(
 );
 
 claimBatchSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
+// Milestone 7.1: Organization-scoped idempotency key uniqueness for claim batches
+claimBatchSchema.index(
+  { organizationId: 1, idempotencyKey: 1 },
+  { unique: true, sparse: true, name: 'org_claim_batch_idempotency_unique' }
+);
 
 module.exports = mongoose.model('ClaimBatch', claimBatchSchema);

@@ -73,5 +73,7 @@ const claimLineSchema = new mongoose.Schema(
 
 claimLineSchema.index({ organizationId: 1, status: 1 });
 claimLineSchema.index({ batchId: 1, status: 1 });
+// Milestone 7.1: Deduping index to quickly identify lines already batched/claimed from an invoice
+claimLineSchema.index({ organizationId: 1, invoiceId: 1, supportNumber: 1, serviceDate: 1 });
 
 module.exports = mongoose.model('ClaimLine', claimLineSchema);

@@ -103,6 +103,13 @@ const invoiceSchema = new mongoose.Schema({
     silPeriod: {
       from: Date,
       to: Date
+    },
+    // Milestone 7.1: Explicit idempotency token for network retries and offline sync replay
+    idempotencyKey: {
+      type: String,
+      default: null,
+      index: true,
+      sparse: true,
     }
   },
 
@@ -125,6 +132,26 @@ const invoiceSchema = new mongoose.Schema({
     planManagerStakeholderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Stakeholder'
+    },
+    // Milestone 7.3: Plan Manager / Recipient contact details and dispatch tracking
+    recipientDetails: {
+      type: {
+        type: String,
+        enum: ['participant', 'plan_manager', 'ndia', ''],
+        default: '',
+      },
+      name: { type: String, default: '' },
+      email: { type: String, default: '' },
+      company: { type: String, default: '' },
+      phone: { type: String, default: '' },
+      stakeholderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Stakeholder',
+        default: null,
+      },
+      dispatchedAt: { type: Date, default: null },
+      dispatchedBy: { type: String, default: '' },
+      dispatchMethod: { type: String, default: '' },
     }
   },
 
@@ -274,6 +301,30 @@ invoiceSchema.index({ createdAt: -1 });
 invoiceSchema.index({ organizationId: 1, createdAt: -1 });
 // Per-tenant top-clients grouping (clientEmail) inside a date window.
 invoiceSchema.index({ organizationId: 1, clientEmail: 1, createdAt: -1 });
+
+// Milestone 7.1: Enforce idempotency key uniqueness per organization (sparse for legacy documents)
+invoiceSchema.index(
+  { organizationId: 1, 'metadata.idempotencyKey': 1 },
+  { unique: true, sparse: true, name: 'org_idempotency_key_unique' }
+);
+
+// Milestone 7.1: Enforce unique RoC billing period per tenant (prevents concurrent race duplicates)
+invoiceSchema.index(
+  {
+    organizationId: 1,
+    'metadata.silRosterOfCareId': 1,
+    'metadata.silPeriod.from': 1,
+    'metadata.silPeriod.to': 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      'deletion.isDeleted': { $ne: true },
+      'metadata.silRosterOfCareId': { $exists: true },
+    },
+    name: 'sil_roc_period_unique',
+  }
+);
 
 // Phase 6: stamp the funding/billing route on new invoices so the billing
 // artefact (NDIA claim CSV vs plan-manager/participant PDF) is recorded at

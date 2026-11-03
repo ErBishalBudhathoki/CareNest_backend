@@ -122,6 +122,24 @@ class NDISClaimService {
       throw err;
     }
 
+    // Milestone 7.1: Idempotency token check for BPR batch generation
+    if (opts.idempotencyKey) {
+      const existingBatch = await ClaimBatch.findOne({
+        organizationId,
+        idempotencyKey: opts.idempotencyKey,
+      });
+      if (existingBatch) {
+        const existingLines = await ClaimLine.find({ batchId: existingBatch._id }).lean();
+        return {
+          batch: existingBatch,
+          csv: null,
+          validation: { errors: [], warnings: [] },
+          lineCount: existingLines.length,
+          isIdempotentReplay: true,
+        };
+      }
+    }
+
     const org = await Organization.findOne({
       $or: [{ _id: this._objectIdOrNull(organizationId) }, { organizationCode: organizationId }],
     });
@@ -143,6 +161,28 @@ class NDISClaimService {
         organizationId,
         clientId: { $in: clientIds.map((id) => id.toString()) },
       }).lean();
+
+      // Milestone 7.1: Duplicate Claim Prevention (Deduping)
+      // Query existing active claim lines (status != 'rejected') for this organization and invoices
+      // to ensure no line item is double-batched into myplace BPR exports.
+      const invoiceIds = invoices.map((inv) => inv._id);
+      const claimQuery = ClaimLine.find({
+        organizationId,
+        invoiceId: { $in: invoiceIds },
+        status: { $in: ['pending', 'accepted', 'reconciled'] },
+      });
+      const selectedClaim = claimQuery && typeof claimQuery.select === 'function'
+        ? claimQuery.select('invoiceId supportNumber serviceDate')
+        : claimQuery;
+      const activeClaimedLines = (selectedClaim && typeof selectedClaim.lean === 'function'
+        ? await selectedClaim.lean()
+        : await selectedClaim) || [];
+
+      const claimedSet = new Set(
+        activeClaimedLines.map(
+          (cl) => `${cl.invoiceId}_${cl.supportNumber}_${new Date(cl.serviceDate).toISOString().slice(0, 10)}`
+        )
+      );
 
       for (const invoice of invoices) {
         // Phase 6 alignment: only claim invoices that are routed to the claim
@@ -173,6 +213,12 @@ class NDISClaimService {
           const serviceDate = item.date || invoice.metadata?.silPeriod?.from || invoice.createdAt || from;
           const d = new Date(serviceDate);
           if (d < from || d > to) continue;
+
+          // Milestone 7.1: Duplicate Claim Prevention - skip if this line item has already been batched in an active claim line
+          const lineDedupKey = `${invoice._id}_${item.supportItemNumber || ''}_${d.toISOString().slice(0, 10)}`;
+          if (claimedSet.has(lineDedupKey)) {
+            continue;
+          }
 
           const serviceEndDate = item.endDate || invoice.metadata?.silPeriod?.to || null;
           const endD = serviceEndDate ? new Date(serviceEndDate) : null;
@@ -286,18 +332,42 @@ class NDISClaimService {
 
     const totalAmount = round2(lines.reduce((sum, l) => sum + l.requestedAmount, 0));
 
-    const batch = await ClaimBatch.create({
-      organizationId,
-      period: { from, to },
-      status: 'generated',
-      fundingType: 'ndia_managed',
-      registrationNumber,
-      abn,
-      totals: { lines: lines.length, amount: totalAmount },
-      generatedBy: actor,
-      generatedAt: new Date(),
-      createdBy: actor,
-    });
+    let batch;
+    try {
+      batch = await ClaimBatch.create({
+        organizationId,
+        period: { from, to },
+        status: 'generated',
+        fundingType: 'ndia_managed',
+        registrationNumber,
+        abn,
+        totals: { lines: lines.length, amount: totalAmount },
+        generatedBy: actor,
+        generatedAt: new Date(),
+        createdBy: actor,
+        // Milestone 7.1: Stamp idempotency key on batch
+        idempotencyKey: opts.idempotencyKey || null,
+      });
+    } catch (createErr) {
+      if (createErr.code === 11000 && opts.idempotencyKey) {
+        // Race recovery: return winning batch
+        const winningBatch = await ClaimBatch.findOne({
+          organizationId,
+          idempotencyKey: opts.idempotencyKey,
+        });
+        if (winningBatch) {
+          const winningLines = await ClaimLine.find({ batchId: winningBatch._id }).lean();
+          return {
+            batch: winningBatch,
+            csv: null,
+            validation: { errors: [], warnings: [] },
+            lineCount: winningLines.length,
+            isIdempotentReplay: true,
+          };
+        }
+      }
+      throw createErr;
+    }
 
     if (lines.length > 0) {
       await ClaimLine.insertMany(

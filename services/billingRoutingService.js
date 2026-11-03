@@ -59,6 +59,76 @@ class BillingRoutingService {
   }
 
   /**
+   * Milestone 7.3: Resolve the recipient details for automated invoice dispatch.
+   * For plan_managed participants, queries the linked Stakeholder record with role 'plan_manager'.
+   * For self_managed / participant-billed, resolves participant contact info.
+   * For ndia_managed, sets NDIA routing recipient.
+   *
+   * @param {Object} client - Participant record { _id, organizationId, fundingType, clientFirstName, clientLastName, clientEmail, stakeholders? }
+   * @returns {Promise<Object>} Recipient details { type, name, email, company?, phone?, stakeholderId? }
+   */
+  async resolveBillingRecipient(client = {}) {
+    if (!client) {
+      return { type: '', name: '', email: '' };
+    }
+
+    const Stakeholder = require('../models/Stakeholder');
+    const fundingType = client.fundingType || 'plan_managed';
+
+    if (fundingType === 'plan_managed') {
+      const pmId = this._planManagerId(client);
+      if (pmId) {
+        try {
+          const pm = await Stakeholder.findOne({
+            _id: pmId,
+            ...(client.organizationId ? { organizationId: client.organizationId } : {}),
+            isActive: { $ne: false },
+          }).lean();
+          if (pm) {
+            return {
+              type: 'plan_manager',
+              name: pm.name || '',
+              email: pm.email || '',
+              company: pm.company || '',
+              phone: pm.phone || '',
+              stakeholderId: pm._id,
+            };
+          }
+        } catch (err) {
+          // Non-fatal: fallback to participant details
+        }
+      }
+    } else if (fundingType === 'ndia_managed') {
+      return {
+        type: 'ndia',
+        name: 'National Disability Insurance Agency',
+        email: '',
+        company: 'NDIA',
+        phone: '1800 800 110',
+        ndisNumber: client.ndisNumber || '',
+      };
+    }
+
+    // Default to participant (self_managed, combination, or unlinked plan_managed)
+    const participantName =
+      [client.clientFirstName, client.clientLastName].filter(Boolean).join(' ').trim() ||
+      [client.firstName, client.lastName].filter(Boolean).join(' ').trim() ||
+      client.name ||
+      'Participant';
+    const participantEmail = client.clientEmail || client.email || '';
+    const participantPhone = client.clientPhone || client.phone || '';
+
+    return {
+      type: 'participant',
+      name: participantName,
+      email: participantEmail,
+      company: '',
+      phone: participantPhone,
+      clientId: client._id ? client._id.toString() : null,
+    };
+  }
+
+  /**
    * Resolve line-item level funding route for combination-funded participants (Milestone 3.4).
    *
    * Under NDIS combination funding rules:
