@@ -263,6 +263,114 @@ describe('AdvancedPayrollService legacy label + resolved-rate compatibility', ()
   });
 });
 
+describe('AdvancedPayrollService — SCHADS Clause 25.7 Sleepover Payroll Integration', () => {
+  const permEmployee = {
+    payRate: 27.55,
+    employmentType: 'Permanent',
+    award: { level: 2, stream: 'disability', employmentType: 'permanent_ft' },
+  };
+
+  test('pure 8h sleepover shift pays only flat sleepover allowance with $0 wage hours', async () => {
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'u_sleep',
+      period: '2026-07',
+      employee: permEmployee,
+      shifts: [
+        shift('2026-07-01T22:00:00+10:00', '2026-07-02T06:00:00+10:00', {
+          shiftType: 'sleepover',
+        }),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.allowances.sleepover).toBe(62.87);
+    expect(result.data.hoursBreakdown.sleepoverHours).toBe(8);
+    expect(result.data.hoursBreakdown.nightShiftHours).toBe(0);
+    expect(result.data.hoursBreakdown.baseHours).toBe(0);
+    // Base amount is 0; grossPay is strictly the sleepover allowance
+    expect(result.data.baseAmount).toBe(0);
+    expect(result.data.grossPay).toBe(62.87);
+  });
+
+  test('12h sleepover shift (20:00–08:00) pays active hours + sleepover allowance', async () => {
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'u_sleep_12h',
+      period: '2026-07',
+      employee: permEmployee,
+      shifts: [
+        shift('2026-07-01T20:00:00+10:00', '2026-07-02T08:00:00+10:00', {
+          shiftType: 'sleepover',
+        }),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.allowances.sleepover).toBe(62.87);
+    expect(result.data.hoursBreakdown.sleepoverHours).toBe(8);
+    expect(result.data.hoursBreakdown.afternoonShiftHours).toBe(2);
+    expect(result.data.hoursBreakdown.baseHours).toBe(2);
+    expect(result.data.hoursBreakdown.nightShiftHours).toBe(0);
+    // 2026-07-01 SCHADS Level 2 Disability base rate = $33.19
+    // Active wage: 2h afternoon (33.19 * 1.125 = 37.33875 * 2 = 74.68) + 2h base (33.19 * 2 = 66.38) = 141.06
+    // Gross: 141.06 + 62.87 sleepover allowance = 203.93
+    expect(result.data.grossPay).toBeCloseTo(203.93, 2);
+  });
+
+  test('sleepover with disturbance <= 60 min pays overtime + sleepover allowance', async () => {
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'u_sleep_dist',
+      period: '2026-07',
+      employee: permEmployee,
+      shifts: [
+        shift('2026-07-01T22:00:00+10:00', '2026-07-02T06:00:00+10:00', {
+          shiftType: 'sleepover',
+          disturbances: [
+            {
+              startTime: '2026-07-02T01:30:00+10:00',
+              endTime: '2026-07-02T02:00:00+10:00',
+              durationMinutes: 30,
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.allowances.sleepover).toBe(62.87);
+    expect(result.data.hoursBreakdown.overtimeFirst2h).toBe(1); // 1h min OT
+    expect(result.data.hoursBreakdown.nightShiftHours).toBe(0);
+    // 1h OT1 = 33.19 * 1.5 = 49.785 -> 49.79
+    // Gross: 49.79 + 62.87 = 112.66
+    expect(result.data.grossPay).toBeCloseTo(112.65, 1);
+  });
+
+  test('sleepover with disturbance > 60 min converts to active night and forfeits allowance', async () => {
+    const result = await advancedPayrollService.calculatePayroll({
+      userId: 'u_sleep_converted',
+      period: '2026-07',
+      employee: permEmployee,
+      shifts: [
+        shift('2026-07-01T22:00:00+10:00', '2026-07-02T06:00:00+10:00', {
+          shiftType: 'sleepover',
+          disturbances: [
+            {
+              startTime: '2026-07-02T01:00:00+10:00',
+              endTime: '2026-07-02T02:15:00+10:00',
+              durationMinutes: 75,
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.allowances.sleepover).toBe(0); // Forfeited
+    expect(result.data.hoursBreakdown.nightShiftHours).toBe(8);
+    // 8h night = 8 * 33.19 * 1.15 = 305.35
+    expect(result.data.grossPay).toBeCloseTo(305.35, 2);
+  });
+});
+
 describe('AdvancedPayrollService.generatePayslip', () => {
   const ORG = '64f0000000000000000000a1';
 

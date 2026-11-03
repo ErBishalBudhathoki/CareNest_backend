@@ -6,6 +6,9 @@ const Organization = require('../models/Organization');
 const { Invoice } = require('../models/Invoice');
 const { priceValidationService } = require('./priceValidationService');
 const planBudgetService = require('./planBudgetService');
+// Milestone 5.2: Multi-route support and BPRF reconciliation
+const billingRoutingService = require('./billingRoutingService');
+const ndisClaimResultsService = require('./ndisClaimResultsService');
 const { uploadBufferToR2, isR2Configured } = require('../utils/cloudFunctionsUpload');
 const { formatBprDate, BPR_DATE_FORMAT, BPR_DATE_PATTERN } = require('../utils/dateHelpers');
 const logger = require('../config/logger');
@@ -46,6 +49,20 @@ const GST_CODES = ['P1', 'P2'];
 const CLAIM_TYPES = ['STANDARD', 'CANCELLATION', 'REPORT'];
 const CANCELLATION_REASONS = ['NSCC', 'NSDH'];
 const ABN_WEIGHTS = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
+
+/**
+ * Milestone 5.2: Normalize claim type for NDIA BPR export.
+ * Maps irregular_sil to STANDARD and handles case-insensitivity.
+ */
+function normalizeClaimType(raw) {
+  if (!raw) return 'STANDARD';
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'IRREGULAR_SIL' || s === 'IRREGULAR') return 'STANDARD';
+  if (s === 'CANCELLATION') return 'CANCELLATION';
+  if (s === 'REPORT') return 'REPORT';
+  if (s === 'STANDARD') return 'STANDARD';
+  return s;
+}
 
 /**
  * Format a date for the BPR CSV.
@@ -111,10 +128,11 @@ class NDISClaimService {
     const registrationNumber = org?.ndisRegistration?.registrationNumber || '';
     const abn = org?.abn || '';
 
-    // NDIA-managed participants only.
+    // Milestone 5.2: Query NDIA-managed and combination participants.
+    // Combination participants have Core/SIL lines routed to NDIA.
     const clients = await Client.find({
       organizationId,
-      fundingType: 'ndia_managed',
+      fundingType: { $in: ['ndia_managed', 'combination'] },
     }).lean();
     const clientById = new Map(clients.map((c) => [c._id.toString(), c]));
     const clientIds = clients.map((c) => c._id);
@@ -135,30 +153,52 @@ class NDISClaimService {
         // without a billing block fall back to the client's funding type, which
         // is what gated this query in the first place.
         const artifact = invoice.billing?.artifact;
-        if (artifact && artifact !== 'claim_csv') continue;
+        const client = clientById.get(String(invoice.clientId));
+
+        // For non-combination clients: skip if stamped as non-claim artifact
+        if (client?.fundingType !== 'combination' && artifact && artifact !== 'claim_csv') {
+          continue;
+        }
 
         for (const item of invoice.lineItems || []) {
-          const serviceDate = item.date || invoice.createdAt || from;
+          // Milestone 5.2: For combination-funded participants, filter to NDIA-routed line items
+          if (client?.fundingType === 'combination') {
+            const route = item.fundingRoute || (artifact === 'claim_csv' ? 'ndia_managed' : null);
+            if (route !== 'ndia_managed') {
+              continue;
+            }
+          }
+
+          // SIL invoices prefer silPeriod.from if item.date is missing
+          const serviceDate = item.date || invoice.metadata?.silPeriod?.from || invoice.createdAt || from;
           const d = new Date(serviceDate);
           if (d < from || d > to) continue;
 
-          const client = clientById.get(String(invoice.clientId));
+          const serviceEndDate = item.endDate || invoice.metadata?.silPeriod?.to || null;
+          const endD = serviceEndDate ? new Date(serviceEndDate) : null;
+
           const hourly = isHourlyUnit(item.unit);
           const quantity = round2(item.quantity);
+
+          // Milestone 5.2: Map internal claim types (e.g. irregular_sil) to NDIA-compliant values
+          // NDIA myplace 16-column template strictly requires STANDARD, CANCELLATION, or REPORT
+          const rawClaimType = normalizeClaimType(item.claimType || 'STANDARD');
+
           lines.push({
             clientId: invoice.clientId,
             invoiceId: invoice._id,
             ndisNumber: client?.ndisNumber || '',
             supportNumber: item.supportItemNumber || '',
             serviceDate: d,
+            serviceEndDate: endD && !Number.isNaN(endD.getTime()) ? endD : null,
             unit: item.unit || '',
             isHourly: hourly,
             quantity: hourly ? 0 : quantity,
             hours: hourly ? quantity : 0,
             unitPrice: round2(item.price),
             gstCode: item.gstCode || 'P2',
-            claimType: item.claimType || 'STANDARD',
-            cancellationReason: item.cancellationReason || '',
+            claimType: rawClaimType,
+            cancellationReason: rawClaimType === 'CANCELLATION' ? (item.cancellationReason || '') : '',
             authorisedBy: item.authorisedBy || '',
             participantApproved: item.participantApproved || 'Y',
             inKindFundingProgramCode: item.inKindFundingProgramCode || '',
@@ -350,7 +390,11 @@ class NDISClaimService {
         errors.push({ claimReference: ref, field: 'GSTCode', message: 'GSTCode must be P1 or P2.' });
       }
 
-      const claimType = line.claimType || 'STANDARD';
+      // Milestone 5.2: Normalize and validate ClaimType
+      let claimType = String(line.claimType || 'STANDARD').trim().toUpperCase();
+      if (claimType === 'IRREGULAR_SIL') {
+        claimType = 'STANDARD';
+      }
       if (!CLAIM_TYPES.includes(claimType)) {
         errors.push({ claimReference: ref, field: 'ClaimType', message: 'ClaimType must be STANDARD, CANCELLATION or REPORT.' });
       }
@@ -433,14 +477,15 @@ class NDISClaimService {
   buildCsv(lines, { registrationNumber, abn }) {
     const rows = [BPR_HEADERS.join(',')];
     for (const line of lines) {
-      const date = formatNdisDate(line.serviceDate);
+      const fromDate = formatNdisDate(line.serviceDate);
+      const toDate = line.serviceEndDate ? formatNdisDate(line.serviceEndDate) : fromDate;
       const hourly = line.isHourly !== undefined ? line.isHourly : Number(line.hours) > 0;
       rows.push(
         [
           registrationNumber,
           line.ndisNumber,
-          date,
-          date,
+          fromDate,
+          toDate,
           line.supportNumber,
           line.claimReference,
           hourly ? '' : round2(line.quantity).toFixed(2),
@@ -450,7 +495,7 @@ class NDISClaimService {
           line.authorisedBy || '',
           line.participantApproved || 'Y',
           line.inKindFundingProgramCode || '',
-          line.claimType || 'STANDARD',
+          normalizeClaimType(line.claimType || 'STANDARD'),
           line.cancellationReason || '',
           abn,
         ]
@@ -759,6 +804,117 @@ class NDISClaimService {
   _objectIdOrNull(value) {
     const mongoose = require('mongoose');
     return mongoose.Types.ObjectId.isValid(value) ? value : null;
+  }
+
+  /**
+   * Milestone 5.2: Import BPRF and reconcile claim batch, updating lines and cascading
+   * payment/rejection statuses to Invoice models and their audit trails.
+   */
+  async reconcileBPRF(organizationId, batchId, fileContent, actor = '') {
+    const result = await ndisClaimResultsService.importResults(
+      organizationId,
+      batchId,
+      fileContent,
+      actor,
+    );
+    if (result.notFound) return result;
+
+    await this.reconcileInvoicesForBatch(organizationId, batchId, actor);
+    return result;
+  }
+
+  /**
+   * Milestone 5.2: Update invoice payment status, balance due, payment transactions, and
+   * audit trail change history for all invoices linked to this batch.
+   */
+  async reconcileInvoicesForBatch(organizationId, batchId, actor = '') {
+    const claimLines = await ClaimLine.find({ batchId, organizationId }).lean();
+    if (!claimLines || !claimLines.length) return;
+
+    const linesByInvoice = new Map();
+    for (const line of claimLines) {
+      if (!line.invoiceId) continue;
+      const invId = String(line.invoiceId);
+      if (!linesByInvoice.has(invId)) linesByInvoice.set(invId, []);
+      linesByInvoice.get(invId).push(line);
+    }
+
+    for (const [invId, lines] of linesByInvoice.entries()) {
+      const invoice = await Invoice.findOne({ _id: invId, organizationId });
+      if (!invoice) continue;
+
+      const totalPaidOnBatch = round2(
+        lines.reduce(
+          (sum, l) =>
+            sum +
+            (l.status === 'reconciled' || l.status === 'accepted'
+              ? Number(l.paidAmount) || Number(l.requestedAmount) || 0
+              : 0),
+          0,
+        ),
+      );
+      const hasRejections = lines.some((l) => l.status === 'rejected');
+      const allRejected = lines.every((l) => l.status === 'rejected');
+
+      const invoiceTotal = round2(invoice.financialSummary?.totalAmount || 0);
+      const priorPaid = round2(invoice.payment?.paidAmount || 0);
+      const newPaidAmount = round2(priorPaid + totalPaidOnBatch);
+      const balanceDue = round2(Math.max(0, invoiceTotal - newPaidAmount));
+
+      if (totalPaidOnBatch > 0) {
+        invoice.payment = invoice.payment || {};
+        invoice.payment.paidAmount = newPaidAmount;
+        invoice.payment.balanceDue = balanceDue;
+        invoice.payment.status = balanceDue <= 0.01 ? 'paid' : 'partial';
+        if (balanceDue <= 0.01) {
+          invoice.payment.paidDate = new Date();
+          invoice.workflow = invoice.workflow || {};
+          invoice.workflow.status = 'paid';
+        }
+
+        invoice.payment.transactions = invoice.payment.transactions || [];
+        invoice.payment.transactions.push({
+          date: new Date(),
+          amount: totalPaidOnBatch,
+          method: 'ndia_bulk_claim',
+          reference: lines[0]?.remittanceReference || `BPR-${batchId}`,
+          status: 'success',
+          notes: `NDIS BPRF payment reconciliation for batch ${batchId}`,
+        });
+      }
+
+      invoice.auditTrail = invoice.auditTrail || { changeHistory: [] };
+      invoice.auditTrail.changeHistory = invoice.auditTrail.changeHistory || [];
+      invoice.auditTrail.updatedAt = new Date();
+      invoice.auditTrail.updatedBy = actor || 'system';
+
+      if (totalPaidOnBatch > 0) {
+        invoice.auditTrail.changeHistory.push({
+          timestamp: new Date(),
+          userId: actor || 'system',
+          action: 'ndis_claim_paid',
+          reason: `Reconciled payment from NDIS Claim Batch ${batchId}`,
+          changes: { paidAmount: totalPaidOnBatch, newTotalPaid: newPaidAmount, balanceDue, status: invoice.payment.status },
+        });
+      }
+
+      if (hasRejections) {
+        const rejections = lines
+          .filter((l) => l.status === 'rejected')
+          .map((l) => ({ ref: l.claimReference, reason: l.rejectionReason, amount: l.requestedAmount }));
+        invoice.auditTrail.changeHistory.push({
+          timestamp: new Date(),
+          userId: actor || 'system',
+          action: 'ndis_claim_rejected',
+          reason: `NDIA rejected ${rejections.length} line(s) in Claim Batch ${batchId}`,
+          changes: { rejections, allRejected },
+        });
+      }
+
+      if (typeof invoice.save === 'function') {
+        await invoice.save();
+      }
+    }
   }
 }
 

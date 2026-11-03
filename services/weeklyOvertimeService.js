@@ -20,7 +20,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_WEEK = 7 * MS_PER_DAY;
 
 const OVERTIME_CATEGORIES = new Set(['overtimeFirst2h', 'overtimeAfter2h']);
-const EXCLUDED_FROM_WEEKLY_ORDINARY = new Set(['publicHoliday']);
+// Milestone 5.1: Exclude passive sleepover hours from weekly ordinary hours cap (they are paid flat allowance)
+const EXCLUDED_FROM_WEEKLY_ORDINARY = new Set(['publicHoliday', 'sleepover']);
 
 function cycleWeeksFor(employmentType) {
   const type = String(employmentType || '').toLowerCase();

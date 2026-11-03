@@ -35,6 +35,8 @@ const CATEGORIES = {
   PUBLIC_HOLIDAY: 'publicHoliday',
   OVERTIME_1: 'overtimeFirst2h',
   OVERTIME_AFTER: 'overtimeAfter2h',
+  // Milestone 5.1: SCHADS Award Clause 25.7 Sleepover span (paid via flat allowance)
+  SLEEPOVER: 'sleepover',
 };
 
 const HOURS_KEY = {
@@ -46,6 +48,8 @@ const HOURS_KEY = {
   [CATEGORIES.PUBLIC_HOLIDAY]: 'publicHolidayHours',
   [CATEGORIES.OVERTIME_1]: 'overtimeFirst2h',
   [CATEGORIES.OVERTIME_AFTER]: 'overtimeAfter2h',
+  // Milestone 5.1: Distinct tracking of passive sleepover hours
+  [CATEGORIES.SLEEPOVER]: 'sleepoverHours',
 };
 
 const WEEKDAY_MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -199,23 +203,49 @@ function zeroAggregates() {
   for (const key of Object.values(HOURS_KEY)) {
     agg[key] = 0;
   }
+  // Milestone 5.1: Tracking sleepover metrics alongside standard aggregates
+  agg.sleepoverCount = 0;
+  agg.disturbanceHours = 0;
+  agg.activeHours = 0;
   agg.totalHours = 0;
   return agg;
 }
 
 function aggregateSegments(segments) {
   const agg = zeroAggregates();
-  let totalMinutes = 0;
+  let paidMinutes = 0;
+  let activeMinutes = 0;
+  let disturbanceMinutes = 0;
+  let hasSleepover = false;
+
   for (const seg of segments) {
     const hours = seg.minutes / 60;
-    totalMinutes += seg.minutes;
     const key = HOURS_KEY[seg.category];
     if (key) agg[key] += hours;
+
+    if (seg.category === CATEGORIES.SLEEPOVER) {
+      hasSleepover = true;
+      // Sleepover sleeping hours are remunerated via flat allowance under Clause 25.7,
+      // not hourly base/penalty wages.
+    } else if (seg.isDisturbance) {
+      disturbanceMinutes += seg.minutes;
+      paidMinutes += seg.minutes;
+    } else {
+      activeMinutes += seg.minutes;
+      paidMinutes += seg.minutes;
+    }
   }
+
   for (const k of Object.keys(agg)) {
     agg[k] = parseFloat(agg[k].toFixed(2));
   }
-  agg.totalHours = parseFloat((totalMinutes / 60).toFixed(2));
+
+  // Milestone 5.1: Populate sleepover and disturbance indicators
+  agg.sleepoverCount = agg.sleepoverHours > 0 ? 1 : 0;
+  agg.disturbanceHours = parseFloat((disturbanceMinutes / 60).toFixed(2));
+  agg.activeHours = parseFloat((activeMinutes / 60).toFixed(2));
+  // Total hourly-compensated hours: active hours + disturbance hours (if sleepover), or all hours (if standard)
+  agg.totalHours = parseFloat((paidMinutes / 60).toFixed(2));
   return agg;
 }
 
@@ -233,6 +263,183 @@ function segmentShift(shift, config = {}) {
     return { segments: [], aggregates: zeroAggregates() };
   }
 
+  // Milestone 5.1: SCHADS Award Clause 25.7 Sleepover Detection & Disturbance Evaluation
+  const declaredShiftType = (shift.shiftType || '').toString().toLowerCase();
+  const isSleepoverDeclared = declaredShiftType === 'sleepover';
+
+  const rawDisturbances = Array.isArray(shift.disturbances)
+    ? shift.disturbances
+    : Array.isArray(shift.workedTime?.disturbances)
+      ? shift.workedTime.disturbances
+      : [];
+  const parsedDisturbances = rawDisturbances.map((d) => {
+    let dur = Number(d.durationMinutes) || 0;
+    if (!dur && d.startTime && d.endTime) {
+      dur = Math.max(0, Math.round((new Date(d.endTime) - new Date(d.startTime)) / MS_PER_MIN));
+    }
+    return {
+      startTime: d.startTime ? new Date(d.startTime) : null,
+      endTime: d.endTime ? new Date(d.endTime) : null,
+      reason: typeof d.reason === 'string' ? d.reason : '',
+      durationMinutes: dur,
+    };
+  });
+  const totalDisturbanceMinutes =
+    parsedDisturbances.reduce((sum, d) => sum + (d.durationMinutes || 0), 0) ||
+    Number(shift.totalDisturbanceMinutes || 0);
+
+  // Clause 25.7(e)(iii): > 60 cumulative disturbance minutes converts sleepover to active night
+  const isConvertedToActiveNight =
+    Boolean(shift.convertedToActiveNight) ||
+    (isSleepoverDeclared && totalDisturbanceMinutes > 60);
+
+  // If sleepover and NOT converted to active night, isolate the 8h sleepover span
+  if (isSleepoverDeclared && !isConvertedToActiveNight) {
+    let sleepStart;
+    let sleepEnd;
+
+    if (shift.sleepoverStartTime && shift.sleepoverEndTime) {
+      sleepStart = new Date(shift.sleepoverStartTime);
+      sleepEnd = new Date(shift.sleepoverEndTime);
+    } else {
+      const shiftDurationMinutes = Math.round((end.getTime() - start.getTime()) / MS_PER_MIN);
+      if (shiftDurationMinutes <= 8 * 60) {
+        // Shift is 8 hours or less: the whole duration is the sleepover span
+        sleepStart = start;
+        sleepEnd = end;
+      } else {
+        // Standard sleepover window is 22:00 to 06:00 in the target timezone
+        const startParts = getZonedParts(start, timezone);
+        let defStart = zonedWallClockToUtc(startParts.year, startParts.month, startParts.day, 22, 0, timezone);
+        let defEnd = new Date(defStart.getTime() + 8 * 60 * MS_PER_MIN);
+
+        // Clamp to shift boundaries
+        const sMs = Math.max(start.getTime(), defStart.getTime());
+        const eMs = Math.min(end.getTime(), defEnd.getTime());
+        if (eMs > sMs) {
+          sleepStart = new Date(sMs);
+          sleepEnd = new Date(eMs);
+        } else {
+          sleepStart = start;
+          sleepEnd = end;
+        }
+      }
+    }
+
+    // Active segments before and after sleepover
+    const activeIntervals = [];
+    if (sleepStart.getTime() > start.getTime()) {
+      activeIntervals.push({ from: start, to: sleepStart });
+    }
+    if (end.getTime() > sleepEnd.getTime()) {
+      activeIntervals.push({ from: sleepEnd, to: end });
+    }
+
+    const baseActiveSegments = [];
+    for (const interval of activeIntervals) {
+      const boundaries = buildBoundaries(interval.from, interval.to, timezone);
+      const cat = resolveShiftCategory(interval.from, interval.to, timezone);
+      for (let i = 0; i < boundaries.length - 1; i += 1) {
+        const segStart = new Date(boundaries[i]);
+        const segEnd = new Date(boundaries[i + 1]);
+        const minutes = Math.round((segEnd.getTime() - segStart.getTime()) / MS_PER_MIN);
+        if (minutes <= 0) continue;
+        baseActiveSegments.push({
+          from: segStart.toISOString(),
+          to: segEnd.toISOString(),
+          minutes,
+          category: classifySegment(segStart, segEnd, timezone, holidaySet, cat),
+        });
+      }
+    }
+
+    // Deduct unpaid break from active segments
+    let breakRemaining = breakMins;
+    for (const seg of baseActiveSegments) {
+      if (breakRemaining <= 0) break;
+      const take = Math.min(seg.minutes, breakRemaining);
+      seg.minutes -= take;
+      breakRemaining -= take;
+    }
+
+    // Apply daily overtime threshold ONLY to active hours
+    const standardMinutes = standardHoursPerDay * 60;
+    let ordinaryAccumulated = 0;
+    let overtimeAccumulated = 0;
+    const finalSegments = [];
+
+    for (const seg of baseActiveSegments) {
+      if (seg.minutes <= 0) continue;
+      if (seg.category === CATEGORIES.PUBLIC_HOLIDAY) {
+        finalSegments.push({ ...seg });
+        continue;
+      }
+      let remaining = seg.minutes;
+      while (remaining > 0) {
+        if (ordinaryAccumulated < standardMinutes) {
+          const take = Math.min(remaining, standardMinutes - ordinaryAccumulated);
+          finalSegments.push({ ...seg, minutes: take });
+          ordinaryAccumulated += take;
+          remaining -= take;
+          continue;
+        }
+        const ot1Remaining = Math.max(0, 2 * 60 - overtimeAccumulated);
+        if (ot1Remaining > 0) {
+          const take = Math.min(remaining, ot1Remaining);
+          finalSegments.push({ ...seg, minutes: take, category: CATEGORIES.OVERTIME_1 });
+          overtimeAccumulated += take;
+          remaining -= take;
+          continue;
+        }
+        finalSegments.push({ ...seg, minutes: remaining, category: CATEGORIES.OVERTIME_AFTER });
+        overtimeAccumulated += remaining;
+        remaining = 0;
+      }
+    }
+
+    // Add passive sleepover segment (paid via flat allowance, 0 hourly wage)
+    const sleepoverMinutes = Math.round((sleepEnd.getTime() - sleepStart.getTime()) / MS_PER_MIN);
+    if (sleepoverMinutes > 0) {
+      finalSegments.push({
+        from: sleepStart.toISOString(),
+        to: sleepEnd.toISOString(),
+        minutes: sleepoverMinutes,
+        category: CATEGORIES.SLEEPOVER,
+        isSleepover: true,
+      });
+    }
+
+    // Milestone 5.1: Disturbance segments under Clause 25.7(e)
+    // 1 hour minimum at overtime rate per disturbance
+    if (parsedDisturbances.length > 0) {
+      for (const d of parsedDisturbances) {
+        const paidDisturbanceMins = Math.max(60, d.durationMinutes || 60);
+        finalSegments.push({
+          from: (d.startTime || sleepStart).toISOString(),
+          to: (d.endTime || new Date((d.startTime || sleepStart).getTime() + paidDisturbanceMins * MS_PER_MIN)).toISOString(),
+          minutes: paidDisturbanceMins,
+          category: CATEGORIES.OVERTIME_1,
+          isDisturbance: true,
+          reason: d.reason || '',
+        });
+      }
+    } else if (totalDisturbanceMinutes > 0) {
+      const paidDisturbanceMins = Math.max(60, totalDisturbanceMinutes);
+      finalSegments.push({
+        from: sleepStart.toISOString(),
+        to: new Date(sleepStart.getTime() + paidDisturbanceMins * MS_PER_MIN).toISOString(),
+        minutes: paidDisturbanceMins,
+        category: CATEGORIES.OVERTIME_1,
+        isDisturbance: true,
+      });
+    }
+
+    const aggregates = aggregateSegments(finalSegments);
+    aggregates.convertedToActiveNight = false;
+    return { segments: finalSegments, aggregates };
+  }
+
+  // Standard path: non-sleepover shift OR sleepover converted to active night
   const boundaries = buildBoundaries(start, end, timezone);
   const baseSegments = [];
 
@@ -298,7 +505,11 @@ function segmentShift(shift, config = {}) {
     }
   }
 
-  return { segments, aggregates: aggregateSegments(segments) };
+  const aggregates = aggregateSegments(segments);
+  if (isConvertedToActiveNight) {
+    aggregates.convertedToActiveNight = true;
+  }
+  return { segments, aggregates };
 }
 
 class SCHADSService {
@@ -357,6 +568,9 @@ class SCHADSService {
           return baseRate * (mult.overtimeFirst2h || 1.5);
         case CATEGORIES.OVERTIME_AFTER:
           return baseRate * (mult.overtimeAfter2h || 2.0);
+        // Milestone 5.1: Passive sleepover hours have $0 hourly rate (remunerated via flat sleepover allowance)
+        case CATEGORIES.SLEEPOVER:
+          return 0;
         case CATEGORIES.BASE:
         default:
           return baseRate * (mult.base || 1) * (1 + casualLoading);
@@ -383,6 +597,10 @@ class SCHADSService {
       byCategory[k] = parseFloat(byCategory[k].toFixed(2));
     }
 
+    const declaredType = (shift.shiftType || '').toString().toLowerCase();
+    const isSleepover = declaredType === 'sleepover';
+    const isConverted = Boolean(aggregates.convertedToActiveNight);
+
     return {
       segments: pricedSegments,
       aggregates,
@@ -392,6 +610,11 @@ class SCHADSService {
         byCategory,
         gross: parseFloat(gross.toFixed(2)),
       },
+      // Milestone 5.1: Attach sleepoverAllowance and conversion indicator
+      sleepoverAllowance: isSleepover && !isConverted
+        ? schadsRates.resolveAllowances(undefined, shift.startTime).sleepoverAllowance
+        : 0,
+      convertedToActiveNight: isConverted,
     };
   }
 }

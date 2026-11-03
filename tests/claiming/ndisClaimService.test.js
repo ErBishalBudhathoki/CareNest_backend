@@ -26,7 +26,7 @@ jest.mock('../../models/Client', () => ({ find: jest.fn() }));
 jest.mock('../../models/Organization', () => ({ findOne: jest.fn() }));
 // The real module exports the model under `Invoice` (plus the status enums),
 // so the mock must mirror that shape.
-jest.mock('../../models/Invoice', () => ({ Invoice: { find: jest.fn() } }));
+jest.mock('../../models/Invoice', () => ({ Invoice: { find: jest.fn(), findOne: jest.fn() } }));
 jest.mock('../../services/priceValidationService', () => ({
   priceValidationService: { validatePrice: jest.fn().mockResolvedValue({ isValid: true }) },
 }));
@@ -369,6 +369,185 @@ describe('NDISClaimService.generateBatch', () => {
       to: '2026-04-30',
     });
     expect(result.lineCount).toBe(1);
+  });
+
+  test('includes NDIA line items from combination-funded participants and excludes plan/self items', async () => {
+    Client.find.mockReturnValue(
+      lean([
+        {
+          _id: 'c_comb',
+          fundingType: 'combination',
+          ndisNumber: '430999888',
+          plan: { categories: [{ categoryNumber: '01', managementType: 'NDIA' }] },
+        },
+      ]),
+    );
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv_comb',
+          clientId: 'c_comb',
+          createdAt: new Date('2026-04-05T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              fundingRoute: 'ndia_managed',
+              quantity: 4,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-05T00:00:00Z'),
+            },
+            {
+              supportItemNumber: '15_056_0128_1_3',
+              fundingRoute: 'plan_managed',
+              quantity: 2,
+              price: 193.99,
+              unit: 'H',
+              date: new Date('2026-04-05T00:00:00Z'),
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(result.lineCount).toBe(1);
+    expect(result.batch.totals.amount).toBe(325.08); // 4 * 81.27 only
+    expect(result.csv).toContain('430999888');
+    expect(result.csv).toContain('01_011_0107_1_1');
+    expect(result.csv).not.toContain('15_056_0128_1_3');
+  });
+
+  test('maps irregular_sil claim type to STANDARD in batch and CSV', async () => {
+    Client.find.mockReturnValue(
+      lean([{ _id: 'c_sil', fundingType: 'ndia_managed', ndisNumber: '430111222' }]),
+    );
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv_sil_irr',
+          clientId: 'c_sil',
+          createdAt: new Date('2026-04-10T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_451_0107_1_1',
+              claimType: 'irregular_sil',
+              quantity: 5,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-10T00:00:00Z'),
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(result.lineCount).toBe(1);
+    expect(result.batch.totals.amount).toBe(406.35);
+    // Verified: column 14 (ClaimType) is STANDARD, not irregular_sil
+    expect(result.csv).toContain(',STANDARD,,');
+    expect(result.csv).not.toContain('irregular_sil');
+    expect(result.validation.errors).toHaveLength(0);
+  });
+
+  test('exports multi-day SIL period date ranges in CSV columns 3 and 4', async () => {
+    Client.find.mockReturnValue(
+      lean([{ _id: 'c_sil_range', fundingType: 'ndia_managed', ndisNumber: '430555666' }]),
+    );
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv_sil_range',
+          clientId: 'c_sil_range',
+          createdAt: new Date('2026-04-01T00:00:00Z'),
+          metadata: {
+            silRosterOfCareId: 'roc_123',
+            silPeriod: { from: '2026-04-01T00:00:00Z', to: '2026-04-07T00:00:00Z' },
+          },
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 14,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-01T00:00:00Z'),
+              endDate: new Date('2026-04-07T00:00:00Z'),
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(result.lineCount).toBe(1);
+    const row = result.csv.split('\r\n')[1];
+    // Column 3 = 01/04/2026, Column 4 = 07/04/2026
+    expect(row).toContain('01/04/2026,07/04/2026');
+  });
+
+  test('reconcileBPRF cascades payments and audit history to linked Invoice models', async () => {
+    const mockInvoice = {
+      _id: 'inv_rec_1',
+      financialSummary: { totalAmount: 400.0 },
+      payment: { paidAmount: 0, balanceDue: 400.0, status: 'pending', transactions: [] },
+      workflow: { status: 'issued' },
+      auditTrail: { changeHistory: [] },
+      save: jest.fn().mockResolvedValue(true),
+    };
+    Invoice.findOne.mockResolvedValue(mockInvoice);
+
+    ClaimBatch.findOne.mockResolvedValue({
+      _id: 'b_rec_1',
+      status: 'submitted',
+      totals: { amount: 400.0 },
+      save: jest.fn(),
+    });
+
+    ClaimLine.findOne.mockImplementation(async ({ claimReference }) => ({
+      claimReference,
+      invoiceId: 'inv_rec_1',
+      status: 'submitted',
+      requestedAmount: 400.0,
+      save: jest.fn(),
+    }));
+
+    ClaimLine.find.mockReturnValue({
+      lean: async () => [
+        {
+          claimReference: 'CN-REF-1',
+          invoiceId: 'inv_rec_1',
+          status: 'reconciled',
+          paidAmount: 400.0,
+          requestedAmount: 400.0,
+          remittanceReference: 'NDIS-EFT-999',
+        },
+      ],
+    });
+
+    const bprfContent = 'ClaimReference,Status,PaidAmount,RemittanceReference\nCN-REF-1,Accepted,400.00,NDIS-EFT-999';
+    const result = await ndisClaimService.reconcileBPRF('org1', 'b_rec_1', bprfContent, 'admin@care.org');
+
+    expect(result.summary.accepted).toBe(1);
+    expect(mockInvoice.payment.status).toBe('paid');
+    expect(mockInvoice.payment.paidAmount).toBe(400.0);
+    expect(mockInvoice.payment.balanceDue).toBe(0);
+    expect(mockInvoice.workflow.status).toBe('paid');
+    expect(mockInvoice.auditTrail.changeHistory).toHaveLength(1);
+    expect(mockInvoice.auditTrail.changeHistory[0].action).toBe('ndis_claim_paid');
+    expect(mockInvoice.save).toHaveBeenCalled();
   });
 });
 

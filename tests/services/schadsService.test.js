@@ -361,3 +361,119 @@ describe('SCHADS casual loading is additive', () => {
     expect(casual.amount.gross).toBe(280); // 8h * 25 * 1.4
   });
 });
+
+describe('SCHADS Clause 25.7 — Sleepover shifts & disturbances', () => {
+  const profile = (isCasual = false) => ({
+    baseRate: 25,
+    isCasual,
+    timezone: TZ,
+  });
+
+  test('standard sleepover (22:00–06:00) yields 8 sleepover hours and $0 hourly gross', () => {
+    const shiftData = shift(
+      '2026-06-01T22:00:00+10:00',
+      '2026-06-02T06:00:00+10:00',
+      0,
+      { shiftType: 'sleepover' },
+    );
+    const r = schadsService.calculateShiftAmount(shiftData, profile(false));
+    expect(r.aggregates.sleepoverHours).toBe(8);
+    expect(r.aggregates.nightShiftHours).toBe(0);
+    expect(r.aggregates.baseHours).toBe(0);
+    expect(r.amount.gross).toBe(0);
+    expect(r.sleepoverAllowance).toBe(60.02); // 2026-06-01 effective allowance
+    expect(r.convertedToActiveNight).toBe(false);
+  });
+
+  test('sleepover with active hours before (20:00–22:00) and after (06:00–08:00) isolates passive sleepover', () => {
+    const shiftData = shift(
+      '2026-06-01T20:00:00+10:00',
+      '2026-06-02T08:00:00+10:00',
+      0,
+      { shiftType: 'sleepover' },
+    );
+    const r = schadsService.calculateShiftAmount(shiftData, profile(false));
+    expect(r.aggregates.afternoonShiftHours).toBe(2);
+    expect(r.aggregates.sleepoverHours).toBe(8);
+    expect(r.aggregates.baseHours).toBe(2);
+    expect(r.aggregates.nightShiftHours).toBe(0);
+    expect(r.aggregates.overtimeFirst2h).toBe(0); // 4 active hours does not breach 8h daily ordinary cap
+    // 2h afternoon (25 * 1.125 = 28.125 * 2 = 56.25) + 2h base (25 * 2 = 50.00) = 106.25
+    expect(r.amount.gross).toBe(106.25);
+    expect(r.sleepoverAllowance).toBe(60.02);
+  });
+
+  test('sleepover disturbance <= 60 mins pays minimum 1 hour overtime under Clause 25.7(e)', () => {
+    const shiftData = shift(
+      '2026-07-01T22:00:00+10:00',
+      '2026-07-02T06:00:00+10:00',
+      0,
+      {
+        shiftType: 'sleepover',
+        disturbances: [
+          {
+            startTime: '2026-07-02T01:00:00+10:00',
+            endTime: '2026-07-02T01:30:00+10:00',
+            durationMinutes: 30,
+            reason: 'Assisted participant with medication',
+          },
+        ],
+      },
+    );
+    const r = schadsService.calculateShiftAmount(shiftData, profile(false));
+    expect(r.aggregates.sleepoverHours).toBe(8);
+    expect(r.aggregates.overtimeFirst2h).toBe(1); // 1h minimum at OT1
+    expect(r.aggregates.nightShiftHours).toBe(0);
+    // 1h OT1 = 25 * 1.5 = 37.50
+    expect(r.amount.gross).toBe(37.5);
+    expect(r.sleepoverAllowance).toBe(62.87); // 2026-07-01 indexed rate
+    expect(r.convertedToActiveNight).toBe(false);
+  });
+
+  test('sleepover disturbances > 60 mins converts to active night and revokes sleepover allowance', () => {
+    const shiftData = shift(
+      '2026-07-01T22:00:00+10:00',
+      '2026-07-02T06:00:00+10:00',
+      0,
+      {
+        shiftType: 'sleepover',
+        disturbances: [
+          {
+            startTime: '2026-07-02T01:00:00+10:00',
+            endTime: '2026-07-02T01:45:00+10:00',
+            durationMinutes: 45,
+          },
+          {
+            startTime: '2026-07-02T03:00:00+10:00',
+            endTime: '2026-07-02T03:35:00+10:00',
+            durationMinutes: 35,
+          },
+        ],
+      },
+    );
+    const r = schadsService.calculateShiftAmount(shiftData, profile(false));
+    expect(r.aggregates.convertedToActiveNight).toBe(true);
+    expect(r.aggregates.sleepoverHours).toBe(0);
+    expect(r.aggregates.nightShiftHours).toBe(8);
+    // 8h night = 8 * 25 * 1.15 = 230.00
+    expect(r.amount.gross).toBe(230);
+    expect(r.sleepoverAllowance).toBe(0);
+  });
+
+  test('explicit convertedToActiveNight: true converts immediately regardless of disturbances array', () => {
+    const shiftData = shift(
+      '2026-07-01T22:00:00+10:00',
+      '2026-07-02T06:00:00+10:00',
+      0,
+      {
+        shiftType: 'sleepover',
+        convertedToActiveNight: true,
+      },
+    );
+    const r = schadsService.calculateShiftAmount(shiftData, profile(false));
+    expect(r.aggregates.convertedToActiveNight).toBe(true);
+    expect(r.aggregates.nightShiftHours).toBe(8);
+    expect(r.aggregates.sleepoverHours).toBe(0);
+    expect(r.sleepoverAllowance).toBe(0);
+  });
+});

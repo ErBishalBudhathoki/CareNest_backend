@@ -219,21 +219,45 @@ class AdvancedPayrollService {
         shiftAmountTotal += amount.gross;
 
         if (Array.isArray(pricedSegments)) {
-          weeklyShifts.push({
-            startTime: shift.startTime,
-            segments: pricedSegments.map((segment) => ({
-              category: segment.category,
-              hours: segment.hours,
-              rate: segment.rate,
-            })),
-          });
+          // Milestone 5.1: Exclude passive sleepover segments ($0 rate) from weekly overtime calculation
+          const billableSegments = pricedSegments.filter(
+            (segment) => segment.category !== 'sleepover' && segment.rate > 0,
+          );
+          if (billableSegments.length > 0) {
+            weeklyShifts.push({
+              startTime: shift.startTime,
+              segments: billableSegments.map((segment) => ({
+                category: segment.category,
+                hours: segment.hours,
+                rate: segment.rate,
+              })),
+            });
+          }
         }
 
         // Shift-type allowances. Amounts are effective-dated data, resolved
         // against the shift date so historical pay is reproducible.
         const shiftAllowances = schadsRates.resolveAllowances(undefined, shift.startTime);
         const type = (shift.shiftType || '').toString().toLowerCase();
-        if (type === 'sleepover') {
+        // Milestone 5.1: SCHADS Award Clause 25.7 Sleepover allowance check
+        // If converted to active night (disturbances > 60m), sleepover allowance is forfeited
+        const disturbances = Array.isArray(shift.disturbances)
+          ? shift.disturbances
+          : Array.isArray(shift.workedTime?.disturbances)
+            ? shift.workedTime.disturbances
+            : [];
+        const totalDisturbanceMinutes = disturbances.reduce((sum, d) => {
+          const dur = d.durationMinutes != null ? Number(d.durationMinutes) : 0;
+          return sum + (Number.isNaN(dur) || dur < 0 ? 0 : dur);
+        }, 0);
+        const isConvertedToActiveNight = Boolean(
+          shift.convertedToActiveNight ||
+          shift.workedTime?.convertedToActiveNight ||
+          aggregates.convertedToActiveNight ||
+          totalDisturbanceMinutes > 60,
+        );
+
+        if (type === 'sleepover' && !isConvertedToActiveNight) {
           allowanceTotals.sleepover += shiftAllowances.sleepoverAllowance;
         }
         if (profile.allowances.firstAid && shift.firstAidShift) {
@@ -414,6 +438,8 @@ class AdvancedPayrollService {
       publicHolidayHours: 0,
       overtimeFirst2h: 0,
       overtimeAfter2h: 0,
+      // Milestone 5.1: sleepover tracking in totals
+      sleepoverHours: 0,
       totalHours: 0,
     };
   }
@@ -516,6 +542,8 @@ class AdvancedPayrollService {
           publicHolidayHours: this._round(totals.publicHolidayHours),
           overtimeFirst2h: this._round(totals.overtimeFirst2h),
           overtimeAfter2h: this._round(totals.overtimeAfter2h),
+          // Milestone 5.1: Expose sleepoverHours in breakdown
+          sleepoverHours: this._round(totals.sleepoverHours || 0),
           totalHours: this._round(totals.totalHours),
         },
         penalties,
