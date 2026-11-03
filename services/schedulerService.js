@@ -579,7 +579,12 @@ class SchedulerService {
                 'notes',
                 'breakDuration',
                 'isRecurring',
-                'recurringTemplateId'
+                'recurringTemplateId',
+                // Milestone 4.3: Irregular SIL & crisis claiming fields
+                'isIrregularSil',
+                'irregularSilReason',
+                'crisisJustificationNotes',
+                'incidentReportReference'
             ];
             const safeData = {};
             for (const field of ALLOWED_CREATE_FIELDS) {
@@ -1090,7 +1095,12 @@ class SchedulerService {
                 'location',
                 'clientId',
                 'clientEmail',
-                'isActive'
+                'isActive',
+                // Milestone 4.3: Irregular SIL & crisis claiming fields
+                'isIrregularSil',
+                'irregularSilReason',
+                'crisisJustificationNotes',
+                'incidentReportReference'
             ];
             const safeUpdate = {};
             for (const field of ALLOWED_UPDATE_FIELDS) {

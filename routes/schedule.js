@@ -36,7 +36,12 @@ const shiftValidation = [
   body('clientEmail').optional().isEmail().normalizeEmail().withMessage('Invalid client email'),
   body('employeeEmail').optional().isEmail().normalizeEmail().withMessage('Invalid employee email'),
   body('location').optional().trim().isLength({ max: 255 }),
-  body('notes').optional().trim().isLength({ max: 1000 })
+  body('notes').optional().trim().isLength({ max: 1000 }),
+  // Milestone 4.3: Irregular SIL & crisis claiming fields
+  body('isIrregularSil').optional().isBoolean(),
+  body('irregularSilReason').optional().isString().trim(),
+  body('crisisJustificationNotes').optional().isString().trim(),
+  body('incidentReportReference').optional().isString().trim()
 ];
 
 // PUT is a partial update: assignment only sends { employeeEmail }, so the
@@ -48,7 +53,12 @@ const shiftUpdateValidation = [
   body('clientEmail').optional().isEmail().normalizeEmail().withMessage('Invalid client email'),
   body('employeeEmail').optional().isEmail().normalizeEmail().withMessage('Invalid employee email'),
   body('location').optional().trim().isLength({ max: 255 }),
-  body('notes').optional().trim().isLength({ max: 1000 })
+  body('notes').optional().trim().isLength({ max: 1000 }),
+  // Milestone 4.3: Irregular SIL & crisis claiming fields
+  body('isIrregularSil').optional().isBoolean(),
+  body('irregularSilReason').optional().isString().trim(),
+  body('crisisJustificationNotes').optional().isString().trim(),
+  body('incidentReportReference').optional().isString().trim()
 ];
 
 const bulkValidation = [
