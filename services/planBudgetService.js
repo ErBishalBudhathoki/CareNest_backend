@@ -274,12 +274,40 @@ class PlanBudgetService {
       }
     }
 
+    const remainingAfter = round2(remaining - amount);
+    const remainingPercentage = effectiveBudget > 0 ? round2((remainingAfter / effectiveBudget) * 100) : 100;
+
+    // Milestone 6.3: NDIS Plan Budget Drawdown Tracking & Depletion Warning Engine
+    // NDIS Quality & Safeguards Commission rules suggest warning when remaining plan budget drops to 15% or below.
+    let budgetWarning = null;
+    if (remainingPercentage <= 15) {
+      budgetWarning = {
+        code: 'BUDGET_DEPLETION_WARNING',
+        message: `NDIS Plan budget is nearing depletion: only ${remainingPercentage.toFixed(1)}% ($${remainingAfter.toFixed(2)}) remaining after this invoice.`,
+        remainingPercentage,
+        remainingAfter,
+        totalBudget: round2(effectiveBudget),
+      };
+    }
+
+    const budgetDrawdown = {
+      effectiveBudget: round2(effectiveBudget),
+      previousConsumed: round2(consumed),
+      invoiceAmount: amount,
+      remainingAfterInvoice: remainingAfter,
+      remainingPercentage,
+      categoryRemaining,
+    };
+
     return {
       ok: true,
       totalBudget: round2(effectiveBudget),
       consumed: round2(consumed),
-      remaining: round2(remaining - amount),
+      remaining: remainingAfter,
+      remainingPercentage,
       categoryRemaining,
+      budgetWarning,
+      budgetDrawdown,
       planStart,
       planEnd,
     };

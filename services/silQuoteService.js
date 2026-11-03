@@ -1,6 +1,8 @@
 const SILQuote = require('../models/SILQuote');
 const SILRosterOfCare = require('../models/SILRosterOfCare');
 const Client = require('../models/Client');
+// Milestone 6.1: ServiceAgreement model for auto-linking upon quote digital signature
+const ServiceAgreement = require('../models/ServiceAgreement');
 const { priceValidationService } = require('./priceValidationService');
 const logger = require('../config/logger');
 
@@ -117,8 +119,17 @@ class SILQuoteService {
 
   /**
    * Accept a quote. Refuses when any line failed cap validation.
+   * Milestone 6.1: Captures digital e-signature and auto-generates/links an active ServiceAgreement.
+   * Auto-generating the ServiceAgreement automatically satisfies the Milestone 4.2 Consent Gate
+   * when the quote is converted to an active SIL Roster of Care.
+   *
+   * @param {string} organizationId
+   * @param {string} id
+   * @param {Object|string} [signaturePayloadOrActor={}] - Signature payload or actor email if legacy call
+   * @param {string} [actor=''] - Actor email
+   * @returns {Promise<Object>}
    */
-  async acceptQuote(organizationId, id, actor = '') {
+  async acceptQuote(organizationId, id, signaturePayloadOrActor = {}, actor = '') {
     const quote = await SILQuote.findOne({ _id: id, organizationId });
     if (!quote) return { notFound: true };
 
@@ -127,12 +138,84 @@ class SILQuoteService {
       return { blocked: true, failing };
     }
 
+    // Support legacy signature (organizationId, id, actor) where 3rd arg is string
+    let payload = signaturePayloadOrActor;
+    let actorEmail = actor;
+    if (typeof signaturePayloadOrActor === 'string') {
+      actorEmail = signaturePayloadOrActor;
+      payload = {};
+    } else if (!actorEmail && payload.actor) {
+      actorEmail = payload.actor;
+    }
+
+    const signedBy = payload.signedBy || payload.name || actorEmail || 'Authorized Signatory';
+    const signatoryRole = payload.signatoryRole || payload.role || 'participant';
+    const signatureData = payload.signatureData || '';
+    const ipAddress = payload.ipAddress || '';
+
+    // Record digital e-signature on the quote
+    quote.signature = {
+      signedBy,
+      signatoryRole,
+      signatureData,
+      signedAt: new Date(),
+      ipAddress,
+    };
+
     quote.status = 'accepted';
-    quote.approvedBy = actor;
+    quote.approvedBy = actorEmail;
     quote.approvedAt = new Date();
-    quote.updatedBy = actor;
+    quote.updatedBy = actorEmail;
     await quote.save();
-    return { quote };
+
+    // Milestone 6.1: Auto-generate an active ServiceAgreement linking this quote
+    // This provides NDIS compliance and seamlessly unlocks the M4.2 Consent Gate for the RoC.
+    let agreement = null;
+    try {
+      const agreementNumber = `SA-SIL-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      agreement = await ServiceAgreement.create({
+        organizationId,
+        clientId: quote.clientId,
+        propertyId: quote.propertyId || null,
+        quoteId: quote._id,
+        agreementNumber,
+        agreementType: 'sil',
+        status: 'active',
+        effectiveFrom: new Date(),
+        signedAt: new Date(),
+        signedBy: {
+          name: signedBy,
+          role: signatoryRole,
+          signatureData,
+          ipAddress,
+        },
+        participantContribution: {
+          boardAndLodgingWeekly: Number(payload.boardAndLodgingWeekly) || 0,
+          paymentFrequency: payload.paymentFrequency || 'fortnightly',
+        },
+        notes: `Auto-generated upon digital e-signature acceptance of SIL Quote ${quote._id}`,
+        createdBy: actorEmail,
+        updatedBy: actorEmail,
+      });
+
+      logger.business('Service Agreement Auto-Linked for Accepted SIL Quote', {
+        event: 'service_agreement_auto_linked',
+        organizationId,
+        quoteId: quote._id.toString(),
+        agreementId: agreement._id.toString(),
+        agreementNumber: agreement.agreementNumber,
+        signedBy,
+        signatoryRole,
+      });
+    } catch (saErr) {
+      logger.warn('Could not auto-create ServiceAgreement for accepted SIL quote', {
+        error: saErr.message,
+        quoteId: String(quote._id),
+        organizationId,
+      });
+    }
+
+    return { quote, agreement };
   }
 
   async declineQuote(organizationId, id, actor = '') {

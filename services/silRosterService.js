@@ -326,12 +326,17 @@ class SILRosterService {
     const roster = await SILRoster.findOne({ _id: id, organizationId });
     if (!roster) return { notFound: true };
 
-    // §8.5: the org setting is authoritative; an explicit request flag may
+    // §8.5 & Milestone 6.2: the org setting is authoritative; an explicit request flag may
     // override it. Default is warn-only (false).
     let effectiveBlock = blockOnRatioBreach === true;
     try {
       const Organization = require('../models/Organization');
-      const org = await Organization.findOne({ organizationId }).lean();
+      const mongoose = require('mongoose');
+      // In MongoDB, Organization primary key is _id (or organizationCode for legacy identifiers)
+      const query = mongoose.Types.ObjectId.isValid(organizationId)
+        ? { _id: organizationId }
+        : { organizationCode: organizationId };
+      const org = await Organization.findOne(query).lean();
       const setting = org?.settings?.sil?.blockOnRatioBreach;
       if (setting !== undefined && blockOnRatioBreach === undefined) {
         effectiveBlock = setting === true;

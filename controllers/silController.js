@@ -219,10 +219,16 @@ class SILController {
   publishRoster = catchAsync(async (req, res) => {
     const org = this._requireOrg(req, res);
     if (!org) return;
+    // Milestone 6.2: Preserve undefined when blockOnRatioBreach is omitted in request body,
+    // so Organization.settings.sil.blockOnRatioBreach can take precedence as intended.
+    const blockOverride =
+      req.body?.blockOnRatioBreach !== undefined
+        ? req.body.blockOnRatioBreach === true
+        : undefined;
     const result = await silRosterService.publishRoster(
       org,
       req.params.id,
-      { blockOnRatioBreach: req.body?.blockOnRatioBreach === true },
+      { blockOnRatioBreach: blockOverride },
       this._actor(req),
     );
     if (result.notFound) {
@@ -233,7 +239,7 @@ class SILController {
         success: false,
         code: 'RATIO_BREACH',
         message: 'Roster has understaffed shifts and blocking is enabled.',
-        data: { roster: result.roster },
+        data: { roster: result.roster, understaffed: result.understaffed },
       });
     }
     res.json({ success: true, message: 'Roster published.', data: result.roster });
@@ -301,7 +307,13 @@ class SILController {
   acceptQuote = catchAsync(async (req, res) => {
     const org = this._requireOrg(req, res);
     if (!org) return;
-    const result = await silQuoteService.acceptQuote(org, req.params.id, this._actor(req));
+    // Milestone 6.1: Pass signature payload from req.body to acceptQuote
+    const result = await silQuoteService.acceptQuote(
+      org,
+      req.params.id,
+      req.body || {},
+      this._actor(req),
+    );
     if (result.notFound) {
       return res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Quote not found.' });
     }
@@ -313,7 +325,12 @@ class SILController {
         data: { failing: result.failing },
       });
     }
-    res.json({ success: true, message: 'Quote accepted.', data: result.quote });
+    res.json({
+      success: true,
+      message: 'Quote accepted.',
+      data: result.quote,
+      agreement: result.agreement || null,
+    });
   });
 
   declineQuote = catchAsync(async (req, res) => {
@@ -503,6 +520,9 @@ class SILController {
         invoiceId: result.invoice?._id,
         invoiceNumber: result.invoice?.invoiceNumber,
         billing: result.billing,
+        // Milestone 6.3: Surface budget warnings & drawdown metrics if present
+        budgetWarning: result.invoice?.metadata?.planBudgetValidation?.budgetWarning || null,
+        budgetDrawdown: result.invoice?.metadata?.planBudgetValidation?.budgetDrawdown || null,
       },
     });
   });

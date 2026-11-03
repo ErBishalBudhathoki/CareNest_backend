@@ -70,6 +70,19 @@ const silQuoteSchema = new mongoose.Schema(
     },
     approvedBy: { type: String, default: '' },
     approvedAt: { type: Date, default: null },
+    // Milestone 6.1: Digital E-Signature capture for SIL Quotes
+    // Captures signatory name, role, signature data (e.g. data URL or typed mark), timestamp and client IP
+    signature: {
+      signedBy: { type: String, default: '' },
+      signatoryRole: {
+        type: String,
+        enum: ['participant', 'guardian', 'nominee', 'plan_manager', 'provider', ''],
+        default: 'participant',
+      },
+      signatureData: { type: String, default: '' },
+      signedAt: { type: Date, default: null },
+      ipAddress: { type: String, default: '' },
+    },
     rosterOfCareId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'SILRosterOfCare',
@@ -91,6 +104,10 @@ const silQuoteSchema = new mongoose.Schema(
         if (ret.rosterOfCareId) ret.rosterOfCareId = ret.rosterOfCareId.toString();
         if (ret.validUntil) ret.validUntil = ret.validUntil.toISOString();
         if (ret.approvedAt) ret.approvedAt = ret.approvedAt.toISOString();
+        // Milestone 6.1: Format signature timestamp in JSON representation
+        if (ret.signature && ret.signature.signedAt) {
+          ret.signature.signedAt = ret.signature.signedAt.toISOString();
+        }
         if (ret.createdAt) ret.createdAt = ret.createdAt.toISOString();
         if (ret.updatedAt) ret.updatedAt = ret.updatedAt.toISOString();
         return ret;
