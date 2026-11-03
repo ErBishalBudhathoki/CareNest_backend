@@ -87,6 +87,12 @@ const serviceAgreementSchema = new mongoose.Schema(
         ret.id = ret._id.toString();
         delete ret._id;
         delete ret.__v;
+        // Flatten nested signature & contribution fields for frontend API parity
+        ret.signedByName = ret.signedBy ? ret.signedBy.name || '' : '';
+        ret.signedByRole = ret.signedBy ? ret.signedBy.role || 'participant' : 'participant';
+        ret.boardAndLodgingWeekly = ret.participantContribution
+          ? ret.participantContribution.boardAndLodgingWeekly || 0
+          : 0;
         if (ret.clientId) ret.clientId = ret.clientId.toString();
         if (ret.propertyId) ret.propertyId = ret.propertyId.toString();
         if (ret.quoteId) ret.quoteId = ret.quoteId.toString();
