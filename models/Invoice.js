@@ -302,10 +302,16 @@ invoiceSchema.index({ organizationId: 1, createdAt: -1 });
 // Per-tenant top-clients grouping (clientEmail) inside a date window.
 invoiceSchema.index({ organizationId: 1, clientEmail: 1, createdAt: -1 });
 
-// Milestone 7.1: Enforce idempotency key uniqueness per organization (sparse for legacy documents)
+// Milestone 7.1: Enforce idempotency key uniqueness per organization for active idempotency keys
 invoiceSchema.index(
   { organizationId: 1, 'metadata.idempotencyKey': 1 },
-  { unique: true, sparse: true, name: 'org_idempotency_key_unique' }
+  {
+    unique: true,
+    partialFilterExpression: {
+      'metadata.idempotencyKey': { $type: 'string' },
+    },
+    name: 'org_idempotency_key_unique',
+  }
 );
 
 // Milestone 7.1: Enforce unique RoC billing period per tenant (prevents concurrent race duplicates)
@@ -319,7 +325,7 @@ invoiceSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      'deletion.isDeleted': { $ne: true },
+      'deletion.isDeleted': false,
       'metadata.silRosterOfCareId': { $exists: true },
     },
     name: 'sil_roc_period_unique',

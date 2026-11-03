@@ -110,7 +110,13 @@ claimBatchSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
 // Milestone 7.1: Organization-scoped idempotency key uniqueness for claim batches
 claimBatchSchema.index(
   { organizationId: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true, name: 'org_claim_batch_idempotency_unique' }
+  {
+    unique: true,
+    partialFilterExpression: {
+      idempotencyKey: { $type: 'string' },
+    },
+    name: 'org_claim_batch_idempotency_unique',
+  }
 );
 
 module.exports = mongoose.model('ClaimBatch', claimBatchSchema);
