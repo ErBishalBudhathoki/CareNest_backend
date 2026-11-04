@@ -29,6 +29,21 @@ function parseBoolean(value) {
   return ['true', 'yes', 'y', '1'].includes(normalized);
 }
 
+// NDIS price guides run 1 July to 30 June (Australian fiscal year). The
+// version label follows the guide year the item starts in: a row effective
+// from 2025-07-01 belongs to the '2025-26' guide. Rows with the legacy
+// 9999-12-31 sentinel (or unparseable dates) stay 'current'.
+function derivePriceGuideVersion(startDate) {
+  if (startDate === null || startDate === undefined) return 'current';
+  const date = startDate instanceof Date ? startDate : new Date(startDate);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return 'current';
+  const year = date.getUTCFullYear();
+  if (year >= 9999) return 'current';
+  const month = date.getUTCMonth();
+  const startYear = month >= 6 ? year : year - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+}
+
 function parseDate(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
@@ -479,6 +494,7 @@ class NdisCatalogSyncService {
       isLegacy: parseBoolean(
         firstNonNull(rawItem.isLegacy, rawItem.IsLegacy, rawItem.islegacy),
       ),
+      priceGuideVersion: derivePriceGuideVersion(startDate),
       startDate,
       endDate,
       quoteRequired: parseBoolean(
@@ -692,3 +708,5 @@ class NdisCatalogSyncService {
 }
 
 module.exports = new NdisCatalogSyncService();
+// Exported for unit testing the version-derivation contract only.
+module.exports.derivePriceGuideVersion = derivePriceGuideVersion;

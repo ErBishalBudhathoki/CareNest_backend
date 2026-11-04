@@ -212,8 +212,9 @@ class BillingAutomationService {
         createdAt: new Date().toISOString(),
         
         // Automatic calculations
-        gst: amount * 0.1, // 10% GST
-        totalCredit: amount * 1.1,
+        // NDIS supports are GST-free under Australian tax law.
+        gst: 0,
+        totalCredit: amount,
         
         // Workflow
         workflow: {

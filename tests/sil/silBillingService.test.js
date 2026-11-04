@@ -45,6 +45,11 @@ jest.mock('../../models/Shift', () => ({
   find: (...args) => mockShiftFind(...args),
 }));
 
+const mockSupportItemFindOne = jest.fn();
+jest.mock('../../models/SupportItem', () => ({
+  findOne: (...args) => mockSupportItemFindOne(...args),
+}));
+
 const mockWorkedTimeFind = jest.fn();
 jest.mock('../../models/WorkedTime', () => ({
   find: (...args) => mockWorkedTimeFind(...args),
@@ -646,5 +651,128 @@ describe('SILBillingService.inclusiveDays', () => {
     expect(
       silBillingService.inclusiveDays(new Date('2026-04-01'), new Date('2026-04-14')),
     ).toBe(14);
+  });
+});
+
+describe('SILBillingService — crisis rate resolution (M4.3)', () => {
+  const rocWithoutPricedSupport = {
+    ...activeRoc,
+    supports: [{ ...activeRoc.supports[0], unitPrice: 0 }, activeRoc.supports[1]],
+  };
+
+  const irregularShift = {
+    _id: 'sCrisis1',
+    silRosterOfCareId: 'roc1',
+    clientId: 'c1',
+    isActive: true,
+    isIrregularSil: true,
+    irregularSilReason: 'crisis',
+    crisisJustificationNotes: 'Acute behaviour escalation',
+    incidentReportReference: 'INC-2026-04-0012',
+    startTime: new Date('2026-04-05T10:00:00.000Z'),
+    endTime: new Date('2026-04-05T14:00:00.000Z'),
+    breakDuration: 0,
+  };
+
+  const irregularWt = {
+    _id: 'wtCrisis1',
+    silShiftId: 'sCrisis1',
+    totalHours: 4,
+    isActive: true,
+    isIrregularSil: true,
+  };
+
+  const crisISUPPORT_QUERY = expect.objectContaining({
+    supportItemNumber: '01_451_0107_1_1',
+  });
+
+  const armIrregularScenario = () => {
+    mockRocFindOne.mockResolvedValue(rocWithoutPricedSupport);
+    mockShiftFind.mockImplementation((query) => {
+      if (query.isIrregularSil || (Array.isArray(query?.$or) && query.$or.some((c) => c.isIrregularSil))) {
+        return { lean: async () => [irregularShift] };
+      }
+      return { lean: async () => [] };
+    });
+    mockWorkedTimeFind.mockImplementation((query) => {
+      if (Array.isArray(query?.$or) && query.$or.some((c) => c.silShiftId?.$in?.includes('sCrisis1'))) {
+        return { lean: async () => [irregularWt] };
+      }
+      return { lean: async () => [] };
+    });
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockClientFindOne.mockReturnValue({
+      lean: async () => ({
+        clientFirstName: 'Ada',
+        clientLastName: 'Nguyen',
+        clientEmail: 'ada@example.com',
+      }),
+    });
+    noExistingInvoice();
+    mockPropertyFindOne.mockReturnValue({ lean: async () => null });
+    mockGetMmmByPostcode.mockResolvedValue(null);
+    mockGetMultiplierForMmm.mockImplementation((mmm) => (mmm === 6 ? 1.4 : mmm === 7 ? 1.5 : 1.0));
+    mockGenerateInvoiceNumber.mockResolvedValue('INVORG6101AN');
+    mockCreateInvoice.mockImplementation(async (data) => ({
+      success: true,
+      data: {
+        ...data,
+        _id: 'inv-crisis',
+        billing: { fundingType: 'ndia_managed', recipientType: 'ndia', artifact: 'claim_csv' },
+      },
+    }));
+    armIrregularScenario();
+  });
+
+  const generateCrisisInvoice = () =>
+    silBillingService.generateInvoiceFromRosterOfCare(
+      'org1',
+      'roc1',
+      { from: '2026-04-01', to: '2026-04-14', mode: 'verified_timesheet' },
+      'admin@org.com',
+    );
+
+  const crisisLineOf = () => {
+    const payload = mockCreateInvoice.mock.calls[0][0];
+    return payload.lineItems.find((item) => item.supportItemNumber === '01_451_0107_1_1');
+  };
+
+  test('uses the active NDIS catalogue price when the RoC carries no priced support', async () => {
+    mockSupportItemFindOne.mockReturnValue({
+      sort: () => ({
+        lean: async () => ({ supportItemNumber: '01_451_0107_1_1', price: 88.5 }),
+      }),
+    });
+
+    await generateCrisisInvoice();
+
+    expect(mockSupportItemFindOne).toHaveBeenCalledWith(crisISUPPORT_QUERY);
+    const line = crisisLineOf();
+    expect(line).toMatchObject({ price: 88.5, totalPrice: 354 });
+  });
+
+  test('falls back to the named default when the catalogue has no crisis row', async () => {
+    mockSupportItemFindOne.mockReturnValue({
+      sort: () => ({ lean: async () => null }),
+    });
+
+    await generateCrisisInvoice();
+
+    const line = crisisLineOf();
+    expect(line).toMatchObject({ price: 65.47, totalPrice: 261.88 });
+  });
+
+  test('falls back to the named default when the catalogue lookup throws', async () => {
+    mockSupportItemFindOne.mockImplementation(() => {
+      throw new Error('catalog unavailable');
+    });
+
+    await generateCrisisInvoice();
+
+    const line = crisisLineOf();
+    expect(line).toMatchObject({ price: 65.47, totalPrice: 261.88 });
   });
 });

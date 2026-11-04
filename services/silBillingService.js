@@ -4,6 +4,7 @@ const Shift = require('../models/Shift');
 const WorkedTime = require('../models/WorkedTime');
 const SILOccupancy = require('../models/SILOccupancy');
 const SILProperty = require('../models/SILProperty');
+const SupportItem = require('../models/SupportItem');
 const silRatioService = require('./silRatioService');
 const { mmmService } = require('./mmmService');
 const { Invoice } = require('../models/Invoice');
@@ -30,6 +31,14 @@ const { normalizeToIsoDate } = require('../utils/dateHelpers');
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// Support item used for Irregular SIL / Crisis Staffing line items.
+const CRISIS_SUPPORT_ITEM_NUMBER = '01_451_0107_1_1';
+// Last-resort base rate used only when the RoC carries no priced support
+// item AND the NDIS catalogue has no active price for the crisis item.
+// Keeps invoice generation resilient; the catalogue lookup below is the
+// authoritative source whenever available.
+const CATALOG_FALLBACK_CRISIS_RATE = 65.47;
+
 function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
@@ -52,6 +61,32 @@ function parseDateInput(value) {
   if (!iso) return null;
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d));
+}
+
+/**
+ * Best-effort lookup of the active crisis support rate from the NDIS
+ * catalogue (effective-dated, by delivery date). Returns the parsed price,
+ * or null when the catalogue is unavailable or holds no active priced row.
+ */
+async function lookupCrisisSupportRate(asOf) {
+  try {
+    const effective = asOf ? new Date(asOf) : new Date();
+    const item = await SupportItem.findOne({
+      supportItemNumber: CRISIS_SUPPORT_ITEM_NUMBER,
+      isActive: { $ne: false },
+      startDate: { $lte: effective },
+      $or: [{ endDate: null }, { endDate: { $gte: effective } }],
+    })
+      .sort({ startDate: -1 })
+      .lean();
+    const price = Number(item?.price);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch (error) {
+    logger.warn('NDIS catalogue crisis rate lookup failed; using fallback rate', {
+      error: error.message,
+    });
+    return null;
+  }
 }
 
 async function safeFind(model, filter) {
@@ -680,8 +715,15 @@ class SILBillingService {
           }
         }
 
-        // Default base crisis rate from RoC daytime support or NDIS weekday standard cap ($65.47)
-        const baseCrisisRate = (roc.supports && roc.supports.length > 0 && Number(roc.supports[0].unitPrice)) || 65.47;
+        // Crisis base rate priority: RoC daytime support price → active NDIS
+        // catalogue price for the crisis item → named last-resort fallback.
+        const rocCrisisRate = roc.supports && roc.supports.length > 0
+          ? Number(roc.supports[0].unitPrice)
+          : NaN;
+        const baseCrisisRate =
+          (Number.isFinite(rocCrisisRate) && rocCrisisRate > 0 && rocCrisisRate) ||
+          (await lookupCrisisSupportRate(periodFrom)) ||
+          CATALOG_FALLBACK_CRISIS_RATE;
         const effectiveCrisisRate = mmmMultiplier > 1.0 ? round2(baseCrisisRate * mmmMultiplier) : round2(baseCrisisRate);
 
         for (const irrShift of irregularShiftList) {
@@ -709,7 +751,7 @@ class SILBillingService {
             const reason = irrShift.irregularSilReason || 'crisis';
 
             lineItems.push({
-              supportItemNumber: '01_451_0107_1_1',
+              supportItemNumber: CRISIS_SUPPORT_ITEM_NUMBER,
               supportItemName: `Irregular SIL / Crisis Staffing (${reason.toUpperCase()})`,
               price: effectiveCrisisRate,
               quantity: shiftHours,
