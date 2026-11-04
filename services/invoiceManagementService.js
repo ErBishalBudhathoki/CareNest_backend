@@ -12,6 +12,7 @@ const InvoiceLineItem = require('../models/InvoiceLineItem');
 const { invoiceArtifactService } = require('./invoiceArtifactService');
 const planBudgetService = require('./planBudgetService');
 const { priceValidationService } = require('./priceValidationService');
+const billingRoutingService = require('./billingRoutingService');
 const { getCanonicalOrganizationCode } = require('../utils/organizationCodeUtils');
 const InputValidator = require('../utils/inputValidator');
 const logger = require('../config/logger');
@@ -689,16 +690,22 @@ class InvoiceManagementService {
       // NDIA-managed claims cannot exceed the published price cap. The app
       // validates too, but the API is the last line of defence: a missing or
       // stale client-side cap must not produce an unclaimable invoice.
+      // Milestone 3.4: the participant is fetched once up front (with the plan
+      // envelopes) so both this cap gate and the funding-route stamping below
+      // share one read.
+      let client = null;
+      if (invoiceData.clientId) {
+        client = await Client.findOne({
+          _id: invoiceData.clientId,
+          organizationId: invoiceData.organizationId,
+        })
+          .select('fundingType clientState plan')
+          .lean();
+      }
       if (
         String(metadata.invoiceType || 'client').toLowerCase() === 'client' &&
         invoiceData.clientId
       ) {
-        const client = await Client.findOne({
-          _id: invoiceData.clientId,
-          organizationId: invoiceData.organizationId,
-        })
-          .select('fundingType clientState')
-          .lean();
         const funding = String(client?.fundingType || '').toLowerCase();
         const ndiaManaged = funding === 'ndia_managed' || funding === 'combination';
         const capOverride = metadata.priceCapOverride || {};
@@ -773,6 +780,32 @@ class InvoiceManagementService {
       } else if (!planValidation.skipped) {
         metadata.planBudgetValidation = planValidation;
         invoiceData.metadata = metadata;
+      }
+
+      // Milestone 3.4: stamp the funding route on every line item so the claim
+      // batch (ndisClaimService) can split NDIA-managed items from
+      // plan/self-managed ones for combination-funded participants, and so
+      // routed artefacts match the participant's overall funding type. The
+      // participant is only stamped when its record was actually loaded above.
+      // Best-effort: a routing failure must never block invoice creation.
+      if (client && Array.isArray(invoiceData.lineItems) && invoiceData.lineItems.length > 0) {
+        try {
+          invoiceData.lineItems.forEach((item, idx) => {
+            const route = billingRoutingService.resolveLineItemRoute({
+              supportItemNumber:
+                item.supportItemNumber || item.ndisItemNumber || item.itemCode || item.itemNumber || '',
+              fundingType: client.fundingType,
+              planCategories: client.plan?.categories || [],
+            });
+            invoiceData.lineItems[idx].fundingRoute = route.fundingRoute;
+          });
+        } catch (routeErr) {
+          logger.warn('Failed to stamp line-item funding routes', {
+            error: routeErr.message,
+            invoiceNumber: invoiceData.invoiceNumber,
+            organizationId: invoiceData.organizationId,
+          });
+        }
       }
 
       // Create new invoice document

@@ -109,6 +109,16 @@ const clientSchema = new mongoose.Schema({
           categoryNumber: { type: String, required: true, trim: true },
           name: { type: String, default: '', trim: true },
           budget: { type: Number, min: 0, default: 0 },
+          // Milestone 3.4: explicit funding route for this category on
+          // combination-funded participants. Read by
+          // billingRoutingService.resolveLineItemRoute; null keeps the default
+          // NDIS combination category routing.
+          fundingType: {
+            type: String,
+            enum: ['ndia_managed', 'plan_managed', 'self_managed'],
+            default: null,
+            trim: true,
+          },
         },
       ],
       default: [],

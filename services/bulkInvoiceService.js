@@ -1,10 +1,7 @@
 const ClientAssignment = require('../models/ClientAssignment');
-const Client = require('../models/Client');
-const Invoice = require('../models/Invoice');
-const InvoiceLineItem = require('../models/InvoiceLineItem');
 const logger = require('../utils/logger');
 const { formatDisplayDate } = require('../utils/dateHelpers');
-const billingRoutingService = require('./billingRoutingService');
+const { InvoiceManagementService: invoiceManagementService } = require('./invoiceManagementService');
 const crypto = require('crypto');
 
 /**
@@ -39,9 +36,6 @@ async function generateInvoicesFromAppointments({
     throw new NoEligibleAppointmentsError();
   }
 
-  const invoices = [];
-  const lineItems = [];
-
   // Group by client if requested
   if (groupByClient) {
     const clientGroups = {};
@@ -53,9 +47,15 @@ async function generateInvoicesFromAppointments({
       clientGroups[clientId].push(apt);
     });
 
-    // Create one invoice per client
+    let invoiceCount = 0;
+    let summaryTotal = 0;
+
+    // Create one invoice per client through the unified invoice pipeline
+    // (plan-budget gate, NDIA price caps, fundingRoute stamping, analytics
+    // line-item insert) so bulk invoices behave like ordinary ones.
     for (const [clientId, apts] of Object.entries(clientGroups)) {
-      const invoice = new Invoice({
+      let subtotal = 0;
+      const invoiceData = {
         organizationId,
         clientId,
         invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
@@ -63,25 +63,24 @@ async function generateInvoicesFromAppointments({
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         status: 'pending',
         subtotal: 0,
-        tax: 0,
+        tax: 0, // NDIS supports are GST-free under Australian tax law
         total: 0,
         financialSummary: {
           subtotal: 0,
           taxAmount: 0,
           discountAmount: 0,
           expenseAmount: 0,
-          totalAmount: 0,
+          totalAmount: subtotal,
           currency: 'AUD',
         },
-      });
+        lineItems: [],
+      };
 
-      let subtotal = 0;
       apts.forEach((apt) => {
         const amount = apt.serviceId.rate * apt.duration;
         subtotal += amount;
 
-        lineItems.push({
-          invoiceId: invoice._id,
+        invoiceData.lineItems.push({
           appointmentId: apt._id,
           description: `${apt.serviceId.name} - ${formatDisplayDate(apt.date)}`,
           quantity: apt.duration,
@@ -90,10 +89,9 @@ async function generateInvoicesFromAppointments({
         });
       });
 
-      invoice.subtotal = subtotal;
-      invoice.tax = 0; // NDIS supports are GST-free under Australian tax law
-      invoice.total = subtotal;
-      invoice.financialSummary = {
+      invoiceData.subtotal = subtotal;
+      invoiceData.total = subtotal;
+      invoiceData.financialSummary = {
         subtotal,
         taxAmount: 0,
         discountAmount: 0,
@@ -101,85 +99,97 @@ async function generateInvoicesFromAppointments({
         totalAmount: subtotal,
         currency: 'AUD',
       };
-      invoices.push(invoice);
-    }
-  } else {
-    // Create individual invoices
-    appointments.forEach((apt) => {
-      const amount = apt.serviceId.rate * apt.duration;
-      const invoice = new Invoice({
-        organizationId,
-        clientId: apt.clientId._id,
-        invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
-        issueDate: new Date(),
-        dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        status: 'pending',
-        subtotal: amount,
-        tax: 0, // NDIS supports are GST-free under Australian tax law
-        total: amount,
-        financialSummary: {
-          subtotal: amount,
-          taxAmount: 0,
-          discountAmount: 0,
-          expenseAmount: 0,
-          totalAmount: amount,
-          currency: 'AUD',
-        },
-      });
 
-      lineItems.push({
-        invoiceId: invoice._id,
-        appointmentId: apt._id,
-        description: `${apt.serviceId.name} - ${formatDisplayDate(apt.date)}`,
-        quantity: apt.duration,
-        unitPrice: apt.serviceId.rate,
-        amount,
-      });
-
-      invoices.push(invoice);
-    });
-  }
-
-  // Apply funding/billing routing to each invoice before insertMany
-  // (insertMany skips pre-save hooks, so the billing block must be stamped
-  // here explicitly). Best-effort: a routing failure must never block
-  // invoice creation.
-  try {
-    const clientIds = [...new Set(invoices.map((inv) => inv.clientId?.toString()).filter(Boolean))];
-    const clients = await Client.find({ _id: { $in: clientIds } }).lean();
-    const clientMap = new Map(clients.map((c) => [c._id.toString(), c]));
-
-    for (const invoice of invoices) {
-      const client = clientMap.get(invoice.clientId?.toString());
-      if (client) {
-        invoice.billing = billingRoutingService.buildInvoiceBilling(client);
+      const summary = await invoiceManagementService.createInvoice(invoiceData);
+      if (summary && summary.success === false) {
+        throw new Error(summary.error || 'Failed to create bulk invoice');
       }
+
+      invoiceCount += 1;
+      summaryTotal += Number(summary?.data?.total || 0);
     }
-  } catch (_) {
-    // Never block bulk invoice creation on routing metadata.
+
+    // Mark appointments as invoiced
+    await ClientAssignment.updateMany(
+      { _id: { $in: appointmentIds } },
+      { $set: { invoiced: true } },
+    );
+
+    logger.info(`Bulk generated ${invoiceCount} invoices`, {
+      organizationId,
+      invoiceCount,
+      appointmentCount: appointments.length,
+      groupByClient,
+    });
+
+    return {
+      invoiceCount,
+      appointmentCount: appointments.length,
+      totalAmount: summaryTotal,
+    };
   }
 
-  // Save invoices and line items
-  await Invoice.insertMany(invoices);
-  await InvoiceLineItem.insertMany(lineItems);
+  const payloads = [];
+  // Create individual invoices
+  appointments.forEach((apt) => {
+    const amount = apt.serviceId.rate * apt.duration;
+
+    payloads.push({
+      organizationId,
+      clientId: apt.clientId._id,
+      invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
+      issueDate: new Date(),
+      dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      status: 'pending',
+      subtotal: amount,
+      tax: 0, // NDIS supports are GST-free under Australian tax law
+      total: amount,
+      financialSummary: {
+        subtotal: amount,
+        taxAmount: 0,
+        discountAmount: 0,
+        expenseAmount: 0,
+        totalAmount: amount,
+        currency: 'AUD',
+      },
+      lineItems: [
+        {
+          appointmentId: apt._id,
+          description: `${apt.serviceId.name} - ${formatDisplayDate(apt.date)}`,
+          quantity: apt.duration,
+          unitPrice: apt.serviceId.rate,
+          amount,
+        },
+      ],
+    });
+  });
+
+  let createdTotal = 0;
+  for (const invoiceData of payloads) {
+    const summary = await invoiceManagementService.createInvoice(invoiceData);
+    if (summary && summary.success === false) {
+      throw new Error(summary.error || 'Failed to create bulk invoice');
+    }
+    createdTotal += Number(summary?.data?.total ?? invoiceData.total ?? 0);
+  }
 
   // Mark appointments as invoiced
   await ClientAssignment.updateMany(
     { _id: { $in: appointmentIds } },
-    { $set: { invoiced: true } }
+    { $set: { invoiced: true } },
   );
 
-  logger.info(`Bulk generated ${invoices.length} invoices`, {
+  logger.info(`Bulk generated ${payloads.length} invoices`, {
     organizationId,
-    invoiceCount: invoices.length,
+    invoiceCount: payloads.length,
     appointmentCount: appointments.length,
     groupByClient,
   });
 
   return {
-    invoiceCount: invoices.length,
+    invoiceCount: payloads.length,
     appointmentCount: appointments.length,
-    totalAmount: invoices.reduce((sum, inv) => sum + inv.total, 0),
+    totalAmount: createdTotal,
   };
 }
 
