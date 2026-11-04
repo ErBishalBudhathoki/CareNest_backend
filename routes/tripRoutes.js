@@ -56,7 +56,19 @@ const createTripValidation = [
   body('clientId')
     .optional()
     .isMongoId()
-    .withMessage('Client ID must be a valid MongoDB ObjectId')
+    .withMessage('Client ID must be a valid MongoDB ObjectId'),
+  body('propertyId')
+    .optional()
+    .isMongoId()
+    .withMessage('Property ID must be a valid MongoDB ObjectId'),
+  body('clientIds')
+    .optional()
+    .isArray({ max: 20 })
+    .withMessage('clientIds must be an array of at most 20 participant IDs'),
+  body('clientIds.*')
+    .optional()
+    .isMongoId()
+    .withMessage('Each client ID must be a valid MongoDB ObjectId')
 ];
 
 const getAllTripsValidation = [
@@ -124,6 +136,38 @@ const analyticsValidation = [
     .withMessage('End date must be a valid ISO 8601 date')
 ];
 
+const transportChargesValidation = [
+  param('tripId')
+    .isMongoId()
+    .withMessage('Trip ID must be a valid MongoDB ObjectId'),
+  body('totalKm')
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage('totalKm must be a positive number'),
+  body('clientIds')
+    .optional()
+    .isArray({ max: 20 })
+    .withMessage('clientIds must be an array of at most 20 participant IDs'),
+  body('clientIds.*')
+    .optional()
+    .isMongoId()
+    .withMessage('Each client ID must be a valid MongoDB ObjectId'),
+  body('supportItemNumber')
+    .optional()
+    .trim()
+    .isLength({ max: 40 })
+    .withMessage('supportItemNumber must be at most 40 characters'),
+  body('supportItemName')
+    .optional()
+    .trim()
+    .isLength({ max: 160 })
+    .withMessage('supportItemName must be at most 160 characters'),
+  body('date')
+    .optional()
+    .isISO8601()
+    .withMessage('date must be a valid ISO 8601 date')
+];
+
 // Create a trip
 router.post(
   '/',
@@ -132,6 +176,16 @@ router.post(
   createTripValidation,
   handleValidationErrors,
   tripController.createTrip
+);
+
+// Create activity transport charges for a multi-participant trip (Milestone 3.2)
+router.post(
+  '/:tripId/transport-charges',
+  authenticateUser,
+  tripWriteLimiter,
+  transportChargesValidation,
+  handleValidationErrors,
+  tripController.createTransportCharges
 );
 
 // Get all trips (Admin only)

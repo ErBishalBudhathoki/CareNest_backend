@@ -143,6 +143,47 @@ class SILController {
     }
   });
 
+  // ---- Absences (Milestone 2.1) ----------------------------------------
+
+  recordAbsence = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    try {
+      const absence = await silOccupancyService.recordAbsence(org, req.params.id, req.body, this._actor(req));
+      res.status(201).json({ success: true, message: 'Absence recorded.', data: absence });
+    } catch (error) {
+      this._handleError(res, error);
+    }
+  });
+
+  endOccupancyAbsence = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    try {
+      const absence = await silOccupancyService.endAbsence(
+        org,
+        req.params.id,
+        req.params.absenceId,
+        req.body,
+        this._actor(req),
+      );
+      res.json({ success: true, message: 'Absence ended.', data: absence });
+    } catch (error) {
+      this._handleError(res, error);
+    }
+  });
+
+  listAbsences = catchAsync(async (req, res) => {
+    const org = this._requireOrg(req, res);
+    if (!org) return;
+    const absences = await silOccupancyService.listAbsences(org, {
+      occupancyId: req.query.occupancyId,
+      clientId: req.query.clientId,
+      propertyId: req.query.propertyId,
+    });
+    res.json({ success: true, data: { absences } });
+  });
+
   // ---- Ratio rules -----------------------------------------------------
 
   listRatioRules = catchAsync(async (req, res) => {

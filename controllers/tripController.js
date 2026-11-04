@@ -1,4 +1,5 @@
 const TripService = require('../services/tripService');
+const ProviderTravelService = require('../services/providerTravelService');
 const { createLogger } = require('../utils/logger');
 const catchAsync = require('../utils/catchAsync');
 const logger = createLogger('TripController');
@@ -19,10 +20,28 @@ class TripController {
       clientId,
       startCoordinates,
       endCoordinates,
-      routePath
+      routePath,
+      propertyId,
+      clientIds
     } = req.body;
 
     const parsedDistance = parseFloat(distance);
+
+    // Milestone 3.2: clientIds supports multi-participant activity transport.
+    // When present it must be an array of up to 20 participant id strings.
+    const hasClientIds = clientIds !== undefined && clientIds !== null;
+    if (
+      hasClientIds &&
+      (!Array.isArray(clientIds) ||
+        clientIds.length > 20 ||
+        clientIds.some((id) => typeof id !== 'string'))
+    ) {
+      return res.status(400).json({ 
+        success: false, 
+        code: 'VALIDATION_ERROR',
+        message: 'clientIds must be an array of at most 20 participant IDs' 
+      });
+    }
 
     // Basic validation
     if (
@@ -62,7 +81,9 @@ class TripController {
       clientId,
       startCoordinates,
       endCoordinates,
-      routePath
+      routePath,
+      propertyId,
+      clientIds
     };
 
     const result = await TripService.createTrip(tripData);
@@ -193,6 +214,68 @@ class TripController {
       code: 'TRIP_STATUS_UPDATED',
       message: `Trip status updated to ${status}`
     });
+  });
+
+  /**
+   * Create split activity transport charges for a multi-participant trip
+   * (Milestone 3.2). Delegates to providerTravelService, which loads the trip,
+   * splits its mileage evenly across the transported participants and
+   * produces one 01_799_0107_1_1 charge per participant.
+   * POST /api/trips/:tripId/transport-charges
+   */
+  createTransportCharges = catchAsync(async (req, res) => {
+    const { tripId } = req.params;
+    const { totalKm, clientIds, supportItemNumber, supportItemName, date } = req.body;
+    const userId = req.user?.userId;
+    const organizationId = req.user?.organizationId;
+
+    if (!userId || !organizationId) {
+      return res.status(401).json({
+        success: false,
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized: User or Organization not identified'
+      });
+    }
+
+    const input = {
+      tripId,
+      ...(totalKm !== undefined && totalKm !== null && { totalKm: parseFloat(totalKm) }),
+      ...(clientIds !== undefined && { clientIds }),
+      ...(supportItemNumber !== undefined && { supportItemNumber }),
+      ...(supportItemName !== undefined && { supportItemName }),
+      ...(date !== undefined && { date })
+    };
+
+    try {
+      const charges = await ProviderTravelService.createActivityTransportCharges(
+        organizationId,
+        input,
+        userId
+      );
+
+      logger.business('Trip Transport Charges Created', {
+        event: 'trip_transport_charges_created',
+        userId,
+        organizationId,
+        tripId,
+        chargeCount: charges.length,
+        timestamp: new Date().toISOString()
+      });
+
+      return res.status(201).json({
+        success: true,
+        code: 'TRANSPORT_CHARGES_CREATED',
+        message: `Created ${charges.length} transport charge(s)`,
+        data: { charges }
+      });
+    } catch (error) {
+      const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+      return res.status(status).json({
+        success: false,
+        code: error?.code || 'TRANSPORT_CHARGES_FAILED',
+        message: error?.message || 'Failed to create transport charges'
+      });
+    }
   });
 
   /**

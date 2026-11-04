@@ -74,6 +74,60 @@ router.post(
 );
 router.put('/occupancy/:id', silWriteLimiter, mongoId('id'), handleValidationErrors, silController.endOccupancy);
 
+// ---- Absences (Milestone 2.1) ----
+router.post(
+  '/occupancy/:id/absences',
+  silWriteLimiter,
+  [
+    mongoId('id'),
+    body('startDate').isISO8601().withMessage('startDate must be a valid ISO 8601 date'),
+    body('endDate')
+      .optional()
+      .isISO8601()
+      .withMessage('endDate must be a valid ISO 8601 date'),
+    body('reason')
+      .optional()
+      .isIn(['hospital', 'family_leave', 'holiday', 'transition', 'other'])
+      .withMessage('reason must be one of hospital, family_leave, holiday, transition, other'),
+    body('notes')
+      .optional()
+      .trim()
+      .isLength({ max: 500 })
+      .withMessage('notes must be at most 500 characters'),
+    body('maxClaimableDays')
+      .optional()
+      .isInt({ min: 1, max: 365 })
+      .withMessage('maxClaimableDays must be an integer between 1 and 365'),
+  ],
+  handleValidationErrors,
+  silController.recordAbsence,
+);
+router.put(
+  '/occupancy/:id/absences/:absenceId',
+  silWriteLimiter,
+  [
+    mongoId('id'),
+    mongoId('absenceId'),
+    body('endDate')
+      .optional()
+      .isISO8601()
+      .withMessage('endDate must be a valid ISO 8601 date'),
+  ],
+  handleValidationErrors,
+  silController.endOccupancyAbsence,
+);
+router.get(
+  '/absences',
+  silReadLimiter,
+  [
+    query('occupancyId').optional().isMongoId().withMessage('Invalid occupancyId'),
+    query('clientId').optional().isMongoId().withMessage('Invalid clientId'),
+    query('propertyId').optional().isMongoId().withMessage('Invalid propertyId'),
+  ],
+  handleValidationErrors,
+  silController.listAbsences,
+);
+
 // ---- Ratio rules ----
 router.get('/ratio-rules', silReadLimiter, silController.listRatioRules);
 router.post(

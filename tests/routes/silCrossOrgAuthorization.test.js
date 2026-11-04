@@ -109,6 +109,11 @@ const silRoutes = [
   ['POST', '/api/sil/occupancy'],
   ['PUT', `/api/sil/occupancy/${RESOURCE_ID}`],
 
+  // Milestone 2.1: Absences
+  ['POST', `/api/sil/occupancy/${RESOURCE_ID}/absences`],
+  ['PUT', `/api/sil/occupancy/${RESOURCE_ID}/absences/${RESOURCE_ID}`],
+  ['GET', '/api/sil/absences'],
+
   ['GET', '/api/sil/ratio-rules'],
   ['POST', '/api/sil/ratio-rules'],
   ['PUT', `/api/sil/ratio-rules/${RESOURCE_ID}`],
