@@ -46,3 +46,4 @@ offlineSyncQueueSchema.index({ organizationId: 1, status: 1 });
 offlineSyncQueueSchema.index({ userId: 1, status: 1 });
 
 module.exports = mongoose.model('OfflineSyncQueue', offlineSyncQueueSchema);
+
