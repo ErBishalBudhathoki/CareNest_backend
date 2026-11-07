@@ -4,6 +4,7 @@ const request = require('supertest');
 const { rateLimitMiddleware } = require('../middleware/auth');
 const AdminAuthController = require('../controllers/adminAuthController');
 const redis = require('../config/redis');
+const { scopeKey } = require('../utils/envScope');
 
 // Mock dependencies
 jest.mock('rate-limit-redis', () => {
@@ -96,8 +97,10 @@ describe('Rate Limit Reset Feature', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     
-    // Verify redis.del was called with correct keys
-    expect(redis.del).toHaveBeenCalledWith(`rl:verify:${email}`);
-    expect(redis.del).toHaveBeenCalledWith(`rl:login:${email}`);
+    // Verify redis.del was called with the environment-scoped keys that
+    // middleware/auth.js actually writes (utils/envScope.js): a dev reset
+    // must clear `dev:rl:*` keys, never unscoped or prod ones.
+    expect(redis.del).toHaveBeenCalledWith(scopeKey(`rl:verify:${email}`));
+    expect(redis.del).toHaveBeenCalledWith(scopeKey(`rl:login:${email}`));
   });
 });

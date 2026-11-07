@@ -1,6 +1,7 @@
 
 const { rateLimitMiddleware } = require('../middleware/auth');
 const { RedisStore } = require('rate-limit-redis');
+const { scopeKey } = require('../utils/envScope');
 
 // Mock rate-limit-redis
 jest.mock('rate-limit-redis', () => {
@@ -44,25 +45,28 @@ describe('Rate Limit Configuration', () => {
 
   it('should initialize RedisStore with unique prefix for "login"', () => {
     rateLimitMiddleware('login');
-    
+
     expect(RedisStore).toHaveBeenCalledTimes(1);
     const config = RedisStore.mock.calls[0][0];
-    expect(config).toHaveProperty('prefix', 'rl:login:');
+    // Prefixes are environment-scoped (utils/envScope.js) so a dev limiter
+    // can never touch prod keys: `dev:rl:login:` / `prod:rl:login:`.
+    expect(config).toHaveProperty('prefix', scopeKey('rl:login:'));
+    expect(config).toHaveProperty('prefix', `${scopeKey('rl').split(':')[0]}:rl:login:`);
   });
 
   it('should initialize RedisStore with unique prefix for "verify"', () => {
     rateLimitMiddleware('verify');
-    
+
     expect(RedisStore).toHaveBeenCalledTimes(1);
     const config = RedisStore.mock.calls[0][0];
-    expect(config).toHaveProperty('prefix', 'rl:verify:');
+    expect(config).toHaveProperty('prefix', scopeKey('rl:verify:'));
   });
 
   it('should initialize RedisStore with unique prefix for "register"', () => {
     rateLimitMiddleware('register');
-    
+
     expect(RedisStore).toHaveBeenCalledTimes(1);
     const config = RedisStore.mock.calls[0][0];
-    expect(config).toHaveProperty('prefix', 'rl:register:');
+    expect(config).toHaveProperty('prefix', scopeKey('rl:register:'));
   });
 });
