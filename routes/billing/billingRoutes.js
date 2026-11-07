@@ -8,6 +8,7 @@ const stripeConnectOAuthController = require('../../controllers/billing/stripeCo
 const stripeDashboardController = require('../../controllers/billing/stripeDashboardController');
 const { authenticateUser } = require('../../middleware/auth');
 const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
+const { requireAdminSurface } = require('../../middleware/adminSurface');
 const {
   organizationContextMiddleware,
   requireOrganizationMatch,
@@ -29,6 +30,14 @@ const publicCheckoutLimiter = rateLimit({
 });
 
 // ===== Authenticated routes =====
+//
+// Purchase verification and entitlement status are deliberately NOT admin-gated.
+// `subscription_guard.dart` pushes SubscriptionView to *any* member when a
+// paywalled request returns 402, so a worker or participant must be able to
+// verify their own purchase and read the organisation's entitlement status.
+// They remain tenant-scoped by requireOrgMembership + requireOrganizationMatch.
+// Every other route in this router is a Configuration & Finance action and is
+// gated with requireAdminSurface.
 
 router.post(
   '/entitlements/verify/apple',
@@ -69,6 +78,7 @@ router.post(
   '/entitlements/reset',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -80,6 +90,7 @@ router.post(
   '/hosted-checkout/grant',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -92,6 +103,7 @@ router.post(
   '/recurring-agreements',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -106,6 +118,7 @@ router.get(
   '/recurring-agreements',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   recurringAgreementController.list
@@ -115,6 +128,7 @@ router.delete(
   '/recurring-agreements/:agreementId',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   billingLimiter,
   recurringAgreementController.cancel
 );
@@ -123,6 +137,7 @@ router.post(
   '/recurring/run',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   billingLimiter,
   recurringChargeController.run
 );
@@ -131,6 +146,7 @@ router.post(
   '/connect/oauth/start',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),
@@ -144,6 +160,7 @@ router.get(
   '/dashboard/overview',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -155,6 +172,7 @@ router.get(
   '/dashboard/balance',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -166,6 +184,7 @@ router.get(
   '/dashboard/payouts',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -177,6 +196,7 @@ router.get(
   '/dashboard/revenue',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -188,6 +208,7 @@ router.get(
   '/dashboard/payments',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -199,6 +220,7 @@ router.get(
   '/dashboard/risk',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   query('organizationId').notEmpty(),
@@ -211,6 +233,7 @@ router.post(
   '/dashboard/refund',
   authenticateUser,
   requireOrgMembership,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   billingLimiter,
   body('organizationId').notEmpty(),

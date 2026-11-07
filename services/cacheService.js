@@ -1,5 +1,6 @@
 const redis = require('../config/redis');
 const logger = require('../config/logger');
+const { scopeKey } = require('../utils/envScope');
 
 class CacheService {
   constructor() {
@@ -12,7 +13,7 @@ class CacheService {
    */
   async get(key) {
     try {
-      const data = await redis.get(key);
+      const data = await redis.get(scopeKey(key));
       return data ? JSON.parse(data) : null;
     } catch (error) {
       logger.error(`Cache Get Error [${key}]:`, error);
@@ -28,7 +29,7 @@ class CacheService {
    */
   async set(key, value, ttl = this.defaultTTL) {
     try {
-      await redis.set(key, JSON.stringify(value), 'EX', ttl);
+      await redis.set(scopeKey(key), JSON.stringify(value), 'EX', ttl);
     } catch (error) {
       logger.error(`Cache Set Error [${key}]:`, error);
     }
@@ -40,7 +41,7 @@ class CacheService {
    */
   async del(key) {
     try {
-      await redis.del(key);
+      await redis.del(scopeKey(key));
     } catch (error) {
       logger.error(`Cache Del Error [${key}]:`, error);
     }
@@ -51,8 +52,10 @@ class CacheService {
    * @param {string} pattern 
    */
   async clearPattern(pattern) {
+    // Scope the SCAN match as well: without it a dev pricing change would
+    // delete prod's cached prices for the same organizationId (shared Valkey).
     const stream = redis.scanStream({
-      match: pattern,
+      match: scopeKey(pattern),
       count: 100
     });
 

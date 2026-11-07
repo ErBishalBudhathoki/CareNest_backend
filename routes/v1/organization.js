@@ -2,10 +2,14 @@ const express = require('express');
 const organizationController = require('../../controllers/organizationController');
 const multiTenantController = require('../../controllers/multiTenantController');
 const { authenticateUser } = require('../../middleware/auth');
-const { 
-  organizationContextMiddleware, 
-  optionalOrganizationContext 
+const {
+  organizationContextMiddleware,
+  optionalOrganizationContext
 } = require('../../middleware/organizationContext');
+const {
+  requireAdminSurface,
+  requireMatchingOrganizationNoBodyPin,
+} = require('../../middleware/adminSurface');
 const { body, param, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
@@ -112,6 +116,27 @@ const organizationIdValidation = [
   param('organizationId')
     .trim()
     .matches(objectIdRegex).withMessage('Invalid organization ID format')
+];
+
+/**
+ * Admin-only organisation configuration writes.
+ *
+ * `updateOrganizationDetails` / `updateBranding` do `$set: req.body` over the
+ * whole Organization document (bankDetails, contactDetails, integrations),
+ * so active membership alone is not enough: a worker or participant must not
+ * be able to rewrite org-level financial configuration.
+ *
+ * `organizationContextMiddleware` resolves the org from the header first,
+ * while these controllers write to `req.params.organizationId`. The
+ * no-body-pin matcher rejects that mismatch without injecting a field into
+ * the update payload.
+ *
+ * Reads, creation, org-code verification, my-list and `switch` deliberately
+ * stay open: every member needs to read their org and switch active context.
+ */
+const adminOrganizationWriteGate = [
+  requireMatchingOrganizationNoBodyPin,
+  requireAdminSurface,
 ];
 
 /**
@@ -246,6 +271,7 @@ router.put(
   '/:organizationId',
   organizationWriteLimiter,
   organizationContextMiddleware,
+  ...adminOrganizationWriteGate,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.updateOrganizationDetails
@@ -259,6 +285,7 @@ router.post(
   '/:organizationId/contact-email/send-verification',
   organizationWriteLimiter,
   organizationContextMiddleware,
+  ...adminOrganizationWriteGate,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.sendContactEmailVerification
@@ -272,6 +299,7 @@ router.post(
   '/:organizationId/contacct-email/send-verification',
   organizationWriteLimiter,
   organizationContextMiddleware,
+  ...adminOrganizationWriteGate,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.sendContactEmailVerification
@@ -376,6 +404,7 @@ router.put(
   '/:organizationId/branding',
   organizationWriteLimiter,
   organizationContextMiddleware,
+  ...adminOrganizationWriteGate,
   organizationIdValidation,
   handleValidationErrors,
   organizationController.updateBranding

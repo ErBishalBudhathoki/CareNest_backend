@@ -11,6 +11,13 @@ jest.mock('../../models/ClientAssignment', () => ({
   updateMany: (...args) => mockUpdateMany(...args),
 }));
 
+const mockFindOne = jest.fn();
+jest.mock('../../models/Invoice', () => ({
+  Invoice: {
+    findOne: (...args) => mockFindOne(...args),
+  },
+}));
+
 const mockCreateInvoice = jest.fn();
 jest.mock('../../services/invoiceManagementService', () => ({
   InvoiceManagementService: {
@@ -51,6 +58,7 @@ function armAppointments(list) {
     data: { _id: `inv-${invoiceData.invoiceNumber}`, total: invoiceData.total },
   }));
   mockUpdateMany.mockResolvedValue({ modifiedCount: list.length });
+  mockFindOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
 }
 
 describe('generateInvoicesFromAppointments', () => {
@@ -84,10 +92,15 @@ describe('generateInvoicesFromAppointments', () => {
     const c2Payload = payloads.find((p) => p.clientId === 'c2');
     expect(c1Payload.lineItems).toHaveLength(2);
     expect(c2Payload.lineItems).toHaveLength(1);
+    // Every write is tenant-scoped: an unscoped updateMany could mark another
+    // organisation's appointments as invoiced.
     expect(mockUpdateMany).toHaveBeenCalledWith(
-      { _id: { $in: ['a1', 'a2', 'a3'] } },
+      { _id: { $in: ['a1', 'a2', 'a3'] }, organizationId: 'org-a' },
       { $set: { invoiced: true } },
     );
+    mockUpdateMany.mock.calls.forEach(([filter]) => {
+      expect(filter.organizationId).toBe('org-a');
+    });
   });
 
   test('creates individual invoices otherwise', async () => {
@@ -142,6 +155,60 @@ describe('generateInvoicesFromAppointments', () => {
     ).rejects.toThrow('exceed the NDIS price cap');
     // Appointments must not be marked invoiced when the pipeline fails.
     expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('retry / duplicate-billing guards', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('invoiceNumber and idempotencyKey are deterministic for the same request', async () => {
+    armAppointments([apt('a1', 'c1')]);
+    const args = { appointmentIds: ['a1'], organizationId: 'org-a', groupByClient: false };
+    await generateInvoicesFromAppointments(args);
+    const first = mockCreateInvoice.mock.calls[0][0];
+
+    armAppointments([apt('a1', 'c1')]);
+    await generateInvoicesFromAppointments({ ...args, appointmentIds: ['a1'] });
+    const second = mockCreateInvoice.mock.calls[0][0];
+
+    expect(second.invoiceNumber).toBe(first.invoiceNumber);
+    expect(second.metadata.idempotencyKey).toBe(first.metadata.idempotencyKey);
+    // Must not be a timestamp/random number: those make retries insert a new bill.
+    expect(first.invoiceNumber).toMatch(/^INV-BULK-[0-9a-f]{20}-[0-9a-f]{10}$/);
+  });
+
+  test('a duplicate-key rejection on retry is treated as already-billed, not a 500', async () => {
+    armAppointments([apt('a1', 'c1'), apt('a2', 'c2')]);
+    mockCreateInvoice.mockResolvedValue({ success: false, duplicateKey: true });
+    mockFindOne.mockReturnValue({
+      select: () => ({ lean: async () => ({ total: 200 }) }),
+    });
+
+    const summary = await generateInvoicesFromAppointments({
+      appointmentIds: ['a1', 'a2'],
+      organizationId: 'org-a',
+      groupByClient: false,
+    });
+
+    expect(summary.invoiceCount).toBe(0); // nothing newly created
+    expect(summary.totalAmount).toBeCloseTo(400, 5); // existing bills still accounted
+    expect(mockCreateInvoice).toHaveBeenCalledTimes(2);
+    // The retry still marks the appointments as invoiced so it cannot loop.
+    expect(mockUpdateMany).toHaveBeenCalled();
+  });
+
+  test('a non-duplicate pipeline rejection still fails closed', async () => {
+    armAppointments([apt('a1', 'c1')]);
+    mockCreateInvoice.mockResolvedValue({ success: false, error: 'price cap exceeded' });
+    await expect(
+      generateInvoicesFromAppointments({
+        appointmentIds: ['a1'],
+        organizationId: 'org-a',
+        groupByClient: false,
+      }),
+    ).rejects.toThrow('price cap exceeded');
   });
 });
 

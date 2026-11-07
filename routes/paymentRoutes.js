@@ -11,6 +11,7 @@ const {
   requireOrganizationMatch 
 } = require('../middleware/organizationContext');
 const { requireEntitlement } = require('../middleware/billing/requireEntitlement');
+const { requireAdminSurface } = require('../middleware/adminSurface');
 const { Invoice } = require('../models/Invoice');
 
 // Rate limiting
@@ -56,10 +57,16 @@ const refundValidation = [
   body('reason').optional().isString().trim()
 ];
 
-// Payment Routes
+// Every endpoint in this router is an Invoice Operations finance action
+// (intents, Stripe Connect, payment recording, credit notes, refunds). The
+// participant self-service checkout path is the separate public
+// /api/billing/public/checkout/session route, which is deliberately not gated
+// here. requireAdminSurface runs after organisation context is resolved so it
+// also rejects an admin of org A acting as an employee in org B.
 router.post('/create-intent', 
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   requireEntitlement('create_payment_intent'),
   paymentLimiter, 
@@ -71,6 +78,7 @@ router.post('/create-intent',
 router.post('/onboarding-link', 
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   requireEntitlement('stripe_onboarding'),
   paymentLimiter, 
@@ -82,6 +90,7 @@ router.post('/onboarding-link',
 router.get('/connect-status',
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   paymentLimiter,
   paymentController.getConnectStatus
@@ -92,6 +101,7 @@ router.get('/connect-status',
 router.post('/disconnect',
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationMatch('organizationId'),
   paymentLimiter,
   body('organizationId').notEmpty().withMessage('Organization ID is required'),
@@ -102,6 +112,7 @@ router.post('/disconnect',
 router.post('/record', 
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   requireEntitlement('record_payment'),
   paymentLimiter, 
@@ -114,6 +125,7 @@ router.post('/record',
 router.post('/credit-note', 
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   requireEntitlement('create_credit_note'),
   paymentLimiter, 
@@ -125,6 +137,7 @@ router.post('/credit-note',
 router.post('/credit-note/apply', 
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireEntitlement('apply_credit_note'),
   paymentLimiter, 
   applyCreditValidation, 
@@ -136,6 +149,7 @@ router.post('/credit-note/apply',
 router.post('/refund', 
   authenticateUser,
   organizationContextMiddleware,
+  requireAdminSurface,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   requireEntitlement('process_refund'),
   refundLimiter, 

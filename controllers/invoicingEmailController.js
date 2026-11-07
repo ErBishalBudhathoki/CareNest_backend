@@ -378,13 +378,16 @@ class InvoicingEmailController {
       }
 
       // Deliver asynchronously via Temporal (retried). SMTP latency or
-      // outages must not fail the request. Idempotency key makes
-      // double-taps collapse instead of double-sending.
+      // outages must not fail the request. Hash the PDF bytes, not just the
+      // length: two different invoices of equal size must not collapse into
+      // one delivery. The same key is passed to the activity as its durable
+      // claim id, so a Temporal retry cannot double-send either.
       const idempotencyKey = crypto
         .createHash('sha256')
-        .update(`${recipientEmail}|${subject}|${fileName}|${pdfBuffer.length}`)
+        .update(`${recipientEmail}|${subject}|${fileName}|`)
+        .update(pdfBuffer)
         .digest('hex')
-        .slice(0, 16);
+        .slice(0, 40);
       const workflowId = `invoice-email-${idempotencyKey}`;
       try {
         await TemporalManager.startWorkflow('SendInvoiceEmailWorkflow', {
@@ -396,6 +399,7 @@ class InvoicingEmailController {
               text: invoiceText,
               pdfBase64,
               fileName,
+              deliveryKey: idempotencyKey,
             },
           ],
           workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE',

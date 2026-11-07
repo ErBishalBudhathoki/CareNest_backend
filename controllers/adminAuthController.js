@@ -1,5 +1,6 @@
 
 const redis = require('../config/redis');
+const { scopeKey } = require('../utils/envScope');
 const { createLogger } = require('../utils/logger'); // Import createLogger instead of default export
 const SecureErrorHandler = require('../utils/errorHandler');
 
@@ -37,7 +38,8 @@ class AdminAuthController {
         // Format: prefix + key (email)
         // Note: rate-limit-redis might hash the key or use it directly depending on config.
         // With default config, it uses the key as is.
-        const key = `rl:${type}:${email}`;
+        // Must match the scoped prefix used by middleware/auth.js.
+        const key = scopeKey(`rl:${type}:${email}`);
         
         const result = await redis.del(key);
         if (result > 0) {

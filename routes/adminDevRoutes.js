@@ -90,7 +90,8 @@ async function listRlimitKeys({ maxKeys = RL_SCAN_MAX_KEYS, maxRounds = RL_SCAN_
   let truncated = false;
 
   do {
-    const result = await redis.scan(cursor, 'MATCH', 'rl:*', 'COUNT', 200);
+    // Only enumerate this environment's counters (shared Valkey).
+    const result = await redis.scan(cursor, 'MATCH', `${ENV_SCOPE}:rl:*`, 'COUNT', 200);
     cursor = Array.isArray(result) ? String(result[0]) : '0';
     const batch = Array.isArray(result) ? result[1] : [];
 
@@ -199,6 +200,7 @@ const Trip = require('../models/Trip');
 const Expense = require('../models/Expense');
 const PayrollRecord = require('../models/PayrollRecord');
 const redis = require('../config/redis');
+const { ENV_SCOPE } = require('../utils/envScope');
 const TemporalManager = require('../core/TemporalManager');
 const { createAuditLog, AUDIT_SOURCES } = require('../services/auditService');
 const { convertUsersToCSV } = require('../services/csvExport');

@@ -3,6 +3,7 @@ const multer = require('multer');
 const multerS3 = require('multer-s3');
 const path = require('path');
 const fs = require('fs');
+const { scopePath } = require('../utils/envScope');
 
 // Ensure uploads directory exists for local fallback
 const uploadDir = path.join(__dirname, '../uploads');
@@ -125,7 +126,10 @@ if (isR2Configured) {
                 const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
                 const folder = resolveUploadFolder(req, file);
                 
-                const key = `${folder}/${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`;
+                // R2 is a single shared bucket for dev and prod. Prefix the
+                // object path with the environment so a dev upload can never
+                // collide with or overwrite a prod object.
+                const key = scopePath(`${folder}/${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
                 console.log(`Uploading file to R2: ${key}`);
                 cb(null, key);
             }

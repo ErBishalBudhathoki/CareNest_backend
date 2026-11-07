@@ -134,9 +134,17 @@ const statsValidation = [
   query('endDate').optional().isISO8601().withMessage('Invalid end date')
 ];
 
+// ---------------------------------------------------------------------------
+// Invoice Operations is an ADMIN-ONLY surface. Client-facing invoice access is
+// served by the separate /client-portal/invoices routes, so every route in this
+// router must refuse employees and clients at the API layer — a hidden UI menu
+// is not an authorization boundary.
+// ---------------------------------------------------------------------------
+
 // Create a new invoice
 router.post('/invoices',
   authenticateUser,
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationMatch('organizationId'),
   requireEntitlement('create_invoice'),
@@ -149,6 +157,7 @@ router.post('/invoices',
 // Get list of invoices for an organization
 router.get('/invoices', 
   authenticateUser, 
+  requireAdmin,
   organizationContextMiddleware,
   standardLimiter, 
   getInvoicesValidation, 
@@ -159,6 +168,7 @@ router.get('/invoices',
 // Get details of a specific invoice
 router.get('/invoices/:invoiceId', 
   authenticateUser, 
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   standardLimiter, 
@@ -170,6 +180,7 @@ router.get('/invoices/:invoiceId',
 // Update payment status
 router.patch('/invoices/:invoiceId/payment-status', 
   authenticateUser, 
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   strictLimiter, 
@@ -181,6 +192,7 @@ router.patch('/invoices/:invoiceId/payment-status',
 // Share an invoice
 router.post('/invoices/:invoiceId/share', 
   authenticateUser, 
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   standardLimiter, 
@@ -192,6 +204,7 @@ router.post('/invoices/:invoiceId/share',
 // Share an invoice as PDF
 router.post('/invoices/:invoiceId/share/pdf', 
   authenticateUser, 
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   standardLimiter, 
@@ -203,6 +216,7 @@ router.post('/invoices/:invoiceId/share/pdf',
 // Replace the stored PDF for an invoice (e.g. to embed the payment link)
 router.post('/invoices/:invoiceId/pdf',
   authenticateUser,
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   standardLimiter,
@@ -215,6 +229,7 @@ router.post('/invoices/:invoiceId/pdf',
 // Delete an invoice
 router.delete('/invoices/:invoiceId', 
   authenticateUser, 
+  requireAdmin,
   organizationContextMiddleware,
   requireOrganizationOwnership('invoiceId', () => Invoice),
   strictLimiter, 
@@ -227,9 +242,9 @@ router.delete('/invoices/:invoiceId',
 router.get(
   '/invoices/stats/:organizationId',
   authenticateUser,
+  requireAdmin,
   organizationContextMiddleware,
   standardLimiter,
-  requireAdmin,
   requireOrganizationMatch('organizationId'),
   statsValidation,
   handleValidationErrors,

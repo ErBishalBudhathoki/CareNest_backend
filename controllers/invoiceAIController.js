@@ -74,9 +74,13 @@ exports.detectAnomalies = async (req, res) => {
 exports.predictPayment = async (req, res) => {
   try {
     const { invoiceId } = req.params;
+    const organizationId =
+      (req.organizationContext && req.organizationContext.organizationId) ||
+      req.user?.organizationId;
 
-    // Get invoice
-    const invoice = await Invoice.findById(invoiceId);
+    // An invoice id is not a tenant boundary. Without the organisation filter
+    // any member could read another tenant's invoice by guessing/leaking an id.
+    const invoice = await Invoice.findOne({ _id: invoiceId, organizationId });
     if (!invoice) {
       return res.status(404).json({
         success: false,
@@ -115,7 +119,13 @@ const Organization = require('../models/Organization');
  */
 exports.autoGenerateInvoices = async (req, res) => {
   try {
-    const { organizationId, startDate, endDate, validateBeforeGeneration, groupByClient, forceManual } = req.body;
+    // The router pins organizationId to the validated membership context.
+    // Prefer that context directly so a remounted/unpinned router still cannot
+    // generate invoices for an arbitrary tenant.
+    const organizationId =
+      (req.organizationContext && req.organizationContext.organizationId) ||
+      req.body.organizationId;
+    const { startDate, endDate, validateBeforeGeneration, groupByClient, forceManual } = req.body;
 
     if (!organizationId) {
       return res.status(400).json({
@@ -231,8 +241,11 @@ exports.getSmartReminders = async (req, res) => {
   try {
     const { invoiceId } = req.params;
 
-    // Get invoice
-    const invoice = await Invoice.findById(invoiceId);
+    // Get invoice, scoped to the validated organisation.
+    const organizationId =
+      (req.organizationContext && req.organizationContext.organizationId) ||
+      req.user?.organizationId;
+    const invoice = await Invoice.findOne({ _id: invoiceId, organizationId });
     if (!invoice) {
       return res.status(404).json({
         success: false,
@@ -273,7 +286,10 @@ exports.getSmartReminders = async (req, res) => {
  */
 exports.generateFromText = async (req, res) => {
   try {
-    const { organizationId, textNote } = req.body;
+    const organizationId =
+      (req.organizationContext && req.organizationContext.organizationId) ||
+      req.body.organizationId;
+    const { textNote } = req.body;
     if (!organizationId || !textNote) {
       return res.status(400).json({ success: false, message: 'organizationId and textNote are required' });
     }

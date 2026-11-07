@@ -1,4 +1,10 @@
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  scopePath,
+  readCandidatePaths,
+  isKeyForCurrentScope,
+  isObjectNotFoundError,
+} = require('../utils/envScope');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../config/logger');
@@ -63,6 +69,27 @@ function extractR2Key(pathname, bucket) {
 }
 
 /**
+ * Fetch an object written after env-scoping, falling back to the legacy
+ * unscoped key for rows created before the migration. A key that explicitly
+ * names a different environment is never readable (see the caller guards).
+ */
+async function getR2Object(client, bucket, rawKey) {
+  let lastError;
+  for (const candidate of readCandidatePaths(rawKey)) {
+    try {
+      const object = await client.send(
+        new GetObjectCommand({ Bucket: bucket, Key: candidate })
+      );
+      return { object, key: candidate };
+    } catch (error) {
+      if (!isObjectNotFoundError(error)) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('R2 object not found');
+}
+
+/**
  * Build the authenticated backend URL for an R2/local file URL.
  * Emitters must return THIS (never raw public URLs) so files stay behind
  * auth after the bucket goes private. Works with absolute backend
@@ -101,7 +128,13 @@ const downloadPublicLogo = catchAsync(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Unsupported file host' });
   }
   const key = extractR2Key(parsed.pathname, process.env.R2_BUCKET_NAME);
-  if (!key.toLowerCase().startsWith('logos/')) {
+  // Reject a URL pointing at the other environment's namespace outright.
+  if (!isKeyForCurrentScope(key)) {
+    return res.status(400).json({ success: false, message: 'Invalid file URL' });
+  }
+  const scopedLogoPrefix = scopePath('logos/').toLowerCase();
+  const lowerKey = key.toLowerCase();
+  if (!lowerKey.startsWith('logos/') && !lowerKey.startsWith(scopedLogoPrefix)) {
     return res.status(400).json({
       success: false,
       message: 'Only organization logos are publicly accessible',
@@ -113,8 +146,8 @@ const downloadPublicLogo = catchAsync(async (req, res) => {
     return res.status(500).json({ success: false, message: 'Storage not configured' });
   }
   try {
-    const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-    setDownloadHeaders(res, key.split('/').pop() || 'logo', object.ContentType, object.ContentLength);
+    const { object, key: resolvedKey } = await getR2Object(client, bucket, key);
+    setDownloadHeaders(res, resolvedKey.split('/').pop() || 'logo', object.ContentType, object.ContentLength);
     res.setHeader('Cache-Control', 'public, max-age=86400');
     if (!object.Body || typeof object.Body.pipe !== 'function') {
       return res.status(500).json({ success: false, message: 'Unexpected storage response' });
@@ -197,6 +230,10 @@ exports.downloadFile = catchAsync(async (req, res) => {
     if (!key) {
       return res.status(400).json({ success: false, message: 'Invalid R2 object key' });
     }
+    // A dev URL must never be usable to read a prod object (shared bucket).
+    if (!isKeyForCurrentScope(key)) {
+      return res.status(400).json({ success: false, message: 'Invalid R2 object key' });
+    }
 
     const bucket = process.env.R2_BUCKET_NAME;
     if (!bucket) {
@@ -207,12 +244,7 @@ exports.downloadFile = catchAsync(async (req, res) => {
     }
 
     try {
-      const object = await client.send(
-        new GetObjectCommand({
-          Bucket: bucket,
-          Key: key
-        })
-      );
+      const { object } = await getR2Object(client, bucket, key);
 
       setDownloadHeaders(
         res,

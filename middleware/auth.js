@@ -9,6 +9,7 @@ const { securityMonitor } = require('../utils/securityMonitor');
 const keyRotationService = require('../services/jwtKeyRotationService');
 const firebaseAdminConfig = require('../firebase-admin-config');
 const { isPublicAuthPath } = require('./apiAccessPolicy');
+const { scopeKey } = require('../utils/envScope');
 // Support both export shapes:
 // - { admin, messaging } (production module)
 // - { auth: () => ... } (unit tests mocking firebase-admin-config)
@@ -758,7 +759,8 @@ function rateLimitMiddleware(type) {
     if (redis.isConfigured !== false) {
       rateLimitOptions.store = new RedisStore({
         sendCommand: (...args) => redis.call(...args),
-        prefix: `rl:${type}:`, // Unique prefix for each rate limiter type
+        // Unique prefix per limiter type AND per environment (shared Valkey).
+        prefix: scopeKey(`rl:${type}:`),
       });
       // Keep auth endpoints available even during transient Redis issues.
       rateLimitOptions.passOnStoreError = true;

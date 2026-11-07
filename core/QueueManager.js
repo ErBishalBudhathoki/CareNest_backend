@@ -1,5 +1,6 @@
 const redis = require('../config/redis');
 const logger = require('../config/logger');
+const { ENV_SCOPE } = require('../utils/envScope');
 
 // DEPRECATED PATH: BullMQ queues are disabled on Cloud Run (Redis limits)
 // and all former producers (cron_backup/*, workers/*, ShiftSubscriber)
@@ -128,6 +129,9 @@ class QueueManager {
         const { Queue } = getBullMQ();
         this.queues[name] = new Queue(name, { 
           connection: this.connection,
+          // BullMQ keys are shared Valkey keys. An environment-scoped prefix
+          // keeps dev jobs out of prod queues entirely.
+          prefix: `${ENV_SCOPE}:bull`,
           defaultJobOptions: {
             removeOnComplete: 100,
             removeOnFail: 50,
@@ -195,6 +199,8 @@ class QueueManager {
         }
       }, { 
         connection: this.connection,
+        // Must match the Queue prefix or the worker polls a different keyspace.
+        prefix: `${ENV_SCOPE}:bull`,
         autorun: true,
         settings: {
           stalledInterval: 30000,

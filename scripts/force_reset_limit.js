@@ -2,6 +2,7 @@ const Redis = require('ioredis');
 const path = require('path');
 // Load env from the backend root directory (one level up from scripts)
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const { scopeKey } = require('../utils/envScope');
 
 // Initialize Redis connection
 const redisConfig = process.env.REDIS_URL || {
@@ -32,7 +33,7 @@ async function resetLimits() {
   let totalDeleted = 0;
 
   for (const type of types) {
-    const key = `rl:${type}:${targetEmail}`;
+    const key = scopeKey(`rl:${type}:${targetEmail}`);
     
     // Check if key exists
     const exists = await redis.exists(key);

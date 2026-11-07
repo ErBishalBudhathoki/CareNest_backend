@@ -266,11 +266,14 @@ describe('NDISClaimService.generateBatch', () => {
     expect(result.batch.fileUrl).toBe('');
   });
 
-  test('stores the CSV in R2 with a storage ref when R2 is configured', async () => {
+  test('stores the CSV in R2 under THIS environment namespace', async () => {
+    const { scopePath } = require('../../utils/envScope');
+    const scopedKey = scopePath('claimBatches/org1/b1.csv');
+
     isR2Configured.mockReturnValue(true);
     uploadBufferToR2.mockResolvedValue({
-      key: 'claimBatches/org1/b1.csv',
-      location: 'https://cdn.example.com/claimBatches/org1/b1.csv',
+      key: scopedKey,
+      location: `https://cdn.example.com/${scopedKey}`,
     });
 
     const result = await ndisClaimService.generateBatch('org1', {
@@ -278,14 +281,17 @@ describe('NDISClaimService.generateBatch', () => {
       to: '2026-04-30',
     });
 
+    // Dev and prod share one R2 bucket: an unscoped key would let a dev batch
+    // overwrite a production claim CSV.
     expect(uploadBufferToR2).toHaveBeenCalledWith(
       expect.objectContaining({
-        key: 'claimBatches/org1/b1.csv',
+        key: scopedKey,
         contentType: 'text/csv',
       }),
     );
-    expect(result.batch.fileRef).toBe('claimBatches/org1/b1.csv');
-    expect(result.batch.fileUrl).toBe('https://cdn.example.com/claimBatches/org1/b1.csv');
+    expect(scopedKey).toMatch(/^(dev|prod|staging|test)\//);
+    expect(result.batch.fileRef).toBe(scopedKey);
+    expect(result.batch.fileUrl).toBe(`https://cdn.example.com/${scopedKey}`);
     expect(result.batch.storageProvider).toBe('r2');
   });
 
@@ -548,6 +554,259 @@ describe('NDISClaimService.generateBatch', () => {
     expect(mockInvoice.auditTrail.changeHistory).toHaveLength(1);
     expect(mockInvoice.auditTrail.changeHistory[0].action).toBe('ndis_claim_paid');
     expect(mockInvoice.save).toHaveBeenCalled();
+  });
+});
+
+describe('NDISClaimService.generateBatch idempotency & period boundaries', () => {
+  beforeEach(() => {
+    Organization.findOne.mockResolvedValue({
+      ndisRegistration: { registrationNumber: '405000123' },
+      abn: VALID_ABN,
+    });
+    Client.find.mockReturnValue(
+      lean([{ _id: 'c1', fundingType: 'ndia_managed', ndisNumber: '430123456' }]),
+    );
+    ClaimLine.find.mockReturnValue(lean([]));
+    ClaimBatch.create.mockImplementation(async (doc) => ({ _id: 'b1', ...doc, save: jest.fn() }));
+    ClaimLine.insertMany.mockResolvedValue([]);
+    isR2Configured.mockReturnValue(false);
+    uploadBufferToR2.mockReset();
+    ClaimBatch.findOne.mockReset();
+  });
+
+  test('an idempotent replay returns the existing batch without creating another', async () => {
+    const existing = { _id: 'b-existing', organizationId: 'org1', totals: { lines: 1 } };
+    ClaimBatch.findOne.mockResolvedValueOnce(existing);
+    ClaimLine.find.mockReturnValueOnce(lean([])).mockReturnValue(lean([]));
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+      idempotencyKey: 'claim:org1:2026-04-01:2026-04-30:valid',
+    });
+
+    expect(result.isIdempotentReplay).toBe(true);
+    expect(result.batch).toBe(existing);
+    expect(ClaimBatch.findOne).toHaveBeenCalledWith({
+      organizationId: 'org1',
+      idempotencyKey: 'claim:org1:2026-04-01:2026-04-30:valid',
+    });
+    expect(ClaimBatch.create).not.toHaveBeenCalled();
+  });
+
+  test('a duplicate-key race recovers the winning batch instead of throwing', async () => {
+    ClaimBatch.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      _id: 'b-winner',
+      organizationId: 'org1',
+    });
+    const duplicateError = Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+    ClaimBatch.create.mockRejectedValueOnce(duplicateError);
+    Invoice.find.mockReturnValue(lean([]));
+    ClaimLine.find.mockReturnValue(lean([]));
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+      idempotencyKey: 'race-key',
+    });
+
+    expect(result.isIdempotentReplay).toBe(true);
+    expect(result.batch._id).toBe('b-winner');
+  });
+
+  test('the last day of the period is inclusive (a late-evening line is claimed)', async () => {
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-last-day',
+          clientId: 'c1',
+          createdAt: new Date('2026-04-30T23:30:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-30T23:30:00Z'),
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '2026-04-01',
+      to: '2026-04-30',
+    });
+
+    expect(result.lineCount).toBe(1);
+  });
+
+  test('a DD/MM/YYYY period is parsed day-first, not as US MM/DD', async () => {
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-apr',
+          clientId: 'c1',
+          createdAt: new Date('2026-04-15T10:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+              date: new Date('2026-04-15T10:00:00Z'),
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '01/04/2026',
+      to: '30/04/2026',
+    });
+
+    expect(result.lineCount).toBe(1);
+  });
+
+  // Regression: legacy invoices can carry a display-format (DD/MM/YYYY) string
+  // in lineItems[].date. `new Date('01/04/2026')` used to read 4 January and
+  // silently drop the line from an April claim.
+  test('a DD/MM/YYYY line-item date exports 01/04/2026, not a US-parsed date', async () => {
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-slash',
+          clientId: 'c1',
+          createdAt: new Date('2026-04-01T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+              date: '01/04/2026',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '01/04/2026',
+      to: '30/04/2026',
+    });
+
+    expect(result.lineCount).toBe(1);
+    const cols = result.csv.split('\r\n')[1].split(',');
+    expect(cols[2]).toBe('01/04/2026');
+    expect(cols[3]).toBe('01/04/2026');
+  });
+
+  // Regression: `new Date('31/12/2026')` is Invalid Date, and the old
+  // `.toISOString()` dedupe key threw RangeError, aborting the whole batch.
+  test('a day-first date with day > 12 is skipped, not crashed on', async () => {
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-dec',
+          clientId: 'c1',
+          createdAt: new Date('2026-04-10T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+              date: '31/12/2026',
+            },
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+              date: '10/04/2026',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '01/04/2026',
+      to: '30/04/2026',
+    });
+
+    expect(result.lineCount).toBe(1);
+    expect(result.csv.split('\r\n')[1].split(',')[2]).toBe('10/04/2026');
+  });
+
+  test('a slash-date SIL period renders day-first in both BPR date columns', async () => {
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-sil-slash',
+          clientId: 'c1',
+          createdAt: new Date('2026-04-01T00:00:00Z'),
+          metadata: { silPeriod: { from: '01/04/2026', to: '07/04/2026' } },
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '01/04/2026',
+      to: '30/04/2026',
+    });
+
+    expect(result.lineCount).toBe(1);
+    const cols = result.csv.split('\r\n')[1].split(',');
+    expect(cols[2]).toBe('01/04/2026');
+    expect(cols[3]).toBe('07/04/2026');
+  });
+
+  test('a slash-date line is still deduped against an already-claimed line', async () => {
+    const claimedLine = {
+      invoiceId: 'inv-slash',
+      supportNumber: '01_011_0107_1_1',
+      serviceDate: new Date('2026-04-01T00:00:00Z'),
+    };
+    ClaimLine.find
+      .mockReturnValueOnce({ select: () => ({ lean: async () => [claimedLine] }) })
+      .mockReturnValue(lean([]));
+    Invoice.find.mockReturnValue(
+      lean([
+        {
+          _id: 'inv-slash',
+          clientId: 'c1',
+          createdAt: new Date('2026-04-01T00:00:00Z'),
+          lineItems: [
+            {
+              supportItemNumber: '01_011_0107_1_1',
+              quantity: 1,
+              price: 81.27,
+              unit: 'H',
+              date: '01/04/2026',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await ndisClaimService.generateBatch('org1', {
+      from: '01/04/2026',
+      to: '30/04/2026',
+    });
+
+    expect(result.lineCount).toBe(0);
   });
 });
 

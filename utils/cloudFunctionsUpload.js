@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const { Readable } = require('stream');
 const crypto = require('crypto');
+const { scopePath } = require('./envScope');
 
 // Ensure uploads directory exists for local fallback
 const uploadDir = path.join(__dirname, '../uploads');
@@ -165,7 +166,8 @@ async function uploadToR2(fileBuffer, originalFilename, fieldname) {
     if (fieldname === 'photo') folder = 'profileImage';
 
     const extension = path.extname(originalFilename);
-    const key = `${folder}/${fieldname}-${uniqueSuffix}${extension}`;
+    // Environment-scoped object path (shared R2 bucket).
+    const key = scopePath(`${folder}/${fieldname}-${uniqueSuffix}${extension}`);
 
     return uploadBufferToR2({
         buffer: fileBuffer,
@@ -189,22 +191,27 @@ async function uploadBufferToR2({ buffer, key, contentType = 'application/octet-
         throw new Error('R2 is not configured');
     }
 
-    console.log(`☁️ Uploading to R2: ${key}`);
+    // Central enforcement point: every server-generated artifact (NDIS claim
+    // CSVs, PDFs, exports) lands under the environment namespace. scopePath is
+    // idempotent, so callers that already scoped the key are unaffected.
+    const objectKey = scopePath(key);
+
+    console.log(`☁️ Uploading to R2: ${objectKey}`);
 
     const command = new PutObjectCommand({
         Bucket: process.env.R2_BUCKET_NAME,
-        Key: key,
+        Key: objectKey,
         Body: buffer,
         ContentType: contentType
     });
 
     await client.send(command);
 
-    const publicUrl = buildPublicUrl(key);
+    const publicUrl = buildPublicUrl(objectKey);
     console.log(`✅ Uploaded to R2: ${publicUrl}`);
 
     return {
-        key,
+        key: objectKey,
         location: publicUrl
     };
 }

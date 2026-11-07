@@ -3,6 +3,10 @@ const router = express.Router();
 const pricingController = require('../../controllers/pricingController');
 const { authenticateUser } = require('../../middleware/auth');
 const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
+const {
+  requireAdminSurface,
+  requireMatchingOrganization,
+} = require('../../middleware/adminSurface');
 const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const { validationResult } = require('express-validator');
@@ -51,6 +55,27 @@ const handleValidationErrors = (req, res, next) => {
 // Apply authentication to all routes
 router.use(authenticateUser);
 router.use(requireOrgMembership);
+
+// Pricing/catalogue configuration is an admin-only financial surface: these
+// values drive the NDIS price cap and plan-budget gates that decide whether an
+// invoice or claim line may be issued. Before this gate, any authenticated
+// member could create/approve/delete price caps and bulk-import catalogue rows.
+//
+// Only state-changing methods are gated — employees still need read access for
+// price lookups. A method-based gate also fails closed for write routes added
+// in the future. Body organisationId is pinned to the validated membership so
+// a caller cannot configure a different tenant's pricing.
+const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+// POST is also used for a read-only bulk price lookup; staff still need it.
+const READ_ONLY_POST_PATHS = new Set(['/bulk-lookup']);
+const isStateChanging = (req) =>
+  STATE_CHANGING_METHODS.has(req.method) &&
+  !(req.method === 'POST' && READ_ONLY_POST_PATHS.has(req.path));
+const onStateChangingMethods = (middleware) => (req, res, next) =>
+  isStateChanging(req) ? middleware(req, res, next) : next();
+
+router.use(onStateChangingMethods(requireMatchingOrganization));
+router.use(onStateChangingMethods(requireAdminSurface));
 
 // Create custom pricing
 router.post(

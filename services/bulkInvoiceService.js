@@ -1,8 +1,60 @@
 const ClientAssignment = require('../models/ClientAssignment');
+const { Invoice } = require('../models/Invoice');
 const logger = require('../utils/logger');
 const { formatDisplayDate } = require('../utils/dateHelpers');
 const { InvoiceManagementService: invoiceManagementService } = require('./invoiceManagementService');
 const crypto = require('crypto');
+
+/**
+ * Stable key for the WHOLE request, derived from the submitted IDs (not from
+ * the filtered appointment list). A Temporal activity retry re-sends the same
+ * IDs, so keys stay identical even after some appointments were already marked
+ * invoiced by the first (partially failed) attempt.
+ */
+function _requestKey(organizationId, appointmentIds) {
+  const sorted = [...appointmentIds].map(String).sort().join(',');
+  return crypto
+    .createHash('sha256')
+    .update(`${organizationId}:${sorted}`)
+    .digest('hex')
+    .slice(0, 20);
+}
+
+/**
+ * createInvoice() returns duplicateKey:true for Mongo error 11000 (the
+ * unique invoiceNumber / metadata.idempotencyKey indexes). On a retry that is
+ * SUCCESS, not a failure — otherwise the activity retries forever and reports
+ * a 500 for a bill that was already created.
+ */
+async function _createInvoiceOrSkip(invoiceData) {
+  const summary = await invoiceManagementService.createInvoice(invoiceData);
+  if (summary && summary.success === false) {
+    if (summary.duplicateKey) {
+      const existing = await Invoice.findOne({
+        invoiceNumber: invoiceData.invoiceNumber,
+        organizationId: invoiceData.organizationId,
+      })
+        .select('total financialSummary.totalAmount')
+        .lean();
+      return { created: false, total: Number(existing?.total ?? invoiceData.total ?? 0) };
+    }
+    throw new Error(summary.error || 'Failed to create bulk invoice');
+  }
+  return {
+    created: true,
+    total: Number(summary?.data?.total ?? invoiceData.total ?? 0),
+  };
+}
+
+/** Mark ONLY the appointments we actually fetched, scoped to this tenant. */
+async function _markInvoiced(appointments, organizationId) {
+  const ids = appointments.map((apt) => apt._id);
+  if (ids.length === 0) return;
+  await ClientAssignment.updateMany(
+    { _id: { $in: ids }, organizationId },
+    { $set: { invoiced: true } },
+  );
+}
 
 /**
  * Core bulk-invoice generation, extracted from bulkActionsController so it
@@ -22,6 +74,8 @@ async function generateInvoicesFromAppointments({
   groupByClient,
   dueDate,
 }) {
+  const requestKey = _requestKey(organizationId, appointmentIds);
+
   // Get appointments
   const appointments = await ClientAssignment.find({
     _id: { $in: appointmentIds },
@@ -58,7 +112,15 @@ async function generateInvoicesFromAppointments({
       const invoiceData = {
         organizationId,
         clientId,
-        invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
+        invoiceNumber: `INV-BULK-${requestKey}-${crypto
+          .createHash('sha256')
+          .update(String(clientId))
+          .digest('hex')
+          .slice(0, 10)}`,
+        metadata: {
+          generationMethod: 'bulk_appointments',
+          idempotencyKey: `bulk:${requestKey}:client:${clientId}`,
+        },
         issueDate: new Date(),
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         status: 'pending',
@@ -100,24 +162,22 @@ async function generateInvoicesFromAppointments({
         currency: 'AUD',
       };
 
-      const summary = await invoiceManagementService.createInvoice(invoiceData);
-      if (summary && summary.success === false) {
-        throw new Error(summary.error || 'Failed to create bulk invoice');
-      }
+      const outcome = await _createInvoiceOrSkip(invoiceData);
+      if (outcome.created) invoiceCount += 1;
+      summaryTotal += outcome.total;
 
-      invoiceCount += 1;
-      summaryTotal += Number(summary?.data?.total || 0);
+      // Mark this group immediately. If a later group fails, the retry only
+      // sees the unpaid remainder instead of re-billing the whole request.
+      await _markInvoiced(apts, organizationId);
     }
 
-    // Mark appointments as invoiced
-    await ClientAssignment.updateMany(
-      { _id: { $in: appointmentIds } },
-      { $set: { invoiced: true } },
-    );
+    // Belt-and-braces: tenant-scoped, and only IDs we actually read.
+    await _markInvoiced(appointments, organizationId);
 
     logger.info(`Bulk generated ${invoiceCount} invoices`, {
       organizationId,
       invoiceCount,
+      skippedDuplicates: Object.keys(clientGroups).length - invoiceCount,
       appointmentCount: appointments.length,
       groupByClient,
     });
@@ -137,7 +197,15 @@ async function generateInvoicesFromAppointments({
     payloads.push({
       organizationId,
       clientId: apt.clientId._id,
-      invoiceNumber: `INV-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
+      invoiceNumber: `INV-BULK-${requestKey}-${crypto
+        .createHash('sha256')
+        .update(String(apt._id))
+        .digest('hex')
+        .slice(0, 10)}`,
+      metadata: {
+        generationMethod: 'bulk_appointments',
+        idempotencyKey: `bulk:${requestKey}:appointment:${apt._id}`,
+      },
       issueDate: new Date(),
       dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
       status: 'pending',
@@ -165,29 +233,29 @@ async function generateInvoicesFromAppointments({
   });
 
   let createdTotal = 0;
-  for (const invoiceData of payloads) {
-    const summary = await invoiceManagementService.createInvoice(invoiceData);
-    if (summary && summary.success === false) {
-      throw new Error(summary.error || 'Failed to create bulk invoice');
-    }
-    createdTotal += Number(summary?.data?.total ?? invoiceData.total ?? 0);
+  let createdCount = 0;
+  for (let i = 0; i < payloads.length; i += 1) {
+    const invoiceData = payloads[i];
+    const outcome = await _createInvoiceOrSkip(invoiceData);
+    if (outcome.created) createdCount += 1;
+    createdTotal += outcome.total;
+    // Mark each appointment as soon as its bill exists (retry-safe).
+    await _markInvoiced([appointments[i]], organizationId);
   }
 
-  // Mark appointments as invoiced
-  await ClientAssignment.updateMany(
-    { _id: { $in: appointmentIds } },
-    { $set: { invoiced: true } },
-  );
+  // Belt-and-braces: tenant-scoped, and only IDs we actually read.
+  await _markInvoiced(appointments, organizationId);
 
-  logger.info(`Bulk generated ${payloads.length} invoices`, {
+  logger.info(`Bulk generated ${createdCount} invoices`, {
     organizationId,
-    invoiceCount: payloads.length,
+    invoiceCount: createdCount,
+    skippedDuplicates: payloads.length - createdCount,
     appointmentCount: appointments.length,
     groupByClient,
   });
 
   return {
-    invoiceCount: payloads.length,
+    invoiceCount: createdCount,
     appointmentCount: appointments.length,
     totalAmount: createdTotal,
   };

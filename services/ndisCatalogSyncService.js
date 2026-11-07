@@ -8,6 +8,11 @@ const {
 } = require('@aws-sdk/client-s3');
 const { getDatabase } = require('../config/database');
 const logger = require('../config/logger');
+const {
+  readCandidatePaths,
+  isKeyForCurrentScope,
+  isObjectNotFoundError,
+} = require('../utils/envScope');
 
 const SUPPORT_ITEMS_COLLECTION = 'support_items';
 const SYNC_STATE_COLLECTION = 'reference_sync_state';
@@ -207,6 +212,39 @@ class NdisCatalogSyncService {
 
   _buildSyncStateId(config) {
     return `ndis_catalog:${config.provider}:${config.bucket}:${config.key}`;
+  }
+
+  /**
+   * Resolve the catalog object key for the CURRENT environment.
+   *
+   * Dev and prod share the R2/GCS bucket. New uploads are written under
+   * `<env>/...` by utils/envScope.js, so the scoped key must win; catalogs
+   * uploaded before scoping are still readable via the unscoped fallback.
+   * A key that explicitly names a different environment is rejected rather
+   * than silently reading the wrong price guide.
+   *
+   * @returns {Promise<{key: string, head: object}>}
+   */
+  async _resolveCatalogObject(client, config) {
+    if (!isKeyForCurrentScope(config.key)) {
+      throw new Error(
+        `NDIS catalog key belongs to a different environment: ${config.key}`,
+      );
+    }
+
+    let lastError;
+    for (const candidate of readCandidatePaths(config.key)) {
+      try {
+        const head = await client.send(
+          new HeadObjectCommand({ Bucket: config.bucket, Key: candidate }),
+        );
+        return { key: candidate, head };
+      } catch (error) {
+        if (!isObjectNotFoundError(error)) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('NDIS catalog object not found');
   }
 
   _createClient(config) {
@@ -550,12 +588,9 @@ class NdisCatalogSyncService {
     let remoteEtag = null;
     let remoteLastModified = null;
     const client = this._createClient(config);
-    const head = await client.send(
-      new HeadObjectCommand({
-        Bucket: config.bucket,
-        Key: config.key,
-      }),
-    );
+    const resolved = await this._resolveCatalogObject(client, config);
+    const resolvedKey = resolved.key;
+    const head = resolved.head;
 
     remoteEtag = stripQuotes(head.ETag);
     remoteLastModified = head.LastModified
@@ -579,7 +614,7 @@ class NdisCatalogSyncService {
         source: {
           provider: config.provider,
           bucket: config.bucket,
-          key: config.key,
+          key: resolvedKey,
           etag: remoteEtag,
           lastModified: remoteLastModified,
         },
@@ -589,7 +624,7 @@ class NdisCatalogSyncService {
     const objectResponse = await client.send(
       new GetObjectCommand({
         Bucket: config.bucket,
-        Key: config.key,
+        Key: resolvedKey,
       }),
     );
     payload = await bodyToString(objectResponse.Body);
@@ -615,7 +650,7 @@ class NdisCatalogSyncService {
     const sourceMetadata = {
       provider: config.provider,
       bucket: config.bucket,
-      key: config.key,
+      key: resolvedKey,
       etag: remoteEtag,
       lastModified: remoteLastModified,
       payloadHash,
@@ -669,7 +704,7 @@ class NdisCatalogSyncService {
         $set: {
           provider: config.provider,
           bucket: config.bucket,
-          key: config.key,
+          key: resolvedKey,
           etag: remoteEtag,
           lastModified: remoteLastModified,
           payloadHash,
@@ -688,7 +723,7 @@ class NdisCatalogSyncService {
       source: {
         provider: config.provider,
         bucket: config.bucket,
-        key: config.key,
+        key: resolvedKey,
         etag: remoteEtag,
         lastModified: remoteLastModified,
       },

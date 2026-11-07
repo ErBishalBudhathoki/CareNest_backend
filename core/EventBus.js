@@ -1,11 +1,14 @@
 const EventEmitter = require('events');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
+const { scopeKey } = require('../utils/envScope');
 
 class EventBus extends EventEmitter {
   constructor() {
     super();
-    this.channel = 'app_events';
+    // Shared Valkey pub/sub: scope the channel so dev events are never
+    // delivered to prod subscribers (and vice versa).
+    this.channel = scopeKey('app_events');
     this.redisEnabled = false;
     this.subscribed = false;
     this.connectionErrors = 0;

@@ -4,11 +4,12 @@ const rateLimit = require('express-rate-limit');
 const { body, param, query } = require('express-validator');
 const clientController = require('../controllers/clientController');
 const { authenticateUser, requireRoles } = require('../middleware/auth');
-const { 
-  organizationContextMiddleware, 
+const {
+  organizationContextMiddleware,
   requireOrganizationOwnership,
-  requireOrganizationMatch 
+  requireOrganizationMatch
 } = require('../middleware/organizationContext');
+const { requireAdminSurface } = require('../middleware/adminSurface');
 
 // Rate limiting
 const clientLimiter = rateLimit({
@@ -56,11 +57,14 @@ router.put(
   clientController.updateClient
 );
 
-// Update the participant's NDIS plan period/budget (used by the plan gate)
+// Update the participant's NDIS plan period/budget (used by the plan gate).
+// The budget is the ceiling for all subsequent invoice/claim validation, so
+// only an admin-equivalent token may change it.
 router.put(
   '/client/:clientId/plan',
   clientLimiter,
   organizationContextMiddleware,
+  requireAdminSurface,
   param('clientId').isMongoId(),
   body('organizationId').optional().isMongoId(),
   body('userEmail').optional().isEmail(),

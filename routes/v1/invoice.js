@@ -6,6 +6,10 @@ const { validationResult } = require('express-validator');
 const invoiceController = require('../../controllers/v1/invoiceController');
 const { authenticateUser } = require('../../middleware/auth');
 const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
+const {
+  requireMatchingOrganization,
+  requireAdminSurface,
+} = require('../../middleware/adminSurface');
 
 // Rate limiting
 const invoiceReadLimiter = rateLimit({
@@ -213,9 +217,15 @@ const validationReportValidation = [
     .withMessage('Provider type must be a string')
 ];
 
-// Apply authentication to all routes
+// Apply authentication to all routes. These endpoints are the generation
+// engine behind the Admin dashboard's "Invoice Operations" surface, so the
+// server-side role gate must not depend on the app hiding the menu item.
+// Bearer auth comes from the global API security gate; the explicit
+// authenticateUser here keeps the subtree safe if it is ever remounted.
 router.use(authenticateUser);
 router.use(requireOrgMembership);
+router.use(requireMatchingOrganization);
+router.use(requireAdminSurface);
 
 // Invoice Generation Routes
 router.post(

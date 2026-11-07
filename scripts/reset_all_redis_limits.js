@@ -2,6 +2,7 @@
 const Redis = require('ioredis');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const { ENV_SCOPE } = require('../utils/envScope');
 
 const redisConfig = process.env.REDIS_URL || {
   host: process.env.REDIS_HOST || 'localhost',
@@ -21,7 +22,9 @@ async function resetAllLimits() {
   
   let cursor = '0';
   let totalDeleted = 0;
-  const pattern = 'rl:*'; // Matches ALL rate limit keys
+  // Scope the scan to THIS environment. A dev script must never wipe prod
+  // rate-limit counters even if both envs ever point at the same Valkey host.
+  const pattern = `${ENV_SCOPE}:rl:*`;
 
   do {
     const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);

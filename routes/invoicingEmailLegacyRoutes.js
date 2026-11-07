@@ -6,6 +6,10 @@ const {
   organizationContextMiddleware,
 } = require('../middleware/organizationContext');
 const { handleValidationErrors } = require('../middleware/validation');
+const {
+  requireMatchingOrganization,
+  requireAdminSurface,
+} = require('../middleware/adminSurface');
 const invoicingEmailController = require('../controllers/invoicingEmailController');
 
 const router = express.Router();
@@ -16,7 +20,18 @@ const limiter = rateLimit({
   message: { success: false, message: 'Too many requests.' },
 });
 
-router.use(authenticateUser, organizationContextMiddleware, limiter);
+// These endpoints read the organisation's SMTP configuration and can send an
+// arbitrary PDF to an arbitrary recipient. They are part of the Admin invoice
+// flow, not employee self-service, so enforce the role on the server. The
+// Admin -> Employee mode switch only changes local UI state; it does not
+// downgrade the credential, which is why the token/membership check matters.
+router.use(
+  authenticateUser,
+  organizationContextMiddleware,
+  requireMatchingOrganization,
+  requireAdminSurface,
+  limiter,
+);
 
 router.post(
   '/addUpdateInvoicingEmailDetail',

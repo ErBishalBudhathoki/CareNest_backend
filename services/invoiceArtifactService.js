@@ -1,5 +1,7 @@
+const crypto = require('crypto');
 const { admin } = require('../firebase-admin-config');
 const logger = require('../config/logger');
+const { scopePath } = require('../utils/envScope');
 
 class InvoiceArtifactService {
   _normalizeString(value, fallback = '') {
@@ -21,18 +23,30 @@ class InvoiceArtifactService {
     return projectId ? `${projectId}.appspot.com` : '';
   }
 
-  _buildStoragePath({ organizationId, clientEmail, invoiceNumber }) {
-    const now = new Date();
+  /**
+   * Deterministic, environment-scoped object key.
+   *
+   * A Temporal/HTTP retry used to produce a new path every attempt because the
+   * key contained Date.now() and Math.random(). Each retry therefore uploaded
+   * an orphan PDF while the invoice record only ever pointed at one of them.
+   * The key is now derived from the invoice number and the PDF bytes, so a
+   * replay of the same request overwrites the same object. Stored artifacts
+   * keep their original absolute path and remain readable by
+   * downloadPdfAsBase64().
+   */
+  _buildStoragePath({ organizationId, clientEmail, invoiceNumber, pdfBuffer }) {
     const org = this._sanitizeSegment(organizationId, 'org');
     const client = this._sanitizeSegment(clientEmail, 'client');
     const invoice = this._sanitizeSegment(invoiceNumber, 'invoice');
-    const year = now.getUTCFullYear();
-    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
-    const nonce = Math.floor(Math.random() * 1e9);
-    const fileName = `${invoice}_${now.getTime()}_${nonce}.pdf`;
+    const digest = crypto
+      .createHash('sha256')
+      .update(pdfBuffer || Buffer.alloc(0))
+      .digest('hex')
+      .slice(0, 20);
+    const fileName = `${invoice}_${digest}.pdf`;
     return {
       fileName,
-      path: `invoice_artifacts/${org}/${year}/${month}/${client}/${fileName}`,
+      path: scopePath(`invoice_artifacts/${org}/${client}/${fileName}`),
     };
   }
 
@@ -56,6 +70,7 @@ class InvoiceArtifactService {
       organizationId,
       clientEmail,
       invoiceNumber,
+      pdfBuffer: buffer,
     });
     const file = bucket.file(storage.path);
     const uploadedAt = new Date().toISOString();

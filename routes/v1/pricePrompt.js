@@ -7,7 +7,22 @@
 
 const express = require('express');
 const PricePromptController = require('../../controllers/pricePromptController');
+const { authenticateUser } = require('../../middleware/auth');
+const { requireOrgMembership } = require('../../middleware/requireOrgMembership');
+const {
+  requireMatchingOrganization,
+  requireAdminSurface,
+} = require('../../middleware/adminSurface');
 const router = express.Router();
+
+// Price prompts drive invoice generation and are reached only from the Admin
+// invoice flow. Bearer auth alone (supplied by the global API security gate)
+// is not an admin boundary, so gate the whole subtree and pin the organisation
+// to the validated membership before controllers read it from the body.
+router.use(authenticateUser);
+router.use(requireOrgMembership);
+router.use(requireMatchingOrganization);
+router.use(requireAdminSurface);
 
 // Create a price prompt for missing pricing
 // POST /invoice/price-prompt/create

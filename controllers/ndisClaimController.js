@@ -3,6 +3,7 @@ const ndisClaimService = require('../services/ndisClaimService');
 const ndisClaimResultsService = require('../services/ndisClaimResultsService');
 const cancellationBillingService = require('../services/cancellationBillingService');
 const providerTravelService = require('../services/providerTravelService');
+const { normalizeToIsoDate } = require('../utils/dateHelpers');
 
 /**
  * NDIS claiming API (Phase 6). Org-scoped.
@@ -33,22 +34,46 @@ class NDISClaimController {
     const org = this._requireOrg(req, res);
     if (!org) return;
     try {
+      // ClaimBatch already supports idempotencyKey (pre-check + unique index +
+      // race recovery), but the controller never supplied one, so a retried
+      // POST created a second, usually empty, batch for the same period.
+      // Prefer a caller-supplied key; otherwise derive one from the canonical
+      // period so double-submits collapse. `regenerate: true` is the explicit
+      // opt-out for deliberately re-running a period after new invoices arrive.
+      const explicitKey = String(
+        req.get('x-idempotency-key') || req.body.idempotencyKey || '',
+      ).trim();
+      const fromKey = normalizeToIsoDate(req.body.from);
+      const toKey = normalizeToIsoDate(req.body.to);
+      const allowInvalid = req.body.allowInvalid === true;
+      const regenerate = req.body.regenerate === true;
+      const idempotencyKey =
+        explicitKey ||
+        (!regenerate && fromKey && toKey
+          ? `claim:${org}:${fromKey}:${toKey}:${allowInvalid ? 'invalid' : 'valid'}`
+          : null);
+
       const result = await ndisClaimService.generateBatch(
         org,
         {
           from: req.body.from,
           to: req.body.to,
-          allowInvalid: req.body.allowInvalid === true,
+          allowInvalid,
+          idempotencyKey: idempotencyKey || undefined,
         },
         this._actor(req),
       );
-      res.status(201).json({
+      // A replay is not a new resource.
+      res.status(result.isIdempotentReplay ? 200 : 201).json({
         success: true,
-        message: `Generated ${result.lineCount} claim line(s).`,
+        message: result.isIdempotentReplay
+          ? 'Claim batch already generated for this request.'
+          : `Generated ${result.lineCount} claim line(s).`,
         data: {
           batch: result.batch,
           csv: result.csv,
           validation: result.validation,
+          isIdempotentReplay: result.isIdempotentReplay === true,
         },
       });
     } catch (error) {

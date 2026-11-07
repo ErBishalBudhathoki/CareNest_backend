@@ -10,7 +10,13 @@ const planBudgetService = require('./planBudgetService');
 const billingRoutingService = require('./billingRoutingService');
 const ndisClaimResultsService = require('./ndisClaimResultsService');
 const { uploadBufferToR2, isR2Configured } = require('../utils/cloudFunctionsUpload');
-const { formatBprDate, BPR_DATE_FORMAT, BPR_DATE_PATTERN } = require('../utils/dateHelpers');
+const {
+  formatBprDate,
+  BPR_DATE_FORMAT,
+  BPR_DATE_PATTERN,
+  normalizeToIsoDate,
+} = require('../utils/dateHelpers');
+const { scopePath } = require('../utils/envScope');
 const logger = require('../config/logger');
 
 /**
@@ -75,6 +81,36 @@ function formatNdisDate(value) {
   return formatBprDate(value);
 }
 
+/**
+ * Normalise a stored service date to a UTC-midnight Date.
+ *
+ * `lineItems[].date` and `metadata.silPeriod.*` are Date-typed in the current
+ * schema, but `.lean()` returns legacy documents verbatim: those can carry
+ * strings, including the app's canonical DD/MM/YYYY display format.
+ * `new Date('01/04/2026')` is 4 January in Node (not 1 April) and
+ * `new Date('31/12/2026')` is Invalid Date — the latter used to throw a
+ * RangeError in `.toISOString()` and abort the whole batch. Both would also
+ * put the wrong SupportsDeliveredFrom/To into the myplace BPR CSV.
+ *
+ * Returns null for unparseable values so the caller can skip the line instead
+ * of exporting a NaN date or crashing batch generation.
+ *
+ * @param {Date|string|number|null} value
+ * @returns {Date|null}
+ */
+function toServiceDate(value) {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    // Keep the UTC calendar day, which is what formatBprDate reads.
+    return new Date(`${value.toISOString().slice(0, 10)}T00:00:00.000Z`);
+  }
+
+  const iso = normalizeToIsoDate(value);
+  if (!iso) return null;
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
@@ -114,8 +150,14 @@ class NDISClaimService {
    * @param {string} actor
    */
   async generateBatch(organizationId, opts = {}, actor = '') {
-    const from = new Date(opts.from);
-    const to = new Date(opts.to);
+    // Never `new Date(userString)`: Node reads a slash date as US MM/DD, which
+    // silently claims the wrong period. Also make `to` inclusive of the whole
+    // final day — a bare ISO date is midnight, which used to drop every claim
+    // line dated later on the last day of the period.
+    const fromIso = normalizeToIsoDate(opts.from);
+    const toIso = normalizeToIsoDate(opts.to);
+    const from = fromIso ? new Date(`${fromIso}T00:00:00.000Z`) : new Date(NaN);
+    const to = toIso ? new Date(`${toIso}T23:59:59.999Z`) : new Date(NaN);
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
       const err = new Error('Invalid period: from/to are required and to >= from.');
       err.statusCode = 400;
@@ -179,9 +221,14 @@ class NDISClaimService {
         : await selectedClaim) || [];
 
       const claimedSet = new Set(
-        activeClaimedLines.map(
-          (cl) => `${cl.invoiceId}_${cl.supportNumber}_${new Date(cl.serviceDate).toISOString().slice(0, 10)}`
-        )
+        activeClaimedLines
+          .map((cl) => {
+            const claimedDate = toServiceDate(cl.serviceDate);
+            return claimedDate
+              ? `${cl.invoiceId}_${cl.supportNumber}_${claimedDate.toISOString().slice(0, 10)}`
+              : null;
+          })
+          .filter(Boolean),
       );
 
       for (const invoice of invoices) {
@@ -209,9 +256,22 @@ class NDISClaimService {
             }
           }
 
-          // SIL invoices prefer silPeriod.from if item.date is missing
-          const serviceDate = item.date || invoice.metadata?.silPeriod?.from || invoice.createdAt || from;
-          const d = new Date(serviceDate);
+          // SIL invoices prefer silPeriod.from if item.date is missing.
+          // Never `new Date(storedString)`: a DD/MM/YYYY legacy value is read
+          // as US MM/DD and silently claims the wrong period (or is Invalid
+          // Date, which throws in toISOString()).
+          const rawServiceDate =
+            item.date || invoice.metadata?.silPeriod?.from || invoice.createdAt || from;
+          const d = toServiceDate(rawServiceDate);
+          if (!d) {
+            logger.warn('[ndis-claim] skipped line with unparseable service date', {
+              organizationId,
+              invoiceId: String(invoice._id),
+              supportNumber: item.supportItemNumber || '',
+              serviceDate: String(rawServiceDate),
+            });
+            continue;
+          }
           if (d < from || d > to) continue;
 
           // Milestone 7.1: Duplicate Claim Prevention - skip if this line item has already been batched in an active claim line
@@ -221,7 +281,7 @@ class NDISClaimService {
           }
 
           const serviceEndDate = item.endDate || invoice.metadata?.silPeriod?.to || null;
-          const endD = serviceEndDate ? new Date(serviceEndDate) : null;
+          const endD = serviceEndDate ? toServiceDate(serviceEndDate) : null;
 
           const hourly = isHourlyUnit(item.unit);
           const quantity = round2(item.quantity);
@@ -839,7 +899,9 @@ class NDISClaimService {
    * upload fails, so batch generation never fails on a storage outage.
    */
   async _storeCsv(batch, csv, organizationId) {
-    const key = `claimBatches/${this._sanitizeKeySegment(organizationId)}/${batch._id}.csv`;
+    // Deterministic AND environment-scoped: a retry overwrites the same
+    // object, and a dev batch can never overwrite a prod claim CSV.
+    const key = scopePath(`claimBatches/${this._sanitizeKeySegment(organizationId)}/${batch._id}.csv`);
 
     if (isR2Configured()) {
       try {

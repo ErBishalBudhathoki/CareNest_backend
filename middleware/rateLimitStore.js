@@ -25,6 +25,7 @@
 const { RedisStore } = require('rate-limit-redis');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
+const { scopeKey } = require('../utils/envScope');
 
 /**
  * Build a Valkey-backed store, or return null when Redis is unavailable or the
@@ -38,9 +39,12 @@ function createRateLimitStore(prefix) {
   if (redis.isConfigured === false) return null;
 
   try {
+    // Valkey is shared infrastructure. Prefix every counter with the
+    // environment so a dev login/reset can never clear a prod rate limit.
+    const scopedPrefix = scopeKey(prefix);
     return new RedisStore({
       sendCommand: (...args) => redis.call(...args),
-      prefix,
+      prefix: scopedPrefix,
     });
   } catch (error) {
     logger.warn('Failed to create Redis rate-limit store; falling back to memory', {

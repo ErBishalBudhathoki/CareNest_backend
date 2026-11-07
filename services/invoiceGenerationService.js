@@ -18,6 +18,11 @@ const TripService = require('./tripService');
 const logger = require('../config/logger');
 const dateHelpers = require('../utils/dateHelpers');
 const { parseDurationToHours } = require('../utils/timeHelpers');
+const {
+  STANDARD_WORKED_TIME_EXCLUSIONS,
+  STANDARD_SHIFT_EXCLUSIONS,
+  findOrphanSilWorkedTimeIds,
+} = require('../utils/silBillingBoundary');
 
 class InvoiceGenerationService {
   /**
@@ -414,7 +419,10 @@ class InvoiceGenerationService {
           organizationId: client.organizationId,
           clientId: client._id,
           startTime: { $gte: start, $lte: end },
-          isActive: { $ne: false }
+          isActive: { $ne: false },
+          // SIL roster shifts are invoiced by SIL Management / NDIS Claiming.
+          // A client whose only work is SIL must NOT get a standard invoice.
+          ...STANDARD_SHIFT_EXCLUSIONS
         });
 
         if (shifts.length === 0) {
@@ -1021,14 +1029,60 @@ class InvoiceGenerationService {
         return [];
       }
 
-      const workedTimeData = await WorkedTime.find({
+      const baseQuery = {
         userEmail: userEmail,
         clientEmail: clientEmail,
         date: {
           $gte: dateHelpers.startOfDay(start),
           $lte: dateHelpers.endOfDay(end)
         }
+      };
+
+      const workedTimeData = await WorkedTime.find({
+        ...baseQuery,
+        // SIL hours are billed by the SIL/NDIS pipeline. Including them here
+        // would invoice the same shift twice (P0 double-billing).
+        ...STANDARD_WORKED_TIME_EXCLUSIONS
       });
+
+      // A silShiftId is a best-effort link (timer-stop overlap lookup + legacy
+      // backfill), not proof that SIL billing will claim the row. Recover rows
+      // whose link is missing or no longer points at a real SIL shift, so the
+      // exclusion can never silently drop ordinary worked hours.
+      const silLinked = await WorkedTime.find(
+        {
+          ...baseQuery,
+          $or: [
+            { silShiftId: { $ne: null } },
+            { isIrregularSil: true }
+          ]
+        },
+        '_id silShiftId isIrregularSil'
+      );
+
+      if (silLinked && silLinked.length > 0) {
+        const Shift = require('../models/Shift');
+        const linkedIds = silLinked
+          .map((row) => row.silShiftId)
+          .filter(Boolean);
+        const shifts = linkedIds.length > 0
+          ? await Shift.find(
+            { _id: { $in: linkedIds } },
+            '_id silRosterOfCareId isIrregularSil'
+          )
+          : [];
+        const orphanIds = findOrphanSilWorkedTimeIds(silLinked, shifts);
+
+        if (orphanIds.length > 0) {
+          logger.warn('Recovered worked-time rows with an unresolved SIL link', {
+            userEmail,
+            clientEmail,
+            count: orphanIds.length
+          });
+          const recovered = await WorkedTime.find({ _id: { $in: orphanIds } });
+          workedTimeData.push(...recovered);
+        }
+      }
 
       return workedTimeData || [];
     } catch (error) {

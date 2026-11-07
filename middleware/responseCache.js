@@ -28,6 +28,7 @@
 
 const cacheService = require('../services/cacheService');
 const logger = require('../config/logger');
+const { scopeKey } = require('../utils/envScope');
 
 /** Prefix -> TTL in seconds. */
 const CACHEABLE_PREFIXES = [
@@ -107,7 +108,9 @@ function cacheKey(path, scope, query) {
   const normalisedQuery = query
     ? query.split('&').filter(Boolean).sort().join('&')
     : '';
-  return `http:resp:${scope}:${path}${normalisedQuery ? `?${normalisedQuery}` : ''}`;
+  // Environment-scoped: Valkey is shared, so a dev response must never be
+  // served to (or evict) a prod response for the same user/org/path.
+  return scopeKey(`http:resp:${scope}:${path}${normalisedQuery ? `?${normalisedQuery}` : ''}`);
 }
 
 /** Store only successful responses. Never let a cache failure reach the client. */

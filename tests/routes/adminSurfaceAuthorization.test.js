@@ -72,8 +72,10 @@ jest.mock('../../utils/securityMonitor', () => ({
   },
 }));
 
-// Membership lookup used by organizationContext / rbac middleware. Returns an
-// active employee membership so req.user stays JWT-derived.
+// Membership lookup used by organizationContext / rbac middleware. The admin
+// token gets an owner membership, the employee token an employee membership,
+// so the surface gate can be asserted against both without a live database.
+const ADMIN_USER_ID = '507f1f77bcf86cd799439099';
 jest.mock('../../models/UserOrganization', () => {
   function buildQuery(value) {
     return {
@@ -84,8 +86,12 @@ jest.mock('../../models/UserOrganization', () => {
     };
   }
   return {
-    findOne: jest.fn(() =>
-      buildQuery({ _id: 'uo-1', role: 'employee', permissions: [], isActive: true })
+    findOne: jest.fn((query) =>
+      buildQuery(
+        query && String(query.userId) === '507f1f77bcf86cd799439099'
+          ? { _id: 'uo-admin', role: 'owner', permissions: ['*'], isActive: true }
+          : { _id: 'uo-1', role: 'employee', permissions: [], isActive: true }
+      )
     ),
     find: jest.fn(() => buildQuery([])),
     db: { readyState: 1 },
@@ -96,10 +102,10 @@ const app = require('../../app');
 
 const ORG_ID = '507f1f77bcf86cd799439012';
 
-function makeToken({ email, roles }) {
+function makeToken({ email, roles, userId = '507f1f77bcf86cd799439011' }) {
   return jwt.sign(
     {
-      userId: '507f1f77bcf86cd799439011',
+      userId,
       email,
       roles,
       organizationId: ORG_ID,
@@ -111,7 +117,14 @@ function makeToken({ email, roles }) {
 
 const employeeToken = () =>
   makeToken({ email: 'employee@example.com', roles: ['employee'] });
-const adminToken = () => makeToken({ email: 'admin@example.com', roles: ['admin'] });
+const clientToken = () =>
+  makeToken({ email: 'client@example.com', roles: ['client'] });
+const adminToken = () =>
+  makeToken({
+    email: 'admin@example.com',
+    roles: ['admin'],
+    userId: ADMIN_USER_ID,
+  });
 
 const withToken = (req, token) =>
   req.set('Authorization', `Bearer ${token}`).set('x-organization-id', ORG_ID);
@@ -179,6 +192,51 @@ const memberReachableRequests = [
 // org-wide: a colleague's payslip.
 const colleagueOnlyRequests = [
   ['GET', '/api/payroll-advanced/payslip/507f1f77bcf86cd799439013/2026-09'],
+];
+
+// Phase 2: the generation engine behind "Invoice Operations" and the
+// AI / price-prompt / invoice-email helpers were authenticated by the global
+// gate but had no role check. Some of them read organizationId straight from
+// the body, so an employee token could also cross tenants. These assertions
+// pin the router-level gate; the admin cases use endpoints that fail input
+// validation before touching the database.
+const financialSurfaceRequests = [
+  ['POST', '/api/invoice/generate-line-items'],
+  ['POST', '/api/invoice-ai/validate'],
+  ['POST', '/api/invoice-ai/detect-anomalies'],
+  ['POST', '/api/sendInvoiceEmail'],
+];
+
+// Write paths are asserted for non-admin tokens only: the role gate must
+// short-circuit before any controller reaches MongoDB.
+const financialWriteRequests = [
+  ['POST', '/api/invoice-ai/auto-generate'],
+  ['POST', '/api/invoice-ai/generate-from-text'],
+  ['POST', '/api/invoice/bulk-generate'],
+  ['POST', '/api/invoice/price-prompt/create'],
+  ['POST', '/api/invoice/generate-with-prompts'],
+  ['POST', '/api/invoice/complete-generation'],
+  ['GET', '/api/invoice/price-prompt/pending/session-1'],
+];
+
+// Phase 2 (NDIS configuration): price caps, the NDIS catalogue, approvals and
+// participant plan budgets decide whether an invoice or claim line is allowed
+// and for how much. They sit under "Configuration & Finance" but previously had
+// only authentication + membership, so any employee token could rewrite them.
+// Read-only price lookups (including the POST /bulk-lookup) must stay open.
+const configurationWriteRequests = [
+  ['POST', '/api/pricing/create'],
+  ['PUT', '/api/pricing/p1'],
+  ['DELETE', '/api/pricing/p1'],
+  ['PUT', '/api/pricing/p1/approval'],
+  ['POST', '/api/pricing/bulk-import'],
+  ['PUT', `/api/pricing/fallback-base-rate/${ORG_ID}`],
+  ['PUT', `/api/client/${ORG_ID}/plan`],
+];
+
+const configurationReadRequests = [
+  ['GET', '/api/pricing/support-items'],
+  ['POST', '/api/pricing/bulk-lookup'],
 ];
 
 // Supertest's `request(app)` spins up and tears down an ephemeral listener per
@@ -253,5 +311,69 @@ describe('admin-surface API authorization', () => {
     // later addition: every method on the router subtree must be covered.
     const res = await send('GET', '/api/sil/rosters-of-care', employeeToken());
     expect(res.status).toBe(403);
+  });
+
+  describe.each(financialSurfaceRequests)('%s %s', (method, path) => {
+    test('employee and client tokens are denied with 403 INSUFFICIENT_PERMISSIONS', async () => {
+      for (const token of [employeeToken(), clientToken()]) {
+        const res = await send(method, path, token);
+        expect(res.status).toBe(403);
+        expect(res.body?.code).toBe('INSUFFICIENT_PERMISSIONS');
+      }
+    });
+
+    test('admin token is not denied by the role gate', async () => {
+      const res = await send(method, path, adminToken());
+      expect(res.status).not.toBe(403);
+      expect(res.body?.code).not.toBe('INSUFFICIENT_PERMISSIONS');
+    });
+  });
+
+  describe.each(financialWriteRequests)('%s %s', (method, path) => {
+    test('non-admin tokens are refused before the controller runs', async () => {
+      for (const token of [employeeToken(), clientToken()]) {
+        const res = await send(method, path, token);
+        expect(res.status).toBe(403);
+        expect(res.body?.code).toBe('INSUFFICIENT_PERMISSIONS');
+      }
+    });
+  });
+
+  test('an admin token cannot auto-generate invoices for another organisation', async () => {
+    // The active-org header and the body must agree. A contradictory body id
+    // is rejected by requireOrgMembership before any invoice can be created;
+    // requireMatchingOrganization is the second line of defence and is covered
+    // separately in tests/middleware/adminSurface.test.js.
+    const res = await send('POST', '/api/invoice-ai/auto-generate', adminToken())
+      .send({ organizationId: '507f1f77bcf86cd799439013' });
+    expect(res.status).toBe(400);
+    expect(res.body?.code).toBe('ORG_ID_CONFLICT');
+  });
+
+  describe.each(configurationWriteRequests)('%s %s', (method, path) => {
+    test('non-admin tokens cannot rewrite NDIS pricing or plan budgets', async () => {
+      for (const token of [employeeToken(), clientToken()]) {
+        const res = await send(method, path, token);
+        expect(res.status).toBe(403);
+        expect(res.body?.code).toBe('INSUFFICIENT_PERMISSIONS');
+      }
+    });
+  });
+
+  describe.each(configurationReadRequests)('%s %s', (method, path) => {
+    test('read-only pricing lookups stay available to employees', async () => {
+      const res = await send(method, path, employeeToken());
+      expect(res.status).not.toBe(403);
+      expect(res.body?.code).not.toBe('INSUFFICIENT_PERMISSIONS');
+    });
+  });
+
+  test('an admin cannot configure pricing for a different organisation', async () => {
+    // requireMatchingOrganization pins the body org to the validated
+    // membership; requireOrgMembership rejects the contradiction first.
+    const res = await send('POST', '/api/pricing/create', adminToken())
+      .send({ organizationId: '507f1f77bcf86cd799439013' });
+    expect([400, 403]).toContain(res.status);
+    expect(['ORG_ID_CONFLICT', 'ORGANIZATION_MISMATCH']).toContain(res.body?.code);
   });
 });

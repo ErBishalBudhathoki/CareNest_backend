@@ -5,6 +5,10 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
 const { requireOrgMembership } = require('../middleware/requireOrgMembership');
+const {
+  requireAdminSurface,
+  requireMatchingOrganization,
+} = require('../middleware/adminSurface');
 const accountingService = require('../services/accountingService');
 const logger = require('../config/logger');
 
@@ -42,6 +46,14 @@ const syncValidation = [
 // Apply authentication to all routes
 router.use(authenticateUser);
 router.use(requireOrgMembership);
+
+// Xero/MYOB connection, OAuth callback and invoice sync are Configuration &
+// Finance surfaces. Every route here is a state-changing administrative write;
+// none is reachable from worker or participant self-service screens. Pin the
+// organisation to the validated membership because these controllers still
+// read it straight from the request body.
+router.use(requireMatchingOrganization);
+router.use(requireAdminSurface);
 
 /**
  * @route POST /api/accounting/connect

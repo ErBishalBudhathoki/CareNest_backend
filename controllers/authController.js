@@ -6,6 +6,11 @@ const { buildFileProxyUrl } = require('./fileController');
 const User = require('../models/User');
 const UserOrganization = require('../models/UserOrganization');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  readCandidatePaths,
+  isKeyForCurrentScope,
+  isObjectNotFoundError,
+} = require('../utils/envScope');
 
 // Lazy-init R2 client (reused across requests)
 let _r2Client = null;
@@ -263,11 +268,23 @@ class AuthController {
     const client = getR2Client();
 
     // Strategy 1: Fetch from R2 via S3 SDK (preferred — works for private buckets)
-    if (client && bucket && r2Key) {
+    if (client && bucket && r2Key && isKeyForCurrentScope(r2Key)) {
       try {
-        const object = await client.send(
-          new GetObjectCommand({ Bucket: bucket, Key: r2Key })
-        );
+        // Try this environment's namespace first, then the legacy unscoped key.
+        let object = null;
+        let lastError;
+        for (const candidate of readCandidatePaths(r2Key)) {
+          try {
+            object = await client.send(
+              new GetObjectCommand({ Bucket: bucket, Key: candidate })
+            );
+            break;
+          } catch (candidateError) {
+            if (!isObjectNotFoundError(candidateError)) throw candidateError;
+            lastError = candidateError;
+          }
+        }
+        if (!object) throw lastError || new Error('R2 object not found');
 
         res.set('Content-Type', object.ContentType || 'image/jpeg');
         if (object.ContentLength != null) {
